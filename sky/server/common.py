@@ -420,11 +420,7 @@ def _start_api_server(deploy: bool = False,
                 dashboard_msg += (
                     'Dashboard may be stale when installed from source, '
                     'to rebuild: npm --prefix sky/dashboard install '
-                    '&& npm --prefix sky/dashboard run build\n')
-            dashboard_msg += (
-                f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
-                f'Dashboard: {get_dashboard_url(server_url)}')
-            dashboard_msg += f'{colorama.Style.RESET_ALL}'
+                    '&& npm --prefix sky/dashboard run build')
         logger.info(
             ux_utils.finishing_message(
                 f'SkyPilot API server started. {dashboard_msg}'))

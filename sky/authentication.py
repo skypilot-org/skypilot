@@ -432,8 +432,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Add message saying "Please check: ~/.sky/config.yaml" to the error
         # message.
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
-                from None
+            raise ValueError(str(e) +
+                             ' Please check: ~/.sky/config.yaml.') from None
     _, public_key_path = get_or_generate_keys()
 
     # Add the user's public key to the SkyPilot cluster.
@@ -566,4 +566,22 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = f.read()
     client.get_or_add_ssh_key(public_key)
     config['auth']['ssh_public_key'] = public_key_path
+    return configure_ssh_info(config)
+
+
+def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Hyperbolic."""
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # TODO: adjust below to use public_keys instead of
+    # public_key once backwards-compatibility is no longer required
+    config['publicKey'] = public_key
+
+    # Set up auth section for Ray template
+    config.setdefault('auth', {})
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+
     return configure_ssh_info(config)

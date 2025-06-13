@@ -169,6 +169,6 @@ class ClusterStartCompletePrecondition(Precondition):
             include_request_names=['sky.launch', 'sky.start'],
             cluster_names=[self.cluster_name])
         if len(requests) == 0:
-            # No runnning or pending tasks, the start process is done.
+            # No running or pending tasks, the start process is done.
             return True, None
         return False, f'Waiting for cluster {self.cluster_name} to be UP.'

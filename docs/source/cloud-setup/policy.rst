@@ -14,54 +14,175 @@ Example usage:
 - :ref:`use-spot-for-gpu-policy`
 - :ref:`enforce-autostop-policy`
 - :ref:`dynamic-kubernetes-contexts-update-policy`
-
-
-To implement and use an admin policy:
-
-- Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface;
-- Admins distributes this package to users;
-- Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
-
+- :ref:`use-local-gcp-credentials-policy`
 
 Overview
 --------
 
+SkyPilot has a :ref:`client-server architecture <sky-api-server>`, where a centralized API server can be deployed and users can interact with the server through a client.
 
+To deploy a admin policy, here are the steps:
 
-User-Side
-~~~~~~~~~~
-
-To apply the policy, a user needs to set the ``admin_policy`` field in the SkyPilot config
-``~/.sky/config.yaml`` to the path of the Python package that implements the policy.
-For example:
-
-.. code-block:: yaml
-
-    admin_policy: mypackage.subpackage.MyPolicy
-
+1. :ref:`Implement the policy in a Python package <implement-admin-policy>` or :ref:`host the policy as a RESTful server <host-admin-policy-as-server>`.
+2. Deploy the policy at the :ref:`server-side <server-side-admin-policy>` and/or the :ref:`client-side <client-side-admin-policy>`.
 
 .. hint::
 
-    SkyPilot loads the policy from the given package in the same Python environment.
-    You can test the existence of the policy by running:
+    If admin policy is set at both client-side and server-side, the policy at client-side will be applied first, the mutated tasks and SkyPilot config will then be processed by the policy at server-side.
+
+.. _client-side-admin-policy:
+
+Client-side
+~~~~~~~~~~~
+
+You can get the policy applied at the client-side by following the steps below.
+
+.. tab-set::
+
+  .. tab-item:: Use a RESTful policy server
+  
+    Set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to the hosted policy URL.
+  
+    .. code-block:: yaml
+  
+      admin_policy: https://example.com/policy
+    
+  .. tab-item:: Use a Python package
+
+    First, install the Python package that implements the policy:
 
     .. code-block:: bash
 
-        python -c "from mypackage.subpackage import MyPolicy"
+        pip install mypackage.subpackage
 
+    Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to the path of the Python package that implements the policy.
 
-Admin-Side
-~~~~~~~~~~
+    .. code-block:: yaml
 
-An admin can distribute the Python package to users with a pre-defined policy. The
-policy should implement the ``sky.AdminPolicy`` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
+        admin_policy: mypackage.subpackage.MyPolicy
 
+    Optionally, you can also apply different policies in different projects by leveraging the :ref:`layered config <config-sources-and-overrides>`, e.g. set a different policy in ``$pwd/.sky.yaml`` for the current project:
+
+    .. code-block:: yaml
+
+        admin_policy: mypackage.subpackage.AnotherPolicy
+
+    .. hint::
+
+        SkyPilot loads the policy from the given package in the same Python environment.
+        You can test the existence of the policy by running:
+
+        .. code-block:: bash
+
+            python -c "from mypackage.subpackage import MyPolicy"
+
+.. _server-side-admin-policy:
+
+Server-side
+~~~~~~~~~~~
+
+If you have a :ref:`centralized API server <sky-api-server>` deployed, you can enforce a policy for all users by setting it at the server-side.
+
+.. tab-set::
+
+  .. tab-item:: Use a RESTful policy server
+  
+    Open the server's dashboard, go to :ref:`the server's SkyPilot config <sky-api-server-config>` and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the API URL of the policy server.
+
+    .. code-block:: yaml
+
+        admin_policy: https://example.com/policy
+    
+  .. tab-item:: Use a Python package
+
+    First, install the Python package that implements the policy on the API server host:
+
+    .. code-block:: bash
+
+        pip install mypackage.subpackage
+
+    For helm deployment, refer to :ref:`sky-api-server-admin-policy` to install the policy package.
+
+    Then, open the server's dashboard, go to :ref:`the server's SkyPilot config <sky-api-server-config>` and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the path of the Python package that implements the policy.
+
+    .. code-block:: yaml
+
+        admin_policy: mypackage.subpackage.MyPolicy
+
+.. _host-admin-policy-as-server:
+
+Host admin policy as a RESTful server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can host an admin policy as a RESTful API server and configure the SkyPilot to call the RESTful url to apply the policy.
+
+It is recommended to :ref:`inherit your implementation from the AdminPolicy interface <implement-admin-policy>` to ensure the request and response body are correctly typed. Here is an example of implementing a policy server using Python and FastAPI:
+
+.. dropdown:: Example Policy Server
+
+    .. literalinclude:: ../../../examples/admin_policy/example_server/policy_server.py
+        :language: python
+        :caption: `Policy Server <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_server/policy_server.py>`_
+
+.. note::
+
+    Since the policy server is typically centralized, hosting admin policies that contains local operations (e.g. :ref:`use-local-gcp-credentials-policy`) at the policy server may lead to unexpected behavior and thus is not recommended.
+
+Optionally, the server can also be implemented in other languages as long as it follows the API convention:
+
+.. dropdown:: The Admin Policy API
+
+    **POST /<api-path>**
+
+    Request body is a marshalled :ref:`sky.UserRequest <user-request-class>` in JSON format:
+
+    .. code-block:: json
+
+        {
+          "task": {
+            "name": "sky-cmd",
+            "resources": {
+              "cpus": "1+",
+            },
+            "num_nodes": 1,
+          },
+          "skypilot_config": {},
+          "request_options": {
+            "cluster_name": "test",
+            "idle_minutes_to_autostop": null,
+            "down": false,
+            "dryrun": false
+          },
+          "at_client_side": false
+        }
+    
+    Response body is a marshalled :ref:`sky.MutatedUserRequest <mutated-user-request-class>` in JSON format:
+
+    .. code-block:: json
+
+        {
+          "task": {
+            "name": "sky-cmd",
+            "resources": {
+              "cpus": "1+",
+            },
+            "num_nodes": 1,
+          },
+          "skypilot_config": {}
+        }
+
+.. _implement-admin-policy:
+
+Implement an admin policy package
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Admin policies are implemented by extending the ``sky.AdminPolicy`` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
 
 .. literalinclude:: ../../../sky/admin_policy.py
     :language: python
     :pyobject: AdminPolicy
+    :name: admin-policy-interface
     :caption: `AdminPolicy Interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
-
 
 Your custom admin policy should look like this:
 
@@ -77,23 +198,22 @@ Your custom admin policy should look like this:
             return sky.MutatedUserRequest(user_request.task,
                                           user_request.skypilot_config)
 
-
 ``UserRequest`` and ``MutatedUserRequest`` are defined as follows (see `source code <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_ for more details):
-
 
 .. literalinclude:: ../../../sky/admin_policy.py
     :language: python
     :pyobject: UserRequest
+    :name: user-request-class
     :caption: `UserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
 .. literalinclude:: ../../../sky/admin_policy.py
     :language: python
     :pyobject: MutatedUserRequest
+    :name: mutated-user-request-class
     :caption: `MutatedUserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
-
 In other words, an ``AdminPolicy`` can mutate any fields of a user request, including
-the :ref:`task <yaml-spec>` and the :ref:`global skypilot config <config-yaml>`,
+the :ref:`task <yaml-spec>` and the :ref:`skypilot config <config-yaml>` for that specific user request,
 giving admins a lot of flexibility to control user's SkyPilot usage.
 
 An ``AdminPolicy`` can be used to both validate and mutate user requests. If
@@ -112,10 +232,6 @@ The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
     :language: python
     :pyobject: RequestOptions
     :caption: `RequestOptions Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
-
-.. note::
-
-    The ``sky.AdminPolicy`` should be idempotent. In other words, it should be safe to apply the policy multiple times to the same user request.
 
 Example policies
 ----------------
@@ -212,3 +328,21 @@ Dynamically update Kubernetes contexts to use
 .. literalinclude:: ../../../examples/admin_policy/dynamic_kubernetes_contexts_update.yaml
     :language: yaml
     :caption: `Config YAML for using DynamicKubernetesContextsUpdatePolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/dynamic_kubernetes_contexts_update.yaml>`_
+
+.. _use-local-gcp-credentials-policy:
+
+Use local GCP credentials for all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/client_policy.py
+    :language: python
+    :pyobject: UseLocalGcpCredentialsPolicy
+    :caption: `UseLocalGcpCredentialsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/client_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/use_local_gcp_credentials.yaml
+    :language: yaml
+    :caption: `Config YAML for using UseLocalGcpCredentialsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/use_local_gcp_credentials.yaml>`_
+
+.. note::
+
+    This policy only take effects when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` will be a no-op.
