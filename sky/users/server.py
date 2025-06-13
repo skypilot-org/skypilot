@@ -21,7 +21,7 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Filelocks for the policy update.
+# Filelocks for the user management.
 USER_LOCK_PATH = os.path.expanduser('~/.sky/.{user_id}.lock')
 USER_LOCK_TIMEOUT_SECONDS = 20
 
@@ -72,11 +72,6 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
 
-    # Check if user already exists
-    if global_user_state.get_user_by_name(username):
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=f'User {username!r} already exists')
-
     if not role:
         role = rbac.get_default_role()
 
@@ -85,6 +80,10 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
     user_hash = hashlib.md5(
         username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
+        # Check if user already exists
+        if global_user_state.get_user_by_name(username):
+            raise fastapi.HTTPException(
+                status_code=400, detail=f'User {username!r} already exists')
         global_user_state.add_or_update_user(
             models.User(id=user_hash, name=username, password=password_hash))
         permission.permission_service.update_role(user_hash, role)

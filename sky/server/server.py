@@ -221,14 +221,15 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
+                                           'false')
+        if str(enable_basic_auth).lower() != 'true':
+            return await call_next(request)
+
         if request.url.path.startswith('/api/'):
             # Try to set the auth user from the basic auth header so the
             # following endpoint handlers can leverage the auth_user info
             _try_set_basic_auth_user(request)
-            return await call_next(request)
-        enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
-                                           'false')
-        if str(enable_basic_auth).lower() != 'true':
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')

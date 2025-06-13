@@ -49,20 +49,32 @@ Install the SkyPilot Helm chart with the following command:
     WEB_PASSWORD=yourpassword
     AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 
-    # Deploy the API server with basic auth enabled in ingress
-    # controller, which does not support RBAC
-    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-      --namespace $NAMESPACE \
-      --create-namespace \
-      --set ingress.authCredentials=$AUTH_STRING
+.. tab-set::
 
-    # Deploy the API server with basic auth enabled in API
-    # server, which supports RBAC
-    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-      --namespace $NAMESPACE \
-      --create-namespace \
-      --set apiService.enableUserManagement=true \
-      --set apiService.initialBasicAuthCredentials=$AUTH_STRING
+    .. tab-item:: Basic Auth in API Server (Supports RBAC)
+        :sync: api-server-tab
+
+        Deploy the API server with basic auth enabled in the API server (supports RBAC):
+
+        .. code-block:: bash
+
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --namespace $NAMESPACE \
+            --create-namespace \
+            --set apiService.enableUserManagement=true \
+            --set apiService.initialBasicAuthCredentials=$AUTH_STRING
+
+    .. tab-item:: Basic Auth in Ingress (No RBAC)
+        :sync: ingress-tab
+
+        Deploy the API server with basic auth enabled in the ingress controller (does not support RBAC):
+
+        .. code-block:: bash
+
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --namespace $NAMESPACE \
+            --create-namespace \
+            --set ingress.authCredentials=$AUTH_STRING
 
 .. dropdown:: Flags explanation
 
@@ -72,7 +84,7 @@ Install the SkyPilot Helm chart with the following command:
     * ``--devel``: Use the latest development version of the SkyPilot helm chart. To use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
     * ``--namespace $NAMESPACE``: Specify the namespace to deploy the API server in.
     * ``--create-namespace``: Create the namespace if it doesn't exist.
-    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials in ingress controller for the API server.
+    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials in the ingress controller.
     * :ref:`--set apiService.enableUserManagement=true <helm-values-apiService-enableUserManagement>`: Enable basic auth and user management in the API server.
     * :ref:`--set apiService.initialBasicAuthCredentials=$AUTH_STRING <helm-values-apiService-initialBasicAuthCredentials>`: Set the initial basic auth credentials in the API server, if this is not set, a default user ``skypilot`` with password ``skypilot`` will be created.
 
