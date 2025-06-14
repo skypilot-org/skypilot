@@ -50,6 +50,48 @@ class DiskTier(enum.Enum):
         return types.index(self) <= types.index(other)
 
 
+class NetworkTier(enum.Enum):
+    """All network tiers supported by SkyPilot."""
+    STANDARD = 'standard'
+    BEST = 'best'
+
+    @classmethod
+    def supported_tiers(cls) -> List[str]:
+        return [tier.value for tier in cls]
+
+    @classmethod
+    def cli_help_message(cls) -> str:
+        return (
+            f'Network tier. Could be one of {", ".join(cls.supported_tiers())}'
+            f'. If {cls.BEST.value} is specified, use the best network tier '
+            'available on the specified instance. '
+            f'Default: {cls.STANDARD.value}')
+
+    @classmethod
+    def from_str(cls, tier: str) -> 'NetworkTier':
+        if tier not in cls.supported_tiers():
+            raise ValueError(f'Invalid network tier: {tier}')
+        return cls(tier)
+
+    def __le__(self, other: 'NetworkTier') -> bool:
+        types = list(NetworkTier)
+        return types.index(self) <= types.index(other)
+
+
+class StorageType(enum.Enum):
+    """Storage type."""
+    # Durable network storage, e.g. GCP persistent disks
+    NETWORK = 'network'
+    # Local instance storage, e.g. GCP local SSDs
+    INSTANCE = 'instance'
+
+
+class DiskAttachMode(enum.Enum):
+    """Disk attach mode."""
+    READ_ONLY = 'read_only'
+    READ_WRITE = 'read_write'
+
+
 @dataclasses.dataclass
 class ClusterName:
     display_name: str

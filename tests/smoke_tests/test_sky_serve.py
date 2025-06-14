@@ -33,6 +33,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 from sky import serve
+from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -319,6 +320,7 @@ def test_skyserve_oci_http():
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
@@ -390,6 +392,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_kubernetes
 @pytest.mark.no_do
 @pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -462,6 +465,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.resource_heavy
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -507,6 +511,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -578,6 +583,7 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_cancel(generic_cloud: str):
@@ -606,6 +612,7 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
@@ -630,6 +637,7 @@ def test_skyserve_streaming(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
@@ -655,6 +663,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
@@ -679,6 +688,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
@@ -716,6 +726,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
@@ -778,6 +789,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -820,6 +832,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
@@ -874,6 +887,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -897,6 +911,9 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                        (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]) +
             _check_service_version(name, "1,2"),
         ]
+        # The two old on-demand instances will be in READY or SHUTTING_DOWN
+        # status after autoscale.
+        TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = r'READY\|SHUTTING_DOWN'
     else:
         # Check blue green update, it will keep both old on-demand instances
         # running, once there are 4 spot instance ready.
@@ -906,6 +923,9 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                        (2, False, 'READY')]) +
             _check_service_version(name, "1"),
         ]
+        # The two old on-demand instances will be in READY status
+        # after autoscale update.
+        TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE = 'READY'
     test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
@@ -918,10 +938,11 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             # Wait for update to be registered
             'sleep 90',
             wait_until_no_pending,
-            _check_replica_in_status(
-                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (2, False, 'READY')]),
+            _check_replica_in_status(name, [
+                (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                (2, False, TWO_OLD_ON_DEMAND_INSTANCES_STATUS_AFTER_AUTOSCALE)
+            ]),
             *update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
@@ -940,6 +961,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
@@ -998,6 +1020,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
@@ -1037,6 +1060,7 @@ def test_skyserve_https(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""
     name = _get_service_name()
@@ -1115,7 +1139,9 @@ def test_skyserve_ha_kill_after_ready():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -1152,7 +1178,9 @@ def test_skyserve_ha_kill_during_provision():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -1186,7 +1214,9 @@ def test_skyserve_ha_kill_during_pending():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -1234,7 +1264,9 @@ def test_skyserve_ha_kill_during_shutdown():
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+        env={
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
+        })
     smoke_tests_utils.run_one_test(test)
 
 

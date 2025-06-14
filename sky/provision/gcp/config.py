@@ -10,6 +10,7 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
+from sky.utils import resources_utils
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +274,7 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
     # For example, `roles/iam.serviceAccountUser` can be granted at the
     # skypilot-v1 service account level, which can be checked with
     # service_account_policy = iam.projects().serviceAccounts().getIamPolicy(
-    #    resource=f'projects/{project_id}/serviceAcccounts/{email}').execute()
+    #    resource=f'projects/{project_id}/serviceAccounts/{email}').execute()
     # We now skip the check for `iam.serviceAccounts.actAs` permission for
     # simplicity as it can be granted at the service account level.
     def check_permissions(policy, required_permissions):
@@ -788,7 +789,8 @@ def _configure_subnet(region: str, cluster_name: str,
     default_interfaces = []
     enable_gpu_direct = config.provider_config.get('enable_gpu_direct', False)
     enable_gvnic = config.provider_config.get('enable_gvnic', False)
-    if enable_gpu_direct:
+    network_tier = config.provider_config.get('network_tier', 'standard')
+    if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
         if not enable_gvnic:
             logger.warning(
                 'Enable GPU Direct requires gvnic to be enabled, enabling gvnic'

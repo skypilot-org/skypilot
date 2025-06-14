@@ -2,9 +2,12 @@
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import dataclasses
 import datetime
+import hashlib
+import json
 import logging
 import multiprocessing
 import os
@@ -23,14 +26,15 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -45,14 +49,18 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import permission
+from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -94,6 +102,31 @@ logger = sky_logging.init_logger(__name__)
 # response will block other requests from being processed.
 
 
+class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle RBAC."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # TODO(hailong): should have a list of paths
+        # that are not checked for RBAC
+        if (request.url.path.startswith('/dashboard/') or
+                request.url.path.startswith('/api/')):
+            return await call_next(request)
+
+        auth_user = _get_auth_user_header(request)
+        if auth_user is None:
+            return await call_next(request)
+
+        permission_service = permission.permission_service
+        # Check the role permission
+        if permission_service.check_endpoint_permission(auth_user.id,
+                                                        request.url.path,
+                                                        request.method):
+            return fastapi.responses.JSONResponse(
+                status_code=403, content={'detail': 'Forbidden'})
+
+        return await call_next(request)
+
+
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
@@ -105,6 +138,64 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         response.headers['X-Request-ID'] = request_id
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
+
+
+def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
+    if 'X-Auth-Request-Email' not in request.headers:
+        return None
+    user_name = request.headers['X-Auth-Request-Email']
+    user_hash = hashlib.md5(
+        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    return models.User(id=user_hash, name=user_name)
+
+
+class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle auth proxy."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        auth_user = _get_auth_user_header(request)
+
+        # Add user to database if auth_user is present
+        if auth_user is not None:
+            newly_added = global_user_state.add_or_update_user(auth_user)
+            if newly_added:
+                permission.permission_service.add_user_if_not_exists(
+                    auth_user.id)
+
+        # Store user info in request.state for access by GET endpoints
+        if auth_user is not None:
+            request.state.auth_user = auth_user
+        else:
+            request.state.auth_user = None
+
+        body = await request.body()
+        if auth_user and body:
+            try:
+                original_json = await request.json()
+            except json.JSONDecodeError as e:
+                logger.error(f'Error parsing request JSON: {e}')
+            else:
+                logger.debug(f'Overriding user for {request.state.request_id}: '
+                             f'{auth_user.name}, {auth_user.id}')
+                if 'env_vars' in original_json:
+                    if isinstance(original_json.get('env_vars'), dict):
+                        original_json['env_vars'][
+                            constants.USER_ID_ENV_VAR] = auth_user.id
+                        original_json['env_vars'][
+                            constants.USER_ENV_VAR] = auth_user.name
+                    else:
+                        logger.warning(
+                            f'"env_vars" in request body is not a dictionary '
+                            f'for request {request.state.request_id}. '
+                            'Skipping user info injection into body.')
+                else:
+                    original_json['env_vars'] = {}
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
+                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        return await call_next(request)
 
 
 # Default expiration time for upload ids before cleanup.
@@ -195,11 +286,13 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
             if not _is_relative_to(request_path, parent):
-                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+                return fastapi.responses.JSONResponse(
+                    status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
@@ -213,9 +306,53 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(users_rest.router, prefix='/users', tags=['users'])
+app.include_router(workspaces_rest.router,
+                   prefix='/workspaces',
+                   tags=['workspaces'])
+
+
+@app.get('/token')
+async def token(request: fastapi.Request,
+                local_port: Optional[int] = None) -> fastapi.responses.Response:
+    del local_port  # local_port is used by the served js, but ignored by server
+    user = _get_auth_user_header(request)
+
+    token_data = {
+        'v': 1,  # Token version number, bump for backwards incompatible.
+        'user': user.id if user is not None else None,
+        'cookies': request.cookies,
+    }
+    # Use base64 encoding to avoid having to escape anything in the HTML.
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    token_page_path = html_dir / 'token_page.html'
+    try:
+        with open(token_page_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+    except FileNotFoundError as e:
+        raise fastapi.HTTPException(
+            status_code=500, detail='Token page template not found.') from e
+
+    user_info_string = f'Logged in as {user.name}' if user is not None else ''
+    html_content = html_content.replace(
+        'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
+        base64_str).replace('USER_PLACEHOLDER', user_info_string)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            # X-Accel-Buffering: no is useful for preventing buffering issues
+            # with some reverse proxies.
+            'X-Accel-Buffering': 'no'
+        })
 
 
 @app.post('/check')
@@ -232,12 +369,15 @@ async def check(request: fastapi.Request,
 
 
 @app.get('/enabled_clouds')
-async def enabled_clouds(request: fastapi.Request) -> None:
+async def enabled_clouds(request: fastapi.Request,
+                         workspace: Optional[str] = None,
+                         expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body=payloads.RequestBody(),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -294,7 +434,7 @@ async def list_accelerators(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerators,
+        func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -309,7 +449,7 @@ async def list_accelerator_counts(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerator_counts,
+        func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -327,25 +467,30 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
 
+    context.initialize()
+    ctx = context.get()
+    assert ctx is not None
+    # TODO(aylei): generalize this to all requests without a db record.
+    ctx.override_envs(validate_body.env_vars)
+
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
-        dag, _ = admin_policy_utils.apply(
-            dag, request_options=validate_body.request_options)
-        # Skip validating workdir and file_mounts, as those need to be
-        # validated after the files are uploaded to the SkyPilot API server
-        # with `upload_mounts_to_api_server`.
-        dag.validate(skip_file_mounts=True, skip_workdir=True)
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag, request_options=validate_body.request_options) as dag:
+            # Skip validating workdir and file_mounts, as those need to be
+            # validated after the files are uploaded to the SkyPilot API server
+            # with `upload_mounts_to_api_server`.
+            dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        loop = asyncio.get_running_loop()
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await loop.run_in_executor(None, validate_dag, dag)
+        await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
@@ -548,6 +693,7 @@ async def launch(launch_body: payloads.LaunchBody,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=launch_body.cluster_name,
+        retryable=launch_body.retry_until_up,
     )
 
 
@@ -735,13 +881,6 @@ async def logs(
     )
 
 
-@app.get('/users')
-async def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
-    user_list = global_user_state.get_all_users()
-    return [user.to_dict() for user in user_list]
-
-
 @app.post('/download_logs')
 async def download_logs(
         request: fastapi.Request,
@@ -873,6 +1012,33 @@ async def local_down(request: fastapi.Request) -> None:
         request_name='local_down',
         request_body=payloads.RequestBody(),
         func=core.local_down,
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
+@app.post('/ssh_up')
+async def ssh_up(request: fastapi.Request,
+                 ssh_up_body: payloads.SSHUpBody) -> None:
+    """Deploys a Kubernetes cluster on SSH targets."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_up',
+        request_body=ssh_up_body,
+        func=core.ssh_up,
+        schedule_type=requests_lib.ScheduleType.LONG,
+    )
+
+
+@app.post('/ssh_down')
+async def ssh_down(request: fastapi.Request,
+                   ssh_up_body: payloads.SSHUpBody) -> None:
+    """Tears down a Kubernetes cluster on SSH targets."""
+    # We still call ssh_up but with cleanup=True
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='ssh_down',
+        request_body=ssh_up_body,
+        func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
         schedule_type=requests_lib.ScheduleType.LONG,
     )
 
@@ -1054,7 +1220,7 @@ async def api_status(
 
 
 @app.get('/api/health')
-async def health() -> Dict[str, str]:
+async def health(request: fastapi.Request) -> Dict[str, Any]:
     """Checks the health of the API server.
 
     Returns:
@@ -1066,23 +1232,22 @@ async def health() -> Dict[str, str]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
+    user = _get_auth_user_header(request)
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
+        'user': user.to_dict() if user is not None else None,
     }
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')
-async def kubernetes_pod_ssh_proxy(
-    websocket: fastapi.WebSocket,
-    cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()
-) -> None:
+async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
+                                   cluster_name: str) -> None:
     """Proxies SSH to the Kubernetes pod with websocket."""
     await websocket.accept()
-    cluster_name = cluster_name_body.cluster_name
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     cluster_records = core.status(cluster_name, all_users=True)
@@ -1151,6 +1316,19 @@ async def kubernetes_pod_ssh_proxy(
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
+
+
+@app.get('/all_contexts')
+async def all_contexts(request: fastapi.Request) -> None:
+    """Gets all Kubernetes and SSH node pool contexts."""
+
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='all_contexts',
+        request_body=payloads.RequestBody(),
+        func=core.get_all_contexts,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
 
 
 # === Internal APIs ===

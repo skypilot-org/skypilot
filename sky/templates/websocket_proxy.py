@@ -21,11 +21,21 @@ from websockets.asyncio.client import connect
 
 BUFFER_SIZE = 2**16  # 64KB
 
+# Environment variable for a file path to the API cookie file.
+# Keep in sync with server/constants.py
+API_COOKIE_FILE_ENV_VAR = 'SKYPILOT_API_COOKIE_FILE'
+# Default file if unset.
+# Keep in sync with server/constants.py
+API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
+
 
 def _get_cookie_header(url: str) -> Dict[str, str]:
     """Extract Cookie header value from a cookie jar for a specific URL"""
-    cookie_path = os.environ.get('SKYPILOT_API_COOKIE_FILE')
+    cookie_path = os.environ.get(API_COOKIE_FILE_ENV_VAR)
     if cookie_path is None:
+        cookie_path = API_COOKIE_FILE_DEFAULT_LOCATION
+    cookie_path = os.path.expanduser(cookie_path)
+    if not os.path.exists(cookie_path):
         return {}
 
     request = Request(url)

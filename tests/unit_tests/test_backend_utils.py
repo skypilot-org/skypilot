@@ -9,14 +9,12 @@ from sky.resources import Resources
 
 
 # Set env var to test config file.
-@mock.patch.object(skypilot_config, '_dict', None)
-@mock.patch.object(skypilot_config, '_loaded_config_path', None)
-@mock.patch('sky.clouds.service_catalog.instance_type_exists',
-            return_value=True)
-@mock.patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
-@mock.patch('sky.clouds.service_catalog.get_image_id_from_tag',
-            return_value='fake-image')
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 @mock.patch('sky.check.get_cloud_credential_file_mounts',
             return_value='~/.aws/credentials')

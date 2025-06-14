@@ -5,7 +5,14 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
+import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import {
   CustomTooltip as Tooltip,
@@ -24,6 +31,8 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { getClusters } from '@/data/connectors/clusters';
+import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -34,31 +43,293 @@ import {
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import yaml from 'js-yaml';
+
+// Helper function to format cost (copied from workspaces.jsx)
+// const formatCost = (cost) => { // Cost function removed
+//   if (cost >= 10) {
+//     // Use the user-updated threshold of 10
+//     return cost.toFixed(1);
+//   }
+//   return cost.toFixed(2);
+// };
+
+const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
+
+// Define constant for "All Users" similar to workspaces
+const ALL_USERS_VALUE = '__ALL_USERS__';
+
+// Helper function to format autostop information, similar to _get_autostop in CLI utils
+const formatAutostop = (autostop, toDown) => {
+  let autostopStr = '';
+  let separation = '';
+
+  if (autostop >= 0) {
+    autostopStr = autostop + 'm';
+    separation = ' ';
+  }
+
+  if (toDown) {
+    autostopStr += `${separation}(down)`;
+  }
+
+  if (autostopStr === '') {
+    autostopStr = '-';
+  }
+
+  return autostopStr;
+};
+
+// Helper function to format username for display (reuse from users.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
 
 export function Clusters() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
+  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
+  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
+  const [workspaces, setWorkspaces] = useState([]);
+  const [users, setUsers] = useState([]);
   const isMobile = useMobile();
 
+  // Handle URL query parameters for workspace and user filtering
+  useEffect(() => {
+    if (router.isReady) {
+      if (router.query.workspace) {
+        const workspaceParam = Array.isArray(router.query.workspace)
+          ? router.query.workspace[0]
+          : router.query.workspace;
+        setWorkspaceFilter(workspaceParam);
+      }
+      if (router.query.user) {
+        const userParam = Array.isArray(router.query.user)
+          ? router.query.user[0]
+          : router.query.user;
+        setUserFilter(userParam);
+      }
+    }
+  }, [router.isReady, router.query.workspace, router.query.user]);
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (newWorkspace, newUser) => {
+    const query = { ...router.query };
+
+    // Update workspace parameter
+    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
+      query.workspace = newWorkspace;
+    } else {
+      delete query.workspace;
+    }
+
+    // Update user parameter
+    if (newUser && newUser !== ALL_USERS_VALUE) {
+      query.user = newUser;
+    } else {
+      delete query.user;
+    }
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Handle workspace filter change
+  const handleWorkspaceFilterChange = (newWorkspace) => {
+    setWorkspaceFilter(newWorkspace);
+    updateURLParams(newWorkspace, userFilter);
+  };
+
+  // Handle user filter change
+  const handleUserFilterChange = (newUser) => {
+    setUserFilter(newUser);
+    updateURLParams(workspaceFilter, newUser);
+  };
+
+  useEffect(() => {
+    const fetchFilterData = async () => {
+      try {
+        // Trigger cache preloading for clusters page and background preload other pages
+        await cachePreloader.preloadForPage('clusters');
+
+        // Fetch configured workspaces for the filter dropdown
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+
+        // Fetch all clusters to see if 'default' workspace is implicitly used
+        const allClusters = await dashboardCache.get(getClusters);
+        const uniqueClusterWorkspaces = [
+          ...new Set(
+            allClusters
+              .map((cluster) => cluster.workspace || 'default')
+              .filter((ws) => ws)
+          ),
+        ];
+
+        // Combine configured workspaces with any actively used 'default' workspace
+        const finalWorkspaces = new Set(configuredWorkspaceNames);
+        if (
+          uniqueClusterWorkspaces.includes('default') &&
+          !finalWorkspaces.has('default')
+        ) {
+          // Add 'default' if it's used by clusters but not in configured list
+          // This ensures 'default' appears if relevant, even if not explicitly in skypilot config
+        }
+        // Ensure all unique cluster workspaces are in the list, especially 'default'
+        uniqueClusterWorkspaces.forEach((wsName) =>
+          finalWorkspaces.add(wsName)
+        );
+
+        setWorkspaces(Array.from(finalWorkspaces).sort());
+
+        // Fetch users for the filter dropdown
+        const fetchedUsers = await dashboardCache.get(getUsers);
+        const uniqueClusterUsers = [
+          ...new Set(
+            allClusters
+              .map((cluster) => ({
+                userId: cluster.user_hash || cluster.user,
+                username: cluster.user,
+              }))
+              .filter((user) => user.userId)
+          ).values(),
+        ];
+
+        // Combine fetched users with unique cluster users
+        const finalUsers = new Map();
+
+        // Add fetched users first
+        fetchedUsers.forEach((user) => {
+          finalUsers.set(user.userId, {
+            userId: user.userId,
+            username: user.username,
+            display: formatUserDisplay(user.username, user.userId),
+          });
+        });
+
+        // Add any cluster users not in the fetched list
+        uniqueClusterUsers.forEach((user) => {
+          if (!finalUsers.has(user.userId)) {
+            finalUsers.set(user.userId, {
+              userId: user.userId,
+              username: user.username,
+              display: formatUserDisplay(user.username, user.userId),
+            });
+          }
+        });
+
+        setUsers(
+          Array.from(finalUsers.values()).sort((a, b) =>
+            a.display.localeCompare(b.display)
+          )
+        );
+      } catch (error) {
+        console.error('Error fetching data for filters:', error);
+        setWorkspaces(['default']); // Fallback or error state
+        setUsers([]); // Fallback or error state
+      }
+    };
+    fetchFilterData();
+  }, []);
+
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
   };
 
   return (
-    <Layout highlighted="clusters">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
+        <div className="text-base flex items-center">
           <Link
             href="/clusters"
             className="text-sky-blue hover:underline leading-none"
           >
             Sky Clusters
           </Link>
+          <Select
+            value={workspaceFilter}
+            onValueChange={handleWorkspaceFilterChange}
+          >
+            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by workspace...">
+                {workspaceFilter === ALL_WORKSPACES_VALUE
+                  ? 'All Workspaces'
+                  : workspaceFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_WORKSPACES_VALUE}>
+                All Workspaces
+              </SelectItem>
+              {workspaces.map((ws) => (
+                <SelectItem key={ws} value={ws}>
+                  {ws}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={userFilter} onValueChange={handleUserFilterChange}>
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by user...">
+                {userFilter === ALL_USERS_VALUE
+                  ? 'All Users'
+                  : users.find((u) => u.userId === userFilter)?.display ||
+                    userFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.userId} value={user.userId}>
+                  {user.display}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center">
           {loading && (
@@ -67,21 +338,22 @@ export function Clusters() {
               <span className="ml-2 text-gray-500">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
+          <button
             onClick={handleRefresh}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        workspaceFilter={workspaceFilter}
+        userFilter={userFilter}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -104,7 +376,7 @@ export function Clusters() {
         onClose={() => setIsVSCodeModalOpen(false)}
         cluster={selectedCluster}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -112,6 +384,8 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  workspaceFilter,
+  userFilter,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -128,7 +402,7 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    const initialData = await getClusters();
+    const initialData = await dashboardCache.get(getClusters);
     setData(initialData);
     setLoading(false);
     setLocalLoading(false);
@@ -137,8 +411,23 @@ export function ClusterTable({
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    let filteredData = data;
+    // Filter by workspace if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
+    if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
+      filteredData = filteredData.filter((item) => {
+        const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
+        return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
+      });
+    }
+    // Filter by user if userFilter is set and not 'ALL_USERS_VALUE'
+    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+      filteredData = filteredData.filter((item) => {
+        const itemUserId = item.user_hash || item.user;
+        return itemUserId === userFilter;
+      });
+    }
+    return sortData(filteredData, sortConfig.key, sortConfig.direction);
+  }, [data, sortConfig, workspaceFilter, userFilter]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -232,6 +521,12 @@ export function ClusterTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('workspace')}
+              >
+                Workspace{getSortDirection('workspace')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('infra')}
               >
                 Infra{getSortDirection('infra')}
@@ -248,6 +543,12 @@ export function ClusterTable({
               >
                 Started{getSortDirection('time')}
               </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('autostop')}
+              >
+                Autostop{getSortDirection('autostop')}
+              </TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -256,7 +557,7 @@ export function ClusterTable({
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -281,6 +582,14 @@ export function ClusterTable({
                       </Link>
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <Link
+                        href="/workspaces"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.workspace || 'default'}
+                      </Link>
+                    </TableCell>
                     <TableCell>
                       <NonCapitalizedTooltip
                         content={item.full_infra || item.infra}
@@ -311,6 +620,9 @@ export function ClusterTable({
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
+                    <TableCell>
+                      {formatAutostop(item.autostop, item.to_down)}
+                    </TableCell>
                     <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
@@ -325,7 +637,7 @@ export function ClusterTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={9}
                   className="text-center py-6 text-gray-500"
                 >
                   No active clusters

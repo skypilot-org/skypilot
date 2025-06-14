@@ -14,6 +14,7 @@ from sky import clouds
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
@@ -21,6 +22,7 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -73,8 +75,8 @@ class Optimizer:
     def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
                      gigabytes: float) -> float:
         """Returns estimated egress cost."""
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, clouds.DummyCloud) or isinstance(
+                dst_cloud, clouds.DummyCloud):
             return 0.0
 
         if not src_cloud.is_same_cloud(dst_cloud):
@@ -88,8 +90,8 @@ class Optimizer:
                      gigabytes: float) -> float:
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, clouds.DummyCloud) or isinstance(
+                dst_cloud, clouds.DummyCloud):
             return 0.0
         if not src_cloud.is_same_cloud(dst_cloud):
             # 10Gbps is close to the average of observed b/w from S3
@@ -167,7 +169,7 @@ class Optimizer:
 
         def make_dummy(name):
             dummy = task_lib.Task(name)
-            dummy.set_resources({DummyResources(cloud=DummyCloud())})
+            dummy.set_resources({DummyResources(cloud=clouds.DummyCloud())})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
 
@@ -197,7 +199,7 @@ class Optimizer:
         node: task_lib.Task,
         resources: resources_lib.Resources,
     ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
-        if isinstance(parent_resources.cloud, DummyCloud):
+        if isinstance(parent_resources.cloud, clouds.DummyCloud):
             # Special case.  The current 'node' is a real
             # source node, and its input may be on a different
             # cloud from 'resources'.
@@ -376,6 +378,10 @@ class Optimizer:
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
+                    elif all(
+                            isinstance(orig_resources.cloud, clouds.SSH)
+                            for orig_resources in node.resources):
+                        source_hint = 'node pool'
                     elif all(
                             isinstance(orig_resources.cloud, clouds.Kubernetes)
                             for orig_resources in node.resources):
@@ -858,11 +864,19 @@ class Optimizer:
                 'accelerators': f'{resources.accelerators}',
                 'use_spot': resources.use_spot
             }
+
+            # Handle special case for Kubernetes and SSH clouds
             if isinstance(resources.cloud, clouds.Kubernetes):
-                # Region for Kubernetes is the context name, i.e. different
-                # Kubernetes clusters. We add region to the key to show all the
-                # Kubernetes clusters in the optimizer table for better UX.
+                # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
+                # context name, i.e. different Kubernetes clusters. We add
+                # region to the key to show all the Kubernetes clusters in the
+                # optimizer table for better UX.
+
+                if resources.cloud.__class__.__name__ == 'SSH':
+                    resource_key_dict[
+                        'cloud'] = 'SSH'  # Force the cloud name to be SSH
                 resource_key_dict['region'] = resources.region
+
             return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
@@ -1158,11 +1172,6 @@ class DummyResources(resources_lib.Resources):
         return 0
 
 
-class DummyCloud(clouds.Cloud):
-    """A dummy Cloud that has zero egress cost from/to."""
-    pass
-
-
 def _filter_out_blocked_launchable_resources(
         launchable_resources: Iterable[resources_lib.Resources],
         blocked_resources: Iterable[resources_lib.Resources]):
@@ -1209,9 +1218,11 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         clouds_to_check_again = list(clouds_need_recheck -
                                      global_disabled_clouds)
         if len(clouds_to_check_again) > 0:
-            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
-                                       quiet=True,
-                                       clouds=clouds_to_check_again)
+            sky_check.check_capability(
+                sky_cloud.CloudCapability.COMPUTE,
+                quiet=True,
+                clouds=clouds_to_check_again,
+                workspace=skypilot_config.get_active_workspace())
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
@@ -1221,7 +1232,13 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         if disabled_clouds:
             is_or_are = 'is' if len(disabled_clouds) == 1 else 'are'
             task_name = f' {task.name!r}' if task.name is not None else ''
-            msg = (f'Task{task_name} requires {", ".join(disabled_clouds)} '
+            disabled_display_names = []
+            for c in disabled_clouds:
+                cloud_obj_one = registry.CLOUD_REGISTRY.from_str(c)
+                if cloud_obj_one is not None:
+                    disabled_display_names.append(cloud_obj_one.display_name())
+            cloud_names = ', '.join(disabled_display_names)
+            msg = (f'Task{task_name} requires {cloud_names} '
                    f'which {is_or_are} not enabled. To enable access, change '
                    f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
                    f'sky check {" ".join(c.lower() for c in disabled_clouds)}'
@@ -1296,7 +1313,7 @@ def _fill_in_launchable_resources(
             if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
-                # the underlying service_catalog filtering
+                # the underlying catalog filtering
                 cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(

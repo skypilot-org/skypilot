@@ -2,9 +2,11 @@
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import enum
+import functools
 import json
 import pathlib
 import sqlite3
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -13,6 +15,7 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -118,7 +121,11 @@ def create_table(cursor, conn):
         controller_pid INTEGER DEFAULT NULL,
         dag_yaml_path TEXT,
         env_file_path TEXT,
-        user_hash TEXT)""")
+        user_hash TEXT,
+        workspace TEXT DEFAULT NULL,
+        priority INTEGER DEFAULT 500,
+        entrypoint TEXT DEFAULT NULL,
+        original_user_yaml_path TEXT DEFAULT NULL)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -134,11 +141,28 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'user_hash', 'TEXT')
 
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'job_info',
+                                 'workspace',
+                                 'TEXT DEFAULT NULL',
+                                 value_to_replace_existing_entries='default')
+
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'job_info',
+                                 'priority',
+                                 'INTEGER',
+                                 value_to_replace_existing_entries=500)
+
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'entrypoint', 'TEXT')
+    db_utils.add_column_to_table(cursor, conn, 'job_info',
+                                 'original_user_yaml_path', 'TEXT')
     conn.commit()
 
 
-# Module-level connection/cursor; thread-safe as the module is only imported
-# once.
+# Module-level connection/cursor; thread-safe as the db is initialized once
+# across all threads.
 def _get_db_path() -> str:
     """Workaround to collapse multi-step Path ops for type checker.
     Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
@@ -149,8 +173,26 @@ def _get_db_path() -> str:
     return str(path)
 
 
-_DB_PATH = _get_db_path()
-db_utils.SQLiteConn(_DB_PATH, create_table)
+_DB_PATH = None
+_db_init_lock = threading.Lock()
+
+
+def _init_db(func):
+    """Initialize the database."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global _DB_PATH
+        if _DB_PATH is not None:
+            return func(*args, **kwargs)
+        with _db_init_lock:
+            if _DB_PATH is None:
+                _DB_PATH = _get_db_path()
+                db_utils.SQLiteConn(_DB_PATH, create_table)
+        return func(*args, **kwargs)
+
+    return wrapper
+
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -190,6 +232,10 @@ columns = [
     'dag_yaml_path',
     'env_file_path',
     'user_hash',
+    'workspace',
+    'priority',
+    'entrypoint',
+    'original_user_yaml_path',
 ]
 
 
@@ -206,7 +252,7 @@ class ManagedJobStatus(enum.Enum):
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
 
     However, a managed job only has one ManagedJobStatus on the jobs controller.
-        ManagedJobStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
+        ManagedJobStatus = [PENDING, STARTING, RUNNING, ...]
     Mapping from JobStatus to ManagedJobStatus:
         INIT            ->  STARTING/RECOVERING
         SETTING_UP      ->  RUNNING
@@ -226,10 +272,14 @@ class ManagedJobStatus(enum.Enum):
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
     PENDING = 'PENDING'
+    # SUBMITTED: This state used to be briefly set before immediately changing
+    # to STARTING. Its use was removed in #5682. We keep it for backwards
+    # compatibility, so we can still parse old jobs databases that may have jobs
+    # in this state.
+    # TODO(cooperc): remove this in v0.12.0
+    DEPRECATED_SUBMITTED = 'SUBMITTED'
     # The submitted_at timestamp of the managed job in the 'spot' table will be
     # set to the time when the job controller begins running.
-    # SUBMITTED: The jobs controller starts the controller process.
-    SUBMITTED = 'SUBMITTED'
     # STARTING: The controller process is launching the cluster for the managed
     # job.
     STARTING = 'STARTING'
@@ -305,7 +355,6 @@ class ManagedJobStatus(enum.Enum):
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
-    ManagedJobStatus.SUBMITTED: colorama.Fore.BLUE,
     ManagedJobStatus.STARTING: colorama.Fore.BLUE,
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
@@ -317,6 +366,8 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.FAILED_CONTROLLER: colorama.Fore.RED,
     ManagedJobStatus.CANCELLING: colorama.Fore.YELLOW,
     ManagedJobStatus.CANCELLED: colorama.Fore.YELLOW,
+    # TODO(cooperc): backwards compatibility, remove this in v0.12.0
+    ManagedJobStatus.DEPRECATED_SUBMITTED: colorama.Fore.BLUE,
 }
 
 
@@ -333,8 +384,12 @@ class ManagedJobScheduleState(enum.Enum):
     - LAUNCHING -> ALIVE: The launch attempt was completed. It may have
       succeeded or failed. The job controller is not allowed to sky.launch again
       without transitioning to ALIVE_WAITING and then LAUNCHING.
+    - LAUNCHING -> ALIVE_BACKOFF: The launch failed to find resources, and is
+      in backoff waiting for resources.
     - ALIVE -> ALIVE_WAITING: The job controller wants to sky.launch again,
       either for recovery or to launch a subsequent task.
+    - ALIVE_BACKOFF -> ALIVE_WAITING: The backoff period has ended, and the job
+      controller wants to try to launch again.
     - ALIVE_WAITING -> LAUNCHING: The scheduler has determined that the job
       controller may launch again.
     - LAUNCHING, ALIVE, or ALIVE_WAITING -> DONE: The job controller is exiting
@@ -348,6 +403,7 @@ class ManagedJobScheduleState(enum.Enum):
     state or vice versa. (In fact, schedule state is defined on the job and
     status on the task.)
     - INACTIVE or WAITING should only be seen when a job is PENDING.
+    - ALIVE_BACKOFF should only be seen when a job is STARTING.
     - ALIVE_WAITING should only be seen when a job is RECOVERING, has multiple
       tasks, or needs to retry launching.
     - LAUNCHING and ALIVE can be seen in many different statuses.
@@ -373,6 +429,9 @@ class ManagedJobScheduleState(enum.Enum):
     # The job is running sky.launch, or soon will, using a limited number of
     # allowed launch slots.
     LAUNCHING = 'LAUNCHING'
+    # The job is alive, but is in backoff waiting for resources - a special case
+    # of ALIVE.
+    ALIVE_BACKOFF = 'ALIVE_BACKOFF'
     # The controller for the job is running, but it's not currently launching.
     ALIVE = 'ALIVE'
     # The job is in a terminal state. (Not necessarily SUCCEEDED.)
@@ -380,18 +439,23 @@ class ManagedJobScheduleState(enum.Enum):
 
 
 # === Status transition functions ===
-def set_job_info(job_id: int, name: str):
+@_init_db
+def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO job_info
-            (spot_job_id, name, schedule_state)
-            VALUES (?, ?, ?)""",
-            (job_id, name, ManagedJobScheduleState.INACTIVE.value))
+            (spot_job_id, name, schedule_state, workspace, entrypoint)
+            VALUES (?, ?, ?, ?, ?)""",
+            (job_id, name, ManagedJobScheduleState.INACTIVE.value, workspace,
+             entrypoint))
 
 
+@_init_db
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the task to pending state."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -402,11 +466,12 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
              ManagedJobStatus.PENDING.value))
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
-                  submit_time: float, resources_str: str,
-                  specs: Dict[str, Union[str,
-                                         int]], callback_func: CallbackType):
-    """Set the task to submitted.
+@_init_db
+def set_starting(job_id: int, task_id: int, run_timestamp: str,
+                 submit_time: float, resources_str: str,
+                 specs: Dict[str, Union[str,
+                                        int]], callback_func: CallbackType):
+    """Set the task to starting state.
 
     Args:
         job_id: The managed job ID.
@@ -418,11 +483,13 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
         specs: The specs of the managed task.
         callback_func: The callback function.
     """
+    assert _DB_PATH is not None
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
     # the log directory and submission time align with each other, so as to
     # make it easier to find them based on one of the values.
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the managed task is submitted.
+    logger.info('Launching the spot cluster...')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -436,19 +503,58 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?) AND
             status=(?) AND
             end_at IS null""",
-            (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
+            (resources_str, submit_time, ManagedJobStatus.STARTING.value,
              run_timestamp, json.dumps(specs), job_id, task_id,
              ManagedJobStatus.PENDING.value))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to submitted. '
+                'Failed to set the task to starting. '
                 f'({cursor.rowcount} rows updated)')
+    # SUBMITTED is no longer used, but we keep it for backward compatibility.
+    # TODO(cooperc): remove this in v0.12.0
     callback_func('SUBMITTED')
+    callback_func('STARTING')
 
 
-def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
-    """Set the task to starting state."""
-    logger.info('Launching the spot cluster...')
+@_init_db
+def set_backoff_pending(job_id: int, task_id: int):
+    """Set the task to PENDING state if it is in backoff.
+
+    This should only be used to transition from STARTING or RECOVERING back to
+    PENDING.
+    """
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE spot SET status=(?)
+            WHERE spot_job_id=(?) AND
+            task_id=(?) AND
+            status IN (?, ?) AND
+            end_at IS null""", (ManagedJobStatus.PENDING.value, job_id, task_id,
+                                ManagedJobStatus.STARTING.value,
+                                ManagedJobStatus.RECOVERING.value))
+        logger.debug('back to PENDING')
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                'Failed to set the task back to pending. '
+                f'({cursor.rowcount} rows updated)')
+    # Do not call callback_func here, as we don't use the callback for PENDING.
+
+
+@_init_db
+def set_restarting(job_id: int, task_id: int, recovering: bool):
+    """Set the task back to STARTING or RECOVERING from PENDING.
+
+    This should not be used for the initial transition from PENDING to STARTING.
+    In that case, use set_starting instead. This function should only be used
+    after using set_backoff_pending to transition back to PENDING during
+    launch retry backoff.
+    """
+    assert _DB_PATH is not None
+    target_status = ManagedJobStatus.STARTING.value
+    if recovering:
+        target_status = ManagedJobStatus.RECOVERING.value
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -456,18 +562,22 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
             WHERE spot_job_id=(?) AND
             task_id=(?) AND
             status=(?) AND
-            end_at IS null""", (ManagedJobStatus.STARTING.value, job_id,
-                                task_id, ManagedJobStatus.SUBMITTED.value))
+            end_at IS null""",
+            (target_status, job_id, task_id, ManagedJobStatus.PENDING.value))
+        logger.debug(f'back to {target_status}')
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to starting. '
+                f'Failed to set the task back to {target_status}. '
                 f'({cursor.rowcount} rows updated)')
-    callback_func('STARTING')
+    # Do not call callback_func here, as it should only be invoked for the
+    # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
 
 
+@_init_db
 def set_started(job_id: int, task_id: int, start_time: float,
                 callback_func: CallbackType):
     """Set the task to started state."""
+    assert _DB_PATH is not None
     logger.info('Job started.')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -496,8 +606,10 @@ def set_started(job_id: int, task_id: int, start_time: float,
     callback_func('STARTED')
 
 
+@_init_db
 def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
+    assert _DB_PATH is not None
     logger.info('=== Recovering... ===')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -517,9 +629,11 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
     callback_func('RECOVERING')
 
 
+@_init_db
 def set_recovered(job_id: int, task_id: int, recovered_time: float,
                   callback_func: CallbackType):
     """Set the task to recovered."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -539,9 +653,11 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
     callback_func('RECOVERED')
 
 
+@_init_db
 def set_succeeded(job_id: int, task_id: int, end_time: float,
                   callback_func: CallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -561,6 +677,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
     logger.info('Job succeeded.')
 
 
+@_init_db
 def set_failed(
     job_id: int,
     task_id: Optional[int],
@@ -585,6 +702,7 @@ def set_failed(
         override_terminal: If True, override the current status even if end_at
             is already set.
     """
+    assert _DB_PATH is not None
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
@@ -635,12 +753,14 @@ def set_failed(
     logger.info(failure_reason)
 
 
+@_init_db
 def set_cancelling(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
     as a whole, and we should not cancel a single task.
     """
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -656,11 +776,13 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
         logger.info('Cancellation skipped, job is already terminal')
 
 
+@_init_db
 def set_cancelled(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
     """
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -677,11 +799,14 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
         logger.info('Cancellation skipped, job is not CANCELLING')
 
 
+@_init_db
 def set_local_log_file(job_id: int, task_id: Optional[int],
                        local_log_file: str):
     """Set the local log file for a job."""
+    assert _DB_PATH is not None
     filter_str = 'spot_job_id=(?)'
     filter_args = [local_log_file, job_id]
+
     if task_id is not None:
         filter_str += ' AND task_id=(?)'
         filter_args.append(task_id)
@@ -692,9 +817,11 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 
 
 # ======== utility functions ========
+@_init_db
 def get_nonterminal_job_ids_by_name(name: Optional[str],
                                     all_users: bool = False) -> List[int]:
     """Get non-terminal job ids by name."""
+    assert _DB_PATH is not None
     statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
     field_values = [
         status.value for status in ManagedJobStatus.terminal_statuses()
@@ -729,6 +856,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
         return job_ids
 
 
+@_init_db
 def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
     """Get jobs from the database that have a live schedule_state.
 
@@ -737,6 +865,7 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
     exception: the job may have just transitioned from WAITING to LAUNCHING, but
     the controller process has not yet started.
     """
+    assert _DB_PATH is not None
     job_filter = '' if job_id is None else 'AND spot_job_id=(?)'
     job_value = (job_id,) if job_id is not None else ()
 
@@ -767,6 +896,7 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
         return jobs
 
 
+@_init_db
 def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
     """Get jobs that need controller process checking.
 
@@ -778,6 +908,7 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
     - Jobs have schedule_state DONE but are in a non-terminal status
     - Legacy jobs (that is, no schedule state) that are in non-terminal status
     """
+    assert _DB_PATH is not None
     job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
     job_value = () if job_id is None else (job_id,)
 
@@ -823,8 +954,10 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         return [row[0] for row in rows if row[0] is not None]
 
 
+@_init_db
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
+    assert _DB_PATH is not None
     name_filter = ''
     field_values = []
     if name is not None:
@@ -850,8 +983,10 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
+@_init_db
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         id_statuses = cursor.execute(
             """\
@@ -893,11 +1028,13 @@ def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     return status
 
 
+@_init_db
 def get_failure_reason(job_id: int) -> Optional[str]:
     """Get the failure reason of a job.
 
     If the job has multiple tasks, we return the first failure reason.
     """
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         reason = cursor.execute(
             """\
@@ -910,8 +1047,10 @@ def get_failure_reason(job_id: int) -> Optional[str]:
         return reason[0]
 
 
+@_init_db
 def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get managed jobs from the database."""
+    assert _DB_PATH is not None
     job_filter = '' if job_id is None else f'WHERE spot.spot_job_id={job_id}'
 
     # Join spot and job_info tables to get the job name for each task.
@@ -938,12 +1077,26 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                 job_dict['schedule_state'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
+
+            # Add user YAML content for managed jobs.
+            yaml_path = job_dict.get('original_user_yaml_path')
+            if yaml_path:
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        job_dict['user_yaml'] = f.read()
+                except (FileNotFoundError, IOError, OSError):
+                    job_dict['user_yaml'] = None
+            else:
+                job_dict['user_yaml'] = None
+
             jobs.append(job_dict)
         return jobs
 
 
+@_init_db
 def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         task_name = cursor.execute(
             """\
@@ -953,8 +1106,10 @@ def get_task_name(job_id: int, task_id: int) -> str:
         return task_name[0]
 
 
+@_init_db
 def get_latest_job_id() -> Optional[int]:
     """Get the latest job id."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute("""\
             SELECT spot_job_id FROM spot
@@ -965,7 +1120,9 @@ def get_latest_job_id() -> Optional[int]:
         return None
 
 
+@_init_db
 def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         task_specs = cursor.execute(
             """\
@@ -975,8 +1132,10 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
         return json.loads(task_specs[0])
 
 
+@_init_db
 def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
+    assert _DB_PATH is not None
     filter_str = 'spot_job_id=(?)'
     filter_args = [job_id]
     if task_id is not None:
@@ -994,24 +1153,30 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 # scheduler lock to work correctly.
 
 
-def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
-                          user_hash: str) -> None:
+@_init_db
+def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
+                          original_user_yaml_path: str, env_file_path: str,
+                          user_hash: str, priority: int) -> None:
     """Do not call without holding the scheduler lock."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
-            'schedule_state = (?), dag_yaml_path = (?), env_file_path = (?), '
-            '  user_hash = (?) '
+            'schedule_state = (?), dag_yaml_path = (?), '
+            'original_user_yaml_path = (?), env_file_path = (?), '
+            '  user_hash = (?), priority = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
             (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
-             env_file_path, user_hash, job_id,
-             ManagedJobScheduleState.INACTIVE.value)).rowcount
+             original_user_yaml_path, env_file_path, user_hash, priority,
+             job_id, ManagedJobScheduleState.INACTIVE.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
+@_init_db
 def scheduler_set_launching(job_id: int,
                             current_state: ManagedJobScheduleState) -> None:
     """Do not call without holding the scheduler lock."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
@@ -1022,8 +1187,10 @@ def scheduler_set_launching(job_id: int,
         assert updated_count == 1, (job_id, updated_count)
 
 
+@_init_db
 def scheduler_set_alive(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
@@ -1034,20 +1201,39 @@ def scheduler_set_alive(job_id: int) -> None:
         assert updated_count == 1, (job_id, updated_count)
 
 
-def scheduler_set_alive_waiting(job_id: int) -> None:
+@_init_db
+def scheduler_set_alive_backoff(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
             'schedule_state = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
-            (ManagedJobScheduleState.ALIVE_WAITING.value, job_id,
-             ManagedJobScheduleState.ALIVE.value)).rowcount
+            (ManagedJobScheduleState.ALIVE_BACKOFF.value, job_id,
+             ManagedJobScheduleState.LAUNCHING.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
+@_init_db
+def scheduler_set_alive_waiting(job_id: int) -> None:
+    """Do not call without holding the scheduler lock."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        updated_count = cursor.execute(
+            'UPDATE job_info SET '
+            'schedule_state = (?) '
+            'WHERE spot_job_id = (?) AND schedule_state IN (?, ?)',
+            (ManagedJobScheduleState.ALIVE_WAITING.value, job_id,
+             ManagedJobScheduleState.ALIVE.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).rowcount
+        assert updated_count == 1, (job_id, updated_count)
+
+
+@_init_db
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
@@ -1059,7 +1245,9 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
             assert updated_count == 1, (job_id, updated_count)
 
 
+@_init_db
 def set_job_controller_pid(job_id: int, pid: int):
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
@@ -1068,7 +1256,9 @@ def set_job_controller_pid(job_id: int, pid: int):
         assert updated_count == 1, (job_id, updated_count)
 
 
+@_init_db
 def get_job_schedule_state(job_id: int) -> ManagedJobScheduleState:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         state = cursor.execute(
             'SELECT schedule_state FROM job_info WHERE spot_job_id = (?)',
@@ -1076,7 +1266,9 @@ def get_job_schedule_state(job_id: int) -> ManagedJobScheduleState:
         return ManagedJobScheduleState(state)
 
 
+@_init_db
 def get_num_launching_jobs() -> int:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         return cursor.execute(
             'SELECT COUNT(*) '
@@ -1085,34 +1277,72 @@ def get_num_launching_jobs() -> int:
             (ManagedJobScheduleState.LAUNCHING.value,)).fetchone()[0]
 
 
+@_init_db
 def get_num_alive_jobs() -> int:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         return cursor.execute(
             'SELECT COUNT(*) '
             'FROM job_info '
-            'WHERE schedule_state IN (?, ?, ?)',
+            'WHERE schedule_state IN (?, ?, ?, ?)',
             (ManagedJobScheduleState.ALIVE_WAITING.value,
              ManagedJobScheduleState.LAUNCHING.value,
-             ManagedJobScheduleState.ALIVE.value)).fetchone()[0]
+             ManagedJobScheduleState.ALIVE.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()[0]
 
 
+@_init_db
 def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
+
+    Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
+    priority is greater than or equal to any currently LAUNCHING or
+    ALIVE_BACKOFF job.
 
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
     """
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        row = cursor.execute(
+        # Get the highest-priority WAITING or ALIVE_WAITING job whose priority
+        # is greater than or equal to the highest priority LAUNCHING or
+        # ALIVE_BACKOFF job's priority.
+        waiting_job_row = cursor.execute(
             'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
-            'WHERE schedule_state in (?, ?) '
-            'ORDER BY spot_job_id LIMIT 1',
+            'WHERE schedule_state IN (?, ?) '
+            'AND priority >= COALESCE('
+            '    (SELECT MAX(priority) '
+            '     FROM job_info '
+            '     WHERE schedule_state IN (?, ?)), '
+            '    0'
+            ')'
+            'ORDER BY priority DESC, spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
-             ManagedJobScheduleState.ALIVE_WAITING.value)).fetchone()
+             ManagedJobScheduleState.ALIVE_WAITING.value,
+             ManagedJobScheduleState.LAUNCHING.value,
+             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()
+
+        if waiting_job_row is None:
+            return None
+
         return {
-            'job_id': row[0],
-            'schedule_state': ManagedJobScheduleState(row[1]),
-            'dag_yaml_path': row[2],
-            'env_file_path': row[3],
-        } if row is not None else None
+            'job_id': waiting_job_row[0],
+            'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
+            'dag_yaml_path': waiting_job_row[2],
+            'env_file_path': waiting_job_row[3],
+        }
+
+
+@_init_db
+def get_workspace(job_id: int) -> str:
+    """Get the workspace of a job."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        workspace = cursor.execute(
+            'SELECT workspace FROM job_info WHERE spot_job_id = (?)',
+            (job_id,)).fetchone()
+        job_workspace = workspace[0] if workspace else None
+        if job_workspace is None:
+            return constants.SKYPILOT_DEFAULT_WORKSPACE
+        return job_workspace

@@ -12,7 +12,7 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     apt-get update -y && \
     apt-get install --no-install-recommends -y \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse socat netcat-openbsd curl rsync vim tini && \
+        pciutils nano fuse socat netcat-openbsd curl rsync vim tini autossh jq && \
     rm -rf /var/lib/apt/lists/* && \
     # Install kubectl based on architecture
     ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
@@ -23,6 +23,7 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl && \
+    curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash && \
     # Install uv and skypilot
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \

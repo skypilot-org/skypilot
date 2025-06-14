@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import create_engine
 
 import sky
 from sky import backends
@@ -13,11 +14,12 @@ def _mock_db_conn(tmp_path, monkeypatch):
     # Create a temporary database file
     db_path = tmp_path / 'state_testing.db'
 
-    # Create a new SQLiteConn instance
-    db_conn = db_utils.SQLiteConn(str(db_path), global_user_state.create_table)
+    sqlalchemy_engine = create_engine(f'sqlite:///{db_path}')
 
-    # Monkeypatch the global database connection
-    monkeypatch.setattr(global_user_state, '_DB', db_conn)
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
+                        sqlalchemy_engine)
+
+    global_user_state.create_table()
 
 
 @pytest.fixture
@@ -31,7 +33,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
     - test-disk-tier1: AWS, 1x m6i.2xlarge, with best disk tier
     - test-disk-tier2: GCP, 1x n2-standard-8, with medium disk tier
     """
-    assert 'state.db' not in global_user_state._DB.db_path
+    assert 'state.db' not in global_user_state._SQLALCHEMY_ENGINE.url
 
     handle = backends.CloudVmRayResourceHandle(
         cluster_name='test-cluster1',

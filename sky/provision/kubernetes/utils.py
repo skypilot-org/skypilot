@@ -1,6 +1,7 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
 import functools
+import hashlib
 import json
 import math
 import os
@@ -15,6 +16,7 @@ from urllib.parse import urlparse
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -129,6 +131,30 @@ logger = sky_logging.init_logger(__name__)
 # Default retry settings for Kubernetes API calls
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_INTERVAL_SECONDS = 1
+
+
+def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
+    """Normalize TPU names to the k8s-compatible name and extract count."""
+    # Examples:
+    # 'tpu-v6e-8' -> ('tpu-v6e-slice', 8)
+    # 'tpu-v5litepod-4' -> ('tpu-v5-lite-podslice', 4)
+
+    gcp_to_k8s_patterns = [
+        (r'^tpu-v6e-(\d+)$', 'tpu-v6e-slice'),
+        (r'^tpu-v5p-(\d+)$', 'tpu-v5p-slice'),
+        (r'^tpu-v5litepod-(\d+)$', 'tpu-v5-lite-podslice'),
+        (r'^tpu-v5lite-(\d+)$', 'tpu-v5-lite-device'),
+        (r'^tpu-v4-(\d+)$', 'tpu-v4-podslice'),
+    ]
+
+    for pattern, replacement in gcp_to_k8s_patterns:
+        match = re.match(pattern, accelerator)
+        if match:
+            count = int(match.group(1))
+            return replacement, count
+
+    # Default fallback
+    return accelerator, 1
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -425,6 +451,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
+        acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
         count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
                                                        {}).get(acc_count, None)
         if count_to_topology is None:
@@ -458,6 +485,14 @@ class GKELabelFormatter(GPULabelFormatter):
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        try:
+            _ = cls.get_accelerator_from_label_value(value)
+            return True, ''
+        except ValueError as e:
+            return False, str(e)
 
 
 class GFDLabelFormatter(GPULabelFormatter):
@@ -563,17 +598,29 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
-    label_formatter = None
-
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
+        skip = False
         for _, label_list in node_labels.items():
-            for label, _ in label_list:
+            for label, value in label_list:
                 if lf.match_label_key(label):
-                    label_formatter = lf()
-                    return label_formatter, node_labels
+                    valid, reason = lf.validate_label_value(value)
+                    if valid:
+                        return lf(), node_labels
+                    else:
+                        logger.warning(f'GPU label {label} matched for label '
+                                       f'formatter {lf.__class__.__name__}, '
+                                       f'but has invalid value {value}. '
+                                       f'Reason: {reason}. '
+                                       'Skipping...')
+                        skip = True
+                        break
+            if skip:
+                break
+        if skip:
+            continue
 
-    return label_formatter, node_labels
+    return None, node_labels
 
 
 class Autoscaler:
@@ -752,6 +799,8 @@ class GKEAutoscaler(Autoscaler):
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
                 if 'resourceLabels' in node_config:
+                    requested_acc_type, requested_acc_count = normalize_tpu_accelerator_name(
+                        requested_acc_type)
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
@@ -991,7 +1040,7 @@ def check_instance_fits(context: Optional[str],
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    def check_tpu_fits(candidate_instance_type: 'KubernetesInstanceType',
+    def check_tpu_fits(acc_type: str, acc_count: int,
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on requested TPU.
 
@@ -1001,8 +1050,6 @@ def check_instance_fits(context: Optional[str],
         node (node_tpu_chip_count) and the total TPU chips across the entire
         podslice (topology_chip_count) are correctly handled.
         """
-        acc_type = candidate_instance_type.accelerator_type
-        acc_count = candidate_instance_type.accelerator_count
         tpu_list_in_cluster = []
         for node in node_list:
             if acc_type == node.metadata.labels[
@@ -1053,7 +1100,8 @@ def check_instance_fits(context: Optional[str],
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason
         else:
@@ -1137,6 +1185,11 @@ def get_accelerator_label_key_values(
     #  support pollingthe clusters for autoscaling information, such as the
     #  node pools configured etc.
 
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
+    cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
+    context_display_name = common_utils.removeprefix(
+        context, 'ssh-') if (context and is_ssh_node_pool) else context
+
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
         # If autoscaler is set in config.yaml, override the label key and value
@@ -1176,13 +1229,17 @@ def get_accelerator_label_key_values(
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
-                raise exceptions.ResourcesUnavailableError(
-                    'Could not detect GPU labels in Kubernetes cluster. '
-                    'If this cluster has GPUs, please ensure GPU nodes have '
-                    'node labels of either of these formats: '
-                    f'{supported_formats}. Please refer to '
-                    'the documentation on how to set up node labels.'
-                    f'{suffix}')
+                msg = (f'Could not detect GPU labels in {cloud_name}.')
+                if not is_ssh_node_pool:
+                    msg += (' Run `sky check ssh` to debug.')
+                else:
+                    msg += (
+                        ' If this cluster has GPUs, please ensure GPU nodes have '
+                        'node labels of either of these formats: '
+                        f'{supported_formats}. Please refer to '
+                        'the documentation on how to set up node labels.')
+                msg += f'{suffix}'
+                raise exceptions.ResourcesUnavailableError(msg)
         else:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
@@ -1193,7 +1250,7 @@ def get_accelerator_label_key_values(
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
-                                f'Node {node_name!r} in Kubernetes cluster has '
+                                f'Node {node_name!r} in {cloud_name} has '
                                 f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
@@ -1257,10 +1314,10 @@ def get_accelerator_label_key_values(
                 # TODO(Doyoung): Update the error message raised with the
                 # multi-host TPU support.
                 raise exceptions.ResourcesUnavailableError(
-                    'Could not find any node in the Kubernetes cluster '
+                    f'Could not find any node in the {cloud_name} '
                     f'with {acc_type}. Please ensure at least one node in the '
                     f'cluster has {acc_type} and node labels are setup '
-                    'correctly. Please refer to the documentration for more. '
+                    'correctly. Please refer to the documentation for more. '
                     f'{suffix}. Note that multi-host TPU podslices are '
                     'currently not unsupported.')
     else:
@@ -1270,15 +1327,24 @@ def get_accelerator_label_key_values(
             if env_options.Options.SHOW_DEBUG_INFO.get():
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
-            raise exceptions.ResourcesUnavailableError(
-                f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
-                f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
-                ' contains GPUs, please ensure GPU drivers are installed on '
-                'the node. Check if the GPUs are setup correctly by running '
-                '`kubectl describe nodes` and looking for the '
-                f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
-                'Please refer to the documentation on how to set up GPUs.'
-                f'{suffix}')
+            if is_ssh_node_pool:
+                msg = (
+                    f'Could not detect GPUs in SSH Node Pool '
+                    f'\'{context_display_name}\'. If this cluster contains '
+                    'GPUs, please ensure GPU drivers are installed on the node '
+                    'and re-run '
+                    f'`sky ssh up --infra {context_display_name}`. {suffix}')
+            else:
+                msg = (
+                    f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
+                    f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
+                    ' contains GPUs, please ensure GPU drivers are installed on '
+                    'the node. Check if the GPUs are setup correctly by running '
+                    '`kubectl describe nodes` and looking for the '
+                    f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
+                    'Please refer to the documentation on how to set up GPUs.'
+                    f'{suffix}')
+            raise exceptions.ResourcesUnavailableError(msg)
     assert False, 'This should not be reached'
 
 
@@ -1365,7 +1431,7 @@ def check_credentials(context: Optional[str],
     # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
     # optional checks.
     try:
-        _ = _get_kubeconfig_path()
+        _ = get_kubeconfig_paths()
     except ValueError as e:
         return False, f'{common_utils.format_exception(e, use_bracket=True)}'
 
@@ -1507,7 +1573,7 @@ def is_kubeconfig_exec_auth(
         return False, None
 
     # Get active context and user from kubeconfig using k8s api
-    all_contexts, current_context = k8s.config.list_kube_config_contexts()
+    all_contexts, current_context = kubernetes.list_kube_config_contexts()
     context_obj = current_context
     if context is not None:
         for c in all_contexts:
@@ -1518,15 +1584,11 @@ def is_kubeconfig_exec_auth(
             raise ValueError(f'Kubernetes context {context!r} not found.')
     target_username = context_obj['context']['user']
 
-    # K8s api does not provide a mechanism to get the user details from the
-    # context. We need to load the kubeconfig file and parse it to get the
-    # user details.
-    kubeconfig_path = _get_kubeconfig_path()
+    # Load the kubeconfig for the context
+    kubeconfig_text = _get_kubeconfig_text_for_context(context)
+    kubeconfig = yaml.safe_load(kubeconfig_text)
 
-    # Load the kubeconfig file as a dictionary
-    with open(kubeconfig_path, 'r', encoding='utf-8') as f:
-        kubeconfig = yaml.safe_load(f)
-
+    # Get the user details
     user_details = kubeconfig['users']
 
     # Find user matching the target username
@@ -1540,11 +1602,11 @@ def is_kubeconfig_exec_auth(
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = context_obj['name']
         exec_msg = ('exec-based authentication is used for '
-                    f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues with autodown or when running '
-                    'Managed Jobs or SkyServe controller on Kubernetes. '
-                    'To fix, configure SkyPilot to create a service account '
-                    'for running pods by setting the following in '
+                    f'Kubernetes context {ctx_name!r}. '
+                    'Make sure that the corresponding cloud provider is '
+                    'also enabled through `sky check` (e.g.: GCP for GKE). '
+                    'Alternatively, configure SkyPilot to create a service '
+                    'account for running pods by setting the following in '
                     '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
@@ -1552,6 +1614,27 @@ def is_kubeconfig_exec_auth(
                     'reference/config.html')
         return True, exec_msg
     return False, None
+
+
+def _get_kubeconfig_text_for_context(context: Optional[str] = None) -> str:
+    """Get the kubeconfig text for the given context.
+
+    The kubeconfig might be multiple files, this function use kubectl to
+    handle merging automatically.
+    """
+    command = 'kubectl config view --minify'
+    if context is not None:
+        command += f' --context={context}'
+    proc = subprocess.run(command,
+                          shell=True,
+                          check=False,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f'Failed to get kubeconfig text for context {context}: {proc.stderr.decode("utf-8")}'
+        )
+    return proc.stdout.decode('utf-8')
 
 
 @annotations.lru_cache(scope='request')
@@ -1563,7 +1646,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     """
     k8s = kubernetes.kubernetes
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
+        _, current_context = kubernetes.list_kube_config_contexts()
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
         return None
@@ -1599,7 +1682,7 @@ def get_all_kube_context_names() -> List[str]:
     k8s = kubernetes.kubernetes
     context_names = []
     try:
-        all_contexts, _ = k8s.config.list_kube_config_contexts()
+        all_contexts, _ = kubernetes.list_kube_config_contexts()
         # all_contexts will always have at least one context. If kubeconfig
         # does not have any contexts defined, it will raise ConfigException.
         context_names = [context['name'] for context in all_contexts]
@@ -1642,7 +1725,7 @@ def get_kube_config_context_namespace(
                 return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
-        contexts, current_context = k8s.config.list_kube_config_contexts()
+        contexts, current_context = kubernetes.list_kube_config_contexts()
         if context_name is None:
             context = current_context
         else:
@@ -2306,6 +2389,7 @@ def get_endpoint_debug_message() -> str:
 def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
+    cloud: Optional[clouds.Cloud] = None,
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
@@ -2350,11 +2434,17 @@ def combine_pod_config_fields(
     yaml_obj = yaml.safe_load(yaml_content)
     # We don't use override_configs in `skypilot_config.get_nested`, as merging
     # the pod config requires special handling.
-    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
-                                                   default_value={},
-                                                   override_configs={})
-    override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
-        'pod_config', {}))
+    if isinstance(cloud, clouds.SSH):
+        kubernetes_config = skypilot_config.get_nested(('ssh', 'pod_config'),
+                                                       default_value={},
+                                                       override_configs={})
+        override_pod_config = (cluster_config_overrides.get('ssh', {}).get(
+            'pod_config', {}))
+    else:
+        kubernetes_config = skypilot_config.get_nested(
+            ('kubernetes', 'pod_config'), default_value={}, override_configs={})
+        override_pod_config = (cluster_config_overrides.get(
+            'kubernetes', {}).get('pod_config', {}))
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2792,7 +2882,7 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
     namespace = get_namespace_from_config(provider_config)
     context = get_context_from_config(provider_config)
@@ -2834,8 +2924,8 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
     if context == kubernetes.in_cluster_context_name():
-        # If the context (also used as the region) is in-cluster, we need to
-        # we need to use in-cluster auth by setting the context to None.
+        # If the context (also used as the region) is in-cluster, we need
+        # to use in-cluster auth by setting the context to None.
         context = None
     return context
 
@@ -2867,7 +2957,8 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 def is_tpu_on_gke(accelerator: str) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
-    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
+    normalized, _ = normalize_tpu_accelerator_name(accelerator)
+    return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
 def get_node_accelerator_count(attribute_dict: dict) -> int:
@@ -3081,18 +3172,112 @@ def get_gpu_resource_key():
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
 
 
-def _get_kubeconfig_path() -> str:
-    """Get the path to the kubeconfig file.
+def get_kubeconfig_paths() -> List[str]:
+    """Get the path to the kubeconfig files.
     Parses `KUBECONFIG` env var if present, else uses the default path.
-    Currently, specifying multiple KUBECONFIG paths in the envvar is not
-    allowed, hence will raise a ValueError.
     """
-    kubeconfig_path = os.path.expanduser(
-        os.getenv(
-            'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
-            KUBE_CONFIG_DEFAULT_LOCATION))
-    if len(kubeconfig_path.split(os.pathsep)) > 1:
-        raise ValueError('SkyPilot currently only supports one '
-                         'config file path with $KUBECONFIG. Current '
-                         f'path(s) are {kubeconfig_path}.')
-    return kubeconfig_path
+    # We should always use the latest KUBECONFIG environment variable to
+    # make sure env var overrides get respected.
+    paths = os.getenv('KUBECONFIG', kubernetes.DEFAULT_KUBECONFIG_PATH)
+    expanded = []
+    for path in paths.split(kubernetes.ENV_KUBECONFIG_PATH_SEPARATOR):
+        expanded.append(os.path.expanduser(path))
+    return expanded
+
+
+def format_kubeconfig_exec_auth(config: Any,
+                                output_path: str,
+                                inject_wrapper: bool = True) -> bool:
+    """Reformat the kubeconfig so that exec-based authentication can be used
+    with SkyPilot. Will create a new kubeconfig file under <output_path>
+    regardless of whether a change has been made.
+
+    kubectl internally strips all environment variables except for system
+    defaults. If `inject_wrapper` is true, a wrapper executable is applied
+    to inject the relevant PATH information before exec-auth is executed.
+
+    Contents of sky-kube-exec-wrapper:
+
+    #!/bin/bash
+    export PATH="$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk:$PATH"
+    exec "$@"
+
+    refer to `skylet/constants.py` for more information.
+
+    Args:
+        config (dict): kubeconfig parsed by yaml.safe_load
+        output_path (str): Path where the potentially modified kubeconfig file
+          will be saved
+        inject_wrapper (bool): Whether to inject the wrapper script
+    Returns: whether config was updated, for logging purposes
+    """
+    updated = False
+    for user in config.get('users', []):
+        exec_info = user.get('user', {}).get('exec', {})
+        current_command = exec_info.get('command', '')
+
+        if current_command:
+            # Strip the path and keep only the executable name
+            executable = os.path.basename(current_command)
+            if executable == kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER:
+                # we don't want this happening recursively.
+                continue
+
+            if inject_wrapper:
+                exec_info[
+                    'command'] = kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER
+                if exec_info.get('args') is None:
+                    exec_info['args'] = []
+                exec_info['args'].insert(0, executable)
+                updated = True
+            elif executable != current_command:
+                exec_info['command'] = executable
+                updated = True
+
+            # Handle Nebius kubeconfigs: change --profile to 'sky'
+            if executable == 'nebius':
+                args = exec_info.get('args', [])
+                if args and '--profile' in args:
+                    try:
+                        profile_index = args.index('--profile')
+                        if profile_index + 1 < len(args):
+                            old_profile = args[profile_index + 1]
+                            if old_profile != 'sky':
+                                args[profile_index + 1] = 'sky'
+                                updated = True
+                    except ValueError:
+                        pass
+
+    os.makedirs(os.path.dirname(os.path.expanduser(output_path)), exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as file:
+        yaml.safe_dump(config, file)
+
+    return updated
+
+
+def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
+    """Reformat the kubeconfig file or retrieve it from cache if it has already
+    been formatted before. Store it in the cache directory if necessary.
+
+    Having a cache for this is good if users spawn an extreme number of jobs
+    concurrently.
+
+    Args:
+        kubeconfig_path (str): kubeconfig path
+    Returns: updated kubeconfig path
+    """
+    # TODO(kyuds): GC cache files
+    with open(kubeconfig_path, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+    normalized = yaml.dump(config, sort_keys=True)
+    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    path = os.path.expanduser(
+        f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
+    )
+
+    # If we have already converted the same kubeconfig before, just return.
+    if os.path.isfile(path):
+        return path
+
+    format_kubeconfig_exec_auth(config, path)
+    return path

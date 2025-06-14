@@ -20,8 +20,12 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import os
+import pathlib
 import subprocess
+import tempfile
+import textwrap
 
+import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -379,8 +383,6 @@ def test_gcp_mig():
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env={
             skypilot_config.ENV_VAR_PROJECT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
-            constants.SKY_API_SERVER_URL_ENV_VAR:
-                sky.server.common.get_server_url()
         })
     smoke_tests_utils.run_one_test(test)
 
@@ -424,7 +426,7 @@ def test_gcp_force_enable_external_ips():
         test_commands,
         f'sky down -y {name}',
         env={
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_file,
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG: skypilot_config_file,
             constants.SKY_API_SERVER_URL_ENV_VAR:
                 sky.server.common.get_server_url()
         })
@@ -453,6 +455,7 @@ def test_image_no_conda():
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
@@ -475,4 +478,208 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_docker_image_and_ssh():
+    """Test K8s docker image ID interchangeability with/without prefix."""
+    # We use a real, simple image like docker for the test.
+    image_name = 'continuumio/miniconda3:latest'
+    docker_prefixed_image_id = f'docker:{image_name}'
+    unprefixed_image_id = image_name
+    run_command = 'echo hello world'
+    # Create temporary YAML files for testing
+    import os
+    import tempfile
+
+    def create_temp_yaml(content, suffix):
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(content.encode())
+            return f.name
+
+    # YAML with docker: prefix
+    docker_yaml = textwrap.dedent(f"""\
+        resources:
+            image_id: {docker_prefixed_image_id}
+            cpus: 2+
+            memory: 2+
+            infra: kubernetes
+        run: {run_command}
+        """)
+
+    # YAML without docker: prefix
+    unprefixed_yaml = textwrap.dedent(f"""\
+        resources:
+            image_id: {unprefixed_image_id}
+            cpus: 2+
+            memory: 2+
+            infra: kubernetes
+        run: {run_command}
+        """)
+
+    docker_yaml_path = create_temp_yaml(docker_yaml, '_docker.yaml')
+    unprefixed_yaml_path = create_temp_yaml(unprefixed_yaml, '_unprefixed.yaml')
+
+    try:
+        # Scenario 1: launch with docker:alpine, exec with alpine
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
+            'test_kubernetes_docker_image_and_ssh',
+            [
+                f'sky launch -c {name}-1 --retry-until-up -y --async '
+                f'--cpus 2+ --memory 2+ '
+                f'--infra kubernetes '
+                f'--image-id {docker_prefixed_image_id} "{run_command}"',
+                f'sky launch -c {name}-2 --retry-until-up -y '
+                f'--cpus 2+ --memory 2+ '
+                f'--infra kubernetes '
+                f'--image-id {unprefixed_image_id} "{run_command}"',
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=f'{name}-1',
+                    cluster_status=[sky.ClusterStatus.UP],
+                    timeout=5 * 60),
+                f'sky logs {name}-1 1 --status',
+                f'sky launch --fast -c {name}-1 {unprefixed_yaml_path}',
+                f'sky exec {name}-1 {unprefixed_yaml_path}',
+                f'sky logs {name}-1 2 --status',
+                f'sky logs {name}-1 3 --status',
+                # Second cluster
+                f'sky logs {name}-2 1 --status',
+                f'sky launch --fast -c {name}-2 {docker_yaml_path}',
+                f'sky exec {name}-2 {docker_yaml_path}',
+                f'sky logs {name}-2 2 --status',
+                f'sky logs {name}-2 3 --status',
+                # Ensure SSH config is updated.
+                'sky status',
+                f'ssh {name}-1 -- "{run_command}" | grep "hello world"',
+                f'ssh {name}-2 -- "{run_command}" | grep "hello world"',
+            ],
+            f'sky down -y {name}-1 {name}-2',
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        # Clean up temporary files
+        os.unlink(docker_yaml_path)
+        os.unlink(unprefixed_yaml_path)
+
+
+@pytest.fixture
+def private_docker_registry_setup(request):
+    """Fixture to setup private docker registry test environment.
+
+    Args:
+        request: pytest request object containing the parameters
+    """
+    # Get parameters from the test function
+    docker_username = request.param['docker_username']
+    docker_password = request.param['docker_password']
+    docker_server = request.param['docker_server']
+    full_image_name = request.param['full_image_name']
+
+    # Dynamically get passwords for cloud providers
+    if 'ecr' in docker_server:
+        # Get ECR login password
+        # Extract region from ECR server URL
+        region = docker_server.split(
+            '.'
+        )[3]  # e.g., us-east-1 from 195275664570.dkr.ecr.us-east-1.amazonaws.com
+        result = subprocess.run(
+            ['aws', 'ecr', 'get-login-password', '--region', region],
+            capture_output=True,
+            text=True,
+            check=True)
+        docker_password = result.stdout.strip()
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_private_docker_registry.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(docker_username=docker_username,
+                              docker_password=docker_password,
+                              docker_server=docker_server,
+                              full_image_name=full_image_name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        yield file_path
+
+
+@pytest.mark.no_azure
+@pytest.mark.no_kubernetes
+@pytest.mark.parametrize(
+    'private_docker_registry_setup,cloud_provider',
+    [
+        # AWS with docker.io registry
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_SERVER'),
+            'full_image_name':
+                os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME')
+        }, 'aws'),
+        # GCP with Artifact Registry
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_GCP_DOCKER_SERVER'),
+            'full_image_name': os.environ.get(
+                'PRIVATE_REGISTRY_TEST_GCP_DOCKER_FULL_IMAGE_NAME')
+        }, 'gcp'),
+        # AWS with ECR
+        ({
+            'docker_username':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_USERNAME'),
+            'docker_password':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_PASSWORD'),
+            'docker_server':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_SERVER'),
+            'full_image_name':
+                os.environ.get('PRIVATE_REGISTRY_TEST_AWS_ECR_FULL_IMAGE_NAME')
+        }, 'aws'),
+    ],
+    indirect=['private_docker_registry_setup'])
+def test_private_docker_registry(generic_cloud,
+                                 private_docker_registry_setup: str,
+                                 cloud_provider: str):
+    # Skip test if environment variables are not set
+    if not os.environ.get('PRIVATE_REGISTRY_TEST_DOCKER_FULL_IMAGE_NAME'):
+        pytest.skip(
+            'Skipping test as docker registry environment variables are not set'
+        )
+
+    # Skip test if the required cloud provider is not available
+    if cloud_provider != generic_cloud:
+        pytest.skip(
+            f'Skipping test for {cloud_provider} as it is not the generic cloud'
+        )
+
+    name = smoke_tests_utils.get_cluster_name()
+    test_name = f'private_docker_registry_{cloud_provider}'
+
+    test = smoke_tests_utils.Test(
+        test_name,
+        [
+            f'sky launch -c {name} -y --infra {cloud_provider} {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_helm_deploy_gke(request):
+    helm_version = request.config.getoption('--helm-version')
+    package_name = request.config.getoption('--helm-package')
+    test = smoke_tests_utils.Test('helm_deploy_gke', [
+        f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+    ])
     smoke_tests_utils.run_one_test(test)

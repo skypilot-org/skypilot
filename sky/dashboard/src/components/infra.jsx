@@ -8,14 +8,400 @@ import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
-import { getGPUs, getCloudInfrastructure } from '@/data/connectors/infra';
+import { getInfraData } from '@/data/connectors/infra';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
 
-// Set the refresh interval to 1 minute for GPU data
-const GPU_REFRESH_INTERVAL = 60000;
-const NAME_TRUNCATE_LENGTH = 30;
+// Set the refresh interval to align with other pages
+const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
+const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+// Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
+export function InfrastructureSection({
+  title,
+  isLoading,
+  isDataLoaded,
+  contexts,
+  gpus,
+  groupedPerContextGPUs,
+  groupedPerNodeGPUs,
+  handleContextClick,
+  contextStats = {},
+  isSSH = false, // To differentiate between SSH and Kubernetes
+}) {
+  // Add defensive check for contexts
+  const safeContexts = contexts || [];
+
+  // Show loading spinner while data is being fetched
+  if (isLoading || !isDataLoaded) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <h3 className="text-lg font-semibold mb-4">{title}</h3>
+          <div className="flex items-center justify-center py-6">
+            <CircularProgress size={24} className="mr-3" />
+            <span className="text-gray-500">Loading {title}...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Only show "no data" message after data has been loaded and confirmed empty
+  if (isDataLoaded && safeContexts.length === 0) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <h3 className="text-lg font-semibold mb-4">{title}</h3>
+          <p className="text-sm text-gray-500">
+            No {title} found or {title} is not configured.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isDataLoaded && safeContexts.length > 0) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+        <div className="p-5">
+          <div className="flex items-center mb-4">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+              {safeContexts.length}{' '}
+              {safeContexts.length === 1
+                ? isSSH
+                  ? 'pool'
+                  : 'context'
+                : isSSH
+                  ? 'pools'
+                  : 'contexts'}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                        {isSSH ? 'Node Pool' : 'Context'}
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Clusters
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Jobs
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Nodes
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                        GPU Types
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        #GPUs
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody
+                    className={`bg-white divide-y divide-gray-200 ${safeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                  >
+                    {safeContexts.map((context) => {
+                      const gpus = groupedPerContextGPUs[context] || [];
+                      const nodes = groupedPerNodeGPUs[context] || [];
+                      const totalGpus = gpus.reduce(
+                        (sum, gpu) => sum + (gpu.gpu_total || 0),
+                        0
+                      );
+
+                      // Get cluster and job counts for this context
+                      const contextStatsKey = isSSH
+                        ? `ssh/${context.replace(/^ssh-/, '')}` // Remove ssh- prefix and add ssh/ prefix
+                        : `kubernetes/${context}`; // Add kubernetes/ prefix
+                      const stats = contextStats[contextStatsKey] || {
+                        clusters: 0,
+                        jobs: 0,
+                      };
+
+                      // Format GPU types based on context type
+                      const gpuTypes = (() => {
+                        const typeCounts = gpus.reduce((acc, gpu) => {
+                          acc[gpu.gpu_name] =
+                            (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
+                          return acc;
+                        }, {});
+
+                        return Object.keys(typeCounts).join(', ');
+                      })();
+
+                      // Format display name for SSH contexts
+                      const displayName = isSSH
+                        ? context.replace(/^ssh-/, '')
+                        : context;
+
+                      return (
+                        <tr key={context} className="hover:bg-gray-50">
+                          <td className="p-3">
+                            <NonCapitalizedTooltip
+                              content={displayName}
+                              className="text-sm text-muted-foreground"
+                            >
+                              <span
+                                className="text-blue-600 hover:underline cursor-pointer"
+                                onClick={() => handleContextClick(context)}
+                              >
+                                {displayName.length > NAME_TRUNCATE_LENGTH
+                                  ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+                                  : displayName}
+                              </span>
+                            </NonCapitalizedTooltip>
+                          </td>
+                          <td className="p-3">
+                            {stats.clusters > 0 ? (
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                {stats.clusters}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                0
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {stats.jobs > 0 ? (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                {stats.jobs}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                0
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3">{(nodes || []).length}</td>
+                          <td className="p-3">{gpuTypes || '-'}</td>
+                          <td className="p-3">{totalGpus}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {gpus && gpus.length > 0 && (
+              <div>
+                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
+                          GPU
+                          <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
+                            {gpus.reduce((sum, gpu) => sum + gpu.gpu_free, 0)}{' '}
+                            of{' '}
+                            {gpus.reduce((sum, gpu) => sum + gpu.gpu_total, 0)}{' '}
+                            free
+                          </span>
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                          Requestable
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600 w-1/2">
+                          <div className="flex items-center">
+                            <span>Utilization</span>
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
+                    >
+                      {gpus.map((gpu) => {
+                        const usedGpus = gpu.gpu_total - gpu.gpu_free;
+                        const freePercentage =
+                          gpu.gpu_total > 0
+                            ? (gpu.gpu_free / gpu.gpu_total) * 100
+                            : 0;
+                        const usedPercentage =
+                          gpu.gpu_total > 0
+                            ? (usedGpus / gpu.gpu_total) * 100
+                            : 0;
+
+                        // Find the requestable quantities from contexts
+                        const requestableQtys = groupedPerContextGPUs
+                          ? Object.values(groupedPerContextGPUs)
+                              .flat()
+                              .filter(
+                                (g) =>
+                                  g.gpu_name === gpu.gpu_name &&
+                                  (isSSH
+                                    ? g.context.startsWith('ssh-')
+                                    : !g.context.startsWith('ssh-'))
+                              )
+                              .map((g) => g.gpu_requestable_qty_per_node)
+                              .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
+                              .join(', ')
+                          : '-';
+
+                        return (
+                          <tr key={gpu.gpu_name}>
+                            <td className="p-3 font-medium w-24 whitespace-nowrap">
+                              {gpu.gpu_name}
+                            </td>
+                            <td className="p-3 text-xs text-gray-600">
+                              {requestableQtys || '-'} / node
+                            </td>
+                            <td className="p-3 w-2/3">
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
+                                  {usedPercentage > 0 && (
+                                    <div
+                                      style={{ width: `${usedPercentage}%` }}
+                                      className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
+                                    >
+                                      {usedPercentage > 15 &&
+                                        `${usedGpus} used`}
+                                    </div>
+                                  )}
+                                  {freePercentage > 0 && (
+                                    <div
+                                      style={{ width: `${freePercentage}%` }}
+                                      className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
+                                    >
+                                      {freePercentage > 15 &&
+                                        `${gpu.gpu_free} free`}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// Reusable component for context details
+export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
+  // Determine if this is an SSH context
+  const isSSHContext = contextName.startsWith('ssh-');
+  const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
+
+  return (
+    <div className="mb-4">
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
+        <div className="p-5">
+          <h4 className="text-lg font-semibold mb-4">Available GPUs</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {gpusInContext.map((gpu) => {
+              const usedGpus = gpu.gpu_total - gpu.gpu_free;
+              const freePercentage =
+                gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
+              const usedPercentage =
+                gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
+
+              return (
+                <div
+                  key={gpu.gpu_name}
+                  className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
+                >
+                  <div className="flex justify-between items-center mb-1.5 flex-wrap">
+                    <div className="font-medium text-gray-800 text-sm">
+                      {gpu.gpu_name}
+                      <span className="text-xs text-gray-500 ml-2">
+                        (Requestable: {gpu.gpu_requestable_qty_per_node} / node)
+                      </span>
+                    </div>
+                    <span className="text-xs font-medium">
+                      {gpu.gpu_free} free / {gpu.gpu_total} total
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-md h-4 flex overflow-hidden shadow-sm">
+                    {usedPercentage > 0 && (
+                      <div
+                        style={{ width: `${usedPercentage}%` }}
+                        className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs"
+                      >
+                        {usedPercentage > 15 && `${usedGpus} used`}
+                      </div>
+                    )}
+                    {freePercentage > 0 && (
+                      <div
+                        style={{ width: `${freePercentage}%` }}
+                        className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
+                      >
+                        {freePercentage > 15 && `${gpu.gpu_free} free`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {nodesInContext && nodesInContext.length > 0 && (
+            <>
+              <h4 className="text-lg font-semibold mb-4">Nodes</h4>
+              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Node
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU
+                      </th>
+                      <th className="p-3 text-right font-medium text-gray-600">
+                        Availability
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {nodesInContext.map((node, index) => (
+                      <tr
+                        key={`${node.node_name}-${index}`}
+                        className="hover:bg-gray-50"
+                      >
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.node_name}
+                        </td>
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.gpu_name}
+                        </td>
+                        <td className="p-3 whitespace-nowrap text-right text-gray-700">
+                          {`${node.gpu_free} of ${node.gpu_total} free`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function GPUs() {
   // Separate loading states for different data sources
@@ -28,95 +414,171 @@ export function GPUs() {
   const [cloudDataLoaded, setCloudDataLoaded] = useState(false);
   const router = useRouter();
 
+  const [allKubeContextNames, setAllKubeContextNames] = useState([]);
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
+  const [contextStats, setContextStats] = useState({});
 
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
-  const fetchData = React.useCallback(async () => {
-    // Start loading for both data sources
-    setKubeLoading(true);
-    setCloudLoading(true);
+  const fetchData = React.useCallback(
+    async (options = { showLoadingIndicators: true }) => {
+      if (options.showLoadingIndicators) {
+        setKubeLoading(true);
+        setCloudLoading(true);
+      }
 
-    // Fetch Kubernetes data
-    try {
-      const gpusResponse = await getGPUs();
-      const {
-        allGPUs: fetchedAllGPUs,
-        perContextGPUs: fetchedPerContextGPUs,
-        perNodeGPUs: fetchedPerNodeGPUs,
-      } = gpusResponse;
+      try {
+        // Use the shared getInfraData function
+        const infraData = await dashboardCache.get(getInfraData);
 
-      setAllGPUs(fetchedAllGPUs || []);
-      setPerContextGPUs(fetchedPerContextGPUs || []);
-      setPerNodeGPUs(fetchedPerNodeGPUs || []);
-      setKubeDataLoaded(true);
-    } catch (err) {
-      console.error('Error fetching Kubernetes data:', err);
-      setAllGPUs([]);
-      setPerContextGPUs([]);
-      setPerNodeGPUs([]);
-    } finally {
-      setKubeLoading(false);
-    }
+        const { gpuData, cloudData } = infraData || {};
 
-    // Fetch Cloud infrastructure data
-    try {
-      const cloudInfraResponse = await getCloudInfrastructure();
-      setCloudInfraData(cloudInfraResponse?.clouds || []);
-      setTotalClouds(cloudInfraResponse?.totalClouds || 0);
-      setEnabledClouds(cloudInfraResponse?.enabledClouds || 0);
-      setCloudDataLoaded(true);
-    } catch (err) {
-      console.error('Error fetching cloud infrastructure data:', err);
-      setCloudInfraData([]);
-      setTotalClouds(0);
-      setEnabledClouds(0);
-    } finally {
-      setCloudLoading(false);
-      if (isInitialLoad) setIsInitialLoad(false);
-    }
-  }, [isInitialLoad]);
+        // Set GPU data with defensive checks
+        if (gpuData) {
+          const {
+            allContextNames: fetchedAllKubeContextNames,
+            allGPUs: fetchedAllGPUs,
+            perContextGPUs: fetchedPerContextGPUs,
+            perNodeGPUs: fetchedPerNodeGPUs,
+            contextStats: fetchedContextStats,
+          } = gpuData;
 
-  React.useEffect(() => {
-    if (refreshDataRef) {
-      refreshDataRef.current = fetchData;
-    }
-  }, [refreshDataRef, fetchData]);
+          setAllKubeContextNames(fetchedAllKubeContextNames || []);
+          setAllGPUs(fetchedAllGPUs || []);
+          setPerContextGPUs(fetchedPerContextGPUs || []);
+          setPerNodeGPUs(fetchedPerNodeGPUs || []);
+          setContextStats(fetchedContextStats || {});
+          setKubeDataLoaded(true);
+        } else if (infraData && infraData.gpuData === null) {
+          // Data was explicitly null (not just missing)
+          setAllKubeContextNames([]);
+          setAllGPUs([]);
+          setPerContextGPUs([]);
+          setPerNodeGPUs([]);
+          setContextStats({});
+          setKubeDataLoaded(true);
+        } else if (!infraData) {
+          // If no data at all, still need to clear loading eventually
+          console.log('No infra data received from cache');
+        }
 
+        // Set cloud data with defensive checks
+        if (cloudData) {
+          setCloudInfraData(cloudData.clouds || []);
+          setTotalClouds(cloudData.totalClouds || 0);
+          setEnabledClouds(cloudData.enabledClouds || 0);
+          setCloudDataLoaded(true);
+        } else if (infraData && infraData.cloudData === null) {
+          // Data was explicitly null (not just missing)
+          setCloudInfraData([]);
+          setTotalClouds(0);
+          setEnabledClouds(0);
+          setCloudDataLoaded(true);
+        } else if (!infraData) {
+          // If no data at all, still need to clear loading eventually
+          console.log('No cloud data received from cache');
+        }
+      } catch (error) {
+        console.error('Error in fetchData:', error);
+        // On error, we should still mark data as loaded but with empty values
+        setAllKubeContextNames([]);
+        setAllGPUs([]);
+        setPerContextGPUs([]);
+        setPerNodeGPUs([]);
+        setContextStats({});
+        setCloudInfraData([]);
+        setTotalClouds(0);
+        setEnabledClouds(0);
+        setKubeDataLoaded(true);
+        setCloudDataLoaded(true);
+      } finally {
+        // Always clear loading states when showLoadingIndicators is true
+        // This prevents infinite loading state
+        if (options.showLoadingIndicators) {
+          setKubeLoading(false);
+          setCloudLoading(false);
+        }
+
+        // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
+        if (isInitialLoad && options.showLoadingIndicators) {
+          setIsInitialLoad(false);
+        }
+      }
+    },
+    [isInitialLoad]
+  );
+
+  // Effect for assigning fetchData to refreshDataRef, stable after isInitialLoad becomes false.
+  useEffect(() => {
+    refreshDataRef.current = fetchData;
+  }, [fetchData]);
+
+  // Effect for initial load.
+  useEffect(() => {
+    // This calls the fetchData version defined when isInitialLoad is true.
+    // That fetchData will then set isInitialLoad to false within its finally block.
+    const initializeData = async () => {
+      // Trigger cache preloading for infra page and background preload other pages
+      await cachePreloader.preloadForPage('infra');
+
+      fetchData({ showLoadingIndicators: true });
+    };
+
+    initializeData();
+  }, [fetchData]); // Include fetchData dependency
+
+  // Effect for interval refresh.
   useEffect(() => {
     let isCurrent = true;
-
-    fetchData();
-
     const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
+      if (isCurrent && refreshDataRef.current) {
+        // Calls the latest fetchData from the ref, with showLoadingIndicators: false
+        refreshDataRef.current({ showLoadingIndicators: false });
       }
-    }, GPU_REFRESH_INTERVAL);
+    }, REFRESH_INTERVAL);
 
     return () => {
       isCurrent = false;
       clearInterval(interval);
     };
-  }, [fetchData]);
+  }, []); // Remove REFRESH_INTERVAL as it's a constant
+
+  // Reset states when component unmounts
+  useEffect(() => {
+    return () => {
+      // Don't invalidate cache on unmount - this was causing premature cache invalidation
+      // Cache should only be invalidated on manual refresh or TTL expiration
+      // Reset loading states for fresh load next time
+      setKubeDataLoaded(false);
+      setCloudDataLoaded(false);
+      setIsInitialLoad(true);
+    };
+  }, []);
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getInfraData);
+
     if (refreshDataRef.current) {
-      setIsInitialLoad(false);
-      refreshDataRef.current();
+      refreshDataRef.current({ showLoadingIndicators: true });
     }
   };
 
   // Calculate summary data
-  const totalGpuTypes = allGPUs.length;
-  const grandTotalGPUs = allGPUs.reduce((sum, gpu) => sum + gpu.gpu_total, 0);
-  const grandTotalFreeGPUs = allGPUs.reduce(
+  const totalGpuTypes = (allGPUs || []).length;
+  const grandTotalGPUs = (allGPUs || []).reduce(
+    (sum, gpu) => sum + gpu.gpu_total,
+    0
+  );
+  const grandTotalFreeGPUs = (allGPUs || []).reduce(
     (sum, gpu) => sum + gpu.gpu_free,
     0
   );
@@ -134,9 +596,57 @@ export function GPUs() {
     }, {});
   }, [perContextGPUs]);
 
+  // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
+  const sshContexts = React.useMemo(() => {
+    if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
+      return [];
+    }
+    const contexts = allKubeContextNames.filter((context) =>
+      context.startsWith('ssh-')
+    );
+    return contexts;
+  }, [allKubeContextNames]);
+
   const kubeContexts = React.useMemo(() => {
-    return Object.keys(groupedPerContextGPUs);
-  }, [groupedPerContextGPUs]);
+    if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
+      return [];
+    }
+    const contexts = allKubeContextNames.filter(
+      (context) => !context.startsWith('ssh-')
+    );
+    return contexts;
+  }, [allKubeContextNames]);
+
+  // Filter GPUs by context type (SSH vs Kubernetes)
+  const sshGPUs = React.useMemo(() => {
+    if (!perContextGPUs || !allGPUs) return [];
+
+    // Create a map of GPU names from SSH contexts
+    const sshGpuNames = new Set();
+    perContextGPUs.forEach((gpu) => {
+      if (gpu.context.startsWith('ssh-')) {
+        sshGpuNames.add(gpu.gpu_name);
+      }
+    });
+
+    // Filter allGPUs based on whether they appear in SSH contexts
+    return allGPUs.filter((gpu) => sshGpuNames.has(gpu.gpu_name));
+  }, [allGPUs, perContextGPUs]);
+
+  const kubeGPUs = React.useMemo(() => {
+    if (!perContextGPUs || !allGPUs) return [];
+
+    // Create a map of GPU names from Kubernetes contexts
+    const kubeGpuNames = new Set();
+    perContextGPUs.forEach((gpu) => {
+      if (!gpu.context.startsWith('ssh-')) {
+        kubeGpuNames.add(gpu.gpu_name);
+      }
+    });
+
+    // Filter allGPUs based on whether they appear in Kubernetes contexts
+    return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
+  }, [allGPUs, perContextGPUs]);
 
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
@@ -153,160 +663,53 @@ export function GPUs() {
 
   // Check URL on component mount to set initial context
   useEffect(() => {
-    if (router.query.context) {
+    if (router.isReady && router.query.context) {
       const contextParam = Array.isArray(router.query.context)
         ? router.query.context[0]
         : router.query.context;
       setSelectedContext(decodeURIComponent(contextParam));
     }
-  }, [router.isReady, router.query]);
+  }, [router.isReady, router.query.context]);
 
   // Handler for clicking on a context
   const handleContextClick = (context) => {
     setSelectedContext(context);
-    // Use replace instead of push and set as to the same URL to ensure it's just a URL change
-    router.replace(
-      {
-        pathname: '/infra',
-        query: context ? { context } : undefined,
-      },
-      context ? `/infra/${encodeURIComponent(context)}` : '/infra',
-      { shallow: true }
-    );
+    // Use push instead of replace for proper browser history
+    router.push(`/infra/${encodeURIComponent(context)}`);
   };
 
   // Handler to go back to main view
   const handleBackClick = () => {
     setSelectedContext(null);
-    // Use replace and set as to the same URL
-    router.replace({ pathname: '/infra' }, '/infra', { shallow: true });
+    // Use push instead of replace for proper browser history
+    router.push('/infra');
   };
-
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    const handleRouteChange = (url) => {
-      const contextMatch = url.match(/\/infra\/([^\/]+)$/);
-      if (contextMatch) {
-        const contextParam = decodeURIComponent(contextMatch[1]);
-        setSelectedContext(contextParam);
-      } else if (url === '/infra') {
-        setSelectedContext(null);
-      }
-    };
-
-    router.events.on('routeChangeComplete', handleRouteChange);
-
-    return () => {
-      router.events.off('routeChangeComplete', handleRouteChange);
-    };
-  }, [router.events]);
 
   // Render context details
   const renderContextDetails = (contextName) => {
     const gpusInContext = groupedPerContextGPUs[contextName] || [];
     const nodesInContext = groupedPerNodeGPUs[contextName] || [];
 
-    return (
-      <div className="mb-4">
-        <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
-          <div className="p-5">
-            <h4 className="text-lg font-semibold mb-4">Available GPUs</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {gpusInContext.map((gpu) => {
-                const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                const freePercentage =
-                  gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-                const usedPercentage =
-                  gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-
-                return (
-                  <div
-                    key={gpu.gpu_name}
-                    className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
-                  >
-                    <div className="flex justify-between items-center mb-1.5 flex-wrap">
-                      <div className="font-medium text-gray-800 text-sm">
-                        {gpu.gpu_name}
-                        <span className="text-xs text-gray-500 ml-2">
-                          (Requestable: {gpu.gpu_requestable_qty_per_node} /
-                          node)
-                        </span>
-                      </div>
-                      <span className="text-xs font-medium">
-                        {gpu.gpu_free} free / {gpu.gpu_total} total
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-100 rounded-md h-4 flex overflow-hidden shadow-sm">
-                      {usedPercentage > 0 && (
-                        <div
-                          style={{ width: `${usedPercentage}%` }}
-                          className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs"
-                        >
-                          {usedPercentage > 15 && `${usedGpus} used`}
-                        </div>
-                      )}
-                      {freePercentage > 0 && (
-                        <div
-                          style={{ width: `${freePercentage}%` }}
-                          className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
-                        >
-                          {freePercentage > 15 && `${gpu.gpu_free} free`}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {nodesInContext.length > 0 && (
-              <>
-                <h4 className="text-lg font-semibold mb-4">Nodes</h4>
-                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-100">
-                      <tr>
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          Node
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          GPU
-                        </th>
-                        <th className="p-3 text-right font-medium text-gray-600">
-                          Availability
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {nodesInContext.map((node, index) => (
-                        <tr
-                          key={`${node.node_name}-${index}`}
-                          className="hover:bg-gray-50"
-                        >
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.node_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.gpu_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-right text-gray-700">
-                            {`${node.gpu_free} of ${node.gpu_total} free`}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
+    if (kubeLoading && !kubeDataLoaded) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64">
+          <CircularProgress size={32} className="mb-4" />
+          <span className="text-gray-500 text-lg">Loading Context...</span>
         </div>
-      </div>
+      );
+    }
+
+    return (
+      <ContextDetails
+        contextName={contextName}
+        gpusInContext={gpusInContext}
+        nodesInContext={nodesInContext}
+      />
     );
   };
 
   const renderCloudInfrastructure = () => {
-    if (cloudLoading && !cloudDataLoaded) {
+    if (cloudLoading || !cloudDataLoaded) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -329,7 +732,7 @@ export function GPUs() {
               {enabledClouds} of {totalClouds} enabled
             </span>
           </div>
-          {cloudInfraData.length === 0 ? (
+          {!cloudInfraData || cloudInfraData.length === 0 ? (
             <p className="text-sm text-gray-500">
               No enabled clouds available.
             </p>
@@ -389,199 +792,37 @@ export function GPUs() {
   };
 
   const renderKubernetesInfrastructure = () => {
-    if (kubeLoading && !kubeDataLoaded) {
-      return (
-        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
-          <div className="p-5">
-            <h3 className="text-lg font-semibold mb-4">Kubernetes</h3>
-            <div className="flex items-center justify-center py-6">
-              <CircularProgress size={24} className="mr-3" />
-              <span className="text-gray-500">Loading Kubernetes...</span>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    return (
+      <InfrastructureSection
+        title="Kubernetes"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={kubeContexts}
+        gpus={kubeGPUs}
+        groupedPerContextGPUs={groupedPerContextGPUs}
+        groupedPerNodeGPUs={groupedPerNodeGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={contextStats}
+        isSSH={false}
+      />
+    );
+  };
 
-    if (kubeDataLoaded && allGPUs.length > 0) {
-      return (
-        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
-          <div className="p-5">
-            <div className="flex items-center mb-4">
-              <h3 className="text-lg font-semibold">Kubernetes</h3>
-              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                {kubeContexts.length}{' '}
-                {kubeContexts.length === 1 ? 'context' : 'contexts'}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/3">
-                          Context
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
-                          Nodes
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/3">
-                          GPU Types
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
-                          #GPUs
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody
-                      className={`bg-white divide-y divide-gray-200 ${kubeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                    >
-                      {kubeContexts.map((context) => {
-                        const gpus = groupedPerContextGPUs[context] || [];
-                        const nodes = groupedPerNodeGPUs[context] || [];
-                        const totalGpus = gpus.reduce(
-                          (sum, gpu) => sum + (gpu.gpu_total || 0),
-                          0
-                        );
-                        const gpuTypes = (() => {
-                          const typeCounts = gpus.reduce((acc, gpu) => {
-                            acc[gpu.gpu_name] =
-                              (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
-                            return acc;
-                          }, {});
-                          return Object.keys(typeCounts).join(', ');
-                        })();
-                        return (
-                          <tr key={context} className="hover:bg-gray-50">
-                            <td className="p-3">
-                              <NonCapitalizedTooltip
-                                content={context}
-                                className="text-sm text-muted-foreground"
-                              >
-                                <span
-                                  className="text-blue-600 hover:underline cursor-pointer"
-                                  onClick={() => handleContextClick(context)}
-                                >
-                                  {context.length > NAME_TRUNCATE_LENGTH
-                                    ? `${context.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${context.substring(context.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
-                                    : context}
-                                </span>
-                              </NonCapitalizedTooltip>
-                            </td>
-                            <td className="p-3">{nodes.length}</td>
-                            <td className="p-3">{gpuTypes}</td>
-                            <td className="p-3">{totalGpus}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div>
-                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
-                          GPU
-                          <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
-                            {grandTotalFreeGPUs} of {grandTotalGPUs} free
-                          </span>
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/4">
-                          Requestable
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/2">
-                          <div className="flex items-center">
-                            <span>Utilization</span>
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody
-                      className={`bg-white divide-y divide-gray-200 ${allGPUs.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                    >
-                      {allGPUs.map((gpu) => {
-                        const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                        const freePercentage =
-                          gpu.gpu_total > 0
-                            ? (gpu.gpu_free / gpu.gpu_total) * 100
-                            : 0;
-                        const usedPercentage =
-                          gpu.gpu_total > 0
-                            ? (usedGpus / gpu.gpu_total) * 100
-                            : 0;
-
-                        // Find the requestable quantities from any context
-                        const requestableQtys = perContextGPUs
-                          .filter((g) => g.gpu_name === gpu.gpu_name)
-                          .map((g) => g.gpu_requestable_qty_per_node)
-                          .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
-                          .join(', ');
-
-                        return (
-                          <tr key={gpu.gpu_name}>
-                            <td className="p-3 font-medium w-24 whitespace-nowrap">
-                              {gpu.gpu_name}
-                            </td>
-                            <td className="p-3 text-xs text-gray-600">
-                              {requestableQtys || '-'} / node
-                            </td>
-                            <td className="p-3 w-2/3">
-                              <div className="flex items-center gap-3">
-                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
-                                  {usedPercentage > 0 && (
-                                    <div
-                                      style={{ width: `${usedPercentage}%` }}
-                                      className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
-                                    >
-                                      {usedPercentage > 15 &&
-                                        `${usedGpus} used`}
-                                    </div>
-                                  )}
-                                  {freePercentage > 0 && (
-                                    <div
-                                      style={{ width: `${freePercentage}%` }}
-                                      className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
-                                    >
-                                      {freePercentage > 15 &&
-                                        `${gpu.gpu_free} free`}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (kubeDataLoaded && allGPUs.length === 0) {
-      return (
-        <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
-          <div className="p-5">
-            <h3 className="text-lg font-semibold mb-4">
-              Kubernetes Infrastructure
-            </h3>
-            <p className="text-sm text-gray-500">
-              No Kubernetes GPUs found or Kubernetes is not configured.
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    return null;
+  const renderSSHNodePoolInfrastructure = () => {
+    return (
+      <InfrastructureSection
+        title="SSH Node Pool"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={sshContexts}
+        gpus={sshGPUs}
+        groupedPerContextGPUs={groupedPerContextGPUs}
+        groupedPerNodeGPUs={groupedPerNodeGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={contextStats}
+        isSSH={true}
+      />
+    );
   };
 
   const renderKubernetesTab = () => {
@@ -600,7 +841,10 @@ export function GPUs() {
 
     return (
       <>
-        {/* Show Kubernetes Infrastructure first */}
+        {/* Show SSH Node Pool Infrastructure first */}
+        {renderSSHNodePoolInfrastructure()}
+
+        {/* Show Kubernetes Infrastructure second */}
         {renderKubernetesInfrastructure()}
 
         {/* Then show Cloud Infrastructure */}
@@ -612,36 +856,43 @@ export function GPUs() {
   // Check if any data is currently loading
   const isAnyLoading = kubeLoading || cloudLoading;
 
+  // Check if all data has been loaded at least once
+  const isAllDataLoaded = kubeDataLoaded && cloudDataLoaded && !isInitialLoad;
+
   return (
-    <Layout highlighted="infra">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link
             href="/infra"
             className={`text-sky-blue hover:underline ${selectedContext ? '' : 'cursor-default'}`}
-            onClick={(e) => {
-              if (selectedContext) {
-                e.preventDefault();
-                handleBackClick();
-              }
-            }}
           >
             Infrastructure
           </Link>
           {selectedContext && (
             <>
               <span className="mx-2 text-gray-500">›</span>
-              <span
-                className="text-sky-blue hover:underline cursor-pointer"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleBackClick();
-                }}
-              >
-                Kubernetes
-              </span>
+              {selectedContext.startsWith('ssh-') ? (
+                <Link
+                  href="/infra"
+                  className="text-sky-blue hover:underline cursor-pointer"
+                >
+                  SSH Node Pool
+                </Link>
+              ) : (
+                <Link
+                  href="/infra"
+                  className="text-sky-blue hover:underline cursor-pointer"
+                >
+                  Kubernetes
+                </Link>
+              )}
               <span className="mx-2 text-gray-500">›</span>
-              <span className="text-sky-blue">{selectedContext}</span>
+              <span className="text-sky-blue">
+                {selectedContext.startsWith('ssh-')
+                  ? selectedContext.replace(/^ssh-/, '')
+                  : selectedContext}
+              </span>
             </>
           )}
         </div>
@@ -663,8 +914,18 @@ export function GPUs() {
         </div>
       </div>
 
-      {renderKubernetesTab()}
-    </Layout>
+      {/* Show loading spinner for entire page if initial load */}
+      {!isAllDataLoaded ? (
+        <div className="flex flex-col items-center justify-center py-32">
+          <CircularProgress size={32} className="mb-4" />
+          <span className="text-gray-500 text-lg">
+            Loading infrastructure data...
+          </span>
+        </div>
+      ) : (
+        renderKubernetesTab()
+      )}
+    </>
   );
 }
 
@@ -673,7 +934,10 @@ function CloudGpuTable({ data, title }) {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
 
-  if (!data || data.length === 0) {
+  // Add defensive check for data
+  const safeData = data || [];
+
+  if (safeData.length === 0) {
     return (
       <>
         <h3 className="text-lg font-semibold mb-3">{title}</h3>
@@ -684,10 +948,10 @@ function CloudGpuTable({ data, title }) {
     );
   }
 
-  const totalPages = Math.ceil(data.length / pageSize);
+  const totalPages = Math.ceil(safeData.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = Math.min(startIndex + pageSize, data.length);
-  const paginatedData = data.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + pageSize, safeData.length);
+  const paginatedData = safeData.slice(startIndex, endIndex);
 
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -729,7 +993,7 @@ function CloudGpuTable({ data, title }) {
         </table>
       </div>
       {/* Pagination controls */}
-      {data.length > pageSize && (
+      {safeData.length > pageSize && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -763,7 +1027,7 @@ function CloudGpuTable({ data, title }) {
               </div>
             </div>
             <div>
-              {startIndex + 1} – {endIndex} of {data.length}
+              {startIndex + 1} – {endIndex} of {safeData.length}
             </div>
             <div className="flex items-center space-x-2">
               <button

@@ -124,6 +124,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
             platform, preset = config.node_config['InstanceType'].split('_')
+
             instance_id = utils.launch(
                 cluster_name_on_cloud=cluster_name_on_cloud,
                 node_type=node_type,
@@ -134,7 +135,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 disk_size=config.node_config['DiskSize'],
                 user_data=config.node_config['UserData'],
                 associate_public_ip_address=(
-                    not config.provider_config['use_internal_ips']))
+                    not config.provider_config['use_internal_ips']),
+                filesystems=config.node_config.get('filesystems', []),
+                network_tier=config.node_config.get('network_tier'))
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise

@@ -5,11 +5,13 @@ from unittest import mock
 
 import pytest
 
+from sky import check
 from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
+from sky.skylet import constants
 from sky.utils import resources_utils
 
 GLOBAL_VALID_LABELS = {
@@ -100,7 +102,12 @@ def test_kubernetes_labels_resources():
 
 def test_no_cloud_labels_resources():
     global_user_state.set_enabled_clouds(['aws', 'gcp'],
-                                         sky_cloud.CloudCapability.COMPUTE)
+                                         sky_cloud.CloudCapability.COMPUTE,
+                                         constants.SKYPILOT_DEFAULT_WORKSPACE)
+    global_user_state.set_allowed_clouds(
+        check._get_workspace_allowed_clouds(
+            constants.SKYPILOT_DEFAULT_WORKSPACE),
+        constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -114,7 +121,12 @@ def test_no_cloud_labels_resources():
 
 def test_no_cloud_labels_resources_single_enabled_cloud():
     global_user_state.set_enabled_clouds(['aws'],
-                                         sky_cloud.CloudCapability.COMPUTE)
+                                         sky_cloud.CloudCapability.COMPUTE,
+                                         constants.SKYPILOT_DEFAULT_WORKSPACE)
+    global_user_state.set_allowed_clouds(
+        check._get_workspace_allowed_clouds(
+            constants.SKYPILOT_DEFAULT_WORKSPACE),
+        constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS
@@ -123,15 +135,13 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
         **GLOBAL_INVALID_LABELS,
         'aws:cannotstartwithaws': 'value',
     }
-    _run_label_test(allowed_labels, invalid_labels)
+    _run_label_test(allowed_labels, invalid_labels, cloud=clouds.AWS())
 
 
-@mock.patch('sky.clouds.service_catalog.instance_type_exists',
-            return_value=True)
-@mock.patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
-@mock.patch('sky.clouds.service_catalog.get_image_id_from_tag',
-            return_value='fake-image')
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ[
@@ -489,3 +499,276 @@ def test_resources_ordered_with_base_infra():
 
     assert str(resources_list[2].cloud).lower() == 'azure'
     assert resources_list[2].region is None
+
+
+def test_kubernetes_image_id_formats_in_resources(enable_all_clouds):
+    """Test Resources normalizes Kubernetes image_id to include 'docker:' prefix."""
+    k8s_cloud = clouds.Kubernetes()
+    test_cases = [
+        # (input_image_id, expected_stored_image_id_in_resources_object)
+        ('alpine', 'docker:alpine'),
+        ('docker:alpine', 'docker:alpine'),
+        ('myrepo/myimage:latest', 'docker:myrepo/myimage:latest'),
+        ('docker:myrepo/myimage:latest', 'docker:myrepo/myimage:latest'),
+        ('another.registry.com/myrepo/myimage:tag',
+         'docker:another.registry.com/myrepo/myimage:tag'),
+        ('docker:another.registry.com/myrepo/myimage:tag',
+         'docker:another.registry.com/myrepo/myimage:tag'),
+    ]
+
+    for input_id, expected_stored_id in test_cases:
+        # Test direct initialization and validation
+        # This assumes Resources.__init__ or a subsequent step normalizes
+        # image_id for Kubernetes by adding 'docker:' if missing.
+        res = Resources(cloud=k8s_cloud, image_id=input_id)
+        res.validate(
+        )  # Kubernetes cloud validate_resources currently just checks type
+        assert list(res.image_id.values())[0] == expected_stored_id, (
+            f'Input: {input_id}, Expected stored: {expected_stored_id}, '
+            f'Got: {res.image_id}')
+
+        # Test YAML serialization and deserialization
+        # Assumes to_yaml_config() serializes the (potentially prefixed)
+        # internal value.
+        yaml_config = res.to_yaml_config()
+        assert list(
+            yaml_config.get('image_id').values())[0] == expected_stored_id, (
+                f'Input: {input_id}, Expected in YAML: {expected_stored_id}, '
+                f'Got in YAML: {yaml_config}')
+
+        loaded_res_list = list(Resources.from_yaml_config(yaml_config))
+        assert len(loaded_res_list) == 1, f"Load count for {input_id}"
+        loaded_res = loaded_res_list[0]
+        assert list(loaded_res.image_id.values())[0] == expected_stored_id, (
+            f'Input: {input_id}, Expected from loaded YAML: {expected_stored_id}, '
+            f'Got: {loaded_res.image_id}')
+        assert isinstance(
+            loaded_res.cloud,
+            clouds.Kubernetes), (f'Loaded cloud type mismatch for {input_id}')
+
+
+def test_network_tier_basic():
+    """Test basic network tier functionality and validation."""
+    # Test with no network_tier specified (defaults to None)
+    r = Resources()
+    assert r.network_tier is None
+
+    # Test with standard network tier
+    r = Resources(network_tier='standard')
+    assert r.network_tier == resources_utils.NetworkTier.STANDARD
+
+    # Test with best network tier
+    r = Resources(network_tier='best')
+    assert r.network_tier == resources_utils.NetworkTier.BEST
+
+    # Test with NetworkTier enum directly
+    r = Resources(network_tier=resources_utils.NetworkTier.BEST)
+    assert r.network_tier == resources_utils.NetworkTier.BEST
+
+
+def test_network_tier_validation():
+    """Test network tier validation with invalid values."""
+    # Test invalid network tier string
+    with pytest.raises(ValueError, match='Invalid network_tier'):
+        Resources(network_tier='invalid')
+
+    # Test case insensitive validation
+    r = Resources(network_tier='BEST')
+    assert r.network_tier == resources_utils.NetworkTier.BEST
+
+    r = Resources(network_tier='Standard')
+    assert r.network_tier == resources_utils.NetworkTier.STANDARD
+
+
+def test_network_tier_comparison():
+    """Test network tier comparison in less_demanding_than method."""
+    # Test network tier matching
+    r1 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    r2 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    assert r1.less_demanding_than(r2)
+
+    # Test standard <= best
+    r1 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    r2 = Resources(cloud=clouds.GCP(), network_tier='best')
+    assert r1.less_demanding_than(r2)
+
+    # Test best not <= standard
+    r1 = Resources(cloud=clouds.GCP(), network_tier='best')
+    r2 = Resources(cloud=clouds.GCP(), network_tier='standard')
+    assert not r1.less_demanding_than(r2)
+
+    # Test None network_tier vs specified
+    r1 = Resources(cloud=clouds.GCP(), network_tier='best')
+    r2 = Resources(cloud=clouds.GCP())  # No network_tier specified
+    assert not r1.less_demanding_than(r2)
+
+    # Test None network_tier (should accept anything)
+    r1 = Resources(cloud=clouds.GCP())  # No network_tier specified
+    r2 = Resources(cloud=clouds.GCP(), network_tier='best')
+    assert r1.less_demanding_than(r2)
+
+
+def test_network_tier_cloud_features():
+    """Test that network_tier=best requires CUSTOM_NETWORK_TIER feature."""
+    # Test standard tier doesn't require custom network tier feature
+    r = Resources(network_tier='standard')
+    features = r.get_required_cloud_features()
+    assert clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER not in features
+
+    # Test best tier requires custom network tier feature
+    r = Resources(network_tier='best')
+    features = r.get_required_cloud_features()
+    assert clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER in features
+
+
+def test_network_tier_yaml_serialization():
+    """Test network tier YAML serialization and deserialization."""
+    # Test best network tier
+    r = Resources(network_tier='best')
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['network_tier'] == 'best'
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.network_tier == resources_utils.NetworkTier.BEST
+
+    # Test standard network tier
+    r = Resources(network_tier='standard')
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['network_tier'] == 'standard'
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.network_tier == resources_utils.NetworkTier.STANDARD
+
+
+def test_network_tier_with_gcp():
+    """Test network tier functionality specifically with GCP cloud."""
+    # Test GCP supports both standard and best network tiers
+    r_standard = Resources(infra='gcp', network_tier='standard')
+    r_standard.validate()
+    assert r_standard.network_tier == resources_utils.NetworkTier.STANDARD
+
+    r_best = Resources(infra='gcp', network_tier='best')
+    r_best.validate()
+    assert r_best.network_tier == resources_utils.NetworkTier.BEST
+
+
+def test_network_tier_copy():
+    """Test network tier preservation in copy operations."""
+    r = Resources(network_tier='best', cpus=4)
+    r_copy = r.copy()
+    assert r_copy.network_tier == resources_utils.NetworkTier.BEST
+
+    # Test overriding network tier in copy
+    r_override = r.copy(network_tier='standard')
+    assert r_override.network_tier == resources_utils.NetworkTier.STANDARD
+    assert r_override.cpus == '4'  # Other properties preserved
+
+
+def test_network_tier_repr():
+    """Test that network tier appears in the string representation."""
+    r = Resources(network_tier='best')
+    repr_str = str(r)
+    assert 'network_tier=best' in repr_str
+
+    r = Resources(network_tier='standard')
+    repr_str = str(r)
+    assert 'network_tier=standard' in repr_str
+
+
+def test_autostop_config():
+    """Test autostop config override functionality."""
+    # Override with down=True when no existing autostop config
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(down=True)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 0  # default value
+
+    # Override with idle_minutes when no existing autostop config
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(idle_minutes=10)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is False  # default value
+    assert r.autostop_config.idle_minutes == 10
+
+    # Override with both down and idle_minutes when no existing config
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(down=True, idle_minutes=15)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 15
+
+    # Override when there's an existing autostop config
+    r = Resources(autostop={'idle_minutes': 20, 'down': False})
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is False
+    assert r.autostop_config.idle_minutes == 20
+
+    # Override only down flag
+    r.override_autostop_config(down=True)
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 20  # unchanged
+
+    # Override existing config with new idle_minutes
+    r = Resources(autostop={'idle_minutes': 25, 'down': True})
+    assert r.autostop_config.idle_minutes == 25
+    assert r.autostop_config.down is True
+
+    r.override_autostop_config(idle_minutes=30)
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True  # unchanged
+    assert r.autostop_config.idle_minutes == 30
+
+    # Override existing config with both parameters
+    r = Resources(autostop={'idle_minutes': 35, 'down': False})
+    r.override_autostop_config(down=True, idle_minutes=40)
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 40
+
+    # Call override with default parameters (should do nothing)
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config()  # both parameters are default (False, None)
+    assert r.autostop_config is None  # should remain None
+
+    # Call override with default parameters on existing config
+    r = Resources(autostop={'idle_minutes': 45, 'down': True})
+    original_config = r.autostop_config
+
+    r.override_autostop_config()  # should do nothing
+    assert r.autostop_config is original_config  # same object
+    assert r.autostop_config.idle_minutes == 45  # unchanged
+    assert r.autostop_config.down is True  # unchanged
+
+    # Override with down=False (should still create config if none exists)
+    r = Resources()
+    assert r.autostop_config is None
+
+    r.override_autostop_config(down=False, idle_minutes=50)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is True
+    assert r.autostop_config.down is False
+    assert r.autostop_config.idle_minutes == 50
+
+    # Test with disabled autostop config
+    r = Resources(autostop=False)
+    assert r.autostop_config is not None
+    assert r.autostop_config.enabled is False
+
+    r.override_autostop_config(down=True, idle_minutes=55)
+    assert r.autostop_config.enabled is False  # should remain disabled
+    assert r.autostop_config.down is True
+    assert r.autostop_config.idle_minutes == 55

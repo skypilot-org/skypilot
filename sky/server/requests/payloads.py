@@ -72,12 +72,28 @@ def request_body_env_vars() -> dict:
 
 def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
+    if annotations.is_on_api_server:
+        return {}
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
     # server endpoint on the server side. This avoids the warning at
     # server-side.
     config.pop_nested(('api_server',), default_value=None)
+    # Remove the admin policy, as the policy has been applied on the client
+    # side.
+    config.pop_nested(('admin_policy',), default_value=None)
     return config
+
+
+def get_override_skypilot_config_path_from_client() -> Optional[str]:
+    """Returns the override config path from the client."""
+    if annotations.is_on_api_server:
+        return None
+    # Currently, we don't need to check if the client-side config
+    # has been overridden because we only deal with cases where
+    # client has a project-level config/changed config and the
+    # api server has a different config.
+    return skypilot_config.loaded_config_path_serialized()
 
 
 class RequestBody(pydantic.BaseModel):
@@ -87,6 +103,12 @@ class RequestBody(pydantic.BaseModel):
     entrypoint_command: str = ''
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
+    override_skypilot_config_path: Optional[str] = None
+
+    # Allow extra fields in the request body, which is useful for backward
+    # compatibility, i.e., we can add new fields to the request body without
+    # breaking the existing old API server.
+    model_config = pydantic.ConfigDict(extra='allow')
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -101,6 +123,9 @@ class RequestBody(pydantic.BaseModel):
         data['override_skypilot_config'] = data.get(
             'override_skypilot_config',
             get_override_skypilot_config_from_client())
+        data['override_skypilot_config_path'] = data.get(
+            'override_skypilot_config_path',
+            get_override_skypilot_config_path_from_client())
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -115,6 +140,7 @@ class RequestBody(pydantic.BaseModel):
         kwargs.pop('entrypoint_command')
         kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
+        kwargs.pop('override_skypilot_config_path')
         return kwargs
 
     @property
@@ -126,6 +152,13 @@ class CheckBody(RequestBody):
     """The request body for the check endpoint."""
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
+    workspace: Optional[str] = None
+
+
+class EnabledCloudsBody(RequestBody):
+    """The request body for the enabled clouds endpoint."""
+    workspace: Optional[str] = None
+    expand: bool = False
 
 
 class DagRequestBody(RequestBody):
@@ -166,8 +199,10 @@ class LaunchBody(RequestBody):
     task: str
     cluster_name: str
     retry_until_up: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     idle_minutes_to_autostop: Optional[int] = None
     dryrun: bool = False
+    # TODO(aylei): remove this field in v0.12.0
     down: bool = False
     backend: Optional[str] = None
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
@@ -301,6 +336,12 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserUpdateBody(RequestBody):
+    """The request body for the user update endpoint."""
+    user_id: str
+    role: str
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]
@@ -345,6 +386,7 @@ class JobsQueueBody(RequestBody):
     refresh: bool = False
     skip_finished: bool = False
     all_users: bool = False
+    job_ids: Optional[List[int]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -362,6 +404,7 @@ class JobsLogsBody(RequestBody):
     follow: bool = True
     controller: bool = False
     refresh: bool = False
+    tail: Optional[int] = None
 
 
 class RequestCancelBody(RequestBody):
@@ -446,6 +489,7 @@ class RealtimeGpuAvailabilityRequestBody(RequestBody):
     context: Optional[str] = None
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
+    is_ssh: Optional[bool] = None
 
 
 class KubernetesNodeInfoRequestBody(RequestBody):
@@ -485,6 +529,12 @@ class LocalUpBody(RequestBody):
     password: Optional[str] = None
 
 
+class SSHUpBody(RequestBody):
+    """The request body for the SSH up/down endpoints."""
+    infra: Optional[str] = None
+    cleanup: bool = False
+
+
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""
     service_name: str
@@ -518,3 +568,30 @@ class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
     missing_chunks: Optional[List[str]] = None
+
+
+class UpdateWorkspaceBody(RequestBody):
+    """The request body for updating a specific workspace configuration."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class CreateWorkspaceBody(RequestBody):
+    """The request body for creating a new workspace."""
+    workspace_name: str = ''  # Will be set from path parameter
+    config: Dict[str, Any]
+
+
+class DeleteWorkspaceBody(RequestBody):
+    """The request body for deleting a workspace."""
+    workspace_name: str
+
+
+class UpdateConfigBody(RequestBody):
+    """The request body for updating the entire SkyPilot configuration."""
+    config: Dict[str, Any]
+
+
+class GetConfigBody(RequestBody):
+    """The request body for getting the entire SkyPilot configuration."""
+    pass

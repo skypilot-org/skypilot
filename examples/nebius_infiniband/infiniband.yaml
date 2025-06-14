@@ -1,0 +1,22 @@
+# This example is used to test the InfiniBand
+# connection between two VMs.
+resources:
+  cloud: nebius
+  region: eu-north1
+  accelerators: H100:8
+  network_tier: best
+  
+num_nodes: 2
+
+setup: |
+  sudo apt install perftest -y
+
+run: |
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+      ib_send_bw --report_gbits -n 1000 -F > /dev/null
+  elif [ "${SKYPILOT_NODE_RANK}" == "1" ]; then
+      echo "MASTER_ADDR: $MASTER_ADDR"
+      sleep 2 # wait for the master to start
+      ib_send_bw $MASTER_ADDR --report_gbits -n 1000 -F
+  fi

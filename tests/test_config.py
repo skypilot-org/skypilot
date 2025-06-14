@@ -13,6 +13,7 @@ import sky.exceptions
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
@@ -28,15 +29,14 @@ PROVISION_TIMEOUT = 600
 
 
 def _reload_config() -> None:
-    skypilot_config._dict = config_utils.Config()
-    skypilot_config._loaded_config_path = None
+    skypilot_config._global_config_context = skypilot_config.ConfigContext()
     skypilot_config._reload_config()
 
 
 def _check_empty_config() -> None:
     """Check that the config is empty."""
-    assert not skypilot_config.loaded(), (skypilot_config._dict,
-                                          skypilot_config._loaded_config_path)
+    assert not skypilot_config.loaded(), (
+        skypilot_config._global_config_context)
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
@@ -69,6 +69,11 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                         runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret
+
+            workspaces:
+                ws-train:
+                    gcp:
+                        project_id: test-project
 
             """))
 
@@ -520,6 +525,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
 @mock.patch('sky.skypilot_config.loaded_config_path',
             return_value='/path/to/config.yaml')
 @mock.patch('sky.sky_logging.logging_enabled', return_value=True)
+@annotations.client_api
 def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
                                                   mock_logging_enabled):
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
@@ -590,8 +596,7 @@ def test_override_skypilot_config_without_original_config(
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH', config_path)
     skypilot_config._reload_config()
-    assert not skypilot_config._dict
-    assert skypilot_config._loaded_config_path is None
+    assert not skypilot_config._get_loaded_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
 
     # Test empty override_configs
@@ -622,8 +627,7 @@ def test_override_skypilot_config_without_original_config(
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
-    assert skypilot_config._loaded_config_path is None
-    assert not skypilot_config._dict
+    assert not skypilot_config._get_loaded_config()
 
 
 def test_hierarchical_client_config(monkeypatch, tmp_path):
@@ -706,7 +710,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         non_existent_config_path)
     skypilot_config._reload_config()
-    assert not skypilot_config._dict
+    assert not skypilot_config._get_loaded_config()
 
     # if config files specified by env vars are missing,
     # error out

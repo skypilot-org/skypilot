@@ -8,9 +8,10 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { REFRESH_INTERVALS } from '@/lib/config';
 
 // Refresh interval in milliseconds
-export const REFRESH_INTERVAL = 30000;
+export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 function capitalizeFirstWord(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -24,12 +25,15 @@ export function relativeTime(date) {
   const now = new Date();
   const differenceInDays = (now - date) / (1000 * 3600 * 24);
   if (Math.abs(differenceInDays) < 7) {
+    const originalTimeString = formatDistance(date, now, { addSuffix: true });
+    const shortenedTimeString = shortenTimeString(originalTimeString);
+
     return (
       <CustomTooltip
         content={formatDateTime(date)}
         className="capitalize text-sm text-muted-foreground"
       >
-        {capitalizeFirstWord(formatDistance(date, now, { addSuffix: true }))}
+        {shortenedTimeString}
       </CustomTooltip>
     );
   } else {
@@ -42,6 +46,86 @@ export function relativeTime(date) {
       </CustomTooltip>
     );
   }
+}
+
+// Helper function to shorten time strings
+function shortenTimeString(timeString) {
+  if (!timeString || typeof timeString !== 'string') {
+    return timeString;
+  }
+
+  // Handle "just now" case
+  if (timeString === 'just now') {
+    return 'now';
+  }
+
+  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
+  const aboutMatch = timeString.match(/^about\s+(\d+)\s+(\w+)\s+ago$/i);
+  if (aboutMatch) {
+    const num = aboutMatch[1];
+    const unit = aboutMatch[2];
+    const unitMap = {
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
+      day: 'd',
+      days: 'd',
+      month: 'mo',
+      months: 'mo',
+      year: 'yr',
+      years: 'yr',
+    };
+    if (unitMap[unit]) {
+      return `${num}${unitMap[unit]} ago`;
+    }
+  }
+
+  // Handle "a minute ago", "an hour ago", etc.
+  const singleUnitMatch = timeString.match(/^a[n]?\s+(\w+)\s+ago$/i);
+  if (singleUnitMatch) {
+    const unit = singleUnitMatch[1];
+    const unitMap = {
+      second: 's',
+      minute: 'm',
+      hour: 'h',
+      day: 'd',
+      month: 'mo',
+      year: 'yr',
+    };
+    if (unitMap[unit]) {
+      return `1${unitMap[unit]} ago`;
+    }
+  }
+
+  // Handle "X units ago"
+  const multiUnitMatch = timeString.match(/^(\d+)\s+(\w+)\s+ago$/i);
+  if (multiUnitMatch) {
+    const num = multiUnitMatch[1];
+    const unit = multiUnitMatch[2];
+    const unitMap = {
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
+      day: 'd',
+      days: 'd',
+      month: 'mo',
+      months: 'mo',
+      year: 'yr',
+      years: 'yr',
+    };
+    if (unitMap[unit]) {
+      return `${num}${unitMap[unit]} ago`;
+    }
+  }
+
+  // Fallback to original string if no patterns match
+  return timeString;
 }
 
 export function formatDateTime(date) {
@@ -335,7 +419,7 @@ export function LogFilter({ logs, controller = false }) {
       )}
       <div
         className="logs-container"
-        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
+        dangerouslySetInnerHTML={{ __html: filteredLogs }}
       />
     </div>
   );

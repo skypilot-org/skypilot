@@ -1,8 +1,16 @@
 """Utils for sky databases."""
 import contextlib
+import enum
 import sqlite3
 import threading
+import typing
 from typing import Any, Callable, Optional
+
+import sqlalchemy
+from sqlalchemy import exc as sqlalchemy_exc
+
+if typing.TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
 # obtains a database lock (not necessarily during connection, but whenever it is
@@ -19,6 +27,11 @@ from typing import Any, Callable, Optional
 # 1000x parallelism, this is thus thought to be a conservative setting.
 # For more info, see the PR description for #4552.
 _DB_TIMEOUT_S = 60
+
+
+class SQLAlchemyDialect(enum.Enum):
+    SQLITE = 'sqlite'
+    POSTGRESQL = 'postgresql'
 
 
 @contextlib.contextmanager
@@ -71,22 +84,50 @@ def add_column_to_table(
     conn.commit()
 
 
-def rename_column(
-    cursor: 'sqlite3.Cursor',
-    conn: 'sqlite3.Connection',
+def add_column_to_table_sqlalchemy(
+    session: 'Session',
     table_name: str,
-    old_name: str,
-    new_name: str,
+    column_name: str,
+    column_type: sqlalchemy.types.TypeEngine,
+    default_statement: Optional[str] = None,
+    copy_from: Optional[str] = None,
+    value_to_replace_existing_entries: Optional[Any] = None,
 ):
-    """Rename a column in a table."""
-    # NOTE: This only works for sqlite3 >= 3.25.0. Be careful to use this.
-
-    for row in cursor.execute(f'PRAGMA table_info({table_name})'):
-        if row[1] == old_name:
-            cursor.execute(f'ALTER TABLE {table_name} '
-                           f'RENAME COLUMN {old_name} to {new_name}')
-            break
-    conn.commit()
+    """Add a column to a table."""
+    # column type may be different for different dialects.
+    # for example, sqlite uses BLOB for LargeBinary
+    # while postgres uses BYTEA.
+    column_type_str = column_type.compile(dialect=session.bind.dialect)
+    default_statement_str = (f' {default_statement}'
+                             if default_statement is not None else '')
+    try:
+        session.execute(
+            sqlalchemy.text(f'ALTER TABLE {table_name} '
+                            f'ADD COLUMN {column_name} {column_type_str}'
+                            f'{default_statement_str}'))
+        if copy_from is not None:
+            session.execute(
+                sqlalchemy.text(f'UPDATE {table_name} '
+                                f'SET {column_name} = {copy_from}'))
+        if value_to_replace_existing_entries is not None:
+            session.execute(
+                sqlalchemy.text(f'UPDATE {table_name} '
+                                f'SET {column_name} = :replacement_value '
+                                f'WHERE {column_name} IS NULL'),
+                {'replacement_value': value_to_replace_existing_entries})
+    #sqlite
+    except sqlalchemy_exc.OperationalError as e:
+        if 'duplicate column name' in str(e):
+            pass
+        else:
+            raise
+    #postgressql
+    except sqlalchemy_exc.ProgrammingError as e:
+        if 'already exists' in str(e):
+            pass
+        else:
+            raise
+    session.commit()
 
 
 class SQLiteConn(threading.local):

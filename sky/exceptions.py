@@ -222,7 +222,7 @@ class ManagedJobReachedMaxRetriesError(Exception):
 class ManagedJobStatusError(Exception):
     """Raised when a managed job task status update is invalid.
 
-    For instance, a RUNNING job cannot become SUBMITTED.
+    For instance, a RUNNING job cannot become PENDING.
     """
     pass
 
@@ -488,6 +488,16 @@ class ApiServerConnectionError(RuntimeError):
             f'Try: curl {server_url}/api/health')
 
 
+class ApiServerAuthenticationError(RuntimeError):
+    """Raised when authentication is required for the API server."""
+
+    def __init__(self, server_url: str):
+        super().__init__(
+            f'Authentication required for SkyPilot API server at {server_url}. '
+            f'Please run:\n'
+            f'  sky api login -e {server_url}')
+
+
 class APIVersionMismatchError(RuntimeError):
     """Raised when the API version mismatch."""
     pass
@@ -570,6 +580,29 @@ class JobExitCode(enum.IntEnum):
         return cls.FAILED
 
 
+class ExecutionRetryableError(Exception):
+    """Raised when task execution fails and should be retried."""
+
+    def __init__(self, message: str, hint: str,
+                 retry_wait_seconds: int) -> None:
+        super().__init__(message)
+        self.hint = hint
+        self.retry_wait_seconds = retry_wait_seconds
+
+    def __reduce__(self):
+        # Make sure the exception is picklable
+        return (self.__class__, (str(self), self.hint, self.retry_wait_seconds))
+
+
+class ExecutionPoolFullError(Exception):
+    """Raised when the execution pool is full."""
+
+
 class RequestAlreadyExistsError(Exception):
     """Raised when a request is already exists."""
+    pass
+
+
+class PermissionDeniedError(Exception):
+    """Raised when a user does not have permission to access a resource."""
     pass

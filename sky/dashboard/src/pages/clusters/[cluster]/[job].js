@@ -120,6 +120,7 @@ export function JobDetailPage() {
           setLogs((prevLogs) => [...prevLogs, strippedLog]);
         }
       },
+      workspace: clusterData?.workspace,
     })
       .then(() => {
         if (active) {
@@ -136,7 +137,7 @@ export function JobDetailPage() {
     return () => {
       active = false;
     };
-  }, [cluster, job, isRefreshingLogs, isPending]);
+  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
@@ -185,7 +186,7 @@ export function JobDetailPage() {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="clusters">
+      <>
         <JobHeader
           cluster={cluster}
           job={job}
@@ -314,7 +315,7 @@ export function JobDetailPage() {
             </div>
           </div>
         )}
-      </Layout>
+      </>
     </>
   );
 }

@@ -1,5 +1,6 @@
 """Sky benchmark database, backed by sqlite."""
 import enum
+import functools
 import os
 import pathlib
 import pickle
@@ -16,7 +17,6 @@ _BENCHMARK_BUCKET_NAME_KEY = 'bucket_name'
 _BENCHMARK_BUCKET_TYPE_KEY = 'bucket_type'
 
 _BENCHMARK_DB_PATH = os.path.expanduser('~/.sky/benchmark.db')
-os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
 
 
 class _BenchmarkSQLiteConn(threading.local):
@@ -65,7 +65,26 @@ class _BenchmarkSQLiteConn(threading.local):
         self.conn.commit()
 
 
-_BENCHMARK_DB = _BenchmarkSQLiteConn()
+_BENCHMARK_DB = None
+_benchmark_db_init_lock = threading.Lock()
+
+
+def _init_db(func):
+    """Initialize the database."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global _BENCHMARK_DB
+        if _BENCHMARK_DB:
+            return func(*args, **kwargs)
+        with _benchmark_db_init_lock:
+            if not _BENCHMARK_DB:
+                os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0],
+                            exist_ok=True)
+                _BENCHMARK_DB = _BenchmarkSQLiteConn()
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 class BenchmarkStatus(enum.Enum):
@@ -121,9 +140,11 @@ class BenchmarkRecord(NamedTuple):
     estimated_total_seconds: Optional[float] = None
 
 
+@_init_db
 def add_benchmark(benchmark_name: str, task_name: Optional[str],
                   bucket_name: str) -> None:
     """Add a new benchmark."""
+    assert _BENCHMARK_DB is not None
     launched_at = int(time.time())
     _BENCHMARK_DB.cursor.execute(
         'INSERT INTO benchmark'
@@ -133,8 +154,10 @@ def add_benchmark(benchmark_name: str, task_name: Optional[str],
     _BENCHMARK_DB.conn.commit()
 
 
+@_init_db
 def add_benchmark_result(benchmark_name: str,
                          cluster_handle: 'backend_lib.ResourceHandle') -> None:
+    assert _BENCHMARK_DB is not None
     name = cluster_handle.cluster_name
     num_nodes = cluster_handle.launched_nodes
     resources = pickle.dumps(cluster_handle.launched_resources)
@@ -146,10 +169,12 @@ def add_benchmark_result(benchmark_name: str,
     _BENCHMARK_DB.conn.commit()
 
 
+@_init_db
 def update_benchmark_result(
         benchmark_name: str, cluster_name: str,
         benchmark_status: BenchmarkStatus,
         benchmark_record: Optional[BenchmarkRecord]) -> None:
+    assert _BENCHMARK_DB is not None
     _BENCHMARK_DB.cursor.execute(
         'UPDATE benchmark_results SET '
         'status=(?), record=(?) WHERE benchmark=(?) AND cluster=(?)',
@@ -158,8 +183,10 @@ def update_benchmark_result(
     _BENCHMARK_DB.conn.commit()
 
 
+@_init_db
 def delete_benchmark(benchmark_name: str) -> None:
     """Delete a benchmark result."""
+    assert _BENCHMARK_DB is not None
     _BENCHMARK_DB.cursor.execute(
         'DELETE FROM benchmark_results WHERE benchmark=(?)', (benchmark_name,))
     _BENCHMARK_DB.cursor.execute('DELETE FROM benchmark WHERE name=(?)',
@@ -167,8 +194,10 @@ def delete_benchmark(benchmark_name: str) -> None:
     _BENCHMARK_DB.conn.commit()
 
 
+@_init_db
 def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
     """Get a benchmark from its name."""
+    assert _BENCHMARK_DB is not None
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT * FROM benchmark WHERE name=(?)', (benchmark_name,))
     for name, task, bucket, launched_at in rows:
@@ -181,8 +210,10 @@ def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
         return record
 
 
+@_init_db
 def get_benchmarks() -> List[Dict[str, Any]]:
     """Get all benchmarks."""
+    assert _BENCHMARK_DB is not None
     rows = _BENCHMARK_DB.cursor.execute('SELECT * FROM benchmark')
     records = []
     for name, task, bucket, launched_at in rows:
@@ -196,8 +227,10 @@ def get_benchmarks() -> List[Dict[str, Any]]:
     return records
 
 
+@_init_db
 def set_benchmark_bucket(bucket_name: str, bucket_type: str) -> None:
     """Save the benchmark bucket name and type."""
+    assert _BENCHMARK_DB is not None
     _BENCHMARK_DB.cursor.execute(
         'REPLACE INTO benchmark_config (key, value) VALUES (?, ?)',
         (_BENCHMARK_BUCKET_NAME_KEY, bucket_name))
@@ -207,8 +240,10 @@ def set_benchmark_bucket(bucket_name: str, bucket_type: str) -> None:
     _BENCHMARK_DB.conn.commit()
 
 
+@_init_db
 def get_benchmark_bucket() -> Tuple[Optional[str], Optional[str]]:
     """Get the benchmark bucket name and type."""
+    assert _BENCHMARK_DB is not None
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT value FROM benchmark_config WHERE key=(?)',
         (_BENCHMARK_BUCKET_NAME_KEY,))
@@ -227,15 +262,19 @@ def get_benchmark_bucket() -> Tuple[Optional[str], Optional[str]]:
     return bucket_name, bucket_type
 
 
+@_init_db
 def get_benchmark_clusters(benchmark_name: str) -> List[str]:
     """Get all clusters for a benchmark."""
+    assert _BENCHMARK_DB is not None
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT cluster FROM benchmark_results WHERE benchmark=(?)',
         (benchmark_name,))
     return [row[0] for row in rows]
 
 
+@_init_db
 def get_benchmark_results(benchmark_name: str) -> List[Dict[str, Any]]:
+    assert _BENCHMARK_DB is not None
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT * FROM benchmark_results WHERE benchmark=(?)',
         (benchmark_name,))
