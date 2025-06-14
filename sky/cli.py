@@ -4397,6 +4397,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
     - ``FAILED_CONTROLLER``: Job failed due to an unexpected error in the spot
       controller.
 
+    - ``GIT_COMMIT``: The git commit of the workdir for the job.
+
     If the job failed, either due to user code or resource unavailability, the
     error log can be found with ``sky jobs logs --controller``, e.g.:
 

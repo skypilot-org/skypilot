@@ -1133,6 +1133,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'GIT_COMMIT',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
@@ -1241,6 +1242,8 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                job_tasks[0]['metadata']['git_commit']
+                if job_tasks[0]['metadata']['git_commit'] is not None else '',
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
@@ -1282,6 +1285,8 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                task['metadata']['git_commit']
+                if task['metadata']['git_commit'] is not None else '',
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
@@ -1457,7 +1462,8 @@ class ManagedJobCodeGen:
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
                 managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r})
+                                  {task.name!r}, {resources_str!r},
+                                  {task.metadata!r})
                 """)
         return cls._build(code)
 
