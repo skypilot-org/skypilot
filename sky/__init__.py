@@ -81,7 +81,6 @@ _set_http_proxy_env_vars()
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
 from sky import backends
-from sky import benchmark
 from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
@@ -168,7 +167,6 @@ __all__ = [
     'Optimizer',
     'OptimizeTarget',
     'backends',
-    'benchmark',
     'list_accelerators',
     '__root_dir__',
     'Storage',
