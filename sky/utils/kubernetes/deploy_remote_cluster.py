@@ -1091,7 +1091,7 @@ def deploy_cluster(head_node,
                     f'Skipping...{NC}')
                 return node, True, False
             worker_user = worker_hosts[i]['user']
-            worker_key = worker_hosts[i]['identity_file']
+            worker_key = os.path.expanduser(worker_hosts[i]['identity_file'])
             worker_password = worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
             worker_config = worker_use_ssh_config[i]
