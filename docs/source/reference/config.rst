@@ -151,6 +151,11 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
+  :ref:`logs <config-yaml-logs>`:
+    :ref:`store <config-yaml-logs-store>`: gcp
+    gcp:
+      project_id: my-project-id
+
 
 Fields
 ----------
@@ -1280,3 +1285,29 @@ Example:
    :hidden:
 
    Configuration Sources <config-sources>
+
+.. _config-yaml-logs:
+
+``logs``
+~~~~~~~~
+
+External logging storage configuration (optional).
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp
+    gcp:
+      project_id: my-project-id
+
+.. _config-yaml-logs-store:
+
+``logs.store``
+~~~~~~~~~~~~~~
+
+The type of external logging storage to use. Each logging storage might have its own configuration options under ``logs.<store>`` structure. Refer to the :ref:`External Logging Storage <external-logging-storage>` for more details.
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp
