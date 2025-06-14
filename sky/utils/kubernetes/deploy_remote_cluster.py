@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import yaml
 
+from sky.skylet import constants
 from sky.utils import ux_utils
 
 # Colors for nicer UX
@@ -701,7 +702,7 @@ def main():
                 # Generate a unique context name for each cluster
                 context_name = args.context_name
                 if context_name == 'default':
-                    context_name = 'ssh-' + cluster_name
+                    context_name = f'{constants.SSH_CLUSTER_PREFIX}{cluster_name}'
 
                 # Check cluster history
                 os.makedirs(NODE_POOLS_INFO_DIR, exist_ok=True)
