@@ -306,8 +306,8 @@ def run_remote(node,
         ]
 
         if ssh_key:
-            if not os.path.exists(ssh_key):
-                raise ValueError(f'Identity file `{ssh_key}` doesn\'t exist.')
+            if not os.path.isfile(ssh_key):
+                raise ValueError(f'SSH key not found: {ssh_key}')
             ssh_cmd.extend(['-i', ssh_key])
 
         ssh_cmd.append(f'{user}@{node}' if user else node)
