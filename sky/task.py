@@ -212,6 +212,7 @@ class Task:
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initializes a Task.
 
@@ -267,6 +268,7 @@ class Task:
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
           blocked_resources: A set of resources that this task cannot run on.
+          metadata: A dictionary of metadata to be added to the task.
         """
         self.name = name
         self.run = run
@@ -313,6 +315,8 @@ class Task:
 
         # For internal use only.
         self.file_mounts_mapping = file_mounts_mapping
+
+        self._metadata = metadata if metadata is not None else {}
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -442,6 +446,8 @@ class Task:
                 raise ValueError(
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
+
+        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
     @staticmethod
     def from_yaml_config(
@@ -682,6 +688,10 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+
+    @property
+    def metadata(self) -> str:
+        return json.dumps(self._metadata)
 
     @property
     def envs(self) -> Dict[str, str]:
