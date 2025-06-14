@@ -239,7 +239,7 @@ class SCP(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = catalog.get_image_id_from_tag('skypilot:ubuntu-2004',
+        image_id = catalog.get_image_id_from_tag('skypilot:ubuntu-2204',
                                                  region_name,
                                                  clouds='scp')
         if acc is not None:
