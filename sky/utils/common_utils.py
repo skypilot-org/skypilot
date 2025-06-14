@@ -11,6 +11,7 @@ import platform
 import random
 import re
 import socket
+import subprocess
 import sys
 import time
 import typing
@@ -85,6 +86,18 @@ def generate_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
+
+
+def get_git_commit(path: Optional[str] = None) -> Optional[str]:
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_user_hash() -> str:
