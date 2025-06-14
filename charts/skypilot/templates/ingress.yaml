@@ -2,6 +2,7 @@
 {{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
 {{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
 {{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
+{{- $enableBasicAuthInAPIServer := include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" -}}
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -17,7 +18,7 @@ metadata:
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
     nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
     nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email
-    {{- else }}
+    {{- else if and (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" .Release.Name) }}
