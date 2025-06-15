@@ -71,7 +71,8 @@ def create_table(cursor, conn):
         task_id INTEGER DEFAULT 0,
         task_name TEXT,
         specs TEXT,
-        local_log_file TEXT DEFAULT NULL)""")
+        local_log_file TEXT DEFAULT NULL,
+        metadata TEXT DEFAULT '{}')""")
     conn.commit()
 
     db_utils.add_column_to_table(cursor, conn, 'spot', 'failure_reason', 'TEXT')
@@ -110,6 +111,8 @@ def create_table(cursor, conn):
                                  }))
     db_utils.add_column_to_table(cursor, conn, 'spot', 'local_log_file',
                                  'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor, conn, 'spot', 'metadata',
+                                 'TEXT DEFAULT "{}"')
 
     # `job_info` contains the mapping from job_id to the job_name, as well as
     # information used by the scheduler.
@@ -224,6 +227,7 @@ columns = [
     'task_name',
     'specs',
     'local_log_file',
+    'metadata',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
@@ -453,17 +457,23 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
 
 
 @_init_db
-def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
+def set_pending(
+    job_id: int,
+    task_id: int,
+    task_name: str,
+    resources_str: str,
+    metadata: str,
+):
     """Set the task to pending state."""
     assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO spot
-            (spot_job_id, task_id, task_name, resources, status)
-            VALUES (?, ?, ?, ?, ?)""",
+            (spot_job_id, task_id, task_name, resources, status, metadata)
+            VALUES (?, ?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
-             ManagedJobStatus.PENDING.value))
+             ManagedJobStatus.PENDING.value, metadata))
 
 
 @_init_db
@@ -1077,6 +1087,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                 job_dict['schedule_state'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
+            job_dict['metadata'] = json.loads(job_dict['metadata'])
 
             # Add user YAML content for managed jobs.
             yaml_path = job_dict.get('original_user_yaml_path')
