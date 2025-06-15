@@ -28,6 +28,7 @@ DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
+K3S_PORT = 6443
 
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -207,8 +208,15 @@ def prepare_hosts_info(cluster_name: str,
 
     # Get cluster-level defaults
     cluster_user = cluster_config.get('user', '')
-    cluster_identity_file = cluster_config.get('identity_file', '')
+    cluster_identity_file = os.path.expanduser(
+        cluster_config.get('identity_file', ''))
     cluster_password = cluster_config.get('password', '')
+
+    # Check if cluster identity file exists
+    if cluster_identity_file and not os.path.isfile(cluster_identity_file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'SSH Identity File Missing: {cluster_identity_file}')
 
     hosts_info = []
     for host in cluster_config['hosts']:
@@ -239,9 +247,15 @@ def prepare_hosts_info(cluster_name: str,
             # Use host-specific values or fall back to cluster defaults
             host_user = '' if is_ssh_config_host else host.get(
                 'user', cluster_user)
-            host_identity_file = '' if is_ssh_config_host else host.get(
-                'identity_file', cluster_identity_file)
+            host_identity_file = os.path.expanduser(
+                '' if is_ssh_config_host else host.get(
+                    'identity_file', cluster_identity_file))
             host_password = host.get('password', cluster_password)
+
+            if host_identity_file and not os.path.isfile(host_identity_file):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'SSH Identity File Missing: {host_identity_file}')
 
             hosts_info.append({
                 'ip': host['ip'],
@@ -836,10 +850,6 @@ def deploy_cluster(head_node,
 
     Returns: List of unsuccessful worker nodes.
     """
-    # Ensure SSH key is expanded for paths with ~ (home directory)
-    if ssh_key:
-        ssh_key = os.path.expanduser(ssh_key)
-
     history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
                                      f'{context_name}-history.yaml')
     cert_file_path = os.path.join(NODE_POOLS_INFO_DIR,
@@ -1091,7 +1101,7 @@ def deploy_cluster(head_node,
                     f'Skipping...{NC}')
                 return node, True, False
             worker_user = worker_hosts[i]['user']
-            worker_key = os.path.expanduser(worker_hosts[i]['identity_file'])
+            worker_key = worker_hosts[i]['identity_file']
             worker_password = worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
             worker_config = worker_use_ssh_config[i]
