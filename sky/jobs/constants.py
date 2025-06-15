@@ -1,13 +1,14 @@
 """Constants used for Managed Jobs."""
+
 from typing import Any, Dict, Union
 
 from sky.skylet import constants as skylet_constants
 
-JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
-JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
-JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
+JOBS_CONTROLLER_TEMPLATE = "jobs-controller.yaml.j2"
+JOBS_CONTROLLER_YAML_PREFIX = "~/.sky/jobs_controller"
+JOBS_CONTROLLER_LOGS_DIR = "~/sky_logs/jobs_controller"
 
-JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
+JOBS_TASK_YAML_PREFIX = "~/.sky/managed_jobs"
 
 # Resources as a dict for the jobs controller.
 # Use smaller CPU instance type for jobs controller, but with more memory, i.e.
@@ -18,16 +19,16 @@ JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 # jobs. See _get_launch_parallelism and _get_job_parallelism in scheduler.py.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
-    'cpus': '4+',
-    'memory': '8x',
-    'disk_size': 50
+    "cpus": "4+",
+    "memory": "8x",
+    "disk_size": 50,
 }
 
 # Autostop config for the jobs controller. These are the default values for
 # jobs.controller.autostop in ~/.sky/config.yaml.
 CONTROLLER_AUTOSTOP: Dict[str, Any] = {
-    'idle_minutes': 10,
-    'down': False,
+    "idle_minutes": 10,
+    "down": False,
 }
 
 # TODO(zhwu): This is no longer accurate, after #4592, which increases the
@@ -47,28 +48,28 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 6
+MANAGED_JOBS_VERSION = 7
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes
 # containers may not have systemd), it starts the dashboard manually.
 DASHBOARD_SETUP_CMD = (
-    'if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; '
-    'then '
-    '  systemctl --user daemon-reload; '
-    '  systemctl --user enable --now skypilot-dashboard; '
-    'else '
+    "if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; "
+    "then "
+    "  systemctl --user daemon-reload; "
+    "  systemctl --user enable --now skypilot-dashboard; "
+    "else "
     '  echo "Systemd services not found. Starting SkyPilot dashboard '
     'manually."; '
     # Kill any old dashboard processes;
-    '  ps aux | grep -v nohup | grep -v grep | '
-    '  grep -- \'-m sky.jobs.dashboard.dashboard\' | awk \'{print $2}\' | '
-    '  xargs kill > /dev/null 2>&1 || true;'
+    "  ps aux | grep -v nohup | grep -v grep | "
+    "  grep -- '-m sky.jobs.dashboard.dashboard' | awk '{print $2}' | "
+    "  xargs kill > /dev/null 2>&1 || true;"
     # Launch the dashboard in the background if not already running
-    '  (ps aux | grep -v nohup | grep -v grep | '
-    '  grep -q -- \'-m sky.jobs.dashboard.dashboard\') || '
-    f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
-    '>> ~/.sky/job-dashboard.log 2>&1 &); '
-    'fi')
+    "  (ps aux | grep -v nohup | grep -v grep | "
+    "  grep -q -- '-m sky.jobs.dashboard.dashboard') || "
+    f"(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard "
+    ">> ~/.sky/job-dashboard.log 2>&1 &); "
+    "fi")
 
 DEFAULT_PRIORITY = 500

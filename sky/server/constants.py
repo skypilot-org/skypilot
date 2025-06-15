@@ -30,4 +30,5 @@ API_COOKIE_FILE_ENV_VAR = f"{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE"
 API_COOKIE_FILE_DEFAULT_LOCATION = "~/.sky/cookies.txt"
 
 # The path to the dashboard build output
-DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "..", "dashboard", "out")
+DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "..", "dashboard",
+                             "out")
