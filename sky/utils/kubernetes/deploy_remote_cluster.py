@@ -247,8 +247,8 @@ def prepare_hosts_info(cluster_name: str,
             host_user = '' if is_ssh_config_host else host.get(
                 'user', cluster_user)
             host_identity_file = os.path.expanduser(
-                '' if is_ssh_config_host else host.get(
-                    'identity_file', cluster_identity_file))
+                '' if is_ssh_config_host else host.
+                get('identity_file', cluster_identity_file))
             host_password = host.get('password', cluster_password)
 
             if host_identity_file and not os.path.isfile(host_identity_file):
