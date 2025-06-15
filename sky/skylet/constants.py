@@ -298,6 +298,11 @@ SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
     '(systemctl reload sshd || service ssh reload); '
     '\'')
 
+# SSH cluster context prefix - used to identify SSH-based contexts
+# This prefix is prepended to cluster names for SSH-based deployments
+# Consider changing to 'skyssh-' for better identification as a SkyPilot cluster
+SSH_CLUSTER_PREFIX = 'ssh-'
+
 # Internal: Env var indicating the system is running with a remote API server.
 # It is used for internal purposes, including the jobs controller to mark
 # clusters as launched with a remote API server.
