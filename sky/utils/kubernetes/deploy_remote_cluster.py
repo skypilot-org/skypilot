@@ -28,7 +28,6 @@ DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
-K3S_PORT = 6443
 
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
