@@ -111,7 +111,10 @@ def create_table(cursor, conn):
                                  }))
     db_utils.add_column_to_table(cursor, conn, 'spot', 'local_log_file',
                                  'TEXT DEFAULT NULL')
-    db_utils.add_column_to_table(cursor, conn, 'spot', 'metadata',
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'spot',
+                                 'metadata',
                                  'TEXT DEFAULT "{}"',
                                  value_to_replace_existing_entries='{}')
 
