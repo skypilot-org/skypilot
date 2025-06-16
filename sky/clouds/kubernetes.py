@@ -435,6 +435,7 @@ class Kubernetes(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
+        priority = resources.priority
         # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
         k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
@@ -658,6 +659,7 @@ class Kubernetes(clouds.Cloud):
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
             'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
+            'priority': priority,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
