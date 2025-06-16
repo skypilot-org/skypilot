@@ -130,6 +130,13 @@ fi
 
 # Extract version from response and verify it matches (only if not using 'latest')
 RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
+
+# Verify that we got a valid version string
+if [ -z "$RETURNED_VERSION" ] || [ ${#RETURNED_VERSION} -le 1 ]; then
+    echo "Error: Invalid version returned from API. Got: '$RETURNED_VERSION'"
+    exit 1
+fi
+
 if [ "$HELM_VERSION" != "latest" ]; then
     if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
         echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
