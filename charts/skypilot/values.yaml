@@ -375,12 +375,6 @@ grafana:
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true
-  dashboards:
-    default:
-      nvidia-dcgm-exporter:
-        gnetId: 12239
-        revision: 2
-        datasource: prometheus
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
     dashboardproviders.yaml:
