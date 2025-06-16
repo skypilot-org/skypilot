@@ -1,5 +1,6 @@
 """SDK functions for managed jobs."""
 import os
+import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -204,8 +205,24 @@ def launch(
             controller=controller,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-        config_use_local_path = (
-            managed_job_constants.CONSOLIDATE_WITH_API_SERVER)
+        consolidation_mode_job_id = None
+        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+            # Create local directory for the managed job.
+            pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
+            set_job_info_kwargs = {
+                'workspace': skypilot_config.get_active_workspace(
+                    force_user_workspace=True),
+                'entrypoint': common_utils.get_current_command(),
+            }
+            consolidation_mode_job_id = (
+                managed_job_state.set_job_info_without_job_id(
+                    dag.name, **set_job_info_kwargs))
+            for task_id, task in enumerate(dag.tasks):
+                resources_str = backend_utils.get_task_resources_str(
+                    task, is_managed_job=True)
+                managed_job_state.set_pending(consolidation_mode_job_id,
+                                              task_id, task.name, resources_str)
+
         vars_to_fill: Dict[str, Any] = {
             'remote_original_user_yaml_path': remote_original_user_yaml_path,
             'original_user_dag_path': original_user_yaml_path.name,
@@ -220,14 +237,14 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'priority': priority,
+            'consolidation_mode_job_id': consolidation_mode_job_id,
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
                 remote_user_config_path=remote_user_config_path,
                 # TODO(aylei): the mutated config will not be updated
                 # afterwards without recreate the controller. Need to
                 # revisit this.
-                local_user_config=mutated_user_config,
-                config_use_local_path=config_use_local_path),
+                local_user_config=mutated_user_config),
         }
 
         yaml_path = os.path.join(
@@ -246,19 +263,6 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
-            set_job_info_kwargs = {
-                'workspace': skypilot_config.get_active_workspace(
-                    force_user_workspace=True),
-                'entrypoint': 'whoami dummy'
-            }
-            job_id = managed_job_state.set_job_info_without_job_id(
-                dag.name, **set_job_info_kwargs)
-            for task_id, task in enumerate(dag.tasks):
-                resources_str = backend_utils.get_task_resources_str(
-                    task, is_managed_job=True)
-                managed_job_state.set_pending(job_id, task_id, task.name,
-                                              resources_str)
 
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
@@ -273,19 +277,13 @@ def launch(
                 # workspace A.
                 if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
                     runner = command_runner.LocalProcessCommandRunner()
-                    envs = vars_to_fill['controller_envs']
-                    os.makedirs(os.path.dirname(
-                        os.path.expanduser(remote_env_file_path)),
-                                exist_ok=True)
-                    for k, v in envs.items():
-                        runner.run(
-                            f'echo "export {k}={v}" >> {remote_env_file_path}')
-                    runner.run(
-                        f'python -u -m sky.jobs.scheduler {f.name} '
-                        f'--user-yaml-path {original_user_yaml_path.name} '
-                        f'--job-id {job_id} '
-                        f'--env-file {remote_env_file_path} '
-                        f'--priority {priority}')
+                    if controller_task.file_mounts is not None:
+                        for tar, src in controller_task.file_mounts.items():
+                            logger.debug(f'Syncing file mounts: {src} -> {tar}')
+                            runner.rsync(src, tar, up=True, stream_logs=False)
+                    assert isinstance(controller_task.run, str)
+                    runner.run(controller_task.run)
+                    # TODO(tian): Fix this.
                     return None, None
                 return execution.launch(task=controller_task,
                                         cluster_name=controller_name,
