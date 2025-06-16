@@ -52,15 +52,12 @@ def test_log_collection_to_gcp(generic_cloud: str):
                 # Use grep instead of jq to avoid the dependency on jq.
                 (f'output=$(gcloud logging read \'labels.skypilot_cluster_name={name} AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
-                # Test for managed jobs is flaky now since whether the logging
-                # is enabled is based on the config of the jobs controller.
-                # TODO(aylei): enable logging smoke test for managed jobs.
-                # smoke_tests_utils.with_config(
-                #     f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
-                #     base.name),
-                # 'sleep 60',
-                # (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
-                #  f'{validate_logs_cmd}'),
+                smoke_tests_utils.with_config(
+                    f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
+                    base.name),
+                'sleep 60',
+                (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
+                 f'{validate_logs_cmd}'),
                 f'sky down -y {name}',
                 smoke_tests_utils.with_config(
                     f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
