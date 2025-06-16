@@ -73,6 +73,7 @@ Below is the configuration syntax and some example values.  See details under ea
     /datasets-s3: s3://my-awesome-dataset
     # Mount an existing volume to a remote directory,
     # and sync the local directory to the volume.
+    # GCP only for now.
     /mnt/path1:
       name: volume-name1
       source: /local/path1
@@ -80,6 +81,7 @@ Below is the configuration syntax and some example values.  See details under ea
       persistent: True
     # Create a new network volume with name "volume-name2"
     # and mount it to a remote directory
+    # GCP only for now.
     /mnt/path2:
       name: volume-name2
       store: volume
@@ -87,10 +89,30 @@ Below is the configuration syntax and some example values.  See details under ea
         disk_size: 10
         disk_tier: high
     # Create a new instance volume and mount it to a remote directory
+    # GCP only for now.
     /mnt/path3:
       store: volume
       config:
         storage_type: instance
+    # Create a new ReadWriteMany persistent volume claim
+    # and mount it to Pod in Kubernetes.
+    # The ReadWriteMany PVC needs to be supported by the Kubernetes cluster.
+    /mnt/path4:
+      name: pvc-name
+      store: volume
+      config:
+        disk_size: 10
+        storage_class_name: csi-mounted-fs-path-sc
+        access_mode: ReadWriteMany
+    # Create a new ReadWriteOnce persistent volume claim
+    # and mount it to Pod in Kubernetes.
+    /mnt/path5:
+      name: pvc-name
+      store: volume
+      config:
+        disk_size: 10
+        storage_class_name: compute-csi-default-sc
+        access_mode: ReadWriteOnce
 
   :ref:`setup <yaml-spec-setup>`: |
     echo "Begin setup."
@@ -886,6 +908,12 @@ To create and mount a new instance volume:
         disk_tier: best
         # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
         attach_mode: read_write
+        # 'storage_class_name' and 'access_mode' are only supported for Kubernetes.
+        # Storage class name, optional, default: None
+        # If not specified, the default storage class will be used.
+        storage_class_name: csi-mounted-fs-path-sc
+        # Access mode, either 'ReadWriteMany', 'ReadWriteOnce', or 'ReadOnlyMany', optional, default: ReadWriteOnce
+        access_mode: ReadWriteMany
 
 - Mount with existing volume:
 
@@ -920,12 +948,33 @@ To create and mount a new instance volume:
 
 .. note::
 
+  * Only GCP is supported for the network volume and instance volume for now.
   * If :ref:`GCP TPU <tpu>` is used, creating and mounting a new volume is not supported, please use the existing volume instead.
   * If :ref:`GCP MIG <config-yaml-gcp-managed-instance-group>` is used:
 
     * For the existing volume, the `attach_mode` needs to be `read_only`.
     * For the new volume, the `name` field is ignored.
   * When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
+
+- Mount PVC in Kubernetes:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path4:
+      name: pvc-name
+      store: volume
+      config:
+        disk_size: 10
+        storage_class_name: csi-mounted-fs-path-sc
+        access_mode: ReadWriteMany
+    /mnt/path5:
+      name: pvc-name
+      store: volume
+      config:
+        disk_size: 10
+        storage_class_name: compute-csi-default-sc
+        access_mode: ReadWriteOnce
 
 .. _yaml-spec-setup:
 

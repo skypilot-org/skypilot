@@ -66,6 +66,9 @@ _AUTOSTOP_SCHEMA = {
 
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import resources_utils
+
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
@@ -203,11 +206,29 @@ def _get_single_resources_schema():
                         },
                         'storage_type': {
                             'type': 'string',
+                            'case_insensitive_enum': [
+                                storage_type.value
+                                for storage_type in resources_utils.StorageType
+                            ]
                         },
                         'name': {
                             'type': 'string',
                         },
                         'attach_mode': {
+                            'type': 'string',
+                            'case_insensitive_enum': [
+                                attach_mode.value for attach_mode in
+                                resources_utils.DiskAttachMode
+                            ]
+                        },
+                        'access_mode': {
+                            'type': 'string',
+                            'case_insensitive_enum': [
+                                access_mode.value for access_mode in
+                                resources_utils.DiskAccessMode
+                            ]
+                        },
+                        'storage_class_name': {
                             'type': 'string',
                         },
                     },
@@ -365,6 +386,7 @@ def get_resources_schema():
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
+    from sky.utils import resources_utils
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -411,8 +433,26 @@ def get_storage_schema():
                     },
                     'storage_type': {
                         'type': 'string',
+                        'case_insensitive_enum': [
+                            storage_type.value
+                            for storage_type in resources_utils.StorageType
+                        ]
                     },
                     'attach_mode': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            attach_mode.value
+                            for attach_mode in resources_utils.DiskAttachMode
+                        ]
+                    },
+                    'access_mode': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            access_mode.value
+                            for access_mode in resources_utils.DiskAccessMode
+                        ]
+                    },
+                    'storage_class_name': {
                         'type': 'string',
                     },
                 },

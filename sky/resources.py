@@ -815,8 +815,12 @@ class Resources:
         supported_attach_modes = [
             attach_mode.value for attach_mode in resources_utils.DiskAttachMode
         ]
+        supported_access_modes = [
+            access_mode.value for access_mode in resources_utils.DiskAccessMode
+        ]
         network_type = resources_utils.StorageType.NETWORK
         read_write_mode = resources_utils.DiskAttachMode.READ_WRITE
+        rw_once_mode = resources_utils.DiskAccessMode.READ_WRITE_ONCE.value
         for volume in volumes:
             if 'path' not in volume:
                 with ux_utils.print_exception_no_traceback():
@@ -851,6 +855,18 @@ class Resources:
                             attach_mode_str)
             else:
                 volume['attach_mode'] = read_write_mode
+            if 'access_mode' in volume:
+                if isinstance(volume['access_mode'], str):
+                    access_mode_str = str(volume['access_mode'])
+                    if access_mode_str not in supported_access_modes:
+                        logger.warning(
+                            f'Invalid access_mode {access_mode_str!r}. '
+                            f'Set it to {rw_once_mode}.')
+                        volume['access_mode'] = rw_once_mode
+                    else:
+                        volume['access_mode'] = access_mode_str
+            else:
+                volume['access_mode'] = rw_once_mode
             if volume['storage_type'] == network_type:
                 if ('disk_size' in volume and
                         round(volume['disk_size']) != volume['disk_size']):
@@ -1309,11 +1325,12 @@ class Resources:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cloud must be specified when '
                                  'volumes are provided.')
-        if not self.cloud.is_same_cloud(clouds.GCP()):
+        if (not self.cloud.is_same_cloud(clouds.GCP()) and
+                not self.cloud.is_same_cloud(clouds.Kubernetes())):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Volumes are only supported for GCP'
-                                 f' not for {self.cloud}.')
-
+                raise ValueError(f'Volumes are only supported for GCP and'
+                                 f' Kubernetes, not for {self.cloud}.')
+        kubernetes = self.cloud.is_same_cloud(clouds.Kubernetes())
         need_region_or_zone = False
         try:
             for volume in self.volumes:
@@ -1327,8 +1344,8 @@ class Resources:
                 # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
                 self.cloud.check_disk_tier_enabled(self.instance_type,
                                                    volume['disk_tier'])
-            if (need_region_or_zone and self._region is None and
-                    self._zone is None):
+            if (not kubernetes and need_region_or_zone and
+                    self._region is None and self._zone is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('When specifying the volume name, please'
                                      ' also specify the region or zone.')
