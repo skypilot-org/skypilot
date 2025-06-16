@@ -474,7 +474,7 @@ _TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     ),
     click.option(
-        '--secrets',
+        '--secret',
         required=False,
         type=_parse_secret_var,
         multiple=True,
@@ -484,14 +484,11 @@ _TASK_OPTIONS = [
         multiple times. Examples:
 
         \b
-        1. ``--secrets API_KEY=secret123``: set ``$API_KEY`` on the cluster to be secret123.
+        1. ``--secret API_KEY=secret123``: set ``$API_KEY`` on the cluster to
+        be secret123.
 
-        2. ``--secrets DATABASE_PASSWORD=$DB_PASS``: set ``$DATABASE_PASSWORD`` on the cluster to be the
-        same value of ``$DB_PASS`` in the local environment where the CLI command
-        is run.
-
-        3. ``--secrets JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be the
-        same value of ``$JWT_SECRET`` in the local environment.""",
+        2. ``--secret JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be
+        the same value of ``$JWT_SECRET`` in the local environment.""",
     )
 ]
 _TASK_OPTIONS_WITH_NAME = [
@@ -953,7 +950,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
+                                                 env_overrides=env,
+                                                 secrets_overrides=secrets)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -963,19 +962,10 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
-            if secrets:
-                click.secho(
-                    f'WARNING: secrets {secrets} are ignored, '
-                    'since the yaml file contains multiple tasks. '
-                    'Please specify secrets in the YAML file instead.',
-                    fg='yellow')
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
-        # For YAML files, update secrets on the single task
-        if secrets:
-            task.update_secrets(secrets)
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})

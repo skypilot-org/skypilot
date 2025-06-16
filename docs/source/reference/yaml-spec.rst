@@ -787,7 +787,9 @@ Example of using envs:
 
 Secrets (optional).
 
-Secrets are similar to :ref:`envs <yaml-spec-envs>` above but can only be used in the ``setup`` and ``run``, and will be redacted in the YAML preview in the dashboard.
+Secrets are similar to :ref:`envs <yaml-spec-envs>` above but can only be used in the ``setup`` and ``run``, and will be redacted in the entrypoint/YAML in the dashboard.
+
+Values set here can be overridden by a CLI flag: ``sky launch/exec --secret SECRET=val`` (if ``SECRET`` is present).
 
 Example:
 

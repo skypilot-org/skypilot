@@ -121,27 +121,61 @@ def _fill_in_env_vars(
     return json.loads(yaml_field_str)
 
 
-def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
-    """Checks if there is a valid docker login config in task_envs.
+def _check_docker_login_config(task_envs: Dict[str, str],
+                               task_secrets: Dict[str, str]) -> bool:
+    """Validates a valid docker login config in task_envs and task_secrets.
 
-    If any of the docker login env vars is set, all of them must be set.
+    Docker login variables must be specified together either in envs OR secrets,
+    not split across both. If any of the docker login env vars is set, all of
+    them must be set in the same location.
+
+    Args:
+        task_envs: Environment variables
+        task_secrets: Secret variables (optional, defaults to empty dict)
 
     Returns:
-        True if there is a valid docker login config in task_envs.
+        True if there is a valid docker login config.
         False otherwise.
     Raises:
-        ValueError: if any of the docker login env vars is set, but not all of
-            them are set.
+        ValueError: if docker login configuration is invalid.
     """
+    if task_secrets is None:
+        task_secrets = {}
+
     all_keys = constants.DOCKER_LOGIN_ENV_VARS
-    existing_keys = all_keys & set(task_envs.keys())
-    if not existing_keys:
+    envs_keys = all_keys & set(task_envs.keys())
+    secrets_keys = all_keys & set(task_secrets.keys())
+
+    # Check if any docker variables exist
+    if not envs_keys and not secrets_keys:
         return False
-    if len(existing_keys) != len(all_keys):
+
+    # Check if variables are split across envs and secrets
+    if envs_keys and secrets_keys:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'If any of {", ".join(all_keys)} is set, all of them must '
-                f'be set. Missing envs: {all_keys - existing_keys}')
+                'Docker login variables must be specified together either '
+                'in envs OR secrets, not split across both. '
+                f'Found in envs: {sorted(envs_keys)}, '
+                f'Found in secrets: {sorted(secrets_keys)}')
+
+    # Check if all variables are present in the chosen location
+    if envs_keys:
+        if len(envs_keys) != len(all_keys):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Docker login variables must be specified together '
+                    'in envs. '
+                    f'Missing from envs: {sorted(all_keys - envs_keys)}')
+
+    if secrets_keys:
+        if len(secrets_keys) != len(all_keys):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Docker login variables must be specified together '
+                    'in secrets. '
+                    f'Missing from secrets: {sorted(all_keys - secrets_keys)}')
+
     return True
 
 
@@ -151,10 +185,10 @@ def _with_docker_login_config(
     task_envs: Dict[str, str],
     task_secrets: Dict[str, str],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
+    if not _check_docker_login_config(task_envs, task_secrets):
+        return resources
     envs = task_envs.copy()
     envs.update(task_secrets)
-    if not _check_docker_login_config(envs):
-        return resources
     docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
@@ -285,6 +319,12 @@ class Task:
         self.setup = setup
         self._envs = envs or {}
         self._secrets = secrets or {}
+
+        # Validate Docker login configuration early if both envs and secrets
+        # contain Docker variables
+        if self._envs or self._secrets:
+            _check_docker_login_config(self._envs, self._secrets)
+
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
@@ -457,6 +497,7 @@ class Task:
     def from_yaml_config(
         config: Dict[str, Any],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
+        secrets_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
@@ -471,9 +512,9 @@ class Task:
                     new_envs[str(k)] = None
             config['envs'] = new_envs
 
-        # More robust handling for 'secrets': explicitly convert keys and values to
-        # str, since users may pass '123' as keys/values which will get parsed
-        # as int causing validate_schema() to fail.
+        # More robust handling for 'secrets': explicitly convert keys and values
+        # to str, since users may pass '123' as keys/values which will get
+        # parsed as int causing validate_schema() to fail.
         secrets = config.get('secrets')
         if secrets is not None and isinstance(secrets, dict):
             new_secrets: Dict[str, Optional[str]] = {}
@@ -497,6 +538,12 @@ class Task:
             new_envs.update(env_overrides)
             config['envs'] = new_envs
 
+        if secrets_overrides is not None:
+            # Override secrets vars from CLI.
+            new_secrets = config.get('secrets', {})
+            new_secrets.update(secrets_overrides)
+            config['secrets'] = new_secrets
+
         for k, v in config.get('envs', {}).items():
             if v is None:
                 with ux_utils.print_exception_no_traceback():
@@ -511,9 +558,9 @@ class Task:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Secret variable {k!r} is None. Please set a '
-                        'value for it in task YAML. '
+                        'value for it in task YAML or with --secret flag. '
                         f'To set it to be empty, use an empty string ({k}: "" '
-                        f'in task YAML).')
+                        f'in task YAML or --secret {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -765,7 +812,7 @@ class Task:
         # If the update_envs() is called after set_resources(), we need to
         # manually update docker login config in task resources, in case the
         # docker login envs are newly added.
-        if _check_docker_login_config(self._envs):
+        if _check_docker_login_config(self._envs, self._secrets):
             self.resources = _with_docker_login_config(self.resources,
                                                        self._envs,
                                                        self._secrets)
@@ -776,11 +823,11 @@ class Task:
     def update_secrets(
             self, secrets: Union[None, List[Tuple[str, str]],
                                  Dict[str, str]]) -> 'Task':
-        """Updates secret environment variables for use inside the setup/run commands.
+        """Updates secret env vars for use inside the setup/run commands.
 
         Args:
-          secrets: (optional) either a list of ``(secret_name, value)`` or a dict
-            ``{secret_name: value}``.
+          secrets: (optional) either a list of ``(secret_name, value)`` or a
+            dict ``{secret_name: value}``.
 
         Returns:
           self: The current task, with secrets updated.
@@ -810,6 +857,13 @@ class Task:
                     'secrets must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{secrets}')
         self._secrets.update(secrets)
+        # Validate Docker login configuration if needed
+        if _check_docker_login_config(self._envs, self._secrets):
+            self.resources = _with_docker_login_config(self.resources,
+                                                       self._envs,
+                                                       self._secrets)
+        self.resources = _with_docker_username_for_runpod(
+            self.resources, self._envs, self._secrets)
         return self
 
     @property

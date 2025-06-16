@@ -15,29 +15,141 @@ class TestCloudVmRayBackendTaskRedaction:
                                   'PORT': '8080'
                               },
                               secrets={
-                                  'API_KEY': 'secret-api-key-123',
+                                  'API_KEY': 'sk-very-secret-key-123',
                                   'DATABASE_PASSWORD': 'super-secret-password',
+                                  'JWT_SECRET': 'jwt-signing-secret-456'
                               })
 
-        # Test the exact pattern used in sky/backends/cloud_vm_ray_backend.py line 3199:
-        # task_config = task.to_yaml_config(redact_secrets=True)
-        task_config = None
-        if test_task is not None:
-            task_config = test_task.to_yaml_config(redact_secrets=True)
+        # Test the exact call pattern used in cloud_vm_ray_backend.py
+        task_config = test_task.to_yaml_config(redact_secrets=True)
 
-        # Verify the config was created and sensitive data is redacted
-        assert task_config is not None
-        assert 'secrets' in task_config
-        assert task_config['secrets']['API_KEY'] == '<redacted>'
-        assert task_config['secrets']['DATABASE_PASSWORD'] == '<redacted>'
-
-        # Verify envs are preserved (not redacted)
+        # Verify that environment variables are NOT redacted
         assert 'envs' in task_config
         assert task_config['envs']['DEBUG'] == 'true'
         assert task_config['envs']['PORT'] == '8080'
 
-        # Verify the run command is preserved
+        # Verify that secrets ARE redacted
+        assert 'secrets' in task_config
+        assert task_config['secrets']['API_KEY'] == '<redacted>'
+        assert task_config['secrets']['DATABASE_PASSWORD'] == '<redacted>'
+        assert task_config['secrets']['JWT_SECRET'] == '<redacted>'
+
+        # Verify other task fields are preserved
         assert task_config['run'] == 'echo hello'
+
+    def test_backend_task_config_without_secrets(self):
+        """Test task config generation when no secrets are present."""
+        test_task = task.Task(run='python train.py',
+                              envs={'PYTHONPATH': '/app'})
+
+        task_config = test_task.to_yaml_config(redact_secrets=True)
+
+        # Environment variables should be preserved
+        assert task_config['envs']['PYTHONPATH'] == '/app'
+
+        # No secrets field should be present
+        assert 'secrets' not in task_config or not task_config.get('secrets')
+
+    def test_backend_task_config_empty_secrets(self):
+        """Test task config generation with empty secrets dict."""
+        test_task = task.Task(run='python train.py',
+                              envs={'PYTHONPATH': '/app'},
+                              secrets={})
+
+        task_config = test_task.to_yaml_config(redact_secrets=True)
+
+        # Environment variables should be preserved
+        assert task_config['envs']['PYTHONPATH'] == '/app'
+
+        # Empty secrets should not appear in config
+        assert 'secrets' not in task_config
+
+    def test_backend_redaction_preserves_non_string_values(self):
+        """Test that non-string values in secrets are preserved during redaction."""
+        test_task = task.Task(run='echo hello',
+                              secrets={
+                                  'STRING_SECRET': 'actual-secret',
+                                  'NUMERIC_PORT': 5432,
+                                  'BOOLEAN_FLAG': True,
+                                  'NULL_VALUE': None
+                              })
+
+        task_config = test_task.to_yaml_config(redact_secrets=True)
+
+        # String values should be redacted
+        assert task_config['secrets']['STRING_SECRET'] == '<redacted>'
+
+        # Non-string values should be preserved
+        assert task_config['secrets']['NUMERIC_PORT'] == 5432
+        assert task_config['secrets']['BOOLEAN_FLAG'] is True
+        assert task_config['secrets']['NULL_VALUE'] is None
+
+    def test_backend_supports_both_redaction_modes(self):
+        """Test that backend can use both redacted and non-redacted configs."""
+        test_task = task.Task(run='echo hello',
+                              secrets={'API_KEY': 'secret-key-123'})
+
+        # Test redacted mode (for logging/display)
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        assert redacted_config['secrets']['API_KEY'] == '<redacted>'
+
+        # Test non-redacted mode (for execution)
+        full_config = test_task.to_yaml_config(redact_secrets=False)
+        assert full_config['secrets']['API_KEY'] == 'secret-key-123'
+
+    def test_backend_mixed_envs_and_secrets(self):
+        """Test backend behavior with both envs and secrets containing sensitive data."""
+        test_task = task.Task(
+            run='echo hello',
+            envs={
+                'PUBLIC_API_URL': 'https://api.example.com',
+                'DEBUG_MODE': 'true',
+                'ENVIRONMENT': 'production'
+            },
+            secrets={
+                'PRIVATE_API_KEY': 'sk-secret-key-123',
+                'DATABASE_URL': 'postgresql://user:pass@host:5432/db',
+                'OAUTH_CLIENT_SECRET': 'oauth-secret-456'
+            })
+
+        task_config = test_task.to_yaml_config(redact_secrets=True)
+
+        # All environment variables should remain visible
+        assert task_config['envs'][
+            'PUBLIC_API_URL'] == 'https://api.example.com'
+        assert task_config['envs']['DEBUG_MODE'] == 'true'
+        assert task_config['envs']['ENVIRONMENT'] == 'production'
+
+        # All secrets should be redacted
+        assert task_config['secrets']['PRIVATE_API_KEY'] == '<redacted>'
+        assert task_config['secrets']['DATABASE_URL'] == '<redacted>'
+        assert task_config['secrets']['OAUTH_CLIENT_SECRET'] == '<redacted>'
+
+    def test_backend_config_serialization_safety(self):
+        """Test that redacted configs are safe for serialization/logging."""
+        import json
+
+        import yaml
+
+        test_task = task.Task(
+            run='echo hello',
+            envs={'PUBLIC_VAR': 'public-value'},
+            secrets={'PRIVATE_KEY': 'very-sensitive-key-data'})
+
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+
+        # Should be serializable to JSON
+        json_str = json.dumps(redacted_config)
+        assert 'very-sensitive-key-data' not in json_str
+        assert '<redacted>' in json_str
+
+        # Should be serializable to YAML
+        yaml_str = yaml.dump(redacted_config)
+        assert 'very-sensitive-key-data' not in yaml_str
+        assert '<redacted>' in yaml_str
+
+        # Public values should still be present
+        assert 'public-value' in yaml_str
 
     def test_redacted_config_contains_no_sensitive_data(self):
         """Test that redacted task config doesn't contain sensitive secret data."""

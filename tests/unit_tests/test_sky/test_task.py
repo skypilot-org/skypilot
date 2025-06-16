@@ -245,3 +245,430 @@ def test_update_secrets():
     # Test updating with None (should be no-op)
     task_obj.update_secrets(None)
     assert task_obj.secrets == expected
+
+
+def test_update_secrets_error_handling():
+    """Test error handling in update_secrets method."""
+    task_obj = task.Task(run='echo hello')
+
+    # Test duplicate keys in list input
+    with pytest.raises(ValueError, match='Duplicate secret keys provided'):
+        task_obj.update_secrets([('API_KEY', 'secret1'),
+                                 ('API_KEY', 'secret2')])
+
+    # Test invalid key type
+    with pytest.raises(ValueError, match='Secret keys must be strings'):
+        task_obj.update_secrets({123: 'secret'})
+
+    # Test invalid environment variable name
+    with pytest.raises(ValueError, match='Invalid secret key'):
+        task_obj.update_secrets({'invalid-name': 'secret'})
+
+    # Test invalid input type
+    with pytest.raises(ValueError, match='secrets must be List'):
+        task_obj.update_secrets("invalid_input")
+
+
+def test_secrets_property():
+    """Test the secrets property."""
+    # Test empty secrets
+    task_obj = task.Task(run='echo hello')
+    assert task_obj.secrets == {}
+
+    # Test with initial secrets
+    initial_secrets = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
+    task_obj = task.Task(run='echo hello', secrets=initial_secrets)
+    assert task_obj.secrets == initial_secrets
+
+    # Test that secrets property returns a copy (not a reference)
+    secrets_copy = task_obj.secrets
+    secrets_copy['NEW_SECRET'] = 'new_value'
+    assert 'NEW_SECRET' not in task_obj.secrets
+
+
+def test_envs_and_secrets_property():
+    """Test the envs_and_secrets property that combines both."""
+    envs = {'PUBLIC_VAR': 'public-value', 'DEBUG': 'true'}
+    secrets = {'API_KEY': 'secret-api-key', 'DB_PASSWORD': 'secret-password'}
+
+    task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
+    combined = task_obj.envs_and_secrets
+
+    # Should contain all environment variables
+    assert combined['PUBLIC_VAR'] == 'public-value'
+    assert combined['DEBUG'] == 'true'
+
+    # Should contain all secrets
+    assert combined['API_KEY'] == 'secret-api-key'
+    assert combined['DB_PASSWORD'] == 'secret-password'
+
+    # Total count should be envs + secrets
+    assert len(combined) == len(envs) + len(secrets)
+
+
+def test_secrets_override_envs_in_combined():
+    """Test that secrets override envs with same name in envs_and_secrets."""
+    envs = {'SHARED_VAR': 'env_value', 'ENV_ONLY': 'env_only'}
+    secrets = {'SHARED_VAR': 'secret_value', 'SECRET_ONLY': 'secret_only'}
+
+    task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
+    combined = task_obj.envs_and_secrets
+
+    # Secret should override env for shared variable name
+    assert combined['SHARED_VAR'] == 'secret_value'
+
+    # Unique variables should be preserved
+    assert combined['ENV_ONLY'] == 'env_only'
+    assert combined['SECRET_ONLY'] == 'secret_only'
+
+
+def test_from_yaml_config_with_secrets():
+    """Test parsing secrets from YAML configuration."""
+    config = {
+        'run': 'echo hello',
+        'envs': {
+            'DEBUG': 'true',
+            'PORT': '8080'
+        },
+        'secrets': {
+            'API_KEY': 'secret-key-123',
+            'DATABASE_PASSWORD': 'secret-password'
+        }
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Check that secrets are parsed correctly
+    assert task_obj.secrets == {
+        'API_KEY': 'secret-key-123',
+        'DATABASE_PASSWORD': 'secret-password'
+    }
+
+    # Check that envs are still parsed correctly
+    assert task_obj.envs == {'DEBUG': 'true', 'PORT': '8080'}
+
+    # Check other fields
+    assert task_obj.run == 'echo hello'
+
+
+def test_from_yaml_config_secrets_type_conversion():
+    """Test that secrets keys and values are converted to strings."""
+    config = {
+        'run': 'echo hello',
+        'secrets': {
+            'NUMERIC_KEY': 456,  # Numeric value
+            'BOOL_KEY': True,  # Boolean value
+            'STRING_KEY': 'regular-string',  # String value
+            'EMPTY_KEY': ''  # Empty string value
+        }
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Non-None values should be converted to strings
+    assert task_obj.secrets['NUMERIC_KEY'] == '456'
+    assert task_obj.secrets['BOOL_KEY'] == 'True'
+    assert task_obj.secrets['STRING_KEY'] == 'regular-string'
+    assert task_obj.secrets['EMPTY_KEY'] == ''
+
+
+def test_from_yaml_config_secrets_validation():
+    """Test validation of secrets during YAML parsing."""
+    # Test None secret value
+    config = {'run': 'echo hello', 'secrets': {'API_KEY': None}}
+
+    with pytest.raises(ValueError, match='Secret variable.*is None'):
+        task.Task.from_yaml_config(config)
+
+
+def test_task_initialization_with_secrets():
+    """Test Task initialization with secrets parameter."""
+    secrets = {'API_KEY': 'secret123', 'DB_PASSWORD': 'password456'}
+    task_obj = task.Task(run='echo hello', secrets=secrets)
+
+    assert task_obj.secrets == secrets
+    assert task_obj.run == 'echo hello'
+
+
+def test_secrets_in_task_repr():
+    """Test that secrets don't appear in string representation."""
+    envs = {'DEBUG': 'true'}
+    secrets = {'API_KEY': 'secret123'}
+    task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
+
+    repr_str = repr(task_obj)
+
+    # Envs might be shown in repr, but secrets should never be
+    assert 'secret123' not in repr_str
+    assert 'API_KEY' not in repr_str or '<redacted>' in repr_str
+
+
+def test_secrets_empty_initialization():
+    """Test initialization with empty secrets dict."""
+    task_obj = task.Task(run='echo hello', secrets={})
+    assert task_obj.secrets == {}
+
+
+def test_secrets_with_none_initialization():
+    """Test initialization with None secrets."""
+    task_obj = task.Task(run='echo hello', secrets=None)
+    assert task_obj.secrets == {}
+
+
+def test_from_yaml_config_null_secrets_with_override():
+    """Test that null secrets in YAML can be overridden with secrets_overrides."""
+    config = {
+        'name': 'test-null-secrets',
+        'run': 'echo hello',
+        'envs': {
+            'PUBLIC_VAR': 'public-value'
+        },
+        'secrets': {
+            'API_KEY': None,  # null value
+            'TOKEN': None  # another null value
+        }
+    }
+
+    # Test with secrets overrides
+    secrets_overrides = [('API_KEY', 'overridden-api-key'),
+                         ('TOKEN', 'overridden-token')]
+
+    task_obj = task.Task.from_yaml_config(config,
+                                          secrets_overrides=secrets_overrides)
+
+    expected_secrets = {
+        'API_KEY': 'overridden-api-key',
+        'TOKEN': 'overridden-token'
+    }
+    assert task_obj.secrets == expected_secrets
+
+    # Environment variables should be preserved
+    assert task_obj.envs == {'PUBLIC_VAR': 'public-value'}
+
+
+def test_from_yaml_config_null_secrets_without_override_fails():
+    """Test that null secrets without override fail appropriately."""
+    config = {
+        'name': 'test-null-fail',
+        'run': 'echo hello',
+        'secrets': {
+            'API_KEY': None
+        }
+    }
+
+    # Should fail without override
+    with pytest.raises(ValueError, match="Secret variable 'API_KEY' is None"):
+        task.Task.from_yaml_config(config)
+
+
+def test_from_yaml_config_partial_null_secrets_override():
+    """Test partial override of null secrets while preserving non-null ones."""
+    config = {
+        'name': 'test-partial-null',
+        'run': 'echo hello',
+        'secrets': {
+            'YAML_SECRET': 'yaml-value',  # Non-null, should be preserved
+            'NULL_SECRET': None  # Null, should be overridden
+        }
+    }
+
+    secrets_overrides = [('NULL_SECRET', 'cli-override')]
+
+    task_obj = task.Task.from_yaml_config(config,
+                                          secrets_overrides=secrets_overrides)
+
+    expected_secrets = {
+        'YAML_SECRET': 'yaml-value',
+        'NULL_SECRET': 'cli-override'
+    }
+    assert task_obj.secrets == expected_secrets
+
+
+def test_from_yaml_config_override_non_null_secrets():
+    """Test that CLI override can override non-null secrets too."""
+    config = {
+        'name': 'test-override-non-null',
+        'run': 'echo hello',
+        'secrets': {
+            'EXISTING_SECRET': 'original-value'
+        }
+    }
+
+    secrets_overrides = [('EXISTING_SECRET', 'overridden-value')]
+
+    task_obj = task.Task.from_yaml_config(config,
+                                          secrets_overrides=secrets_overrides)
+
+    expected_secrets = {'EXISTING_SECRET': 'overridden-value'}
+    assert task_obj.secrets == expected_secrets
+
+
+def test_from_yaml_config_env_and_secrets_overrides_independent():
+    """Test that env and secrets overrides work independently."""
+    config = {
+        'name': 'test-independent',
+        'run': 'echo hello',
+        'envs': {
+            'ENV_VAR': None  # null env var
+        },
+        'secrets': {
+            'SECRET_VAR': None  # null secret var
+        }
+    }
+
+    env_overrides = [('ENV_VAR', 'env-override')]
+    secrets_overrides = [('SECRET_VAR', 'secret-override')]
+
+    task_obj = task.Task.from_yaml_config(config,
+                                          env_overrides=env_overrides,
+                                          secrets_overrides=secrets_overrides)
+
+    assert task_obj.envs == {'ENV_VAR': 'env-override'}
+    assert task_obj.secrets == {'SECRET_VAR': 'secret-override'}
+
+    # Combined should have both
+    combined = task_obj.envs_and_secrets
+    expected_combined = {
+        'ENV_VAR': 'env-override',
+        'SECRET_VAR': 'secret-override'
+    }
+    assert combined == expected_combined
+
+
+def test_docker_login_config_all_in_envs_or_secrets():
+    """Test Docker login config when all variables are in envs OR all in secrets."""
+    import sky
+    from sky.skylet import constants
+
+    # Test 1: All in envs (should work)
+    task_obj1 = task.Task(name='test-docker-all-envs',
+                          run='echo hello',
+                          envs={
+                              'SKYPILOT_DOCKER_USERNAME': 'myuser',
+                              'SKYPILOT_DOCKER_SERVER': 'registry.example.com',
+                              'SKYPILOT_DOCKER_PASSWORD': 'password'
+                          })
+
+    # Verify Docker config validation passes
+    resources = sky.Resources(image_id='docker:nginx:latest')
+    task_obj1.set_resources(resources)  # Should not raise an error
+
+    # Test 2: All in secrets (should work)
+    task_obj2 = task.Task(name='test-docker-all-secrets',
+                          run='echo hello',
+                          secrets={
+                              'SKYPILOT_DOCKER_USERNAME': 'secretuser',
+                              'SKYPILOT_DOCKER_SERVER': 'secret.registry.com',
+                              'SKYPILOT_DOCKER_PASSWORD': 'secret-password'
+                          })
+
+    task_obj2.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
+
+    # Test 3: Split across envs and secrets should fail
+    with pytest.raises(
+            ValueError,
+            match='Docker login variables must be specified together'):
+        task_obj3 = task.Task(
+            name='test-docker-split',
+            run='echo hello',
+            envs={
+                'SKYPILOT_DOCKER_USERNAME': 'user',
+                'SKYPILOT_DOCKER_SERVER': 'registry.com'
+            },
+            secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
+        task_obj3.set_resources(sky.Resources())
+
+    # Test 4: Missing variables in envs should fail
+    with pytest.raises(
+            ValueError,
+            match='Docker login variables must be specified together'):
+        task_obj4 = task.Task(
+            name='test-docker-missing-envs',
+            run='echo hello',
+            envs={
+                'SKYPILOT_DOCKER_USERNAME': 'user',
+                'SKYPILOT_DOCKER_SERVER': 'registry.com'
+                # Missing SKYPILOT_DOCKER_PASSWORD
+            })
+        task_obj4.set_resources(sky.Resources())
+
+    # Test 5: Missing variables in secrets should fail
+    with pytest.raises(
+            ValueError,
+            match='Docker login variables must be specified together'):
+        task_obj5 = task.Task(
+            name='test-docker-missing-secrets',
+            run='echo hello',
+            secrets={
+                'SKYPILOT_DOCKER_USERNAME': 'user',
+                # Missing SKYPILOT_DOCKER_PASSWORD and SKYPILOT_DOCKER_SERVER
+            })
+        task_obj5.set_resources(sky.Resources())
+
+
+def test_docker_login_config_update_methods():
+    """Test Docker login config validation when using update_envs and update_secrets."""
+    import sky
+
+    # Test 1: Add complete Docker config to envs all at once - should work
+    task_obj = task.Task(name='test-docker-update-envs', run='echo hello')
+
+    # Set resources first (no Docker config yet)
+    task_obj.set_resources(sky.Resources())
+
+    # Add all Docker vars to envs at once - should work
+    task_obj.update_envs({
+        'SKYPILOT_DOCKER_USERNAME': 'user',
+        'SKYPILOT_DOCKER_SERVER': 'registry.com',
+        'SKYPILOT_DOCKER_PASSWORD': 'password'
+    })
+
+    # Verify all variables are present
+    combined = task_obj.envs_and_secrets
+    assert 'SKYPILOT_DOCKER_USERNAME' in combined
+    assert 'SKYPILOT_DOCKER_SERVER' in combined
+    assert 'SKYPILOT_DOCKER_PASSWORD' in combined
+
+    # Test 2: Add complete Docker config to secrets all at once - should work
+    task_obj2 = task.Task(name='test-docker-update-secrets', run='echo hello')
+    task_obj2.set_resources(sky.Resources())
+
+    # Add all Docker vars to secrets at once - should work
+    task_obj2.update_secrets({
+        'SKYPILOT_DOCKER_USERNAME': 'secretuser',
+        'SKYPILOT_DOCKER_SERVER': 'secret.registry.com',
+        'SKYPILOT_DOCKER_PASSWORD': 'secretpassword'
+    })
+
+    # Test 3: Updating incomplete Docker config should fail
+    task_obj3 = task.Task(name='test-incomplete', run='echo hello')
+    task_obj3.set_resources(sky.Resources())
+
+    # Add only some Docker vars - this should fail
+    with pytest.raises(
+            ValueError,
+            match='Docker login variables must be specified together'):
+        task_obj3.update_envs({
+            'SKYPILOT_DOCKER_USERNAME': 'user',
+            'SKYPILOT_DOCKER_SERVER': 'registry.com'
+            # Missing SKYPILOT_DOCKER_PASSWORD
+        })
+
+
+def test_docker_login_config_no_mixed_envs_secrets():
+    """Test that Docker variables cannot be mixed between envs and secrets."""
+    import sky
+
+    # This should fail because Docker variables are split between envs and secrets
+    with pytest.raises(
+            ValueError,
+            match='Docker login variables must be specified together'):
+        task_obj = task.Task(
+            name='test-docker-mixed',
+            run='echo hello',
+            envs={
+                'SKYPILOT_DOCKER_USERNAME': 'env-user',
+                'SKYPILOT_DOCKER_SERVER': 'env-registry.com'
+            },
+            secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
+        task_obj.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
