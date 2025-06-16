@@ -56,6 +56,11 @@ class FluentbitAgent(LoggingAgent):
                     'name': 'tail',
                     'path': f'{constants.SKY_LOGS_DIRECTORY}/*/*.log',
                     'path_key': 'log_path',
+                    # Shorten the refresh interval from 60s to 1s since every
+                    # job creates a new log file and we must be responsive
+                    # for this: the VM might be autodown within a minute
+                    # right after the job completion.
+                    'refresh_Interval': 1,
                 }],
                 'outputs': [self.fluentbit_output_config(cluster_name)],
             }
