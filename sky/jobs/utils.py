@@ -157,9 +157,17 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
         process = psutil.Process(pid)
-        # The last two args of the command line should be --job-id <id>
-        job_args = process.cmdline()[-2:]
-        return process.is_running() and job_args == ['--job-id', str(job_id)]
+        args = process.cmdline()
+        # Possible cases:
+        #   1. Running on jobs controller. The last two args of the command
+        #      line should be --job-id <id>.
+        #   2. Running on API server in consolidation mode. The whole controller
+        #      process will be wrapped by a bash -c, and the last arg will have
+        #      a substring of '--job-id <id>'.
+        # In both cases, if we find the substring '--job-id <id>' in the joined
+        # command line, it means the controller process is running.
+        cmd_str = ' '.join(args)
+        return process.is_running() and f'--job-id {job_id}' in cmd_str
     except psutil.NoSuchProcess:
         return False
 

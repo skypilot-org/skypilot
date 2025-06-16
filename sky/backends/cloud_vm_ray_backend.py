@@ -2207,7 +2207,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
             self,
@@ -2220,7 +2220,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
+            cluster_info: Optional[provision_common.ClusterInfo] = None,
+            is_fake_cluster: bool = False,
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -2240,6 +2241,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.is_fake_cluster = is_fake_cluster
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2255,7 +2257,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user}')
+                f'\n\tssh_user={self.ssh_user},'
+                f'\n\tis_fake_cluster={self.is_fake_cluster})')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2265,6 +2268,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # Directly load the `use_internal_ips` flag from the cluster yaml
         # instead of `skypilot_config` as the latter can be changed after the
         # cluster is UP.
+        if self.is_fake_cluster:
+            return True
         return global_user_state.get_cluster_yaml_dict(self.cluster_yaml).get(
             'provider', {}).get('use_internal_ips', False)
 
@@ -2273,6 +2278,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         Use this method to use any cloud-specific port fetching logic.
         """
+        if self.is_fake_cluster:
+            return
         del max_attempts  # Unused.
         if self.cached_cluster_info is not None:
             self.stable_ssh_ports = self.cached_cluster_info.get_ssh_ports()
@@ -2284,6 +2291,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             (self.num_ips_per_node * self.launched_nodes - 1))
 
     def _update_cluster_info(self):
+        if self.is_fake_cluster:
+            return
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
         if (self.launched_resources.cloud.PROVISIONER_VERSION >=
@@ -2358,6 +2367,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             exceptions.FetchClusterInfoError: if we failed to get the cluster
                 infos. e.reason is HEAD or WORKER.
         """
+        if self.is_fake_cluster:
+            return
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
@@ -2447,6 +2458,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                             avoid_ssh_control: bool = False
                            ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
+        if self.is_fake_cluster:
+            return [command_runner.LocalProcessCommandRunner()]
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
@@ -2693,6 +2706,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+
+        if version < 11:
+            self.is_fake_cluster = False
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')

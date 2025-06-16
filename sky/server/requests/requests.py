@@ -327,6 +327,18 @@ def refresh_cluster_status_event():
         time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+def managed_job_status_refresh_event():
+    """Refresh the managed job status for controller consolidation mode."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import constants as managed_job_constants
+    from sky.skylet import events
+    event = events.ManagedJobEvent()
+    while True:
+        time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+            event.run()
+
+
 @dataclasses.dataclass
 class InternalRequestDaemon:
     id: str
@@ -341,7 +353,10 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
-                          event_fn=refresh_cluster_status_event)
+                          event_fn=refresh_cluster_status_event),
+    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
+                          name='managed-job-status',
+                          event_fn=managed_job_status_refresh_event),
 ]
 
 

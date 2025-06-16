@@ -35,6 +35,7 @@ from sky.adaptors import common as adaptors_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
+from sky.jobs import constants as jobs_constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import command_runner
@@ -2447,6 +2448,15 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    if (jobs_constants.CONSOLIDATE_WITH_API_SERVER and controller == controller_utils.Controllers.JOBS_CONTROLLER):
+        return backends.CloudVmRayResourceHandle(
+            cluster_name = jobs_constants.CONSOLIDATION_CLUSTER_NAME,
+            cluster_name_on_cloud=jobs_constants.CONSOLIDATION_CLUSTER_NAME,
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=sky.Resources(cloud=clouds.Cloud(), instance_type='fake-cluster'),
+            is_fake_cluster=True,
+        )
     if non_existent_message is None:
         non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name
