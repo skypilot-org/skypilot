@@ -272,7 +272,8 @@ class TestJobsOperations:
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
-        assert isinstance(result.exception, exceptions.NotSupportedError)
+        assert isinstance(result.exception, exceptions.NotSupportedError), (
+            result.exception, result.output, result.exc_info)
 
         result = cli_runner.invoke(cli.down, ['sky-jobs-con*'])
         assert not result.exception
