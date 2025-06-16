@@ -62,6 +62,8 @@ def bootstrap_instances(
                                            config.provider_config)
         _configure_autoscaler_cluster_role_binding(namespace, context,
                                                    config.provider_config)
+
+        _configure_priority_class(namespace, context, config.provider_config)
         # SkyPilot system namespace is required for FUSE mounting. Here we just
         # create the namespace and set up the necessary permissions.
         #
@@ -485,6 +487,49 @@ def _configure_autoscaler_cluster_role_binding(
     kubernetes.auth_api(context).create_cluster_role_binding(binding)
     logger.info('_configure_autoscaler_cluster_role_binding: '
                 f'{created_msg(binding_field, name)}')
+
+
+def _configure_priority_class(namespace, context,
+                              provider_config: Dict[str, Any]) -> None:
+    priority_class_field = 'priority'
+    if priority_class_field not in provider_config:
+        # Priority class is optional, so we only log a debug message.
+        logger.debug('_configure_priority_class: '
+                     f'{not_provided_msg(priority_class_field)}')
+        return
+
+    priority_class = provider_config[priority_class_field]
+    if 'namespace' not in priority_class['metadata']:
+        priority_class['metadata']['namespace'] = namespace
+    elif priority_class['metadata']['namespace'] != namespace:
+        raise InvalidNamespaceError(priority_class_field, namespace)
+
+    name = priority_class['metadata']['name']
+    field_selector = f'metadata.name={name}'
+    priority_classes = (
+        kubernetes.core_api(context).list_namespaced_priority_class(
+            namespace, field_selector=field_selector).items)
+    if priority_classes:
+        assert len(priority_classes) == 1
+        existing_priority_class = priority_classes[0]
+        new_priority_class = kubernetes_utils.dict_to_k8s_object(
+            priority_class, 'V1PriorityClass')
+        if new_priority_class.value == existing_priority_class.value:
+            logger.debug('_configure_priority_class: '
+                         f'{using_existing_msg(priority_class_field, name)}')
+            return
+        logger.info('_configure_priority_class: '
+                    f'{updating_existing_msg(priority_class_field, name)}')
+        kubernetes.core_api(context).patch_namespaced_priority_class(
+            name, namespace, priority_class)
+        return
+
+    logger.debug('_configure_priority_class: '
+                 f'{not_found_msg(priority_class_field, name)}')
+    kubernetes.core_api(context).create_namespaced_priority_class(
+        namespace, priority_class)
+    logger.debug('_configure_priority_class: '
+                 f'{created_msg(priority_class_field, name)}')
 
 
 def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):

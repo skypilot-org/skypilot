@@ -210,7 +210,7 @@ provider:
         apiVersion: v1
         kind: PriorityClass
         metadata:
-          name: {{cluster_name_on_cloud}}-priority
+          name: skypilot-priority-{{priority}}
         value: {{priority}}
     {% endif %}
 
@@ -297,7 +297,7 @@ available_node_types:
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
         {% if priority is not none %}
-        priorityClassName: {{cluster_name_on_cloud}}-priority
+        priorityClassName: skypilot-priority-{{priority}}
         {% endif %}
 
         # Add node selector if GPU/TPUs are requested:
