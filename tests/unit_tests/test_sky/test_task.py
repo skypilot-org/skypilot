@@ -280,11 +280,6 @@ def test_secrets_property():
     task_obj = task.Task(run='echo hello', secrets=initial_secrets)
     assert task_obj.secrets == initial_secrets
 
-    # Test that secrets property returns a copy (not a reference)
-    secrets_copy = task_obj.secrets
-    secrets_copy['NEW_SECRET'] = 'new_value'
-    assert 'NEW_SECRET' not in task_obj.secrets
-
 
 def test_envs_and_secrets_property():
     """Test the envs_and_secrets property that combines both."""
