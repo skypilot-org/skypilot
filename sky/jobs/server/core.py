@@ -274,9 +274,11 @@ def launch(
                 if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
                     runner = command_runner.LocalProcessCommandRunner()
                     if controller_task.file_mounts is not None:
-                        for tar, src in controller_task.file_mounts.items():
-                            logger.debug(f'Syncing file mounts: {src} -> {tar}')
-                            runner.rsync(src, tar, up=True, stream_logs=False)
+                        backend = backends.CloudVmRayBackend()
+                        backend.sync_file_mounts(
+                            handle=None,
+                            all_file_mounts=controller_task.file_mounts,
+                            storage_mounts=controller_task.storage_mounts)
                     assert isinstance(controller_task.run, str)
                     runner.run(controller_task.run)
                     # TODO(tian): Fix this.

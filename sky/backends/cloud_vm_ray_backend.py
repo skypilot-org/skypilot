@@ -43,6 +43,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.jobs import constants as jobs_constants
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -3266,7 +3267,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _sync_file_mounts(
         self,
-        handle: CloudVmRayResourceHandle,
+        handle: Optional[CloudVmRayResourceHandle],
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
@@ -3278,14 +3279,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
-        launched_resources = handle.launched_resources.assert_launchable()
+        if handle is not None:
+            launched_resources = handle.launched_resources.assert_launchable()
+            controller_launched_cloud = launched_resources.cloud
+            cluster_name = handle.cluster_name
+        else:
+            controller_launched_cloud = None
+            cluster_name = jobs_constants.CONSOLIDATION_CLUSTER_NAME
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
-                launched_resources.cloud, all_file_mounts)
+                controller_launched_cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
             self._execute_storage_mounts(handle, storage_mounts)
-            self._set_storage_mounts_metadata(handle.cluster_name,
-                                              storage_mounts)
+            self._set_storage_mounts_metadata(cluster_name, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -4882,7 +4888,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_cluster_ever_up=False,
             prev_config_hash=prev_config_hash)
 
-    def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
+    def _execute_file_mounts(self, handle: Optional[CloudVmRayResourceHandle],
                              file_mounts: Optional[Dict[Path, Path]]):
         """Executes file mounts.
 
@@ -4897,10 +4903,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         start = time.time()
-        runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
+        if handle is not None:
+            runners = handle.get_command_runners()
+            handle_cloud = str(handle.launched_resources.cloud)
+        else:
+            runners = [command_runner.LocalProcessCommandRunner()]
+            handle_cloud = None
         num_threads = subprocess_utils.get_max_workers_for_file_mounts(
-            file_mounts, str(handle.launched_resources.cloud))
+            file_mounts, handle_cloud)
 
         # Check the files and warn
         for dst, src in file_mounts.items():
@@ -5026,7 +5037,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(ux_utils.finishing_message('Synced file_mounts.', log_path))
 
     def _execute_storage_mounts(
-            self, handle: CloudVmRayResourceHandle,
+            self, handle: Optional[CloudVmRayResourceHandle],
             storage_mounts: Optional[Dict[Path, storage_lib.Storage]]):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Handle cases where `storage_mounts` is None. This occurs when users
@@ -5049,10 +5060,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if not storage_mounts:
             return
         start = time.time()
-        runners = handle.get_command_runners()
-        num_threads = subprocess_utils.get_parallel_threads(
-            str(handle.launched_resources.cloud))
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
+        if handle is not None:
+            runners = handle.get_command_runners()
+            handle_cloud = str(handle.launched_resources.cloud)
+            cluster_name = handle.cluster_name
+        else:
+            runners = [command_runner.LocalProcessCommandRunner()]
+            handle_cloud = None
+            cluster_name = jobs_constants.CONSOLIDATION_CLUSTER_NAME
+        num_threads = subprocess_utils.get_parallel_threads(handle_cloud)
 
         plural = 's' if len(storage_mounts) > 1 else ''
         rich_utils.force_update_status(
@@ -5069,7 +5086,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageExternalDeletionError(
                         f'The bucket, {storage_obj.name!r}, could not be '
-                        f'mounted on cluster {handle.cluster_name!r}. Please '
+                        f'mounted on cluster {cluster_name!r}. Please '
                         'verify that the bucket exists. The cluster started '
                         'successfully without mounting the bucket.')
             # Get the first store and use it to mount
