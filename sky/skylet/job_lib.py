@@ -343,7 +343,7 @@ def make_job_command_with_user_switching(username: str,
 
 @init_db
 def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str, metadata: str) -> int:
+            resources_str: str, metadata: str = '{}') -> int:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
@@ -1041,8 +1041,8 @@ class JobLibCodeGen:
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r},'
-            f'{metadata!r})',
-            'print("Job ID: " + str(job_id), flush=True)',
+            f'metadata={metadata!r})',
+            '\nprint("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)
 
