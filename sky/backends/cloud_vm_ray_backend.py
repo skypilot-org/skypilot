@@ -3940,7 +3940,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return returncode
 
     def tail_managed_job_logs(self,
-                              handle: CloudVmRayResourceHandle,
+                              handle: Optional[CloudVmRayResourceHandle],
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
                               controller: bool = False,
@@ -3957,22 +3957,31 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
-        # Refer to the notes in tail_logs.
-        try:
-            returncode = self.run_on_head(
-                handle,
+        if handle is None:
+            runner = command_runner.LocalProcessCommandRunner()
+            returncode = runner.run(
                 code,
                 stream_logs=True,
                 process_stream=False,
-                ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
-        except SystemExit as e:
-            returncode = e.code
+        else:
+            # Refer to the notes in tail_logs.
+            try:
+                returncode = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=True,
+                    process_stream=False,
+                    ssh_mode=command_runner.SshMode.INTERACTIVE,
+                )
+            except SystemExit as e:
+                assert isinstance(e.code, int)
+                returncode = e.code
         return returncode
 
     def sync_down_managed_job_logs(
             self,
-            handle: CloudVmRayResourceHandle,
+            handle: Optional[CloudVmRayResourceHandle],
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
             controller: bool = False,
@@ -3991,6 +4000,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # if job_name and job_id should not both be specified
         assert job_name is None or job_id is None, (job_name, job_id)
+        local_runner = None
+        if handle is None:
+            local_runner = command_runner.LocalProcessCommandRunner()
 
         if job_id is None:
             # generate code to get the job_id
@@ -3998,15 +4010,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # TODO: Only get the latest job_id, since that's the only one we use
             code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
                 job_name=job_name)
-            returncode, job_ids, stderr = self.run_on_head(handle,
-                                                           code,
-                                                           stream_logs=False,
-                                                           require_outputs=True,
-                                                           separate_stderr=True)
+            if local_runner is not None:
+                returncode, job_ids_payload, stderr = local_runner.run(
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+            else:
+                returncode, job_ids_payload, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-            job_ids = message_utils.decode_payload(job_ids)
+            job_ids = message_utils.decode_payload(job_ids_payload)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -4029,16 +4049,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # the function takes in [job_id]
         code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(
             [str(job_id)])
-        returncode, run_timestamps, stderr = self.run_on_head(
-            handle,
-            code,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
+        if local_runner is not None:
+            returncode, run_timestamps_payload, stderr = local_runner.run(
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+        else:
+            returncode, run_timestamps_payload, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
         # returns with a dict of {job_id: run_timestamp}
-        run_timestamps = message_utils.decode_payload(run_timestamps)
+        run_timestamps = message_utils.decode_payload(run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4059,7 +4086,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          f'Job {job_id} local logs: {local_log_dir}'
                          f'{colorama.Style.RESET_ALL}')
 
-            runners = handle.get_command_runners()
+            if local_runner is not None:
+                runners = [local_runner]
+            else:
+                assert handle is not None
+                runners = handle.get_command_runners()
 
             def _rsync_down(args) -> None:
                 """Rsync down logs from remote nodes.
@@ -4108,16 +4139,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
                 signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
-            # We redirect the output to the log file
-            # and disable the STDOUT and STDERR
-            self.run_on_head(
-                handle,
-                code,
-                log_path=os.path.expanduser(log_file),
-                stream_logs=False,
-                process_stream=False,
-                ssh_mode=command_runner.SshMode.INTERACTIVE,
-            )
+            if local_runner is not None:
+                local_runner.run(code,
+                                 log_path=os.path.expanduser(log_file),
+                                 stream_logs=False,
+                                 require_outputs=False)
+            else:
+                # We redirect the output to the log file
+                # and disable the STDOUT and STDERR
+                self.run_on_head(
+                    handle,
+                    code,
+                    log_path=os.path.expanduser(log_file),
+                    stream_logs=False,
+                    process_stream=False,
+                    ssh_mode=command_runner.SshMode.INTERACTIVE,
+                )
 
         logger.debug(f'{colorama.Fore.CYAN}'
                      f'Job {job_id} logs: {local_log_dir}'

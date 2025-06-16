@@ -20,11 +20,13 @@ from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -177,10 +179,15 @@ def launch(
                         task_))
 
     # Has to use `\` to avoid yapf issue.
-    with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as f, \
-         tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
-                                     mode='w') as original_user_yaml_path:
+    with tempfile.NamedTemporaryFile(
+            prefix=f'managed-dag-{dag.name}-',
+            mode='w',
+            delete=not managed_job_constants.CONSOLIDATE_WITH_API_SERVER
+    ) as f, tempfile.NamedTemporaryFile(
+            prefix=f'managed-user-dag-{dag.name}-',
+            mode='w',
+            delete=not managed_job_constants.CONSOLIDATE_WITH_API_SERVER
+    ) as original_user_yaml_path:
         original_user_yaml_path.write(user_dag_str)
         original_user_yaml_path.flush()
 
@@ -197,7 +204,9 @@ def launch(
             controller=controller,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-        vars_to_fill = {
+        config_use_local_path = (
+            managed_job_constants.CONSOLIDATE_WITH_API_SERVER)
+        vars_to_fill: Dict[str, Any] = {
             'remote_original_user_yaml_path': remote_original_user_yaml_path,
             'original_user_dag_path': original_user_yaml_path.name,
             'remote_user_yaml_path': remote_user_yaml_path,
@@ -218,7 +227,7 @@ def launch(
                 # afterwards without recreate the controller. Need to
                 # revisit this.
                 local_user_config=mutated_user_config,
-            ),
+                config_use_local_path=config_use_local_path),
         }
 
         yaml_path = os.path.join(
@@ -237,6 +246,19 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
+        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+            set_job_info_kwargs = {
+                'workspace': skypilot_config.get_active_workspace(
+                    force_user_workspace=True),
+                'entrypoint': 'whoami dummy'
+            }
+            job_id = managed_job_state.set_job_info_without_job_id(
+                dag.name, **set_job_info_kwargs)
+            for task_id, task in enumerate(dag.tasks):
+                resources_str = backend_utils.get_task_resources_str(
+                    task, is_managed_job=True)
+                managed_job_state.set_pending(job_id, task_id, task.name,
+                                              resources_str)
 
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
@@ -249,6 +271,22 @@ def launch(
                 # workspace A, but the controller is in workspace B, the
                 # intermediate bucket and newly created bucket should be in
                 # workspace A.
+                if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+                    runner = command_runner.LocalProcessCommandRunner()
+                    envs = vars_to_fill['controller_envs']
+                    os.makedirs(os.path.dirname(
+                        os.path.expanduser(remote_env_file_path)),
+                                exist_ok=True)
+                    for k, v in envs.items():
+                        runner.run(
+                            f'echo "export {k}={v}" >> {remote_env_file_path}')
+                    runner.run(
+                        f'python -u -m sky.jobs.scheduler {f.name} '
+                        f'--user-yaml-path {original_user_yaml_path.name} '
+                        f'--job-id {job_id} '
+                        f'--env-file {remote_env_file_path} '
+                        f'--priority {priority}')
+                    return None, None
                 return execution.launch(task=controller_task,
                                         cluster_name=controller_name,
                                         stream_logs=stream_logs,
@@ -403,21 +441,27 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    handle = _maybe_restart_controller(refresh,
-                                       stopped_message='No in-progress '
-                                       'managed jobs.',
-                                       spinner_message='Checking '
-                                       'managed jobs')
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
     code = managed_job_utils.ManagedJobCodeGen.get_job_table()
-    returncode, job_table_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
+    if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+        runner = command_runner.LocalProcessCommandRunner()
+        returncode, job_table_payload, stderr = runner.run(code,
+                                                           require_outputs=True,
+                                                           separate_stderr=True,
+                                                           stream_logs=False)
+    else:
+        handle = _maybe_restart_controller(refresh,
+                                           stopped_message='No in-progress '
+                                           'managed jobs.',
+                                           spinner_message='Checking '
+                                           'managed jobs')
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        returncode, job_table_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
 
     if returncode != 0:
         logger.error(job_table_payload + stderr)
@@ -478,9 +522,6 @@ def cancel(name: Optional[str] = None,
     with rich_utils.safe_status(
             ux_utils.spinner_message('Cancelling managed jobs')):
         job_ids = [] if job_ids is None else job_ids
-        handle = backend_utils.is_controller_accessible(
-            controller=controller_utils.Controllers.JOBS_CONTROLLER,
-            stopped_message='All managed jobs should have finished.')
 
         job_id_str = ','.join(map(str, job_ids))
         if sum([bool(job_ids), name is not None, all or all_users]) != 1:
@@ -494,8 +535,6 @@ def cancel(name: Optional[str] = None,
                     'Can only specify one of JOB_IDS, name, or all/'
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
         if all_users:
             code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
                 None, all_users=True)
@@ -507,11 +546,20 @@ def cancel(name: Optional[str] = None,
         else:
             assert name is not None, (job_ids, name, all)
             code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
-        # The stderr is redirected to stdout
-        returncode, stdout, stderr = backend.run_on_head(handle,
-                                                         code,
-                                                         require_outputs=True,
-                                                         stream_logs=False)
+        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+            runner = command_runner.LocalProcessCommandRunner()
+            returncode, stdout, stderr = runner.run(code,
+                                                    require_outputs=True,
+                                                    stream_logs=False)
+        else:
+            handle = backend_utils.is_controller_accessible(
+                controller=controller_utils.Controllers.JOBS_CONTROLLER,
+                stopped_message='All managed jobs should have finished.')
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            # The stderr is redirected to stdout
+            returncode, stdout, stderr = backend.run_on_head(
+                handle, code, require_outputs=True, stream_logs=False)
         try:
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to cancel managed job',
@@ -561,15 +609,19 @@ def tail_logs(name: Optional[str],
         job_name_or_id_str = f'-n {name}'
     else:
         job_name_or_id_str = ''
-    handle = _maybe_restart_controller(
-        refresh,
-        stopped_message=(
-            f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
-            f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
-            f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
-        spinner_message='Retrieving job logs')
+    if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+        handle = None
+        backend = backends.CloudVmRayBackend()
+    else:
+        handle = _maybe_restart_controller(
+            refresh,
+            stopped_message=(
+                f'{jobs_controller_type.value.name.capitalize()} is stopped. '
+                f'To get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
+                f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
+            spinner_message='Retrieving job logs')
 
-    backend = backend_utils.get_backend_from_handle(handle)
+        backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
     return backend.tail_managed_job_logs(handle,
@@ -610,15 +662,19 @@ def download_logs(
         job_name_or_id_str = f'-n {name}'
     else:
         job_name_or_id_str = ''
-    handle = _maybe_restart_controller(
-        refresh,
-        stopped_message=(
-            f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
-            f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
-            f'-r --sync-down {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
-        spinner_message='Retrieving job logs')
-
-    backend = backend_utils.get_backend_from_handle(handle)
+    if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+        handle = None
+        backend = backends.CloudVmRayBackend()
+    else:
+        handle = _maybe_restart_controller(
+            refresh,
+            stopped_message=(
+                f'{jobs_controller_type.value.name.capitalize()} is stopped. '
+                f'To get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
+                f'-r --sync-down {job_name_or_id_str}{colorama.Style.RESET_ALL}'
+            ),
+            spinner_message='Retrieving job logs')
+        backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
     return backend.sync_down_managed_job_logs(handle,
