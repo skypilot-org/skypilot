@@ -180,15 +180,10 @@ def launch(
                         task_))
 
     # Has to use `\` to avoid yapf issue.
-    with tempfile.NamedTemporaryFile(
-            prefix=f'managed-dag-{dag.name}-',
-            mode='w',
-            delete=not managed_job_constants.CONSOLIDATE_WITH_API_SERVER
-    ) as f, tempfile.NamedTemporaryFile(
-            prefix=f'managed-user-dag-{dag.name}-',
-            mode='w',
-            delete=not managed_job_constants.CONSOLIDATE_WITH_API_SERVER
-    ) as original_user_yaml_path:
+    with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
+                                     mode='w') as f, \
+         tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
+                                     mode='w') as original_user_yaml_path:
         original_user_yaml_path.write(user_dag_str)
         original_user_yaml_path.flush()
 
