@@ -141,7 +141,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 26
+    _VERSION = 27
 
     def __init__(
         self,
@@ -164,6 +164,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
+        priority: Optional[int] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
@@ -257,6 +258,9 @@ class Resources:
             not supported and will be ignored.
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
+          priority: the priority for this resource configuration. Must be an
+            integer from 0 to 1000, where higher values indicate higher priority.
+            If None, no priority is set.
           volumes: the volumes to mount on the instance.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
@@ -393,10 +397,14 @@ class Resources:
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
 
+        # Initialize _priority before calling the setter
+        self._priority: Optional[int] = None
+
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
         self._set_autostop_config(autostop)
+        self._set_priority(priority)
         self._set_volumes(volumes)
 
     def validate(self):
@@ -654,6 +662,14 @@ class Resources:
         return self._autostop_config
 
     @property
+    def priority(self) -> Optional[int]:
+        """The priority for this resource configuration.
+
+        Higher values indicate higher priority. Valid range is 0-1000.
+        """
+        return self._priority
+
+    @property
     def is_image_managed(self) -> Optional[bool]:
         return self._is_image_managed
 
@@ -837,6 +853,20 @@ class Resources:
         autostop: Union[bool, int, str, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+    def _set_priority(self, priority: Optional[int]) -> None:
+        """Sets the priority for this resource configuration.
+
+        Args:
+            priority: Priority value from 0 to 1000, where higher values
+                indicate higher priority. If None, no priority is set.
+        """
+        if priority is not None:
+            if not 0 <= priority <= 1000:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Priority must be between 0 and 1000. '
+                                     f'Found: {priority}')
+        self._priority = priority
 
     def _set_volumes(
         self,
@@ -1755,6 +1785,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            priority=override.pop('priority', self.priority),
             volumes=override.pop('volumes', self.volumes),
             infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
@@ -1975,6 +2006,7 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['priority'] = config.pop('priority', None)
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
@@ -2047,6 +2079,7 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        add_if_not_none('priority', self.priority)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -2214,6 +2247,9 @@ class Resources:
 
         if version < 26:
             self._network_tier = state.get('_network_tier', None)
+
+        if version < 27:
+            self._priority = None
 
         self.__dict__.update(state)
 

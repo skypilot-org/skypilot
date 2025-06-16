@@ -868,3 +868,193 @@ def test_autostop_time_format():
     # Test invalid format
     with pytest.raises(ValueError):
         Resources(autostop='invalid')
+
+
+def test_priority_basic():
+    """Test basic priority field functionality."""
+    # Test with no priority specified (defaults to None)
+    r = Resources()
+    assert r.priority is None
+
+    # Test with valid priority values
+    r = Resources(priority=0)
+    assert r.priority == 0
+
+    r = Resources(priority=500)
+    assert r.priority == 500
+
+    r = Resources(priority=1000)
+    assert r.priority == 1000
+
+    # Test with None explicitly
+    r = Resources(priority=None)
+    assert r.priority is None
+
+
+def test_priority_validation():
+    """Test priority field validation with invalid values."""
+    # Test invalid priority - below range
+    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
+        Resources(priority=-1)
+
+    # Test invalid priority - above range
+    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
+        Resources(priority=1001)
+
+
+def test_priority_yaml_serialization():
+    """Test priority YAML serialization and deserialization."""
+    # Test priority serialization
+    r = Resources(priority=750)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['priority'] == 750
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.priority == 750
+
+    # Test None priority (should not appear in yaml)
+    r = Resources(priority=None)
+    yaml_config = r.to_yaml_config()
+    assert 'priority' not in yaml_config
+
+    # Test priority with other fields
+    r = Resources(cpus=4, memory='8', priority=200)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['priority'] == 200
+    assert yaml_config['cpus'] == '4'
+    assert yaml_config['memory'] == '8'
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.priority == 200
+    assert loaded_resources.cpus == '4'
+    assert loaded_resources.memory == '8'
+
+
+def test_priority_copy():
+    """Test priority preservation in copy operations."""
+    r = Resources(priority=300, cpus=4)
+    r_copy = r.copy()
+    assert r_copy.priority == 300
+
+    # Test overriding priority in copy
+    r_override = r.copy(priority=600)
+    assert r_override.priority == 600
+    assert r_override.cpus == '4'  # Other properties preserved
+
+    # Test copying with None priority
+    r_none = Resources(priority=None, cpus=2)
+    r_copy = r_none.copy()
+    assert r_copy.priority is None
+
+    # Test overriding None priority in copy
+    r_override = r_none.copy(priority=100)
+    assert r_override.priority == 100
+    assert r_override.cpus == '2'
+
+
+def test_priority_with_any_of():
+    """Test priority field works with any_of configuration."""
+    config = {
+        'priority': 500,  # Base priority
+        'any_of': [
+            {
+                'cpus': 8,
+                'memory': 16
+            },
+            {
+                'cpus': 4,
+                'memory': 32,
+                'priority': 800  # Override priority
+            },
+        ]
+    }
+    resources_set = Resources.from_yaml_config(config)
+
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 2
+
+    resources_list = list(resources_set)
+
+    # Find resources by properties
+    r_cpus8 = next((r for r in resources_list if r.cpus == '8'), None)
+    r_cpus4 = next((r for r in resources_list if r.cpus == '4'), None)
+
+    assert r_cpus8 is not None
+    assert r_cpus8.priority == 500  # Base priority
+
+    assert r_cpus4 is not None
+    assert r_cpus4.priority == 800  # Override priority
+
+
+def test_priority_with_ordered():
+    """Test priority field works with ordered configuration."""
+    config = {
+        'priority': 300,  # Base priority
+        'ordered': [
+            {
+                'infra': 'gcp',
+                'accelerators': 'A100:8'
+            },
+            {
+                'infra': 'aws',
+                'accelerators': 'V100:8',
+                'priority': 700  # Override priority
+            },
+        ]
+    }
+    resources_list = Resources.from_yaml_config(config)
+
+    assert isinstance(resources_list, list)
+    assert len(resources_list) == 2
+
+    # Ordered resources should preserve order
+    assert resources_list[0].infra.cloud.lower() == 'gcp'
+    assert resources_list[0].priority == 300  # Base priority
+
+    assert resources_list[1].infra.cloud.lower() == 'aws'
+    assert resources_list[1].priority == 700  # Override priority
+
+
+@pytest.mark.parametrize(['resources_kwargs', 'expected_yaml_config'], [
+    ({
+        'infra': 'aws/us-east-1',
+        'accelerators': 'A10',
+        'priority': 400
+    }, {
+        'infra': 'aws/us-east-1',
+        'accelerators': {
+            'A10': 1
+        },
+        'priority': 400,
+        'disk_size': 256,
+    }),
+    ({
+        'cpus': 4,
+        'memory': '8+',
+        'priority': 0
+    }, {
+        'cpus': '4',
+        'memory': '8+',
+        'priority': 0,
+        'disk_size': 256,
+    }),
+    ({
+        'cpus': 2,
+        'priority': 1000
+    }, {
+        'cpus': '2',
+        'priority': 1000,
+        'disk_size': 256,
+    }),
+])
+def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):
+    """Test priority field in to_yaml_config and from_yaml_config."""
+    r = Resources(**resources_kwargs)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config == expected_yaml_config
+
+    loaded_r = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_r.priority == r.priority
+    assert loaded_r.cpus == r.cpus
+    if 'accelerators' in expected_yaml_config:
+        assert loaded_r.accelerators == r.accelerators
