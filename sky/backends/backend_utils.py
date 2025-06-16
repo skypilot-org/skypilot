@@ -664,8 +664,6 @@ def write_cluster_config(
     logging_agent = logs.get_logging_agent()
     if logging_agent:
         for k, v in logging_agent.get_credential_file_mounts().items():
-            # Remote path of the logging credentials should always be private,
-            # i.e. no collision with other credentials.
             assert k not in credentials, f'{k} already in credentials'
             credentials[k] = v
 

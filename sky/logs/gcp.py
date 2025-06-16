@@ -1,17 +1,12 @@
 """GCP logging agent."""
 
-import os
 from typing import Any, Dict, Optional
 
 import pydantic
 
 from sky.clouds import gcp
 from sky.logs.agent import FluentbitAgent
-from sky.skylet import constants
 from sky.utils import resources_utils
-
-_logging_credentials_path = os.path.join(constants.LOGGING_CONFIG_DIR,
-                                         'gcp-credentials.json')
 
 
 class _GCPLoggingConfig(pydantic.BaseModel):
@@ -50,7 +45,7 @@ class GCPLoggingAgent(FluentbitAgent):
                           cluster_name: resources_utils.ClusterName) -> str:
         credential_path = gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
         if self.config.credentials_file:
-            credential_path = _logging_credentials_path
+            credential_path = self.config.credentials_file
         # Set GOOGLE_APPLICATION_CREDENTIALS and check whether credentials
         # is valid.
         # Stackdriver only support service account credentials or credentials
@@ -92,5 +87,5 @@ class GCPLoggingAgent(FluentbitAgent):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if self.config.credentials_file:
-            return {_logging_credentials_path: self.config.credentials_file}
+            return {self.config.credentials_file: self.config.credentials_file}
         return {}
