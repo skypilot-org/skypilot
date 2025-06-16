@@ -42,27 +42,28 @@ from sky.utils import subprocess_utils
 
 @pytest.fixture(autouse=True, scope='module')
 def patch_socket_endpoint():
-    """Patch SocketEndpoint.url to handle localhost in Buildkite environment.
+    """Patch SocketEndpoint.url and HTTPEndpoint.url to handle localhost in Buildkite environment.
 
     This fixture automatically applies to all tests in this module only.
-    It patches the SocketEndpoint.url method to replace localhost/127.0.0.1
+    It patches the endpoint url methods to replace localhost/127.0.0.1
     with host.docker.internal when running in Buildkite environment.
     """
-    if not os.environ.get('BUILDKITE'):
-        # If not in Buildkite, don't patch anything
-        yield
-        return
+    original_socket_url = common.SocketEndpoint.url
+    original_http_url = common.HTTPEndpoint.url
 
-    original_url = common.SocketEndpoint.url
+    def patch_url(original_method):
 
-    def patched_url(self, *args, **kwargs):
-        url = original_url(self, *args, **kwargs)
-        for localhost in ['localhost:', '127.0.0.1:']:
-            if localhost in url:
-                return url.replace(localhost, 'host.docker.internal:')
-        return url
+        def wrapper(self, *args, **kwargs):
+            url = original_method(self, *args, **kwargs)
+            for localhost in ['localhost:', '127.0.0.1:']:
+                if localhost in url:
+                    return url.replace(localhost, 'host.docker.internal:')
+            return url
 
-    with mock.patch.object(common.SocketEndpoint, 'url', patched_url):
+        return wrapper
+
+    with mock.patch.object(common.SocketEndpoint, 'url', patch_url(original_socket_url)), \
+         mock.patch.object(common.HTTPEndpoint, 'url', patch_url(original_http_url)):
         yield
 
 
