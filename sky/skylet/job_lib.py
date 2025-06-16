@@ -342,8 +342,11 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str, metadata: str = '{}') -> int:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> int:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
