@@ -262,7 +262,7 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 
 def contextual(func: F) -> F:
-    """Decorator to intiailize a context before executing the function.
+    """Decorator to initialize a context before executing the function.
 
     If a context is already initialized, this decorator will reset the context,
     i.e. all contextual variables set previously will be cleared.

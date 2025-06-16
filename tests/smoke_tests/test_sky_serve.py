@@ -1130,7 +1130,7 @@ def test_skyserve_ha_kill_after_ready():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
             # Kill controller and verify recovery
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Verify service remains accessible after controller recovery
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1164,7 +1164,7 @@ def test_skyserve_ha_kill_during_provision():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during provisioning
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Verify service eventually becomes ready
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1200,7 +1200,7 @@ def test_skyserve_ha_kill_during_pending():
             f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
             _check_replica_in_status(name, [(1, False, 'PENDING')]),
             # Kill controller during pending
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Verify service eventually becomes ready and accessible
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1250,7 +1250,7 @@ def test_skyserve_ha_kill_during_shutdown():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during shutdown
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Even after the pod ready, `serve status` may return `Failed to connect to serve controller, please try again later.`
             # So we need to wait for a while before checking the status again.
             'sleep 10',
@@ -1268,16 +1268,3 @@ def test_skyserve_ha_kill_during_shutdown():
             skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
         })
     smoke_tests_utils.run_one_test(test)
-
-
-def _kill_and_wait_controller() -> str:
-    """Kill the controller pod and wait for a new one to be ready."""
-    return (
-        'initial_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}"); '
-        'echo "Killing controller pod: $initial_controller_pod"; '
-        'kubectl delete pod $initial_controller_pod; '
-        'until new_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}") && '
-        '[ "$new_controller_pod" != "$initial_controller_pod" ] && kubectl get pod $new_controller_pod | grep "1/1"; do '
-        '  echo "Waiting for new controller pod..."; sleep 5; '
-        'done; '
-        'echo "New controller pod ready: $new_controller_pod"')

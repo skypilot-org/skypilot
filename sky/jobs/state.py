@@ -352,6 +352,16 @@ class ManagedJobStatus(enum.Enum):
             cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
         ]
 
+    @classmethod
+    def processing_statuses(cls) -> List['ManagedJobStatus']:
+        # Any status that is not terminal and is not CANCELLING.
+        return [
+            cls.PENDING,
+            cls.STARTING,
+            cls.RUNNING,
+            cls.RECOVERING,
+        ]
+
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
@@ -607,21 +617,49 @@ def set_started(job_id: int, task_id: int, start_time: float,
 
 
 @_init_db
-def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
+def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
+                   callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
     assert _DB_PATH is not None
     logger.info('=== Recovering... ===')
+    expected_status: List[str] = [ManagedJobStatus.RUNNING.value]
+    status_str = 'status=(?)'
+    if force_transit_to_recovering:
+        # For the HA job controller, it is possible that the jobs came from any
+        # processing status to recovering. But it should not be any terminal
+        # status as such jobs will not be recovered; and it should not be
+        # CANCELLING as we will directly trigger a cleanup.
+        expected_status = [
+            s.value for s in ManagedJobStatus.processing_statuses()
+        ]
+        question_mark_str = ', '.join(['?'] * len(expected_status))
+        status_str = f'status IN ({question_mark_str})'
+    # NOTE: if we are resuming from a controller failure and the previous status
+    # is STARTING, the initial value of `last_recovered_at` might not be set
+    # yet (default value -1). In this case, we should not add current timestamp.
+    # Otherwise, the job duration will be incorrect (~55 years from 1970).
+    current_time = time.time()
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
-            """\
+            f"""\
                 UPDATE spot SET
-                status=(?), job_duration=job_duration+(?)-last_recovered_at
+                status=(?),
+                job_duration=CASE
+                    WHEN last_recovered_at >= 0
+                    THEN job_duration+(?)-last_recovered_at
+                    ELSE job_duration
+                END,
+                last_recovered_at=CASE
+                    WHEN last_recovered_at < 0
+                    THEN (?)
+                    ELSE last_recovered_at
+                END
                 WHERE spot_job_id=(?) AND
                 task_id=(?) AND
-                status=(?) AND
+                {status_str} AND
                 end_at IS null""",
-            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id,
-             ManagedJobStatus.RUNNING.value))
+            (ManagedJobStatus.RECOVERING.value, current_time, current_time,
+             job_id, task_id, *expected_status))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
@@ -996,6 +1034,19 @@ def _get_all_task_ids_statuses(
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
+@_init_db
+def get_job_status_with_task_id(job_id: int,
+                                task_id: int) -> Optional[ManagedJobStatus]:
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        status = cursor.execute(
+            """\
+            SELECT status FROM spot
+            WHERE spot_job_id=(?) AND task_id=(?)""",
+            (job_id, task_id)).fetchone()
+        return ManagedJobStatus(status[0]) if status else None
+
+
 def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
@@ -1156,8 +1207,15 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 @_init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
                           original_user_yaml_path: str, env_file_path: str,
-                          user_hash: str, priority: int) -> None:
-    """Do not call without holding the scheduler lock."""
+                          user_hash: str, priority: int) -> bool:
+    """Do not call without holding the scheduler lock.
+
+    Returns: Whether this is a recovery run or not.
+        If this is a recovery run, the job may already be in the WAITING
+        state and the update will not change the schedule_state (hence the
+        updated_count will be 0). In this case, we return True.
+        Otherwise, we return False.
+    """
     assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
@@ -1169,7 +1227,9 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
              original_user_yaml_path, env_file_path, user_hash, priority,
              job_id, ManagedJobScheduleState.INACTIVE.value)).rowcount
-        assert updated_count == 1, (job_id, updated_count)
+        # For a recovery run, the job may already be in the WAITING state.
+        assert updated_count <= 1, (job_id, updated_count)
+        return updated_count == 0
 
 
 @_init_db
