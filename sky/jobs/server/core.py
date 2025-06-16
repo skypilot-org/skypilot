@@ -483,30 +483,36 @@ def cancel(name: Optional[str] = None,
             stopped_message='All managed jobs should have finished.')
 
         job_id_str = ','.join(map(str, job_ids))
-        if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+        if sum([bool(job_ids), name is not None, all]) != 1:
             arguments = []
             arguments += [f'job_ids={job_id_str}'] if job_ids else []
             arguments += [f'name={name}'] if name is not None else []
             arguments += ['all'] if all else []
-            arguments += ['all_users'] if all_users else []
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Can only specify one of JOB_IDS, name, or all/'
-                    f'all_users. Provided {" ".join(arguments)!r}.')
+                    'Can only specify one of JOB_IDS, name, or all. '
+                    f'Provided {" ".join(arguments)!r}.')
 
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
-        if all_users:
+        
+        # New semantic: all_users is a permission flag, not an action flag
+        if all:
+            # Cancel all jobs - check if all_users permission is granted
             code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                None, all_users=True)
-        elif all:
-            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
+                None, all_users=all_users)
         elif job_ids:
+            # Cancel specific job IDs - all_users permission allows cancelling 
+            # jobs owned by other users
             code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                job_ids)
+                job_ids, all_users=all_users)
         else:
             assert name is not None, (job_ids, name, all)
-            code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
+            # Cancel job by name - all_users permission allows cancelling 
+            # jobs owned by other users  
+            code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
+                name, all_users=all_users)
+        
         # The stderr is redirected to stdout
         returncode, stdout, stderr = backend.run_on_head(handle,
                                                          code,

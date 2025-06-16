@@ -828,7 +828,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
     ]
 
     job_filter = ''
-    if name is None and not all_users:
+    if not all_users:
         job_filter += 'AND (job_info.user_hash=(?)) '
         field_values.append(common_utils.get_user_hash())
     if name is not None:

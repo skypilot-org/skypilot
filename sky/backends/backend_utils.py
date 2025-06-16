@@ -2584,52 +2584,87 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    records = global_user_state.get_clusters()
-    current_user = common_utils.get_current_user()
-
-
-    # Filter by user if requested
-    if not all_users:
-        records = [
-            record for record in records
-            if record['user_hash'] == current_user.id
-        ]
-
-    # TODO(zhwu): We should do the following:
-    # 1. if it is a full cluster name, we should allow it for other users
-    # 2. If it is a glob, we should only allow it for the current user
-    if cluster_names is not None:
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
-        cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        new_records = []
-        not_exist_cluster_names = []
-        for cluster_name in cluster_names:
-            for record in records:
-                if record['name'] == cluster_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_cluster_names.append(cluster_name)
-        if not_exist_cluster_names:
-            clusters_str = ', '.join(not_exist_cluster_names)
-            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
-        records = new_records
-
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    
+    # Get all records first
+    all_records = global_user_state.get_clusters()
+    
+    # Filter by workspace first
     accessible_workspaces = workspaces_core.get_workspaces()
-
     workspace_filtered_records = []
-    for record in records:
+    for record in all_records:
         cluster_workspace = record.get('workspace',
                                        constants.SKYPILOT_DEFAULT_WORKSPACE)
         if cluster_workspace in accessible_workspaces:
             workspace_filtered_records.append(record)
+    all_records = workspace_filtered_records
 
-    records = workspace_filtered_records
+    # Filter by user first (this gives us the base set to work with)
+    if not all_users:
+        current_user = common_utils.get_current_user()
+        user_filtered_records = [
+            record for record in all_records
+            if record['user_hash'] == current_user.id
+        ]
+    else:
+        user_filtered_records = all_records
 
-    yellow = colorama.Fore.YELLOW
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
+    # Filter by specific cluster names if requested
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        cluster_names = _get_glob_clusters(cluster_names, silent=True)
+        
+        # Find matching records in the user-filtered set
+        records = []
+        found_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in user_filtered_records:
+                if record['name'] == cluster_name:
+                    records.append(record)
+                    found_cluster_names.append(cluster_name)
+                    break
+        
+        # Check for missing clusters and show hint if appropriate
+        missing_cluster_names = [name for name in cluster_names if name not in found_cluster_names]
+        if missing_cluster_names and not all_users:
+            # Check if missing clusters exist but are owned by other users
+            other_user_clusters = []
+            for cluster_name in missing_cluster_names:
+                for record in all_records:  # Check ALL records, not just user-filtered
+                    if record['name'] == cluster_name:
+                        other_user_clusters.append(cluster_name)
+                        break
+            
+            if other_user_clusters:
+                # Found clusters owned by other users - show hint
+                clusters_str = ', '.join(f"'{name}'" for name in sorted(other_user_clusters))
+                logger.info(
+                    f'{yellow}Cluster(s) {clusters_str} found but owned by '
+                    'other users.\n'
+                    f'To operate on other users\' clusters, add the '
+                    f'--all-users (-u) flag.{reset}'
+                )
+        
+        # Log completely missing clusters (not found anywhere)
+        if missing_cluster_names:
+            completely_missing = []
+            for cluster_name in missing_cluster_names:
+                found_anywhere = False
+                for record in all_records:
+                    if record['name'] == cluster_name:
+                        found_anywhere = True
+                        break
+                if not found_anywhere:
+                    completely_missing.append(cluster_name)
+            
+            if completely_missing:
+                clusters_str = ', '.join(completely_missing)
+                logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+    else:
+        records = user_filtered_records
 
     def _update_record_with_credentials_and_resources_str(
             record: Optional[Dict[str, Any]]) -> None:

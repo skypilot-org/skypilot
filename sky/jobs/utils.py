@@ -482,12 +482,26 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
+    not_found_job_ids: List[int] = []
+    other_user_job_ids: List[int] = []
+    
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
         job_status = managed_job_state.get_status(job_id)
         if job_status is None:
-            logger.info(f'Job {job_id} not found. Skipped.')
+            # Check if this job exists for other users
+            if not all_users:
+                # Get all jobs to see if this job_id exists but belongs to another user
+                all_jobs = managed_job_state.get_managed_jobs(job_id)
+                if all_jobs:
+                    # Job exists but belongs to another user
+                    other_user_job_ids.append(job_id)
+                else:
+                    # Job truly doesn't exist
+                    not_found_job_ids.append(job_id)
+            else:
+                not_found_job_ids.append(job_id)
             continue
         elif job_status.is_terminal():
             logger.info(f'Job {job_id} is already in terminal state '
@@ -511,39 +525,74 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 f.flush()
         cancelled_job_ids.append(job_id)
 
-    wrong_workspace_job_str = ''
+    # Build status messages
+    messages = []
+    
+    # Jobs not found
+    if not_found_job_ids:
+        plural = 's' if len(not_found_job_ids) > 1 else ''
+        messages.append(f'Job{plural} {", ".join(map(str, not_found_job_ids))} not found. Skipped.')
+    
+    # Jobs owned by other users - show hint
+    if other_user_job_ids:
+        import colorama
+        yellow = colorama.Fore.YELLOW
+        reset = colorama.Style.RESET_ALL
+        plural = 's' if len(other_user_job_ids) > 1 else ''
+        job_list = ", ".join(map(str, other_user_job_ids))
+        messages.append(f'{yellow}Job{plural} {job_list} found but owned by other users.\n'
+                       f'To operate on other users\' jobs, add the --all-users (-u) flag.{reset}')
+    
+    # Wrong workspace jobs
     if wrong_workspace_job_ids:
         plural = 's' if len(wrong_workspace_job_ids) > 1 else ''
         plural_verb = 'are' if len(wrong_workspace_job_ids) > 1 else 'is'
-        wrong_workspace_job_str = (
-            f' Job{plural} with ID{plural}'
-            f' {", ".join(map(str, wrong_workspace_job_ids))} '
-            f'{plural_verb} skipped as they are not in the active workspace '
-            f'{current_workspace!r}. Check the workspace of the job with: '
-            f'sky jobs queue')
+        messages.append(f'Job{plural} with ID{plural} {", ".join(map(str, wrong_workspace_job_ids))} '
+                       f'{plural_verb} skipped as they are not in the active workspace '
+                       f'{current_workspace!r}. Check the workspace of the job with: sky jobs queue')
 
+    # Cancelled jobs
     if not cancelled_job_ids:
-        return f'No job to cancel.{wrong_workspace_job_str}'
+        if messages:
+            return '\n'.join(messages)
+        return 'No job to cancel.'
+    
     identity_str = f'Job with ID {cancelled_job_ids[0]} is'
     if len(cancelled_job_ids) > 1:
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    msg = f'{identity_str} scheduled to be cancelled.{wrong_workspace_job_str}'
-    return msg
+    success_msg = f'{identity_str} scheduled to be cancelled.'
+    if messages:
+        return f'{success_msg}\n' + '\n'.join(messages)
+    return success_msg
 
 
 def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None) -> str:
+                       current_workspace: Optional[str] = None,
+                       all_users: bool = False) -> str:
     """Cancel a job by name."""
-    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name, all_users=all_users)
     if not job_ids:
-        return f'No running job found with name {job_name!r}.'
+        # Check if jobs exist for other users and show hint
+        hint_msg = ""
+        if not all_users:
+            all_job_ids = managed_job_state.get_all_job_ids_by_name(job_name) 
+            if all_job_ids:
+                # Jobs exist for other users - show hint
+                import colorama
+                yellow = colorama.Fore.YELLOW
+                reset = colorama.Style.RESET_ALL
+                hint_msg = (f'\n{yellow}Job {job_name!r} found but owned by '
+                           'other users.\n'
+                           f'To operate on other users\' jobs, add the '
+                           f'--all-users (-u) flag.{reset}')
+        return f'No running job found with name {job_name!r}.{hint_msg}'
     if len(job_ids) > 1:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    msg = cancel_jobs_by_id(job_ids, all_users=all_users, current_workspace=current_workspace)
     return f'{job_name!r} {msg}'
 
 
@@ -1388,7 +1437,7 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_job_by_name(cls, job_name: str) -> str:
+    def cancel_job_by_name(cls, job_name: str, all_users: bool = False) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 4:
@@ -1396,8 +1445,14 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_job_by_name({job_name!r})
-        else:
+        elif managed_job_version < 7:
+            # For backward compatibility, since all_users is not supported
+            # before this change. 
+            # TODO: Remove compatibility before 0.12.0
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
+        else:
+            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r},
+                                            all_users={all_users})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
