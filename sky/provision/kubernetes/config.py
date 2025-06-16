@@ -506,9 +506,8 @@ def _configure_priority_class(namespace, context,
 
     name = priority_class['metadata']['name']
     field_selector = f'metadata.name={name}'
-    priority_classes = (
-        kubernetes.scheduling_api(context).list_namespaced_priority_class(
-            namespace, field_selector=field_selector).items)
+    priority_classes = (kubernetes.scheduling_api(context).list_priority_class(
+        namespace, field_selector=field_selector).items)
     if priority_classes:
         assert len(priority_classes) == 1
         existing_priority_class = priority_classes[0]
@@ -520,13 +519,13 @@ def _configure_priority_class(namespace, context,
             return
         logger.info('_configure_priority_class: '
                     f'{updating_existing_msg(priority_class_field, name)}')
-        kubernetes.scheduling_api(context).patch_namespaced_priority_class(
+        kubernetes.scheduling_api(context).patch_priority_class(
             name, namespace, priority_class)
         return
 
     logger.debug('_configure_priority_class: '
                  f'{not_found_msg(priority_class_field, name)}')
-    kubernetes.scheduling_api(context).create_namespaced_priority_class(
+    kubernetes.scheduling_api(context).create_priority_class(
         namespace, priority_class)
     logger.debug('_configure_priority_class: '
                  f'{created_msg(priority_class_field, name)}')
