@@ -20,6 +20,7 @@ import uuid
 import jsonschema
 
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -256,11 +257,13 @@ class Backoff:
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
+_current_user: Optional['models.User'] = None
 
 
-def set_client_status(client_entrypoint: Optional[str],
-                      client_command: Optional[str],
-                      using_remote_api_server: bool):
+def set_request_context(client_entrypoint: Optional[str],
+                        client_command: Optional[str],
+                        using_remote_api_server: bool,
+                        user: Optional['models.User']):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -269,9 +272,11 @@ def set_client_status(client_entrypoint: Optional[str],
     global _current_command
     global _current_client_entrypoint
     global _using_remote_api_server
+    global _current_user
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
+    _current_user = user
 
 
 def get_current_command() -> str:
@@ -284,6 +289,19 @@ def get_current_command() -> str:
         return _current_command
 
     return get_pretty_entrypoint_cmd()
+
+
+def get_current_user() -> 'models.User':
+    """Returns the current user."""
+    if _current_user is not None:
+        return _current_user
+    return models.User.get_current_user()
+
+
+def set_current_user(user: 'models.User'):
+    """Sets the current user."""
+    global _current_user
+    _current_user = user
 
 
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
@@ -999,3 +1017,9 @@ def _get_cgroup_memory_limit() -> Optional[int]:
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
+
+
+def removeprefix(string: str, prefix: str) -> str:
+    if string.startswith(prefix):
+        return string[len(prefix):]
+    return string

@@ -41,6 +41,7 @@ from sky.utils import common_utils
 # ---------- Dry run: 2 Tasks in a chain. ----------
 @pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
+@pytest.mark.no_hyperbolic  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
@@ -129,6 +130,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_hyperbolic
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -185,11 +187,11 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
-            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
+            f'cp ${{{skypilot_config.ENV_VAR_GLOBAL_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
             # Set config override. This should change the cluster yaml, forcing reprovision/setup
             f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
             # Launch and do full output validation. Setup/provisioning should be run.
-            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 3 --status',
             f'sky status -r {name} | grep UP',
         ],
@@ -204,6 +206,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_vast  # This requires port opening
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 def test_stale_job(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -307,6 +310,7 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -329,6 +333,7 @@ def test_env_check(generic_cloud: str):
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -444,6 +449,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
         sky.down(name)
 
 
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support autostop and host controllers
 def test_jobs_launch_and_logs(generic_cloud: str):
     # The first `with` is to override the sky api endpoint env if --remote-server
     # is specified, so the test knows it's running on the remote server, thats
@@ -487,7 +493,7 @@ def test_jobs_launch_and_logs(generic_cloud: str):
 
 
 # ---------- Testing YAML Specs ----------
-# Our sky storage requires credentials to check the bucket existance when
+# Our sky storage requires credentials to check the bucket existence when
 # loading a task from the yaml file, so we cannot make it a unit test.
 class TestYamlSpecs:
     # TODO(zhwu): Add test for `to_yaml_config` for the Storage object.
@@ -548,6 +554,7 @@ class TestYamlSpecs:
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_nebius  # Nebius does not support K80s
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -566,6 +573,7 @@ def test_multiple_accelerators_ordered():
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -584,6 +592,7 @@ def test_multiple_accelerators_ordered_with_default():
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -601,6 +610,7 @@ def test_multiple_accelerators_unordered():
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -617,6 +627,7 @@ def test_multiple_accelerators_unordered_with_default():
 
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_hyperbolic  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -626,27 +637,6 @@ def test_multiple_resources():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------- Sky Benchmark ----------
-@pytest.mark.skip(reason='SkyBench is not supported in API server')
-@pytest.mark.no_fluidstack  # Requires other clouds to be enabled
-@pytest.mark.no_vast  # Requires other clouds to be enabled
-@pytest.mark.no_paperspace  # Requires other clouds to be enabled
-@pytest.mark.no_kubernetes
-@pytest.mark.aws  # SkyBenchmark requires S3 access
-def test_sky_bench(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'sky-bench',
-        [
-            f'sky bench launch -y -b {name} --infra {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
-            'sleep 120',
-            f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
-        ],
-        f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -786,7 +776,7 @@ def test_kubernetes_context_failover(unreachable_context):
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
-                skypilot_config.ENV_VAR_SKYPILOT_CONFIG: f.name,
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
                     sky.server.common.get_server_url()
             },
@@ -834,6 +824,7 @@ def test_launch_and_exec_async(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_hyperbolic  # Hyperbolic fails to provision resources
 def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()
@@ -1140,3 +1131,24 @@ def test_lambda_cloud_open_ports():
             except Exception as e:
                 print(f'Warning: Failed to clean up test firewall rule: {e}')
                 # Don't fail the test if cleanup fails
+
+
+def test_cli_output(generic_cloud: str):
+    """Test that CLI commands properly stream output."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cli_output',
+        [
+            ('s=$(sky check) && echo "$s" && echo "===Validating check output===" && '
+             'echo "$s" | grep "Enabled infra"'),
+            # Get the launch plan output before the prompting
+            (
+                f's=$(yes no | sky launch -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} || true) && '
+                'echo "$s" && echo "===Validating launch plan===" && '
+                'echo "$s" | grep "CHOSEN" && '
+                'border=$(echo "$s" | grep -A 1 "Considered resources" | tail -n +2) && '
+                'echo $border && echo "===Table should have 3 borders===" && '
+                # Strawman idea: validate the table has 3 borders to ensure it is completed.
+                'echo "$s" | grep -- "$border" | wc -l | grep 3'),
+        ])
+    smoke_tests_utils.run_one_test(test)

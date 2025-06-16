@@ -580,6 +580,29 @@ class JobExitCode(enum.IntEnum):
         return cls.FAILED
 
 
+class ExecutionRetryableError(Exception):
+    """Raised when task execution fails and should be retried."""
+
+    def __init__(self, message: str, hint: str,
+                 retry_wait_seconds: int) -> None:
+        super().__init__(message)
+        self.hint = hint
+        self.retry_wait_seconds = retry_wait_seconds
+
+    def __reduce__(self):
+        # Make sure the exception is picklable
+        return (self.__class__, (str(self), self.hint, self.retry_wait_seconds))
+
+
+class ExecutionPoolFullError(Exception):
+    """Raised when the execution pool is full."""
+
+
 class RequestAlreadyExistsError(Exception):
     """Raised when a request is already exists."""
+    pass
+
+
+class PermissionDeniedError(Exception):
+    """Raised when a user does not have permission to access a resource."""
     pass

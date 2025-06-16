@@ -21,6 +21,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import filelock
+import yaml
 
 import sky
 from sky import backends
@@ -196,7 +197,8 @@ def _get_cluster_config_template(cloud):
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
-        clouds.Nebius: 'nebius-ray.yml.j2'
+        clouds.Nebius: 'nebius-ray.yml.j2',
+        clouds.Hyperbolic: 'hyperbolic-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -786,34 +788,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        del zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'SCPError:' in x.strip())
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, SCPError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in catalog.regions('scp'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _ibm_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -1112,6 +1086,21 @@ class FailoverCloudErrorHandlerV2:
         if isinstance(error, exceptions.InvalidCloudCredentials):
             _add_to_blocked_resources(
                 blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
+    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'SCP handler error: {error}')
+        # Block SCP if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.SCP()))
         else:
             FailoverCloudErrorHandlerV2._default_handler(
                 blocked_resources, launchable_resources, region, zones, error)
@@ -2301,12 +2290,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
-            if os.path.exists(self.cluster_yaml):
-                # It is possible that the cluster yaml is not available when
-                # the handle is unpickled for service replicas from the
-                # controller with older version.
-                config = global_user_state.get_cluster_yaml_dict(
-                    self.cluster_yaml)
+            # It is possible that the cluster yaml is not available when
+            # the handle is unpickled for service replicas from the
+            # controller with older version.
+            yaml_str = global_user_state.get_cluster_yaml_str(self.cluster_yaml)
+            if yaml_str is None:
+                # If the cluster yaml is not available,
+                # we skip updating the cluster info.
+                return
+            config = yaml.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2498,6 +2490,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 raise RuntimeError(
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
+            self._update_cluster_info()
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andyl): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner. Now this
+        # is required for rsync as using deployment in rsync seems to cause
+        # some unknown issues.
+        # TODO(andyl): Should check through the real cluster info. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                controller_utils.high_availability_specified(
+                    self.cluster_name)):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
@@ -2904,14 +2911,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-                # The most frequent reason for the failure of a provision
-                # request is resource unavailability instead of rate
-                # limiting; to make users wait shorter, we do not make
-                # backoffs exponential.
-                backoff = common_utils.Backoff(
-                    initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
-                    max_backoff_factor=1)
-            attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
                 # within the given region first, then optionally retry on all
@@ -2955,19 +2954,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         error_message = str(e)
 
                     if retry_until_up:
-                        logger.error(error_message)
-                        # Sleep and retry.
-                        gap_seconds = backoff.current_backoff()
-                        plural = 's' if attempt_cnt > 1 else ''
+                        gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
                         retry_message = ux_utils.retry_message(
-                            f'Retry after {gap_seconds:.0f}s '
-                            f'({attempt_cnt} attempt{plural}). ')
-                        logger.info(f'\n{retry_message} '
-                                    f'{ux_utils.log_path_hint(log_path)}'
-                                    f'{colorama.Style.RESET_ALL}')
-                        attempt_cnt += 1
-                        time.sleep(gap_seconds)
-                        continue
+                            f'Retry after {gap_seconds:.0f}s ')
+                        hint_message = (f'\n{retry_message} '
+                                        f'{ux_utils.log_path_hint(log_path)}'
+                                        f'{colorama.Style.RESET_ALL}')
+                        raise exceptions.ExecutionRetryableError(
+                            error_message,
+                            hint=hint_message,
+                            retry_wait_seconds=gap_seconds)
                     # Clean up the cluster's entry in `sky status`.
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
@@ -4299,29 +4295,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
-
-        elif terminate and isinstance(cloud, clouds.SCP):
-            # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.scp import node_provider
-            config['provider']['cache_stopped_nodes'] = not terminate
-            provider = node_provider.SCPNodeProvider(config['provider'],
-                                                     cluster_name_on_cloud)
-            try:
-                if not os.path.exists(provider.metadata.path):
-                    raise node_provider.SCPError(
-                        'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-                        'Metadata file does not exist.')
-
-                with open(provider.metadata.path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                    node_id = next(iter(metadata.values())).get(
-                        'creation', {}).get('virtualServerId', None)
-                    provider.terminate_node(node_id)
-                returncode = 0
-            except node_provider.SCPError as e:
-                returncode = 1
-                stdout = ''
-                stderr = str(e)
 
         else:
             config['provider']['cache_stopped_nodes'] = not terminate

@@ -29,6 +29,7 @@ from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
 from common_test_fixtures import mock_services_one_service
 from common_test_fixtures import mock_stream_utils
+from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
@@ -53,7 +54,7 @@ from sky.server import common as server_common
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius'
+    'vast', 'nebius', 'hyperbolic'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -78,7 +79,8 @@ cloud_to_pytest_keyword = {
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
-    'nebius': 'nebius'
+    'nebius': 'nebius',
+    'hyperbolic': 'hyperbolic'
 }
 
 
@@ -152,6 +154,24 @@ def pytest_addoption(parser):
         default=False,
         help='Run tests for Postgres Backend',
     )
+    parser.addoption(
+        '--no-resource-heavy',
+        action='store_true',
+        default=False,
+        help='Skip tests marked as resource_heavy',
+    )
+    parser.addoption(
+        '--helm-version',
+        type=str,
+        default='',
+        help='Version of Helm to use for tests',
+    )
+    parser.addoption(
+        '--helm-package',
+        type=str,
+        default='',
+        help='Package name to use for Helm tests',
+    )
 
 
 def pytest_configure(config):
@@ -197,9 +217,13 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_resource_heavy'] = pytest.mark.skip(
+        reason='skipped, because --no-resource-heavy option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
+    skip_marks['postgres'] = pytest.mark.skip(
+        reason='skipped, because --postgres option is set')
 
     cloud_to_run = _get_cloud_to_run(config)
     generic_cloud = _generic_cloud(config)
@@ -232,6 +256,14 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
+        if ('no_postgres' in item.keywords) and config.getoption('--postgres'):
+            item.add_marker(skip_marks['postgres'])
+
+        # Skip tests marked as resource_heavy if --no-resource-heavy is set
+        marks = [mark.name for mark in item.iter_markers()]
+        if 'resource_heavy' in marks and config.getoption(
+                '--no-resource-heavy'):
+            item.add_marker(skip_marks['no_resource_heavy'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its

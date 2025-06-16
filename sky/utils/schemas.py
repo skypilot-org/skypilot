@@ -273,6 +273,11 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'priority': {
+                'type': 'integer',
+                'minimum': 0,
+                'maximum': 1000,
+            },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -1149,9 +1154,17 @@ def get_config_schema():
 
     admin_policy_schema = {
         'type': 'string',
-        # Check regex to be a valid python module path
-        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
-                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+        'anyOf': [
+            {
+                # Check regex to be a valid python module path
+                'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                            r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+            },
+            {
+                # Check for valid HTTP/HTTPS URL
+                'pattern': r'^https?://.*$',
+            }
+        ]
     }
 
     allowed_clouds = {
@@ -1205,6 +1218,18 @@ def get_config_schema():
         }
     }
 
+    rbac_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'default_role': {
+                'type': 'string',
+                'case_insensitive_enum': ['admin', 'user']
+            },
+        },
+    }
+
     workspace_schema = {'type': 'string'}
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
@@ -1237,6 +1262,15 @@ def get_config_schema():
             'properties': {
                 # Explicit definition for GCP allows both project_id and
                 # disabled
+                'private': {
+                    'type': 'boolean',
+                },
+                'allowed_users': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
@@ -1344,6 +1378,7 @@ def get_config_schema():
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
             'provision': provision_configs,
+            'rbac': rbac_schema,
             **cloud_configs,
         },
     }

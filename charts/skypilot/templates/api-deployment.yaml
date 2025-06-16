@@ -184,7 +184,7 @@ spec:
           mountPath: /var/skypilot/kubeconfig
         {{- else }}
         - name: kube-config
-          mountPath: /root/.kube/config
+          mountPath: /root/.kube
         {{- end }}
         {{- end }}
         {{- if .Values.apiService.sshNodePools }}
@@ -323,6 +323,10 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
+      {{- if .Values.extraInitContainers }}
+      {{- toYaml .Values.extraInitContainers | nindent 6 }}
+      {{- end }}
+
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume

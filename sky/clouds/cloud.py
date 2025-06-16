@@ -631,7 +631,7 @@ class Cloud:
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure.
+        """Whether a resource needs cleanup after preemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
@@ -726,10 +726,14 @@ class Cloud:
         """Errors out if the network tier is not supported by the
         cloud provider.
 
+        For BEST tier: always succeeds, will use best available tier.
+
         Raises:
             exceptions.NotSupportedError: If the network tier is not supported.
         """
         del instance_type  # unused
+
+        # For other tiers, check if supported
         if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(

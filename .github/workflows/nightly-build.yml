@@ -3,9 +3,19 @@ on:
   schedule:
     - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
   workflow_dispatch:
+    inputs:
+      skip_buildkite:
+        description: 'Skip Buildkite tests (smoke, backward-compat, etc.)'
+        required: false
+        default: false
+        type: boolean
+      skip_test_pypi:
+        description: 'Skip publishing to Test PyPI'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  # nightly release check from https://stackoverflow.com/a/67527144
   check-date:
     runs-on: ubuntu-latest
     outputs:
@@ -25,7 +35,6 @@ jobs:
     needs: check-date
     if: ${{ needs.check-date.outputs.should_run != 'false' }}
     outputs:
-      buildkite_json: ${{ steps.trigger_buildkite.outputs.json }}
       version: ${{ steps.set-release-version.outputs.version }}
     steps:
       - name: Clone repository
@@ -78,57 +87,47 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-      # Trigger Buildkite smoke tests
-      - name: Trigger Buildkite Smoke Tests
-        id: trigger_buildkite
-        uses: buildkite/trigger-pipeline-action@v2.3.0
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/smoke-tests"
-          branch: "master"
-          commit: "${{ github.sha }}"
-          message: "nightly-build-pypi"
-          ignore_pipeline_branch_filter: true
-          build_env_vars: '{"ARGS": "--aws"}'
-
-  extract-build-number:
+  smoke-tests-aws:
     needs: nightly-build-pypi
-    uses: ./.github/workflows/extract-buildkite.yml
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_buildkite || github.event_name == 'schedule' }}
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      json_data: ${{ needs.nightly-build-pypi.outputs.buildkite_json }}
-
-  wait-for-buildkite:
-    needs: extract-build-number
-    uses: ./.github/workflows/wait-for-buildkite.yml
-    with:
-      organization: "skypilot-1"
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "nightly-build-pypi --aws"
       pipeline: "smoke-tests"
-      build_number: ${{ needs.extract-build-number.outputs.build_number }}
+      build_env_vars: '{"ARGS": "--aws"}'
       timeout_minutes: 120
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  publish-and-validate-test-pypi:
-    needs: [nightly-build-pypi, wait-for-buildkite]
-    if: needs.wait-for-buildkite.outputs.build_status == 'success'
-    uses: ./.github/workflows/publish-and-validate.yml
+  smoke-tests-kubernetes:
+    needs: nightly-build-pypi
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_buildkite || github.event_name == 'schedule' }}
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      package_name: skypilot-nightly
-      expected_version: ${{ needs.nightly-build-pypi.outputs.version }}
-      repository_type: 'test-pypi'
-    secrets: inherit
+      commit: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      message: "nightly-build-pypi --kubernetes --no-resource-heavy"
+      pipeline: "smoke-tests"
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
+      timeout_minutes: 120
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  publish-and-validate-pypi:
-    needs: [nightly-build-pypi, publish-and-validate-test-pypi]
-    uses: ./.github/workflows/publish-and-validate.yml
+  publish-and-validate-both:
+    needs: [nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes]
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.skip_buildkite) || (always() && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes.result == 'success') }}
+    uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
       expected_version: ${{ needs.nightly-build-pypi.outputs.version }}
-      repository_type: 'pypi'
+      skip_test_pypi: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test_pypi || false }}
     secrets: inherit
 
   trigger-helm-release:
-    needs: [publish-and-validate-pypi]
+    needs: [publish-and-validate-both]
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
     uses: ./.github/workflows/helm-docker-release.yaml
     with:
       package_name: skypilot-nightly
@@ -136,7 +135,7 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, extract-build-number, wait-for-buildkite, publish-and-validate-test-pypi, publish-and-validate-pypi, trigger-helm-release]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes, publish-and-validate-both, trigger-helm-release]
     if: failure() # Only run this job if any of the previous jobs failed
     steps:
       - name: Prepare failure message
@@ -146,15 +145,22 @@ jobs:
           COMMIT_SHA="${{ github.sha }}"
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
-          if [[ "${{ needs.wait-for-buildkite.result }}" == "failure" ]]; then
-            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.extract-build-number.outputs.build_number }}|Buildkite Log>"
-            echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
-            echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
+          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes.result }}" == "failure" ]]; then
+            if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
+              BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
+            fi
+            if [[ "${{ needs.smoke-tests-kubernetes.result }}" == "failure" ]]; then
+              if [[ ! -z "$BUILDKITE_MSG" ]]; then
+                BUILDKITE_MSG="${BUILDKITE_MSG} and"
+              fi
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes.outputs.build_number }}|Buildkite Log(--kubernetes)>"
+            fi
+            MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}"
           else
             MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed for commit <${COMMIT_URL}|${SHORT_SHA}>."
-            echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
-            echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
           fi
+          echo "message_text=${TITLE_TEXT}" >> $GITHUB_OUTPUT
+          echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
 
       - name: Notify Slack channel on failure
         uses: slackapi/slack-github-action@v2.0.0

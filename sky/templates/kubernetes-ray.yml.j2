@@ -632,19 +632,66 @@ available_node_types:
               {% if high_availability %}
               mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
               if [ -f {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready ]; then
+                SKYPILOT_HA_RECOVERY_LOG="/tmp/ha_recovery.log"
+                echo "Starting HA recovery at $(date)" >> $SKYPILOT_HA_RECOVERY_LOG
+                start_time=$SECONDS
+                retry_count=0
+
+                # Wait for Ray to be ready, as the following commands is depending on Ray.
+                GET_RAY_STATUS_CMD=$({{sky_python_cmd}} -c 'from sky.provision import instance_setup; print(instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)')
+                while true; do
+                  retry_count=$((retry_count + 1))
+                  current_duration=$(( SECONDS - start_time ))
+                  echo "Attempt $retry_count to get Ray status after $current_duration seconds..." >> $SKYPILOT_HA_RECOVERY_LOG
+
+                  bash --login -c "$GET_RAY_STATUS_CMD"
+                  if [ $? -eq 0 ]; then
+                    wait_duration=$(( SECONDS - start_time ))
+                    echo "Ray ready after waiting $wait_duration seconds (took $retry_count attempts)" >> $SKYPILOT_HA_RECOVERY_LOG
+                    break
+                  fi
+                  echo "Waiting for Ray to be ready..." >> $SKYPILOT_HA_RECOVERY_LOG
+                  sleep 2
+                done
+
                 # ! Keep this aligned with `CloudVmRayBackend._setup()`
-                # Suppose all `task.setup` are the same for skyserve controller task.
+                # Suppose all `task.setup` are the same for sky serve / managed jobs controller task.
                 # So be careful for compatibility issue once you change it.
                 chmod +x {{k8s_high_availability_deployment_setup_script_path}}
                 /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && {{k8s_high_availability_deployment_setup_script_path}} > /tmp/controller_recovery_setup_commands.log 2>&1"
-                echo "=== Controller setup commands completed for recovery ==="
+                echo "=== Controller setup commands completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
 
+                touch {{k8s_high_availability_restarting_signal_file}}
+                # Get all in-progress jobs from managed jobs controller. We skip any jobs that are already done.
+                # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
+                # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
+                # will delete the service from the database after it is terminated so everything in the database is running.
+                ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs = state.get_managed_jobs(); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
+                if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
+                  read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
+                fi
                 for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
+                  # This is the cluster job id on managed jobs controller, but it is guaranteed to be the same as the managed job id,
+                  # so we directly use it here. See `CloudVmRayBackend._exec_code_on_head::_dump_code_to_file` for more details.
+                  JOB_ID=$(basename $file | sed 's/sky_job_//')
+                  # If the list of in-progress jobs is not None (meaning this is a managed job HA controller) and job is not in-progress, skip.
+                  if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
+                    if [[ ! " ${ALL_IN_PROGRESS_JOBS_SEQ[@]} " =~ " ${JOB_ID} " ]]; then
+                      continue
+                    fi
+                  fi
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
+                  # TODO(tian): This logic may run a lot of things if the jobs controller previously had many jobs.
+                  # We should do more tests and make sure it will scale well.
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
-                  echo "=== Controller task run for service (file: $file) completed for recovery ==="
+                  echo "=== Controller task run for service / job (file: $file) completed for recovery at $(date) ===" >> $SKYPILOT_HA_RECOVERY_LOG
                 done
+                rm {{k8s_high_availability_restarting_signal_file}}
+
+                duration=$(( SECONDS - start_time ))
+                echo "HA recovery completed at $(date)" >> $SKYPILOT_HA_RECOVERY_LOG
+                echo "Total recovery time: $duration seconds" >> $SKYPILOT_HA_RECOVERY_LOG
               fi
 
               touch {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready
@@ -740,7 +787,7 @@ available_node_types:
             spec:
               securityContext:
                 fsGroup: 1000
-              # To prevent the home dir provided by the docker image from being overriden by pvc mounting,
+              # To prevent the home dir provided by the docker image from being overridden by pvc mounting,
               # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
               initContainers:
                 - name: init-copy-home
