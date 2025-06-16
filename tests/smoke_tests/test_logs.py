@@ -19,13 +19,23 @@ def test_log_collection_to_gcp(generic_cloud: str):
     # Calculate timestamp 1 hour ago in ISO format
     one_hour_ago = (datetime.now(timezone.utc) -
                     timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    with tempfile.NamedTemporaryFile(mode='w') as f:
-        f.write(
+    with tempfile.NamedTemporaryFile(mode='w') as base, \
+        tempfile.NamedTemporaryFile(mode='w') as additional_labels:
+        base.write(
             textwrap.dedent(f"""\
                 logs:
                   store: gcp
                 """))
-        f.flush()
+        base.flush()
+        additional_labels.write(
+            textwrap.dedent(f"""\
+                logs:
+                  store: gcp
+                  gcp:
+                    additional_labels:
+                      skypilot_smoke_test_case: {name}-case
+                """))
+        additional_labels.flush()
         logs_cmd = 'for i in {1..10}; do echo $i; done'
         validate_logs_cmd = (
             'echo $output && echo "===Validate logs from GCP Cloud Logging===" && '
@@ -33,7 +43,7 @@ def test_log_collection_to_gcp(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'log_collection_to_gcp',
             [
-                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; ',
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={base.name}; ',
                 f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
                 f'sky logs {name} 1',
                 # Wait for the logs to be available in the GCP Cloud Logging.
@@ -46,8 +56,14 @@ def test_log_collection_to_gcp(generic_cloud: str):
                 'sleep 60',
                 (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\'") && '
                  f'{validate_logs_cmd}'),
+                f'sky down -y {name}',
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={additional_labels.name}; ',
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
+                'sleep 60',
+                (f'output=$(gcloud logging read \'labels.skypilot_smoke_test_case={name}-case AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
+                 f'{validate_logs_cmd}'),
             ],
-            # f'sky down -y {name}',
+            f'sky down -y {name}',
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)

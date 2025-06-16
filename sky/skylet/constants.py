@@ -421,3 +421,6 @@ ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
 
 # The user ID of the SkyPilot system.
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
+
+# The directory to store the logging configuration.
+LOGGING_CONFIG_DIR = '~/.sky/logging'

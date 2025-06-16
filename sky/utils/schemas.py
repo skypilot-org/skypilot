@@ -1357,6 +1357,15 @@ def get_config_schema():
                     'project_id': {
                         'type': 'string',
                     },
+                    'credentials_file': {
+                        'type': 'string',
+                    },
+                    'additional_labels': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
                 },
             },
         },

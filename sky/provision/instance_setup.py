@@ -4,15 +4,13 @@ import functools
 import hashlib
 import json
 import os
-import shlex
-import textwrap
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
+from sky import logs
 from sky import provision
 from sky import sky_logging
-from sky import skypilot_config
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -565,71 +563,25 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
 
 @common.log_function_start_end
 @timeline.event
-def setup_logging_on_cluster(cluster_name: resources_utils.ClusterName,
+def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
+                             cluster_name: resources_utils.ClusterName,
                              cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any]) -> None:
     """Setup logging agent (fluentbit) on all nodes after provisioning."""
     _hint_worker_log_path(cluster_name.name_on_cloud, cluster_info,
                           'logging_setup')
 
-    store = skypilot_config.get_nested(('logs', 'store'), None)
-    if store != 'gcp':
-        raise exceptions.InvalidSkyPilotConfigError(
-            'Only GCP is supported for the logging store, please '
-            'unset the logging store in the config file if not applicable.')
-
-    # The name same as what users see in `sky status`, not required to identify
-    # the log stream but we include it here for better visibility in external
-    # log storage, e.g. users can query logs for specific cluster by just
-    # flitering on the display name.
-    display_name = cluster_name.display_name
-    # The cluster name on cloud is suffixed by unique hash so can be used to
-    # identify logs from the same cluster that get launched multiple times.
-    unique_name = cluster_name.name_on_cloud
-    # Optional GCP project id to export the logs to.
-    project_id = skypilot_config.get_nested(('logs', 'gcp', 'project_id'), None)
-    # The credentials are inherit from the cluster's default GCP credentials,
-    # we might need to support separated credentials for logging agent in the
-    # future.
-    # Refer to https://docs.fluentbit.io/manual/pipeline/outputs/stackdriver
-    # TODO(aylei): Modularize the fluentbit config
-    # TODO(aylei): We can use a lua script to parse the log path and add
-    # `job_id`, `job_name` to labels for better filtering UX.
-    # pylint: disable=line-too-long
-    fluentbit_config_gcp = textwrap.dedent(f"""\
-        pipeline:
-          inputs:
-            - name: tail
-              path: /home/sky/sky_logs/*/*.log
-              path_key: log_path
-        
-          outputs:
-            - name: stackdriver
-              labels: skypilot_cluster_name={display_name},skypilot_cluster_id={unique_name}
-              {f'export_to_project_id: {project_id}' if project_id else ''}
-              match: '*'
-        """)
-
-    logger.info(f'Setting up fluentbit, config: {fluentbit_config_gcp}')
-    config_cmd = f'echo {shlex.quote(fluentbit_config_gcp)} > ~/.sky/fluentbit.yaml'
-
+    @_auto_retry()
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
-        # Install fluentbit if not present, create config, and start it.
-        install_cmd = (
-            'if ! command -v fluent-bit >/dev/null 2>&1; then '
-            'sudo apt-get install -y gnupg; '
-            'curl https://raw.githubusercontent.com/fluent/fluent-bit/master/install.sh | sh; '
-            'fi')
-        start_cmd = ('nohup /opt/fluent-bit/bin/fluent-bit '
-                     '-c ~/.sky/fluentbit.yaml > /tmp/fluentbit.log 2>&1 &')
-        full_cmd = f'set -x; {install_cmd}; {config_cmd}; {start_cmd}'
-        returncode, stdout, stderr = runner.run(full_cmd,
+        cmd = logging_agent.get_setup_command(cluster_name)
+        logger.info(f'Running command on node: {cmd}')
+        returncode, stdout, stderr = runner.run(cmd,
                                                 stream_logs=False,
                                                 require_outputs=True,
                                                 log_path=log_path,
                                                 source_bashrc=True)
         if returncode:
-            raise RuntimeError(f'Failed to setup logging agent\n{full_cmd}\n'
+            raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
                                f'(exit code {returncode}). Error: '
                                f'===== stdout ===== \n{stdout}\n'
                                f'===== stderr ====={stderr}')

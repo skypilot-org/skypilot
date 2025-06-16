@@ -16,6 +16,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import provision
 from sky import sky_logging
 from sky import skypilot_config
@@ -648,12 +649,13 @@ def _post_provision_setup(
             logger.debug('Ray cluster is ready. Skip starting ray cluster on '
                          'worker nodes.')
 
-        log_store = skypilot_config.get_nested(('logs', 'store'), None)
-        if log_store:
+        logging_agent = logs.get_logging_agent()
+        if logging_agent:
             status.update(
                 ux_utils.spinner_message('Setting up logging agent',
                                          provision_logging.config.log_path))
-            instance_setup.setup_logging_on_cluster(cluster_name, cluster_info,
+            instance_setup.setup_logging_on_cluster(logging_agent, cluster_name,
+                                                    cluster_info,
                                                     ssh_credentials)
 
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
