@@ -231,6 +231,22 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
     return ret[0], ret[1]
 
 
+def _parse_secret_var(secret_var: str) -> Tuple[str, str]:
+    """Parse secret vars into a (KEY, VAL) pair."""
+    if '=' not in secret_var:
+        value = os.environ.get(secret_var)
+        if value is None:
+            raise click.UsageError(
+                f'{secret_var} is not set in local environment.')
+        return (secret_var, value)
+    ret = tuple(secret_var.split('=', 1))
+    if len(ret) != 2:
+        raise click.UsageError(
+            f'Invalid secret var: {secret_var}. Must be in the form of KEY=VAL '
+            'or KEY.')
+    return ret[0], ret[1]
+
+
 def _async_call_or_wait(request_id: str, async_call: bool,
                         request_name: str) -> Any:
     short_request_id = request_id[:8]
@@ -456,6 +472,26 @@ _TASK_OPTIONS = [
 
         3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
         same value of ``$MY_ENV3`` in the local environment.""",
+    ),
+    click.option(
+        '--secrets',
+        required=False,
+        type=_parse_secret_var,
+        multiple=True,
+        help="""\
+        Secret variable to set on the remote node. These variables will be
+        redacted in logs and YAML outputs for security. It can be specified
+        multiple times. Examples:
+
+        \b
+        1. ``--secrets API_KEY=secret123``: set ``$API_KEY`` on the cluster to be secret123.
+
+        2. ``--secrets DATABASE_PASSWORD=$DB_PASS``: set ``$DATABASE_PASSWORD`` on the cluster to be the
+        same value of ``$DB_PASS`` in the local environment where the CLI command
+        is run.
+
+        3. ``--secrets JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be the
+        same value of ``$JWT_SECRET`` in the local environment.""",
     )
 ]
 _TASK_OPTIONS_WITH_NAME = [
@@ -868,6 +904,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
+    secrets: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
@@ -926,15 +963,25 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
+            if secrets:
+                click.secho(
+                    f'WARNING: secrets {secrets} are ignored, '
+                    'since the yaml file contains multiple tasks. '
+                    'Please specify secrets in the YAML file instead.',
+                    fg='yellow')
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
+        # For YAML files, update secrets on the single task
+        if secrets:
+            task.update_secrets(secrets)
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
+        task.update_secrets(secrets)
 
     # Override.
     if workdir is not None:
@@ -1243,6 +1290,7 @@ def launch(
         image_id: Optional[str],
         env_file: Optional[Dict[str, str]],
         env: List[Tuple[str, str]],
+        secrets: List[Tuple[str, str]],
         disk_size: Optional[int],
         disk_tier: Optional[str],
         network_tier: Optional[str],
@@ -1297,6 +1345,7 @@ def launch(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
+        secrets=secrets,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -1413,6 +1462,7 @@ def exec(cluster: Optional[str],
          image_id: Optional[str],
          env_file: Optional[Dict[str, str]],
          env: List[Tuple[str, str]],
+         secrets: List[Tuple[str, str]],
          cpus: Optional[str],
          memory: Optional[str],
          disk_size: Optional[int],
@@ -1511,6 +1561,7 @@ def exec(cluster: Optional[str],
         image_id=image_id,
         num_nodes=num_nodes,
         env=env,
+        secrets=secrets,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4224,6 +4275,7 @@ def jobs_launch(
     job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secrets: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
@@ -4271,6 +4323,7 @@ def jobs_launch(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
+        secrets=secrets,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4604,6 +4657,7 @@ def _generate_task_with_service(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secrets: Optional[List[Tuple[str, str]]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Optional[Tuple[str]],
@@ -4636,6 +4690,7 @@ def _generate_task_with_service(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
+        secrets=secrets,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4745,6 +4800,7 @@ def serve_up(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secrets: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Tuple[str],
@@ -4805,6 +4861,7 @@ def serve_up(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secrets=secrets,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4858,7 +4915,8 @@ def serve_update(
         region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
         use_spot: Optional[bool], image_id: Optional[str],
         env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
+        secrets: List[Tuple[str, str]], gpus: Optional[str], 
+        instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
         yes: bool, async_call: bool):
@@ -4909,6 +4967,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secrets=secrets,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,

@@ -679,6 +679,17 @@ def get_task_schema():
                 },
                 'additionalProperties': False,
             },
+            'secrets': {
+                'type': 'object',
+                'required': [],
+                'patternProperties': {
+                    # Checks secret keys are valid env var names.
+                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                        'type': ['string', 'null']
+                    }
+                },
+                'additionalProperties': False,
+            },
             # inputs and outputs are experimental
             'inputs': {
                 'type': 'object',
