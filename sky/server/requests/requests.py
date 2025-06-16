@@ -86,6 +86,7 @@ REQUEST_COLUMNS = [
     'schedule_type',
     COL_USER_ID,
     COL_STATUS_MSG,
+    'managed_job_id',
 ]
 
 
@@ -115,6 +116,7 @@ class RequestPayload:
     # Resources the request operates on.
     cluster_name: Optional[str] = None
     status_msg: Optional[str] = None
+    managed_job_id: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -137,6 +139,7 @@ class Request:
     cluster_name: Optional[str] = None
     # Status message of the request, indicates the reason of current status.
     status_msg: Optional[str] = None
+    managed_job_id: Optional[int] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -222,6 +225,7 @@ class Request:
             user_name=user_name,
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
+            managed_job_id=self.managed_job_id,
         )
 
     def encode(self) -> RequestPayload:
@@ -243,6 +247,7 @@ class Request:
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
+                managed_job_id=self.managed_job_id,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -274,6 +279,7 @@ class Request:
                 user_id=payload.user_id,
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
+                managed_job_id=payload.managed_job_id,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -286,6 +292,17 @@ class Request:
                 exc_info=e)
             # The error is unexpected, so we don't suppress the stack trace.
             raise
+
+
+def kill_managed_job_requests(managed_job_ids: Optional[List[int]] = None):
+    """Kill all pending requests for a managed job."""
+    request_ids = [
+        request_task.request_id for request_task in get_request_tasks(
+            managed_job_ids=managed_job_ids,
+            all_managed_jobs=managed_job_ids is None,
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+    ]
+    kill_requests(request_ids)
 
 
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
@@ -423,10 +440,13 @@ def create_table(cursor, conn):
         {COL_CLUSTER_NAME} TEXT,
         schedule_type TEXT,
         {COL_USER_ID} TEXT,
-        {COL_STATUS_MSG} TEXT)""")
+        {COL_STATUS_MSG} TEXT,
+        managed_job_id INTEGER)""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, 'managed_job_id',
+                                 'INTEGER')
 
 
 _DB = None
@@ -529,6 +549,8 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    all_managed_jobs: bool = False,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -570,6 +592,12 @@ def get_request_tasks(
         request_names_str = ','.join(
             repr(name) for name in include_request_names)
         filters.append(f'name IN ({request_names_str})')
+    if managed_job_ids is not None:
+        managed_job_ids_str = ','.join(repr(id) for id in managed_job_ids)
+        # TODO: fix this so there can be no SQL injection
+        filters.append(f'managed_job_id IN ({managed_job_ids_str})')
+    if all_managed_jobs:
+        filters.append(f'managed_job_id IS NOT NULL')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()

@@ -3583,8 +3583,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
             logger.info(ux_utils.starting_message('Service registered.'))
         else:
-            logger.info(
-                ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
+            if managed_job_dag is not None:
+                logger.info(
+                    ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
+            else:
+                logger.info(
+                    ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
         if not detach_run:
             if (handle.cluster_name == controller_utils.Controllers.
@@ -3595,13 +3599,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # ssh keep connected after ctrl-c.
                 self.tail_logs(handle, job_id)
 
-    def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str) -> int:
+    def _add_job(self,
+                 handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str],
+                 resources_str: str,
+                 managed_job_id: Optional[int] = None) -> int:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
-            resources_str=resources_str)
+            resources_str=resources_str,
+            managed_job_id=managed_job_id)
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -3633,6 +3641,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         detach_run: bool,
+        managed_job_id: Optional[int] = None,
         dryrun: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
@@ -3678,7 +3687,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id = self._add_job(handle, task_copy.name, resources_str)
+        job_id = self._add_job(handle, task_copy.name, resources_str,
+                               managed_job_id)
+        if managed_job_id is not None:
+            assert job_id == managed_job_id, (
+                f'Job ID {job_id} and managed job ID {managed_job_id} should '
+                'be the same for managed jobs')
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
