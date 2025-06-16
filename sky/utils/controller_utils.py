@@ -285,6 +285,16 @@ def _get_cloud_dependencies_installation_commands(
                 commands.append(
                     '(command -v gke-gcloud-auth-plugin &>/dev/null || '
                     '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # pylint: disable=line-too-long
+        elif isinstance(cloud, clouds.Nebius):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(
+                f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
+                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
+                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
+                'nebius profile create --profile sky '
+                '--endpoint api.nebius.cloud '
+                '--service-account-file $HOME/.nebius/credentials.json '
+                '&> /dev/null || echo "Unable to create Nebius profile."')
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -412,7 +422,7 @@ def download_and_stream_latest_job_log(
         return None
 
     log_dir = list(log_dirs.values())[0]
-    log_file = os.path.join(log_dir, 'run.log')
+    log_file = os.path.expanduser(os.path.join(log_dir, 'run.log'))
 
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for

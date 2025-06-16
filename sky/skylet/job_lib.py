@@ -64,10 +64,6 @@ class JobInfoLoc(enum.IntEnum):
     PID = 9
 
 
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
-
-
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #3863, #1441 and PR #1509
@@ -136,7 +132,9 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+                db_path = os.path.expanduser('~/.sky/jobs.db')
+                os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper
@@ -760,6 +758,14 @@ def fail_all_jobs_in_progress() -> None:
 
 
 def update_status() -> None:
+    # This signal file suggests that the controller is recovering from a
+    # failure. See sky/jobs/utils.py::update_managed_jobs_statuses for more
+    # details. When recovering, we should not update the job status to failed
+    # driver as they will be recovered later.
+    if os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        return
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     nonterminal_jobs = _get_jobs(user_hash=None,

@@ -911,7 +911,7 @@ class Task:
 
         Different from set_file_mounts(), this function updates into the
         existing file_mounts (calls ``dict.update()``), rather than
-        overwritting it.
+        overwriting it.
 
         This should be called before provisioning in order to take effect.
 

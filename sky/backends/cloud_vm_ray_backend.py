@@ -21,6 +21,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import filelock
+import yaml
 
 import sky
 from sky import backends
@@ -196,7 +197,8 @@ def _get_cluster_config_template(cloud):
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
-        clouds.Nebius: 'nebius-ray.yml.j2'
+        clouds.Nebius: 'nebius-ray.yml.j2',
+        clouds.Hyperbolic: 'hyperbolic-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -2301,12 +2303,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
-            if os.path.exists(self.cluster_yaml):
-                # It is possible that the cluster yaml is not available when
-                # the handle is unpickled for service replicas from the
-                # controller with older version.
-                config = global_user_state.get_cluster_yaml_dict(
-                    self.cluster_yaml)
+            # It is possible that the cluster yaml is not available when
+            # the handle is unpickled for service replicas from the
+            # controller with older version.
+            yaml_str = global_user_state.get_cluster_yaml_str(self.cluster_yaml)
+            if yaml_str is None:
+                # If the cluster yaml is not available,
+                # we skip updating the cluster info.
+                return
+            config = yaml.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2498,6 +2503,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 raise RuntimeError(
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
+            self._update_cluster_info()
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andyl): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner. Now this
+        # is required for rsync as using deployment in rsync seems to cause
+        # some unknown issues.
+        # TODO(andyl): Should check through the real cluster info. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                controller_utils.high_availability_specified(
+                    self.cluster_name)):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self

@@ -84,6 +84,32 @@ def _get_lock_path() -> str:
     return path
 
 
+def _start_controller(job_id: int, dag_yaml_path: str,
+                      env_file_path: str) -> None:
+    activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+    source_environment_cmd = (f'source {env_file_path};'
+                              if env_file_path else '')
+    run_controller_cmd = ('python -u -m sky.jobs.controller '
+                          f'{dag_yaml_path} --job-id {job_id};')
+
+    # If the command line here is changed, please also update
+    # utils._controller_process_alive. `--job-id X` should be at
+    # the end.
+    run_cmd = (f'{activate_python_env_cmd}'
+               f'{source_environment_cmd}'
+               f'{run_controller_cmd}')
+
+    logs_dir = os.path.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(logs_dir, f'{job_id}.log')
+
+    pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
+    state.set_job_controller_pid(job_id, pid)
+
+    logger.debug(f'Job {job_id} started with pid {pid}')
+
+
 def maybe_schedule_next_jobs() -> None:
     """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
@@ -158,32 +184,9 @@ def maybe_schedule_next_jobs() -> None:
 
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
+                    env_file_path = maybe_next_job['env_file_path']
 
-                    activate_python_env_cmd = (
-                        f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
-                    env_file = maybe_next_job['env_file_path']
-                    source_environment_cmd = (f'source {env_file};'
-                                              if env_file else '')
-                    run_controller_cmd = ('python -u -m sky.jobs.controller '
-                                          f'{dag_yaml_path} --job-id {job_id};')
-
-                    # If the command line here is changed, please also update
-                    # utils._controller_process_alive. `--job-id X` should be at
-                    # the end.
-                    run_cmd = (f'{activate_python_env_cmd}'
-                               f'{source_environment_cmd}'
-                               f'{run_controller_cmd}')
-
-                    logs_dir = os.path.expanduser(
-                        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
-                    os.makedirs(logs_dir, exist_ok=True)
-                    log_path = os.path.join(logs_dir, f'{job_id}.log')
-
-                    pid = subprocess_utils.launch_new_process_tree(
-                        run_cmd, log_output=log_path)
-                    state.set_job_controller_pid(job_id, pid)
-
-                    logger.debug(f'Job {job_id} started with pid {pid}')
+                    _start_controller(job_id, dag_yaml_path, env_file_path)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -203,10 +206,15 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                    original_user_yaml_path, env_file_path,
-                                    common_utils.get_user_hash(), priority)
-    maybe_schedule_next_jobs()
+        is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                                original_user_yaml_path,
+                                                env_file_path,
+                                                common_utils.get_user_hash(),
+                                                priority)
+    if is_resume:
+        _start_controller(job_id, dag_yaml_path, env_file_path)
+    else:
+        maybe_schedule_next_jobs()
 
 
 @contextlib.contextmanager

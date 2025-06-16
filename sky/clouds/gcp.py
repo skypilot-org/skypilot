@@ -1062,7 +1062,7 @@ class GCP(clouds.Cloud):
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure."""
+        """Whether a resource needs cleanup after preemption or failure."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."

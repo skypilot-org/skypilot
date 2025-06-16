@@ -1277,7 +1277,8 @@ def query_instances(
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
             if is_ssh:
-                node_pool = context.lstrip('ssh-') if context else ''
+                node_pool = common_utils.removeprefix(context,
+                                                      'ssh-') if context else ''
                 msg = (
                     f'Cannot connect to SSH Node Pool {node_pool}. '
                     'Please check if the SSH Node Pool is up and accessible. '
