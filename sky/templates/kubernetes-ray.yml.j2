@@ -210,7 +210,7 @@ provider:
 
     {% if priority is not none %}
     priority:
-        apiVersion: v1
+        apiVersion: scheduling.k8s.io/v1
         kind: PriorityClass
         metadata:
           name: skypilot-priority-{{priority}}
