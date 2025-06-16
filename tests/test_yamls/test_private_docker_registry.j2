@@ -1,0 +1,11 @@
+resources:
+  image_id: docker:{{full_image_name}}
+
+envs:
+  SKYPILOT_DOCKER_USERNAME: "{{docker_username}}"
+  SKYPILOT_DOCKER_PASSWORD: "{{docker_password}}"
+  SKYPILOT_DOCKER_SERVER: "{{docker_server}}"
+
+run: |
+  set -e
+  sky -v | grep "1.0.0.dev"

@@ -8,7 +8,7 @@ It opens the opportunity for the open-source community to serve and finetune pri
 
 Serving Gemma on any cloud is easy with SkyPilot. With [serve.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/gemma/serve.yaml) in this directory, you host the model on any cloud with a single command.
 
-### Prerequsites
+### Prerequisites
 
 1. Apply for access to the Gemma model
 

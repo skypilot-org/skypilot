@@ -277,7 +277,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             try:
                 return float(row['VCpuInfo']['DefaultVCpus'])
             except Exception as e:  # pylint: disable=broad-except
-                print('Error occured for row:', row)
+                print('Error occurred for row:', row)
                 print('Error:', e)
                 raise
 

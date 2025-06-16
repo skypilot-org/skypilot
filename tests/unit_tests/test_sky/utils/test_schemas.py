@@ -108,6 +108,63 @@ class TestResourcesSchema(unittest.TestCase):
                     msg=f"Expected '{config['infra']}' to be rejected"):
                 jsonschema.validate(instance=config, schema=resources_schema)
 
+    def test_valid_priority_configs(self):
+        """Test validation of valid priority field configs."""
+        resources_schema = schemas.get_resources_schema()
+
+        # Valid priority configurations
+        valid_priority_configs = [
+            {
+                'priority': 0
+            },  # Minimum value
+            {
+                'priority': 500
+            },  # Middle value
+            {
+                'priority': 1000
+            },  # Maximum value
+            {
+                'cpus': 4,
+                'priority': 750
+            },  # With other fields
+        ]
+
+        for config in valid_priority_configs:
+            # Should not raise an exception
+            jsonschema.validate(instance=config, schema=resources_schema)
+
+    def test_invalid_priority_configs(self):
+        """Test validation rejects invalid priority field configs."""
+        resources_schema = schemas.get_resources_schema()
+
+        # Invalid priority configurations
+        invalid_priority_configs = [
+            {
+                'priority': -1
+            },  # Below minimum
+            {
+                'priority': 1001
+            },  # Above maximum
+            {
+                'priority': 'high'
+            },  # Not an integer
+            {
+                'priority': 500.5
+            },  # Not an integer
+            {
+                'priority': None
+            },  # None (should be omitted instead)
+            {
+                'priority': True
+            },  # Boolean
+        ]
+
+        for config in invalid_priority_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f"Expected priority config {config} to be rejected"):
+                jsonschema.validate(instance=config, schema=resources_schema)
+
 
 class TestWorkspaceSchema(unittest.TestCase):
     """Tests for the workspace schema in schemas.py"""

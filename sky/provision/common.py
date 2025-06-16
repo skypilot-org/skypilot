@@ -238,7 +238,7 @@ class Endpoint:
 
 @dataclasses.dataclass
 class SocketEndpoint(Endpoint):
-    """Socket endpoint accesible via a host and a port."""
+    """Socket endpoint accessible via a host and a port."""
     port: Optional[int]
     host: str = ''
 

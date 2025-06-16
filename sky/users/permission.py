@@ -42,6 +42,8 @@ class PermissionService:
                                               'model.conf')
                     enforcer = casbin.Enforcer(model_path, adapter)
                     self.enforcer = enforcer
+                else:
+                    self.enforcer = _enforcer_instance.enforcer
         else:
             self.enforcer = _enforcer_instance.enforcer
         with _policy_lock():

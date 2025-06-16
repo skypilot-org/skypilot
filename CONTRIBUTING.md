@@ -146,3 +146,68 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
+
+### Test API server on Helm chart deployment
+
+By default, the [Helm Chart Deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) will use the latest released API Server. To test the local change on API Server, you can follow the steps below.
+
+First, start the API Server:
+
+```bash
+# Ensure the helm repository is added and up to date
+helm repo add skypilot https://helm.skypilot.co
+helm repo update
+
+# The following variables will be used throughout the guide
+# NAMESPACE is the namespace to deploy the API server in
+NAMESPACE=skypilot
+# RELEASE_NAME is the name of the helm release, must be unique within the namespace
+RELEASE_NAME=skypilot
+# Set up basic username/password HTTP auth, or use OAuth2 proxy
+WEB_USERNAME=skypilot
+WEB_PASSWORD=yourpassword
+AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+# Deploy the API server
+helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+  --namespace $NAMESPACE \
+  --create-namespace \
+  --set ingress.authCredentials=$AUTH_STRING
+```
+
+Then build the local changes and deploy the new changes to the API Server:
+
+```bash
+DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
+docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile_local .
+
+# Build the local changes
+helm dependency build ./charts/skypilot
+
+# Deploy the new changes to the API Server
+helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set apiService.image=$DOCKER_IMAGE
+```
+
+> Notice that the tag should change every time you build the local changes.
+
+Then, watch the status until the `READY` shows `1/1` and `STATUS` shows `Running`:
+
+```bash
+$ kubectl get pods --namespace $NAMESPACE -l app=${RELEASE_NAME}-api --watch
+NAME                                  READY   STATUS              RESTARTS   AGE
+skypilot-api-server-866b9b64c-ckxfm   0/1     ContainerCreating   0          25s
+skypilot-api-server-866b9b64c-ckxfm   0/1     Running             0          44s
+skypilot-api-server-866b9b64c-ckxfm   1/1     Running             0          75s
+```
+
+Finally, fetch the updated API Server endpoint:
+
+```bash
+HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
+echo $ENDPOINT
+```
+
+

@@ -241,7 +241,7 @@ With the above setup, you can now scale out to run many jobs in parallel.
 
 To run many jobs at once, we will launch the jobs as :ref:`SkyPilot managed jobs <managed-jobs>`. We can control the hyperparameter environment variables independently for each managed job.
 
-You can use normal loops in bash or Python to iterate over possible hyperparamters:
+You can use normal loops in bash or Python to iterate over possible hyperparameters:
 
 .. tab-set::
 

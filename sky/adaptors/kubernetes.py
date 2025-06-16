@@ -93,12 +93,13 @@ def _load_config(context: Optional[str] = None):
             context_name = '(current-context)' if context is None else context
             is_ssh_node_pool = False
             if context_name.startswith('ssh-'):
-                context_name = context_name.lstrip('ssh-')
+                context_name = common_utils.removeprefix(context_name, 'ssh-')
                 is_ssh_node_pool = True
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
                 if is_ssh_node_pool:
-                    context_name = context_name.lstrip('ssh-')
+                    context_name = common_utils.removeprefix(
+                        context_name, 'ssh-')
                     err_str = ('Failed to load SSH Node Pool configuration for '
                                f'{context_name!r}.\n'
                                '    Run `sky ssh up --infra {context_name}` to '

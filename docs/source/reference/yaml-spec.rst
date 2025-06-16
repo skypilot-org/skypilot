@@ -1301,7 +1301,7 @@ Fields
 
 Priority of the job, between 0 and 1000 (default: 500).
 
-Set the queuing priority of the job. A lower value means that the job is higher
+Set the queuing priority of the job. A higher value means that the job is higher
 priority. High priority jobs are scheduled sooner and will block lower priority
 jobs from starting until the high priority jobs have started.
 

@@ -283,10 +283,7 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             'regular-ctx', 'ssh-prod', 'ssh-dev', 'ssh-staging', 'ssh-test'
         ]
         mock_get_workspace_cloud.return_value.get.return_value = None
-        # Only allow specific node pools - note: lstrip('ssh-') behavior
-        # 'ssh-prod'.lstrip('ssh-') -> 'prod'
-        # 'ssh-staging'.lstrip('ssh-') -> 'taging' (not 'staging'!)
-        mock_get_nested.return_value = ['prod', 'taging', 'nonexistent']
+        mock_get_nested.return_value = ['prod', 'staging', 'nonexistent']
 
         # Node pools file has some contexts
         with patch.object(ssh.SSH,

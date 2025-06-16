@@ -81,7 +81,6 @@ _set_http_proxy_env_vars()
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
 from sky import backends
-from sky import benchmark
 from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
@@ -144,6 +143,7 @@ Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
+Hyperbolic = clouds.Hyperbolic
 
 __all__ = [
     '__version__',
@@ -163,10 +163,10 @@ __all__ = [
     'Vsphere',
     'Fluidstack',
     'Nebius',
+    'Hyperbolic',
     'Optimizer',
     'OptimizeTarget',
     'backends',
-    'benchmark',
     'list_accelerators',
     '__root_dir__',
     'Storage',

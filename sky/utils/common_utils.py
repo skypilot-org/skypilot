@@ -1017,3 +1017,9 @@ def _get_cgroup_memory_limit() -> Optional[int]:
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
+
+
+def removeprefix(string: str, prefix: str) -> str:
+    if string.startswith(prefix):
+        return string[len(prefix):]
+    return string
