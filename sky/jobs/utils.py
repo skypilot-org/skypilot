@@ -1246,7 +1246,7 @@ def format_job_table(
                 recovery_cnt,
                 status_str,
                 job_tasks[0]['metadata']['git_commit']
-                if job_tasks[0]['metadata'] and
+                if job_tasks[0].get('metadata', None) and
                 job_tasks[0]['metadata']['git_commit'] is not None else '',
             ]
             if show_all:
@@ -1289,8 +1289,8 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
-                task['metadata']['git_commit'] if task['metadata'] and
-                task['metadata']['git_commit'] is not None else '',
+                task['metadata']['git_commit'] if task.get('metadata', None)
+                and task['metadata']['git_commit'] is not None else '',
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
