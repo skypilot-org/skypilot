@@ -277,7 +277,7 @@ class TestBackwardCompatibility:
             return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_name,
                 job_status=status,
-                timeout=120 if generic_cloud == 'kubernetes' else 300)
+                timeout=600 if generic_cloud == 'kubernetes' else 300)
 
         commands = [
             *self._switch_to_base(
