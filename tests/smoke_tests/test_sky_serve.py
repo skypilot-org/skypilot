@@ -28,14 +28,43 @@ import os
 import shlex
 import tempfile
 from typing import Dict, List, Tuple
+from unittest import mock
 
 import pytest
 from smoke_tests import smoke_tests_utils
 
 from sky import serve
 from sky import skypilot_config
+from sky.provision import common
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+
+
+@pytest.fixture(autouse=True, scope='module')
+def patch_socket_endpoint():
+    """Patch SocketEndpoint.url to handle localhost in Buildkite environment.
+
+    This fixture automatically applies to all tests in this module only.
+    It patches the SocketEndpoint.url method to replace localhost/127.0.0.1
+    with host.docker.internal when running in Buildkite environment.
+    """
+    if not os.environ.get('BUILDKITE'):
+        # If not in Buildkite, don't patch anything
+        yield
+        return
+
+    original_url = common.SocketEndpoint.url
+
+    def patched_url(self, *args, **kwargs):
+        url = original_url(self, *args, **kwargs)
+        for localhost in ['localhost:', '127.0.0.1:']:
+            if localhost in url:
+                return url.replace(localhost, 'host.docker.internal:')
+        return url
+
+    with mock.patch.object(common.SocketEndpoint, 'url', patched_url):
+        yield
+
 
 # ---------- Testing skyserve ----------
 
