@@ -77,6 +77,21 @@ const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
 // Define constant for "All Users"
 const ALL_USERS_VALUE = '__ALL_USERS__';
 
+// Helper function to filter jobs by name
+export function filterJobsByName(jobs, nameFilter) {
+  // If no name filter, return all jobs
+  if (!nameFilter || nameFilter.trim() === '') {
+    return jobs;
+  }
+
+  // Filter jobs by the name filter (case-insensitive partial match)
+  const filterLower = nameFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobName = job.name || '';
+    return jobName.toLowerCase().includes(filterLower);
+  });
+}
+
 // Helper function to filter jobs by workspace
 export function filterJobsByWorkspace(jobs, workspaceFilter) {
   // If no workspace filter or set to "All Workspaces", return all jobs
@@ -287,6 +302,7 @@ export function ManagedJobs() {
   const isMobile = useMobile();
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
   const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
+  const [nameFilter, setNameFilter] = useState('');
   const [workspaces, setWorkspaces] = useState([]);
   const [users, setUsers] = useState([]);
 
@@ -305,11 +321,22 @@ export function ManagedJobs() {
           : router.query.user;
         setUserFilter(userParam);
       }
+      if (router.query.name) {
+        const nameParam = Array.isArray(router.query.name)
+          ? router.query.name[0]
+          : router.query.name;
+        setNameFilter(nameParam);
+      }
     }
-  }, [router.isReady, router.query.workspace, router.query.user]);
+  }, [
+    router.isReady,
+    router.query.workspace,
+    router.query.user,
+    router.query.name,
+  ]);
 
   // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser) => {
+  const updateURLParams = (newWorkspace, newUser, newName) => {
     const query = { ...router.query };
 
     // Update workspace parameter
@@ -326,6 +353,13 @@ export function ManagedJobs() {
       delete query.user;
     }
 
+    // Update name parameter
+    if (newName && newName.trim() !== '') {
+      query.name = newName.trim();
+    } else {
+      delete query.name;
+    }
+
     // Use replace to avoid adding to browser history for filter changes
     router.replace(
       {
@@ -340,13 +374,19 @@ export function ManagedJobs() {
   // Handle workspace filter change
   const handleWorkspaceFilterChange = (newWorkspace) => {
     setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter);
+    updateURLParams(newWorkspace, userFilter, nameFilter);
   };
 
   // Handle user filter change
   const handleUserFilterChange = (newUser) => {
     setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser);
+    updateURLParams(workspaceFilter, newUser, nameFilter);
+  };
+
+  // Handle name filter change
+  const handleNameFilterChange = (newName) => {
+    setNameFilter(newName);
+    updateURLParams(workspaceFilter, userFilter, newName);
   };
 
   // Fetch workspaces and users for filter dropdown
@@ -448,11 +488,41 @@ export function ManagedJobs() {
           >
             Managed Jobs
           </Link>
+          <div className="relative ml-4 mr-2">
+            <input
+              type="text"
+              placeholder="Filter by job name"
+              value={nameFilter}
+              onChange={(e) => handleNameFilterChange(e.target.value)}
+              className="h-8 w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            />
+            {nameFilter && (
+              <button
+                onClick={() => handleNameFilterChange('')}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear filter"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
           <Select
             value={workspaceFilter}
             onValueChange={handleWorkspaceFilterChange}
           >
-            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
                   ? 'All Workspaces'
@@ -513,6 +583,7 @@ export function ManagedJobs() {
         refreshDataRef={refreshDataRef}
         workspaceFilter={workspaceFilter}
         userFilter={userFilter}
+        nameFilter={nameFilter}
       />
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -533,6 +604,7 @@ export function ManagedJobsTable({
   refreshDataRef,
   workspaceFilter,
   userFilter,
+  nameFilter,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -715,6 +787,9 @@ export function ManagedJobsTable({
     // Then apply user filter
     filtered = filterJobsByUser(filtered, userFilter);
 
+    // Then apply name filter
+    filtered = filterJobsByName(filtered, nameFilter);
+
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
       return filtered.filter((item) => selectedStatuses.includes(item.status));
@@ -740,6 +815,7 @@ export function ManagedJobsTable({
     showAllMode,
     workspaceFilter,
     userFilter,
+    nameFilter,
   ]);
 
   // Sort the filtered data
@@ -1318,6 +1394,7 @@ export function ClusterJobs({
   loading,
   refreshClusterJobsOnly,
   userFilter = null,
+  nameFilter = null,
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
@@ -1353,8 +1430,13 @@ export function ClusterJobs({
       filtered = filterJobsByUser(filtered, userFilter);
     }
 
+    // Apply name filter if provided
+    if (nameFilter) {
+      filtered = filterJobsByName(filtered, nameFilter);
+    }
+
     return filtered;
-  }, [clusterJobData, userFilter]);
+  }, [clusterJobData, userFilter, nameFilter]);
 
   useEffect(() => {
     // Check if the data has changed significantly (new data received)
