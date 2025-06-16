@@ -10,7 +10,7 @@ from sky.logs.gcp import GCPLoggingAgent
 def get_logging_agent() -> Optional[LoggingAgent]:
     store = skypilot_config.get_nested(('logs', 'store'), None)
     if store is None:
-      return None
+        return None
     if store == 'gcp':
         return GCPLoggingAgent(skypilot_config.get_nested(('logs', 'gcp'), {}))
     raise exceptions.InvalidSkyPilotConfigError(

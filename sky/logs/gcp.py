@@ -13,15 +13,17 @@ from sky.utils import resources_utils
 _logging_credentials_path = os.path.join(constants.LOGGING_CONFIG_DIR,
                                          'gcp-credentials.json')
 
+
 class _GCPLoggingConfig(pydantic.BaseModel):
     """Configuration for GCP logging agent."""
     project_id: Optional[str] = None
     credentials_file: Optional[str] = None
     additional_labels: Optional[Dict[str, str]] = None
 
+
 class _StackdriverOutputConfig(pydantic.BaseModel):
     """Auxiliary model for building stackdriver output config in YAML.
-    
+
     Ref: https://docs.fluentbit.io/manual/1.7/pipeline/outputs/stackdriver
     """
     name: str = 'stackdriver'
@@ -37,13 +39,15 @@ class _StackdriverOutputConfig(pydantic.BaseModel):
             config['labels'] = label_str
         return config
 
+
 class GCPLoggingAgent(FluentbitAgent):
     """GCP logging agent."""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = _GCPLoggingConfig(**config)
-    
-    def get_setup_command(self, cluster_name: resources_utils.ClusterName) -> str:
+
+    def get_setup_command(self,
+                          cluster_name: resources_utils.ClusterName) -> str:
         credential_path = gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
         if self.config.credentials_file:
             credential_path = _logging_credentials_path
@@ -62,19 +66,18 @@ class GCPLoggingAgent(FluentbitAgent):
         # TODO(aylei): check whether the credentials config is valid before
         # provision.
         pre_cmd = (f'export GOOGLE_APPLICATION_CREDENTIALS={credential_path}; '
-                    f'cat {credential_path} | grep "service_account" || '
-                    f'(echo "Credentials file {credential_path} is not a '
-                    'service account key, check metadata server" && '
-                    'curl -s http://metadata.google.internal >/dev/null || '
-                    f'(echo "Neither service account key nor metadata server is '
-                    'available. Set logs.gcp.credentials_file to a service '
-                    'account key in server config and retry." && '
-                    'exit 1;))')
+                   f'cat {credential_path} | grep "service_account" || '
+                   f'(echo "Credentials file {credential_path} is not a '
+                   'service account key, check metadata server" && '
+                   'curl -s http://metadata.google.internal >/dev/null || '
+                   f'(echo "Neither service account key nor metadata server is '
+                   'available. Set logs.gcp.credentials_file to a service '
+                   'account key in server config and retry." && '
+                   'exit 1;))')
         return pre_cmd + ' && ' + super().get_setup_command(cluster_name)
 
     def fluentbit_output_config(
-            self,
-            cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:
+            self, cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:
         display_name = cluster_name.display_name
         unique_name = cluster_name.name_on_cloud
 
@@ -86,7 +89,7 @@ class GCPLoggingAgent(FluentbitAgent):
                 **(self.config.additional_labels or {})
             },
         ).to_dict()
-    
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if self.config.credentials_file:
             return {_logging_credentials_path: self.config.credentials_file}

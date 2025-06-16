@@ -2,7 +2,7 @@
 import abc
 import os
 import shlex
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -19,41 +19,44 @@ class LoggingAgent(abc.ABC):
     """
 
     @abc.abstractmethod
-    def get_setup_command(self, cluster_name: resources_utils.ClusterName) -> str:
+    def get_setup_command(self,
+                          cluster_name: resources_utils.ClusterName) -> str:
         pass
 
     @abc.abstractmethod
     def get_credential_file_mounts(self) -> Dict[str, str]:
         pass
 
+
 class FluentbitAgent(LoggingAgent):
     """Base class for logging store that use fluentbit as the agent."""
 
-    def get_setup_command(self, cluster_name: resources_utils.ClusterName) -> str:
+    def get_setup_command(self,
+                          cluster_name: resources_utils.ClusterName) -> str:
         install_cmd = (
             'if ! command -v fluent-bit >/dev/null 2>&1; then '
             'sudo apt-get install -y gnupg; '
+            # pylint: disable=line-too-long
             'curl https://raw.githubusercontent.com/fluent/fluent-bit/master/install.sh | sh; '
             'fi')
         cfg = self.fluentbit_config(cluster_name)
         cfg_path = os.path.join(constants.LOGGING_CONFIG_DIR, 'fluentbit.yaml')
         config_cmd = (f'mkdir -p {constants.LOGGING_CONFIG_DIR} && '
                       f'echo {shlex.quote(cfg)} > {cfg_path}')
-        start_cmd = (
-            'nohup $(command -v fluent-bit || echo "/opt/fluent-bit/bin/fluent-bit") '
-            f'-c {cfg_path} > /tmp/fluentbit.log 2>&1 &')
+        start_cmd = ('nohup $(command -v fluent-bit || '
+                     'echo "/opt/fluent-bit/bin/fluent-bit") '
+                     f'-c {cfg_path} > /tmp/fluentbit.log 2>&1 &')
         return f'set -e; {install_cmd}; {config_cmd}; {start_cmd}'
 
-    def fluentbit_config(self, cluster_name: resources_utils.ClusterName) -> str:
+    def fluentbit_config(self,
+                         cluster_name: resources_utils.ClusterName) -> str:
         cfg_dict = {
             'pipeline': {
-                'inputs': [
-                    {
-                        'name': 'tail',
-                        'path': f'{constants.SKY_LOGS_DIRECTORY}/*/*.log',
-                        'path_key': 'log_path',
-                    }
-                ],
+                'inputs': [{
+                    'name': 'tail',
+                    'path': f'{constants.SKY_LOGS_DIRECTORY}/*/*.log',
+                    'path_key': 'log_path',
+                }],
                 'outputs': [self.fluentbit_output_config(cluster_name)],
             }
         }
@@ -61,6 +64,5 @@ class FluentbitAgent(LoggingAgent):
 
     @abc.abstractmethod
     def fluentbit_output_config(
-        self,
-        cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:
+            self, cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:
         pass

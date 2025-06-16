@@ -28,6 +28,8 @@ Google cloud logging
 Configuration options:
 
 - ``project_id``: The project ID of the GCP project to send logs to.
+- ``credentials_file``: The path to the GCP credentials file, refer to :ref:`Authenticating to GCP cloud logging<external-logging-storage-gcp-authentication>` for more details.
+- ``additional_labels``: Additional labels to add to the logs.
 
 Example:
 
@@ -37,6 +39,9 @@ Example:
     store: gcp
     gcp:
       project_id: my-project-id
+      credentials_file: /path/to/credentials.json
+      additional_labels:
+        my_label: my_value
 
 Available filters:
 
@@ -56,3 +61,24 @@ Example querys:
     gcloud logging read "jsonPayload.log_path:my-job-name" --format=json | jq -r ".[].jsonPayload.log"
 
 You can open the `Cloud logging explorer <https://console.cloud.google.com/logs/explorer>`_ and filter the logs by the above filters.
+
+.. _external-logging-storage-gcp-authentication:
+
+Authenticating to GCP cloud logging
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To authenticate to GCP cloud logging, SkyPilot will apply credentials in the following precedence:
+
+- The `service account key <https://cloud.google.com/iam/docs/keys-create-delete>`_ specified by ``logs.gcp.credentials_file``;
+- The default GCP credential of the API server, if the credential is a service account key;
+- `Instance metadata <https://cloud.google.com/compute/docs/metadata/overview>`_, which is only available on GCE and GCP.
+
+.. note::
+
+  In :ref:`client-server architecture<sky-api-server>`, the ``logs.gcp.credentials_file`` refers to the credential file on the remote API server instead of the local machine.
+
+The credentials used must have the following permissions to send logs to GCP cloud logging:
+
+- ``logging.logEntries.create``
+- ``logging.logEntries.route``
+
