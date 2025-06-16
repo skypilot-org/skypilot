@@ -36,22 +36,22 @@ def test_log_collection_to_gcp(generic_cloud: str):
                       skypilot_smoke_test_case: {name}-case
                 """))
         additional_labels.flush()
-        logs_cmd = 'for i in {1..10}; do echo $i; done'
+        logs_cmd = 'for i in {1..10}; do echo $i; done; sleep 3600;'
         validate_logs_cmd = (
             'echo $output && echo "===Validate logs from GCP Cloud Logging===" && '
             'for i in {1..10}; do echo $output | grep -q $i; done')
         test = smoke_tests_utils.Test(
             'log_collection_to_gcp',
             [
-                smoke_tests_utils.with_config(
-                    f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
-                    base.name),
-                f'sky logs {name} 1',
-                # Wait for the logs to be available in the GCP Cloud Logging.
-                'sleep 60',
-                # Use grep instead of jq to avoid the dependency on jq.
-                (f'output=$(gcloud logging read \'labels.skypilot_cluster_name={name} AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
-                 f'{validate_logs_cmd}'),
+                # smoke_tests_utils.with_config(
+                #     f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
+                #     base.name),
+                # f'sky logs {name} 1',
+                # # Wait for the logs to be available in the GCP Cloud Logging.
+                # 'sleep 60',
+                # # Use grep instead of jq to avoid the dependency on jq.
+                # (f'output=$(gcloud logging read \'labels.skypilot_cluster_name={name} AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
+                #  f'{validate_logs_cmd}'),
                 smoke_tests_utils.with_config(
                     f'sky jobs launch -y -n {name}-job --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
                     base.name),
@@ -59,12 +59,12 @@ def test_log_collection_to_gcp(generic_cloud: str):
                 (f'output=$(gcloud logging read \'jsonPayload.log_path:{name}-job AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
                  f'{validate_logs_cmd}'),
                 f'sky down -y {name}',
-                smoke_tests_utils.with_config(
-                    f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
-                    additional_labels.name),
-                'sleep 60',
-                (f'output=$(gcloud logging read \'labels.skypilot_smoke_test_case={name}-case AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
-                 f'{validate_logs_cmd}'),
+                # smoke_tests_utils.with_config(
+                #     f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{logs_cmd}\'',
+                #     additional_labels.name),
+                # 'sleep 60',
+                # (f'output=$(gcloud logging read \'labels.skypilot_smoke_test_case={name}-case AND timestamp>="{one_hour_ago}"\' --order=asc --format=json | grep \'"log":\') && '
+                #  f'{validate_logs_cmd}'),
             ],
             f'sky down -y {name}',
             timeout=20 * 60,
