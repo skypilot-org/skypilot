@@ -239,7 +239,8 @@ def launch(
                 # TODO(aylei): the mutated config will not be updated
                 # afterwards without recreate the controller. Need to
                 # revisit this.
-                local_user_config=mutated_user_config),
+                local_user_config=mutated_user_config,
+            ),
         }
 
         yaml_path = os.path.join(
