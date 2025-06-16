@@ -279,10 +279,12 @@ class TestBackwardCompatibility:
                 job_status=status,
                 timeout=600 if generic_cloud == 'kubernetes' else 300)
 
+        blocking_seconds_for_cancel_job = 2000 if generic_cloud == 'kubernetes' else 1000
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
-                launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-old-0',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
                 launch_job(f'{managed_job_name}-old-1', 'echo hi'),
                 wait_for_status(f'{managed_job_name}-old-1',
                                 [sky.ManagedJobStatus.SUCCEEDED]),
@@ -294,7 +296,8 @@ class TestBackwardCompatibility:
                     sky.ManagedJobStatus.CANCELLING
                 ]),
                 # Cover jobs launched in the new version and still running after upgrade
-                launch_job(f'{managed_job_name}-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-0',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
                 launch_job(f'{managed_job_name}-1', 'echo hi; sleep 400'),
                 wait_for_status(f'{managed_job_name}-0',
                                 [sky.ManagedJobStatus.RUNNING]),
@@ -306,7 +309,8 @@ class TestBackwardCompatibility:
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
                 launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
                 # Cover cancelling jobs launched in the new version
-                launch_job(f'{managed_job_name}-3', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-3',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 f'sky jobs cancel -y -n {managed_job_name}-0',
                 f'sky jobs cancel -y -n {managed_job_name}-3',
