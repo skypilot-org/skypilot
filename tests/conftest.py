@@ -169,7 +169,7 @@ def pytest_addoption(parser):
     parser.addoption(
         '--helm-package',
         type=str,
-        default='skypilot-nightly',
+        default='',
         help='Package name to use for Helm tests',
     )
 
