@@ -2689,6 +2689,8 @@ def get_clusters(
         record['accelerators'] = (f'{handle.launched_resources.accelerators}'
                                   if handle.launched_resources.accelerators else
                                   None)
+        record['priority'] = (f'{handle.launched_resources.priority}'
+                              if handle.launched_resources.priority else None)
 
     # Add auth_config to the records
     for record in records:

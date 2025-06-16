@@ -356,6 +356,17 @@ function ActiveTab({
                   {formatAutostop(clusterData.autostop, clusterData.to_down)}
                 </div>
               </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Priority
+                </div>
+                <div className="text-base mt-1">
+                  {clusterData.priority !== undefined &&
+                  clusterData.priority !== null
+                    ? clusterData.priority
+                    : '-'}
+                </div>
+              </div>
 
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
