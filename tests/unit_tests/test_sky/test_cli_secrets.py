@@ -75,7 +75,7 @@ secrets:
         envs = [('PUBLIC_VAR', 'public_value')]
 
         result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-            entrypoint=(yaml_file,), env=envs, secrets=secrets)
+            entrypoint=(yaml_file,), env=envs, secret=secrets)
 
         # Should be a Task (single task in YAML)
         assert hasattr(result, 'secrets')
@@ -100,7 +100,7 @@ secrets:
 def test_make_task_with_empty_secrets():
     """Test task creation with empty secrets list."""
     result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint=('echo hello',), env=[], secrets=[])
+        entrypoint=('echo hello',), env=[], secret=[])
 
     assert hasattr(result, 'secrets')
     assert result.secrets == {}
@@ -109,7 +109,7 @@ def test_make_task_with_empty_secrets():
 def test_make_task_with_none_secrets():
     """Test task creation with None secrets."""
     result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint=('echo hello',), env=[], secrets=None)
+        entrypoint=('echo hello',), env=[], secret=None)
 
     assert hasattr(result, 'secrets')
     assert result.secrets == {}
@@ -121,7 +121,7 @@ def test_secrets_in_command_line_task():
     envs = [('DEBUG', 'true')]
 
     result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint=('python', 'train.py'), env=envs, secrets=secrets)
+        entrypoint=('python', 'train.py'), env=envs, secret=secrets)
 
     # Check task was created correctly
     assert result.run == 'python train.py'
@@ -137,7 +137,7 @@ def test_secrets_integration_with_resources():
     secrets = [('DOCKER_PASSWORD', 'docker_secret')]
 
     result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint=('echo hello',), secrets=secrets, gpus='V100:1')
+        entrypoint=('echo hello',), secret=secrets, gpus='V100:1')
 
     # Check that secrets are set
     assert result.secrets == {'DOCKER_PASSWORD': 'docker_secret'}
@@ -165,7 +165,7 @@ secrets:
         secrets = [('API_KEY', 'cli_value'), ('CLI_ONLY', 'cli_secret')]
 
         result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-            entrypoint=(yaml_file,), secrets=secrets)
+            entrypoint=(yaml_file,), secret=secrets)
 
         task_secrets = result.secrets
         assert task_secrets['API_KEY'] == 'cli_value'  # CLI overrides YAML
@@ -198,7 +198,7 @@ secrets:
                    ('SECRET_ONLY', 'secret_val')]
 
         result = cli._make_task_or_dag_from_entrypoint_with_overrides(
-            entrypoint=(yaml_file,), env=envs, secrets=secrets)
+            entrypoint=(yaml_file,), env=envs, secret=secrets)
 
         # Check both dictionaries separately
         assert result.envs['SHARED_VAR'] == 'cli_env_value'
@@ -248,7 +248,7 @@ def test_null_secrets_override_with_cli():
                        ('SECRET_TOKEN', 'cli-token')]
 
         task = _make_task_or_dag_from_entrypoint_with_overrides(
-            entrypoint=(yaml_file,), secrets=cli_secrets)
+            entrypoint=(yaml_file,), secret=cli_secrets)
 
         expected_secrets = {
             'API_KEY': 'cli-api-key',
@@ -292,7 +292,7 @@ def test_null_secrets_without_cli_override_fails():
         with pytest.raises(ValueError,
                            match="Secret variable 'API_KEY' is None"):
             _make_task_or_dag_from_entrypoint_with_overrides(
-                entrypoint=(yaml_file,), secrets=None)
+                entrypoint=(yaml_file,), secret=None)
     finally:
         os.unlink(yaml_file)
 
@@ -326,7 +326,7 @@ def test_mixed_null_and_non_null_secrets():
         cli_secrets = [('CLI_SECRET', 'cli-override-value')]
 
         task = _make_task_or_dag_from_entrypoint_with_overrides(
-            entrypoint=(yaml_file,), secrets=cli_secrets)
+            entrypoint=(yaml_file,), secret=cli_secrets)
 
         expected_secrets = {
             'YAML_SECRET': 'yaml-value',
@@ -366,7 +366,7 @@ def test_cli_override_non_null_secrets():
         cli_secrets = [('EXISTING_SECRET', 'overridden-value')]
 
         task = _make_task_or_dag_from_entrypoint_with_overrides(
-            entrypoint=(yaml_file,), secrets=cli_secrets)
+            entrypoint=(yaml_file,), secret=cli_secrets)
 
         expected_secrets = {'EXISTING_SECRET': 'overridden-value'}
         assert task.secrets == expected_secrets

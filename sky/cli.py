@@ -901,7 +901,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
-    secrets: Optional[List[Tuple[str, str]]] = None,
+    secret: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
@@ -952,7 +952,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
                                                  env_overrides=env,
-                                                 secrets_overrides=secrets)
+                                                 secret_overrides=secret)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -971,7 +971,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.set_resources({sky.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
-        task.update_secrets(secrets)
+        task.update_secrets(secret)
 
     # Override.
     if workdir is not None:
@@ -1280,7 +1280,7 @@ def launch(
         image_id: Optional[str],
         env_file: Optional[Dict[str, str]],
         env: List[Tuple[str, str]],
-        secrets: List[Tuple[str, str]],
+        secret: List[Tuple[str, str]],
         disk_size: Optional[int],
         disk_tier: Optional[str],
         network_tier: Optional[str],
@@ -1335,7 +1335,7 @@ def launch(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
-        secrets=secrets,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -1452,7 +1452,7 @@ def exec(cluster: Optional[str],
          image_id: Optional[str],
          env_file: Optional[Dict[str, str]],
          env: List[Tuple[str, str]],
-         secrets: List[Tuple[str, str]],
+         secret: List[Tuple[str, str]],
          cpus: Optional[str],
          memory: Optional[str],
          disk_size: Optional[int],
@@ -1551,7 +1551,7 @@ def exec(cluster: Optional[str],
         image_id=image_id,
         num_nodes=num_nodes,
         env=env,
-        secrets=secrets,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4265,7 +4265,7 @@ def jobs_launch(
     job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
-    secrets: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
@@ -4313,7 +4313,7 @@ def jobs_launch(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
-        secrets=secrets,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4647,7 +4647,7 @@ def _generate_task_with_service(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
-    secrets: Optional[List[Tuple[str, str]]],
+    secret: Optional[List[Tuple[str, str]]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Optional[Tuple[str]],
@@ -4680,7 +4680,7 @@ def _generate_task_with_service(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
-        secrets=secrets,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4790,7 +4790,7 @@ def serve_up(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
-    secrets: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Tuple[str],
@@ -4851,7 +4851,7 @@ def serve_up(
         image_id=image_id,
         env_file=env_file,
         env=env,
-        secrets=secrets,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4905,7 +4905,7 @@ def serve_update(
         infra: Optional[str], cloud: Optional[str], region: Optional[str],
         zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
         image_id: Optional[str], env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]], secrets: List[Tuple[str, str]],
+        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
@@ -4957,7 +4957,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
-        secrets=secrets,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,

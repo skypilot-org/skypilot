@@ -98,7 +98,7 @@ def _load_chain_dag(
 def load_chain_dag_from_yaml(
     path: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
-    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+    secret_overrides: Optional[List[Tuple[str, str]]] = None,
 ) -> dag_lib.Dag:
     """Loads a chain DAG from a YAML file.
 
@@ -118,7 +118,7 @@ def load_chain_dag_from_yaml(
       trivial task).
     """
     configs = common_utils.read_yaml_all(path)
-    return _load_chain_dag(configs, env_overrides, secrets_overrides)
+    return _load_chain_dag(configs, env_overrides, secret_overrides)
 
 
 def load_chain_dag_from_yaml_str(
