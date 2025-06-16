@@ -20,18 +20,18 @@ resources:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // Check that ALL env vars are redacted (JavaScript version redacts everything)
       expect(result).toContain('API_KEY: <redacted>');
       expect(result).toContain('DATABASE_URL: <redacted>');
       expect(result).toContain('DEBUG: <redacted>');
       expect(result).toContain('PORT: <redacted>');
-      
+
       // Check that sensitive values are not present
       expect(result).not.toContain('secret-api-key-123');
       expect(result).not.toContain('postgresql://user:password@host:5432/db');
       expect(result).not.toContain('8080');
-      
+
       // Check that other fields are preserved
       expect(result).toContain('name: test-task');
       expect(result).toContain('run: echo hello');
@@ -51,7 +51,7 @@ envs:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // ALL env vars should be redacted in JavaScript version
       expect(result).toContain('STRING_VAR: <redacted>');
       expect(result).toContain('PORT: <redacted>');
@@ -59,7 +59,7 @@ envs:
       expect(result).toContain('TIMEOUT: <redacted>');
       expect(result).toContain('EMPTY_VAR: <redacted>');
       expect(result).toContain('NULL_VAR: <redacted>');
-      
+
       // No original values should be present
       expect(result).not.toContain('sensitive-value');
       expect(result).not.toContain('8080');
@@ -76,7 +76,7 @@ envs:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // Should not redact array-style envs (this is intentional based on the condition)
       expect(result).toContain('API_KEY=secret-value');
       expect(result).toContain('DEBUG=true');
@@ -91,7 +91,7 @@ resources:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       expect(result).toContain('name: test-task');
       expect(result).toContain('run: echo hello');
       expect(result).toContain('cpus: 2');
@@ -106,7 +106,7 @@ run: echo hello
 `;
 
       const result = formatYaml(yamlString);
-      
+
       expect(result).toContain('name: test-task');
       expect(result).toContain('envs: null');
       expect(result).toContain('run: echo hello');
@@ -120,7 +120,7 @@ run: echo hello
 `;
 
       const result = formatYaml(yamlString);
-      
+
       expect(result).toContain('name: test-task');
       expect(result).toContain('run: echo hello');
       // Empty object might be formatted differently by yaml.dump
@@ -141,7 +141,7 @@ envs:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // ALL values should be redacted in JavaScript version
       expect(result).toContain('AWS_ACCESS_KEY_ID: <redacted>');
       expect(result).toContain('AWS_SECRET_ACCESS_KEY: <redacted>');
@@ -151,7 +151,7 @@ envs:
       expect(result).toContain('STRIPE_KEY: <redacted>');
       expect(result).toContain('WORKER_COUNT: <redacted>');
       expect(result).toContain('ENABLE_LOGGING: <redacted>');
-      
+
       // No sensitive data should be visible
       expect(result).not.toContain('AKIAIOSFODNN7EXAMPLE');
       expect(result).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
@@ -201,7 +201,7 @@ workdir: /app
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // Check all non-env fields are preserved
       expect(result).toContain('name: web-server');
       expect(result).toContain('setup: pip install requirements.txt');
@@ -210,7 +210,7 @@ workdir: /app
       expect(result).toContain('memory: 4GB');
       expect(result).toContain('/app: ./src');
       expect(result).toContain('workdir: /app');
-      
+
       // Check env redaction - ALL values are redacted in JavaScript
       expect(result).toContain('SECRET_KEY: <redacted>');
       expect(result).toContain('PORT: <redacted>');
@@ -236,13 +236,13 @@ service:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // Env redaction should work - ALL values redacted
       expect(result).toContain('SECRET: <redacted>');
       expect(result).toContain('COUNT: <redacted>');
       expect(result).not.toContain('sensitive-data');
       expect(result).not.toContain('5');
-      
+
       // Nested structures should be preserved
       expect(result).toContain('cloud: aws');
       expect(result).toContain('instance_type: p3.2xlarge');
@@ -261,7 +261,7 @@ run: echo hello
 `;
 
       const result = formatYaml(yamlString);
-      
+
       // Should not crash and should preserve the original value
       expect(result).toContain('name: test-task');
       expect(result).toContain('envs: not an object');
@@ -279,7 +279,7 @@ run: echo hello
 `;
 
       const result = formatYaml(yamlString);
-      
+
       expect(result).toContain('LONG_SECRET: <redacted>');
       expect(result).toContain('NORMAL_VAR: <redacted>');
       expect(result).not.toContain(longSecret);
@@ -295,15 +295,15 @@ envs:
 `;
 
       const result = formatYaml(yamlString);
-      
+
       expect(result).toContain('SPECIAL_CHARS: <redacted>');
       expect(result).toContain('UNICODE_VAR: <redacted>');
       expect(result).toContain('MULTILINE: <redacted>');
-      
+
       // Original values should not be present
       expect(result).not.toContain('hello-world');
       expect(result).not.toContain('simple-text');
       expect(result).not.toContain('multi line text');
     });
   });
-}); 
+});

@@ -484,8 +484,6 @@ function JobDetailsContent({
     }
   };
 
-
-
   // Clear logs when activeTab changes or when jobData.id changes
   useEffect(() => {
     setLogs('');

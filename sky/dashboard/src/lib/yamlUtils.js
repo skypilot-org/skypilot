@@ -181,7 +181,7 @@ export const formatJobYaml = (yamlString) => {
     const docsToFormat = documents.length > 1 ? documents.slice(1) : documents;
 
     // Format each document
-    const formattedDocs = docsToFormat.map((doc, index) => 
+    const formattedDocs = docsToFormat.map((doc, index) =>
       formatSingleYamlDocument(doc, index)
     );
 
@@ -197,4 +197,4 @@ export const formatJobYaml = (yamlString) => {
       },
     ];
   }
-}; 
+};

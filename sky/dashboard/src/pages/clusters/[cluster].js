@@ -221,8 +221,6 @@ function ActiveTab({
     }
   };
 
-
-
   const hasCreationArtifacts = clusterData?.command || clusterData?.task_yaml;
 
   return (
