@@ -450,10 +450,8 @@ def download_and_stream_latest_job_log(
 
 
 def shared_controller_vars_to_fill(
-        controller: Controllers,
-        remote_user_config_path: str,
-        local_user_config: Dict[str, Any],
-        config_use_local_path: bool = False) -> Dict[str, str]:
+        controller: Controllers, remote_user_config_path: str,
+        local_user_config: Dict[str, Any]) -> Dict[str, str]:
     if not local_user_config:
         local_user_config_path = None
     else:
@@ -505,13 +503,8 @@ def shared_controller_vars_to_fill(
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
-        if config_use_local_path:
-            if local_user_config_path is not None:
-                env_vars[skypilot_config.
-                         ENV_VAR_SKYPILOT_CONFIG] = local_user_config_path
-        else:
-            env_vars[skypilot_config.
-                     ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
+        env_vars[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

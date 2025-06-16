@@ -789,9 +789,6 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
         callback_func('CANCELLING')
     else:
         logger.info('Cancellation skipped, job is already terminal')
-        status = get_status(job_id)
-        status_str = status.value if status is not None else 'None'
-        logger.info(f'Job status: {status_str}')
 
 
 @_init_db

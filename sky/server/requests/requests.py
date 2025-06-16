@@ -353,7 +353,10 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
-                          event_fn=refresh_cluster_status_event)
+                          event_fn=refresh_cluster_status_event),
+    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
+                          name='managed-job-status',
+                          event_fn=managed_job_status_refresh_event),
 ]
 
 
