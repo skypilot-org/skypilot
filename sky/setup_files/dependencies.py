@@ -60,6 +60,7 @@ install_requires = [
     'psycopg2-binary',
     'casbin',
     'sqlalchemy_adapter',
+    'passlib',
 ]
 
 local_ray = [

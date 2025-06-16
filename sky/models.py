@@ -17,6 +17,7 @@ class User:
     id: str
     # Display name of the user
     name: Optional[str] = None
+    password: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}

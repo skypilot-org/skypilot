@@ -407,6 +407,44 @@ class TestPermissionService:
         assert 'Failed to reload policy due to a timeout' in str(exc_info.value)
         assert 'policy_update.lock' in str(exc_info.value)
 
+    def test_delete_user_with_role(self):
+        """Test deleting a user who has a role."""
+        mock_enforcer = mock.Mock()
+        # User has a role
+        mock_enforcer.get_roles_for_user.return_value = ['user']
+        mock_enforcer.remove_grouping_policy.return_value = True
+
+        with mock.patch.object(permission.PermissionService,
+                               '__init__',
+                               return_value=None):
+            service = permission.PermissionService()
+            service.enforcer = mock_enforcer
+
+            service.delete_user('user1')
+
+            mock_enforcer.get_roles_for_user.assert_called_once_with('user1')
+            mock_enforcer.remove_grouping_policy.assert_called_once_with(
+                'user1', 'user')
+            mock_enforcer.save_policy.assert_called_once()
+
+    def test_delete_user_without_role(self):
+        """Test deleting a user who has no roles."""
+        mock_enforcer = mock.Mock()
+        # User has no roles
+        mock_enforcer.get_roles_for_user.return_value = []
+
+        with mock.patch.object(permission.PermissionService,
+                               '__init__',
+                               return_value=None):
+            service = permission.PermissionService()
+            service.enforcer = mock_enforcer
+
+            service.delete_user('user2')
+
+            mock_enforcer.get_roles_for_user.assert_called_once_with('user2')
+            mock_enforcer.remove_grouping_policy.assert_not_called()
+            mock_enforcer.save_policy.assert_not_called()
+
 
 @pytest.mark.usefixtures("reset_permission_singleton", "cleanup_env_vars")
 class TestPermissionServiceMultiProcess:
