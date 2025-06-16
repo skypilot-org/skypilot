@@ -1093,11 +1093,9 @@ class GCP(clouds.Cloud):
     def _check_instance_type_accelerators_combination(
             resources: 'resources.Resources') -> None:
         resources = resources.assert_launchable()
-        catalog.check_accelerator_attachable_to_host(
-            resources.instance_type,
-            resources.accelerators,
-            resources.zone,
-            'gcp')
+        catalog.check_accelerator_attachable_to_host(resources.instance_type,
+                                                     resources.accelerators,
+                                                     resources.zone, 'gcp')
 
     @classmethod
     def check_disk_tier(
