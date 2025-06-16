@@ -155,10 +155,7 @@ def test_to_yaml_config_with_secrets_redaction():
 
 def test_to_yaml_config_envs_and_secrets():
     """Test that envs and secrets are handled separately."""
-    envs = {
-        'PUBLIC_VAR': 'public-value',
-        'DEBUG': 'true'
-    }
+    envs = {'PUBLIC_VAR': 'public-value', 'DEBUG': 'true'}
     secrets = {
         'API_KEY': 'secret-api-key-123',
         'DATABASE_PASSWORD': 'secret-password'
@@ -227,23 +224,24 @@ def test_to_yaml_config_preserves_other_fields():
 def test_update_secrets():
     """Test the update_secrets method."""
     task_obj = task.Task(run='echo hello')
-    
+
     # Test updating with dict
     secrets_dict = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
     task_obj.update_secrets(secrets_dict)
     assert task_obj.secrets == secrets_dict
-    
+
     # Test updating with list of tuples
-    more_secrets = [('JWT_SECRET', 'jwt-secret'), ('REDIS_PASSWORD', 'redis-pass')]
+    more_secrets = [('JWT_SECRET', 'jwt-secret'),
+                    ('REDIS_PASSWORD', 'redis-pass')]
     task_obj.update_secrets(more_secrets)
     expected = {
         'API_KEY': 'secret1',
-        'DB_PASSWORD': 'secret2', 
+        'DB_PASSWORD': 'secret2',
         'JWT_SECRET': 'jwt-secret',
         'REDIS_PASSWORD': 'redis-pass'
     }
     assert task_obj.secrets == expected
-    
+
     # Test updating with None (should be no-op)
     task_obj.update_secrets(None)
     assert task_obj.secrets == expected

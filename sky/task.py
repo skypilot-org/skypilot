@@ -155,8 +155,7 @@ def _with_docker_login_config(
     envs.update(task_secrets)
     if not _check_docker_login_config(envs):
         return resources
-    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
-        envs)
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
         docker_image = resources.extract_docker_image()
@@ -471,7 +470,7 @@ class Task:
                 else:
                     new_envs[str(k)] = None
             config['envs'] = new_envs
-        
+
         # More robust handling for 'secrets': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.
@@ -776,7 +775,7 @@ class Task:
 
     def update_secrets(
             self, secrets: Union[None, List[Tuple[str, str]],
-                              Dict[str, str]]) -> 'Task':
+                                 Dict[str, str]]) -> 'Task':
         """Updates secret environment variables for use inside the setup/run commands.
 
         Args:
@@ -881,7 +880,8 @@ class Task:
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        self.resources = _with_docker_login_config(resources, self.envs, self.secrets)
+        self.resources = _with_docker_login_config(resources, self.envs,
+                                                   self.secrets)
         # Only have effect on RunPod.
         self.resources = _with_docker_username_for_runpod(
             self.resources, self.envs, self.secrets)
@@ -1399,10 +1399,10 @@ class Task:
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
-        
+
         # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
-        
+
         # Add secrets with redaction if requested
         secrets = self.secrets
         if secrets:

@@ -4910,13 +4910,13 @@ def serve_up(
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(
-        service_name: str, service_yaml: Tuple[str, ...],
-        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
-        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
-        use_spot: Optional[bool], image_id: Optional[str],
-        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-        secrets: List[Tuple[str, str]], gpus: Optional[str], 
-        instance_type: Optional[str], ports: Tuple[str],
+        service_name: str, service_yaml: Tuple[str,
+                                               ...], workdir: Optional[str],
+        infra: Optional[str], cloud: Optional[str], region: Optional[str],
+        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
+        image_id: Optional[str], env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]], secrets: List[Tuple[str, str]],
+        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
         yes: bool, async_call: bool):

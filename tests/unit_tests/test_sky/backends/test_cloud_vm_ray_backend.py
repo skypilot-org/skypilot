@@ -62,7 +62,8 @@ class TestCloudVmRayBackendTaskRedaction:
         # Verify sensitive string values in secrets are redacted
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
         assert redacted_config['secrets']['DATABASE_PASSWORD'] == '<redacted>'
-        assert redacted_config['secrets']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
+        assert redacted_config['secrets'][
+            'AWS_SECRET_ACCESS_KEY'] == '<redacted>'
         assert redacted_config['secrets']['STRIPE_SECRET_KEY'] == '<redacted>'
         assert redacted_config['secrets']['JWT_SECRET'] == '<redacted>'
 
@@ -102,12 +103,15 @@ class TestCloudVmRayBackendTaskRedaction:
         assert non_redacted_config['envs']['DEBUG'] == 'true'
         assert non_redacted_config['envs']['PORT'] == 8080
         assert non_redacted_config['secrets']['API_KEY'] == 'actual-api-key'
-        assert non_redacted_config['secrets']['JWT_SECRET'] == 'actual-jwt-secret'
+        assert non_redacted_config['secrets'][
+            'JWT_SECRET'] == 'actual-jwt-secret'
 
         # Also test default behavior (should redact secrets by default)
         default_config = test_task.to_yaml_config()
-        assert default_config['envs'] == non_redacted_config['envs']  # envs same
-        assert default_config['secrets']['API_KEY'] == '<redacted>'  # secrets redacted
+        assert default_config['envs'] == non_redacted_config[
+            'envs']  # envs same
+        assert default_config['secrets'][
+            'API_KEY'] == '<redacted>'  # secrets redacted
 
     def test_backend_redaction_with_no_secrets(self):
         """Test backend behavior when task has no secret variables."""
