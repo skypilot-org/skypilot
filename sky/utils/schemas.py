@@ -57,7 +57,7 @@ _AUTOSTOP_SCHEMA = {
             'required': [],
             'additionalProperties': False,
             'properties': {
-                # TODO(luca): update field to use minutes as well.
+                # TODO(luca): update field to use time units as well.
                 'idle_minutes': {
                     'type': 'integer',
                     'minimum': 0,
