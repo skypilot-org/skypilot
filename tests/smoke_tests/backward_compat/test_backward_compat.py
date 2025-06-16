@@ -176,6 +176,7 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
+    @pytest.mark.no_kubernetes
     def test_autostop_functionality(self, generic_cloud: str):
         """Test autostop functionality across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
@@ -274,7 +275,9 @@ class TestBackwardCompatibility:
         def wait_for_status(job_name: str,
                             status: Sequence[sky.ManagedJobStatus]):
             return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=job_name, job_status=status, timeout=300)
+                job_name=job_name,
+                job_status=status,
+                timeout=120 if generic_cloud == 'kubernetes' else 300)
 
         commands = [
             *self._switch_to_base(
