@@ -64,10 +64,6 @@ def bootstrap_instances(
                                                    config.provider_config)
 
         if config.provider_config.get('priority', None) is not None:
-            _configure_scheduling_role(namespace, context,
-                                       config.provider_config)
-            _configure_scheduling_role_binding(namespace, context,
-                                               config.provider_config)
             _configure_priority_class(context, config.provider_config)
         # SkyPilot system namespace is required for FUSE mounting. Here we just
         # create the namespace and set up the necessary permissions.
@@ -491,85 +487,6 @@ def _configure_autoscaler_cluster_role_binding(
                 f'{not_found_msg(binding_field, name)}')
     kubernetes.auth_api(context).create_cluster_role_binding(binding)
     logger.info('_configure_autoscaler_cluster_role_binding: '
-                f'{created_msg(binding_field, name)}')
-
-
-def _configure_scheduling_role(namespace, context,
-                               provider_config: Dict[str, Any]) -> None:
-    role_field = 'scheduling_role'
-    if role_field not in provider_config:
-        logger.info('_configure_scheduling_role: '
-                    f'{not_provided_msg(role_field)}')
-        return
-
-    role = provider_config[role_field]
-    if 'namespace' not in role['metadata']:
-        role['metadata']['namespace'] = namespace
-    elif role['metadata']['namespace'] != namespace:
-        raise InvalidNamespaceError(role_field, namespace)
-
-    name = role['metadata']['name']
-    field_selector = f'metadata.name={name}'
-    roles = (kubernetes.auth_api(context).list_namespaced_role(
-        namespace, field_selector=field_selector).items)
-    if roles:
-        assert len(roles) == 1
-        existing_role = roles[0]
-        new_role = kubernetes_utils.dict_to_k8s_object(role, 'V1Role')
-        if new_role.rules == existing_role.rules:
-            logger.info('_configure_scheduling_role: '
-                        f'{using_existing_msg(role_field, name)}')
-            return
-        logger.info('_configure_scheduling_role: '
-                    f'{updating_existing_msg(role_field, name)}')
-        kubernetes.auth_api(context).patch_namespaced_role(
-            name, namespace, role)
-        return
-
-    logger.info('_configure_scheduling_role: '
-                f'{not_found_msg(role_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role(namespace, role)
-    logger.info(f'_configure_scheduling_role: {created_msg(role_field, name)}')
-
-
-def _configure_scheduling_role_binding(namespace, context,
-                                       provider_config: Dict[str, Any]) -> None:
-    binding_field = 'scheduling_role_binding'
-    if binding_field not in provider_config:
-        logger.info('_configure_scheduling_role_binding: '
-                    f'{not_provided_msg(binding_field)}')
-        return
-
-    binding = provider_config[binding_field]
-    if 'namespace' not in binding['metadata']:
-        binding['metadata']['namespace'] = namespace
-    else:
-        namespace = binding['metadata']['namespace']
-
-    name = binding['metadata']['name']
-    field_selector = f'metadata.name={name}'
-    role_bindings = (kubernetes.auth_api(context).list_namespaced_role_binding(
-        namespace, field_selector=field_selector).items)
-    if role_bindings:
-        assert len(role_bindings) == 1
-        existing_binding = role_bindings[0]
-        new_rb = kubernetes_utils.dict_to_k8s_object(binding, 'V1RoleBinding')
-        if (new_rb.role_ref == existing_binding.role_ref and
-                new_rb.subjects == existing_binding.subjects):
-            logger.info('_configure_scheduling_role_binding: '
-                        f'{using_existing_msg(binding_field, name)}')
-            return
-        logger.info('_configure_scheduling_role_binding: '
-                    f'{updating_existing_msg(binding_field, name)}')
-        kubernetes.auth_api(context).patch_namespaced_role_binding(
-            name, namespace, binding)
-        return
-
-    logger.info('_configure_scheduling_role_binding: '
-                f'{not_found_msg(binding_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role_binding(
-        namespace, binding)
-    logger.info('_configure_scheduling_role_binding: '
                 f'{created_msg(binding_field, name)}')
 
 

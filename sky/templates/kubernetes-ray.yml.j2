@@ -188,6 +188,9 @@ provider:
         - apiGroups: [ "networking.k8s.io" ]   # Required for exposing services.
           resources: [ "ingressclasses" ]
           verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "scheduling.k8s.io" ]
+          resources: [ "priorityclasses" ]
+          verbs: [ "list", "create", "patch" ]
 
     # Bind cluster role to the service account
     autoscaler_cluster_role_binding:
@@ -206,33 +209,6 @@ provider:
             apiGroup: rbac.authorization.k8s.io
 
     {% if priority is not none %}
-    scheduling_role:
-        kind: Role
-        apiVersion: scheduling.k8s.io/v1
-        metadata:
-            labels:
-                parent: skypilot
-            name: skypilot-service-account-scheduling-role
-        rules:
-        - apiGroups: ["*"]
-          resources: ["*"]
-          verbs: ["*"]
-
-    scheduling_role_binding:
-        apiVersion: scheduling.k8s.io/v1
-        kind: RoleBinding
-        metadata:
-            labels:
-                parent: skypilot
-            name: skypilot-service-account-scheduling-role-binding
-        subjects:
-        - kind: ServiceAccount
-          name: skypilot-service-account
-        roleRef:
-            kind: Role
-            name: skypilot-service-account-scheduling-role
-            apiGroup: scheduling.k8s.io
-
     priority:
         apiVersion: v1
         kind: PriorityClass
