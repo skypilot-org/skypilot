@@ -821,8 +821,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
             job['resources'],
             job['status'].colored_str(),
             job['log_path'],
-            job['metadata']['git_commit'] if job['metadata'] and
-            job['metadata']['git_commit'] is not None else '',
+            job.get('metadata', {}).get('git_commit', ''),
         ])
     return job_table
 
