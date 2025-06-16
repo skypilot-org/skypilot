@@ -316,7 +316,11 @@ class CommandRunner:
                     pathlib.Path(target).expanduser().resolve())
             else:
                 resolved_target = os.path.expanduser(target)
-            if node_destination is not None:
+            if node_destination is None:
+                # Is a local rsync. Directly resolve the source.
+                resolved_source = str(
+                    pathlib.Path(source).expanduser().resolve())
+            else:
                 if source.startswith('~'):
                     remote_home_dir = _get_remote_home_dir_with_retry()
                     resolved_source = source.replace('~', remote_home_dir)

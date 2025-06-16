@@ -75,7 +75,7 @@ def launch(
         backend is not CloudVmRayBackend, or no job is submitted to
         the cluster.
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
-        None if dryrun.
+        None if dryrun or running in consolidation mode.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
@@ -314,8 +314,7 @@ def launch(
                             storage_mounts=controller_task.storage_mounts)
                     assert isinstance(controller_task.run, str)
                     runner.run(controller_task.run)
-                    # TODO(tian): Fix this.
-                    return None, None
+                    return consolidation_mode_job_id, None
                 return execution.launch(task=controller_task,
                                         cluster_name=controller_name,
                                         stream_logs=stream_logs,

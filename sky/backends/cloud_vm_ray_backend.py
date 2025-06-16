@@ -4057,27 +4057,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        # get the run_timestamp
-        # the function takes in [job_id]
-        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(
-            [str(job_id)])
         if local_runner is not None:
-            returncode, run_timestamps_payload, stderr = local_runner.run(
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
+            # In consolidation mode, we dont submit a ray job, therefore no
+            # run_timestamp is available. We use a dummy run_timestamp here.
+            run_timestamps = {
+                job_id: f'managed-jobs-consolidation-mode-{job_id}'
+            }
         else:
+            # get the run_timestamp
+            # the function takes in [job_id]
+            code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(
+                [str(job_id)])
             returncode, run_timestamps_payload, stderr = self.run_on_head(
                 handle,
                 code,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to sync logs.', stderr)
-        # returns with a dict of {job_id: run_timestamp}
-        run_timestamps = message_utils.decode_payload(run_timestamps_payload)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync logs.', stderr)
+            # returns with a dict of {job_id: run_timestamp}
+            run_timestamps = message_utils.decode_payload(
+                run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
