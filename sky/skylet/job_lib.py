@@ -116,7 +116,8 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
-    db_utils.add_column_to_table(cursor, conn, 'jobs', 'metadata', 'TEXT')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'metadata', 'TEXT',
+                                 value_to_replace_existing_entries='{}')
     conn.commit()
 
 
