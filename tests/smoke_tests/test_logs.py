@@ -36,7 +36,7 @@ def test_log_collection_to_gcp(generic_cloud: str):
                       skypilot_smoke_test_case: {name}-case
                 """))
         additional_labels.flush()
-        logs_cmd = 'for i in {1..10}; do echo $i; done; sleep 3600;'
+        logs_cmd = 'for i in {1..10}; do echo $i; done'
         validate_logs_cmd = (
             'echo $output && echo "===Validate logs from GCP Cloud Logging===" && '
             'for i in {1..10}; do echo $output | grep -q $i; done')
