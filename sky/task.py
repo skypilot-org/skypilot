@@ -1266,7 +1266,7 @@ class Task:
                 d[k] = v
         return d
 
-    def to_yaml_config(self) -> Dict[str, Any]:
+    def to_yaml_config(self, redact_envs: bool = False) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 
         INTERNAL: this method is internal-facing.
@@ -1314,7 +1314,14 @@ class Task:
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
-        add_if_not_none('envs', self.envs, no_empty=True)
+        envs = self.envs
+        if envs:
+            if redact_envs:
+                envs = {
+                    k: '<redacted>' if isinstance(v, str) else v
+                    for k, v in envs.items()
+                }
+        add_if_not_none('envs', envs, no_empty=True)
 
         add_if_not_none('file_mounts', {})
 

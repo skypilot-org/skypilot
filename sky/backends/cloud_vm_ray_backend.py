@@ -3197,7 +3197,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Capture task YAML and command
         task_config = None
         if task is not None:
-            task_config = task.to_yaml_config()
+            task_config = task.to_yaml_config(redact_envs=True)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(

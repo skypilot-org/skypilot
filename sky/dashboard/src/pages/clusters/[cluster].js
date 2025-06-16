@@ -227,6 +227,20 @@ function ActiveTab({
       // Parse the YAML string into an object
       const parsed = yaml.load(yamlString);
 
+      // Redact environment variable values at root level for security
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        'envs' in parsed &&
+        typeof parsed.envs === 'object' &&
+        parsed.envs !== null &&
+        !Array.isArray(parsed.envs)
+      ) {
+        parsed.envs = Object.fromEntries(
+          Object.keys(parsed.envs).map((k) => [k, '<redacted>'])
+        );
+      }
+
       // Re-serialize with pipe syntax for multiline strings
       const formatted = yaml.dump(parsed, {
         lineWidth: -1, // Disable line wrapping
