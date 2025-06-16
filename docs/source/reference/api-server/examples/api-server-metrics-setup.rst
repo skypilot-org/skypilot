@@ -5,7 +5,7 @@ Monitoring SkyPilot API Server Metrics
 
 SkyPilot API Server can export Prometheus-compatible metrics and
 optionally deploy a *one-click* Prometheus + Grafana stack so that you get
-a fully functional monitoring stack out of the box.
+a fully functional monitoring solution out of the box.
 
 .. tip::
 
@@ -13,11 +13,11 @@ a fully functional monitoring stack out of the box.
    knobs described below can be set via ``helm upgrade`` during the initial
    installation or a later upgrade.
 
-TL;DR – Enable the full metrics stack
--------------------------------------
+Quickstart: enable the full metrics stack
+-----------------------------------------
 
 If you do not already have Prometheus or Grafana running, the quickest way to get started is to let the SkyPilot Helm
-chart deploy everything for you **with a single command**:
+chart deploy everything for you with a single command:
 
 .. code-block:: bash
 
@@ -46,15 +46,15 @@ Metrics exposed
 
 The endpoint ``/metrics`` on the SkyPilot API server exposes the following metrics in standard Prometheus format:
 
-* HTTP request latency & status-code counters
-* Job / task state gauges (running, succeeded, failed, pending …)
-* Resource-level stats (CPU, memory, GPU utilisation if DCGM exporter is
-  discovered in the same cluster)
+* Endpoint-level stats: HTTP request latency & status-code counters (e.g., calls and latency to ``/api/v1/jobs``)
+* TODO: Add more here?
+
+You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>` to directly export GPU memory, utilization and power consumption.
 
 Using existing Prometheus / Grafana
 -----------------------------------
 
-The Helm chart introduces **three new top-level blocks**:
+The Helm chart introduces **three new top-level blocks** to provide flexibility in how you set up Prometheus and Grafana:
 
 * ``apiService.metrics.enabled`` – enables the ``/metrics`` HTTP endpoint on the SkyPilot API server.
 * ``prometheus.enabled`` – deploys a prometheus instance configured to scrape the ``/metrics`` endpoint on the SkyPilot API server.

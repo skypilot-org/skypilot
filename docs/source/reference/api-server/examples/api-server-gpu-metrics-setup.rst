@@ -95,8 +95,10 @@ Add the following to your global SkyPilot config (see :ref:`sky-api-server-confi
 What metrics are collected?
 ---------------------------
 
-* GPU Utilization
-* GPU Memory Usage
-* GPU Power Usage
+* GPU utilization
+* GPU memory usage
+* GPU power usage
 
-More detailed metrics, such as GPU errors, NVLink stats and more are available directly on the grafana dashboard. TODO: Add instructions to access the grafana dashboard.
+More detailed metrics, such as GPU errors, NVLink stats and more are available directly on the grafana dashboard.
+
+TODO: Add instructions to access the grafana dashboard.
