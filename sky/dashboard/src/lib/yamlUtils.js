@@ -1,9 +1,9 @@
 import yaml from 'js-yaml';
 
 /**
- * Formats YAML string with environment variable redaction for security
+ * Formats YAML string for better display
  * @param {string} yamlString - The YAML string to format
- * @returns {string} - Formatted YAML with redacted environment variables
+ * @returns {string} - Formatted YAML string
  */
 export const formatYaml = (yamlString) => {
   if (!yamlString) return 'No YAML available';
@@ -71,7 +71,7 @@ export const getYamlPreview = (parsed) => {
 };
 
 /**
- * Formats a single YAML document with environment variable redaction
+ * Formats a single YAML document for display
  * @param {string} doc - The YAML document string to format
  * @param {number} index - The index of the document
  * @returns {object} - Formatted document object with content and preview
