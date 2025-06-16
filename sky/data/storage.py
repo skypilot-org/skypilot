@@ -3257,7 +3257,7 @@ class AzureBlobStore(AbstractStore):
             with rich_utils.safe_status(
                     ux_utils.spinner_message(
                         f'Deleting Azure container {container_name}')):
-                # Check for the existance of the container before deletion.
+                # Check for the existence of the container before deletion.
                 self.storage_client.blob_containers.get(
                     self.resource_group_name,
                     self.storage_account_name,
@@ -3734,7 +3734,7 @@ class R2Store(AbstractStore):
         Raises:
             StorageBucketDeleteError: If deleting the bucket fails.
         """
-        # Deleting objects is very slow programatically
+        # Deleting objects is very slow programmatically
         # (i.e. bucket.objects.all().delete() is slow).
         # In addition, standard delete operations (i.e. via `aws s3 rm`)
         # are slow, since AWS puts deletion markers.

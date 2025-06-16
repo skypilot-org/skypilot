@@ -787,7 +787,7 @@ available_node_types:
             spec:
               securityContext:
                 fsGroup: 1000
-              # To prevent the home dir provided by the docker image from being overriden by pvc mounting,
+              # To prevent the home dir provided by the docker image from being overridden by pvc mounting,
               # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
               initContainers:
                 - name: init-copy-home
