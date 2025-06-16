@@ -150,6 +150,7 @@ def test_get_controller_resources_with_task_resources(
         ])
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()
+    config.pop('_no_missing_accel_warnings')
     assert config == default_controller_resources, config
 
     # 4. All resources have clouds, regions, and zones specified.
