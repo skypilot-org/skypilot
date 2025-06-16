@@ -1095,7 +1095,7 @@ class GCP(clouds.Cloud):
         resources = resources.assert_launchable()
         catalog.check_accelerator_attachable_to_host(
             resources.instance_type,
-            resources.accelerators,  # type: ignore
+            resources.accelerators,
             resources.zone,
             'gcp')
 

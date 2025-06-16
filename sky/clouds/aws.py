@@ -506,7 +506,7 @@ class AWS(clouds.Cloud):
             # Check the instance type is valid in the cloud
             regions = self.regions_with_offering(
                 resources.instance_type,
-                accelerators=resources.accelerators,  # type: ignore
+                accelerators=resources.accelerators,
                 use_spot=resources.use_spot,
                 region=resources.region,
                 zone=resources.zone)

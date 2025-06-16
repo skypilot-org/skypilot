@@ -1308,7 +1308,7 @@ class RetryingVmProvisioner(object):
                 region=to_provision.region,
                 num_nodes=num_nodes,
                 instance_type=to_provision.instance_type,
-                accelerators=to_provision.accelerators,  # type: ignore
+                accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
         ):
             if zones is None:
