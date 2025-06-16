@@ -244,6 +244,8 @@ class SocketEndpoint(Endpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
+        if 'localhost' in host or '127.0.0.1' in host:
+            host = 'host.docker.internal'
         return f'{host}{":" + str(self.port) if self.port else ""}'
 
 

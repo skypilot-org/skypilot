@@ -39,34 +39,6 @@ from sky.provision import common
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
-
-@pytest.fixture(autouse=True, scope='module')
-def patch_socket_endpoint():
-    """Patch SocketEndpoint.url and HTTPEndpoint.url to handle localhost in Buildkite environment.
-
-    This fixture automatically applies to all tests in this module only.
-    It patches the endpoint url methods to replace localhost/127.0.0.1
-    with host.docker.internal when running in Buildkite environment.
-    """
-    original_socket_url = common.SocketEndpoint.url
-    original_http_url = common.HTTPEndpoint.url
-
-    def patch_url(original_method):
-
-        def wrapper(self, *args, **kwargs):
-            url = original_method(self, *args, **kwargs)
-            for localhost in ['localhost:', '127.0.0.1:']:
-                if localhost in url:
-                    return url.replace(localhost, 'host.docker.internal:')
-            return url
-
-        return wrapper
-
-    with mock.patch.object(common.SocketEndpoint, 'url', patch_url(original_socket_url)), \
-         mock.patch.object(common.HTTPEndpoint, 'url', patch_url(original_http_url)):
-        yield
-
-
 # ---------- Testing skyserve ----------
 
 
