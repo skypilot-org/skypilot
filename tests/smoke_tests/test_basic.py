@@ -641,27 +641,6 @@ def test_multiple_resources():
     smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Sky Benchmark ----------
-@pytest.mark.skip(reason='SkyBench is not supported in API server')
-@pytest.mark.no_fluidstack  # Requires other clouds to be enabled
-@pytest.mark.no_vast  # Requires other clouds to be enabled
-@pytest.mark.no_paperspace  # Requires other clouds to be enabled
-@pytest.mark.no_kubernetes
-@pytest.mark.aws  # SkyBenchmark requires S3 access
-def test_sky_bench(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'sky-bench',
-        [
-            f'sky bench launch -y -b {name} --infra {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
-            'sleep 120',
-            f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
-        ],
-        f'sky bench down {name} -y; sky bench delete {name} -y',
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
 @pytest.fixture(scope='session')
 def unreachable_context():
     """Setup the kubernetes context for the test.

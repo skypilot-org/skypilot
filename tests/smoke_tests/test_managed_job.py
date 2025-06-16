@@ -1173,3 +1173,59 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def _get_ha_kill_test(name: str, generic_cloud: str,
+                      status: sky.ManagedJobStatus, first_timeout: int,
+                      second_timeout: int) -> smoke_tests_utils.Test:
+    return smoke_tests_utils.Test(
+        f'test-managed-jobs-ha-kill-{status.value.lower()}',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}', job_status=[status], timeout=first_timeout),
+            smoke_tests_utils.kill_and_wait_controller('jobs'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=second_timeout),
+            f's=$(sky jobs logs --controller -n {name} --no-follow); echo "$s"; echo "$s" | grep "Job succeeded."',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env={
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
+        },
+        timeout=20 * 60,
+    )
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_running(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(
+        name,
+        generic_cloud,
+        sky.ManagedJobStatus.RUNNING,
+        first_timeout=200,
+        second_timeout=335,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(
+        name,
+        generic_cloud,
+        sky.ManagedJobStatus.STARTING,
+        first_timeout=95,
+        second_timeout=600,
+    )
+    smoke_tests_utils.run_one_test(test)

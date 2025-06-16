@@ -105,14 +105,47 @@ def launch(
                     'name only and comment out the task names (so that they '
                     'will be auto-generated) .')
         task_names.add(task_.name)
-        if task_.job_priority is not None:
-            if (priority is not None and priority != task_.job_priority):
+
+        # Check for priority in resources first, then fall back to job priority
+        task_priority = None
+        if task_.resources:
+            # Convert set to list to access elements by index
+            resources_list = list(task_.resources)
+            # Take first resource's priority as reference
+            task_priority = resources_list[0].priority
+
+            # Check all other resources have same priority
+            for resource in resources_list[1:]:
+                if resource.priority != task_priority:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Task {task_.name!r}: All resources must have the '
+                            'same priority. Found priority '
+                            f'{resource.priority} but expected {task_priority}.'
+                        )
+
+            # Check for conflict between resources priority and job
+            # priority
+            if task_.job_priority is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Task {task_.name!r}: Cannot specify both '
+                        f'resources.priority ({task_priority}) and '
+                        f'job.priority ({task_.job_priority}). Please use only '
+                        'one priority specification method.')
+
+        # Fall back to job priority if no resources priority found
+        if task_priority is None:
+            task_priority = task_.job_priority
+
+        if task_priority is not None:
+            if (priority is not None and priority != task_priority):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Multiple tasks in the DAG have different priorities. '
                         'Either specify a priority in only one task, or set '
                         'the same priority for each task.')
-            priority = task_.job_priority
+            priority = task_priority
 
     if priority is None:
         priority = managed_job_constants.DEFAULT_PRIORITY
