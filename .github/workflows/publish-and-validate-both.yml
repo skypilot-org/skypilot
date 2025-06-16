@@ -36,7 +36,7 @@ jobs:
 
   publish-and-validate-pypi:
     needs: [publish-and-validate-test-pypi]
-    if: always()
+    if: always() && (needs.publish-and-validate-test-pypi.result == 'success' || inputs.skip_test_pypi)
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: ${{ inputs.package_name }}
