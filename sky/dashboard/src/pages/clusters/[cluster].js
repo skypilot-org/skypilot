@@ -26,6 +26,7 @@ import {
 } from '@/components/elements/modals';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
+import { formatYaml } from '@/lib/yamlUtils';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -220,66 +221,7 @@ function ActiveTab({
     }
   };
 
-  const formatYaml = (yamlString) => {
-    if (!yamlString) return 'No YAML available';
 
-    try {
-      // Parse the YAML string into an object
-      const parsed = yaml.load(yamlString);
-
-      // Redact environment variable values at root level for security
-      if (
-        parsed &&
-        typeof parsed === 'object' &&
-        'envs' in parsed &&
-        typeof parsed.envs === 'object' &&
-        parsed.envs !== null &&
-        !Array.isArray(parsed.envs)
-      ) {
-        parsed.envs = Object.fromEntries(
-          Object.keys(parsed.envs).map((k) => [k, '<redacted>'])
-        );
-      }
-
-      // Re-serialize with pipe syntax for multiline strings
-      const formatted = yaml.dump(parsed, {
-        lineWidth: -1, // Disable line wrapping
-        styles: {
-          '!!str': 'literal', // Use pipe (|) syntax for multiline strings
-        },
-        quotingType: "'", // Use single quotes for strings that need quoting
-        forceQuotes: false, // Only quote when necessary
-        noRefs: true, // Disable YAML references
-        sortKeys: false, // Preserve original key order
-        condenseFlow: false, // Don't condense flow style
-        indent: 2, // Use 2 spaces for indentation
-      });
-
-      // Add blank lines between top-level sections for better readability
-      const lines = formatted.split('\n');
-      const result = [];
-      let prevIndent = -1;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const currentIndent = line.search(/\S/); // Find first non-whitespace
-
-        // Add blank line before new top-level sections (indent = 0)
-        if (currentIndent === 0 && prevIndent >= 0 && i > 0) {
-          result.push('');
-        }
-
-        result.push(line);
-        prevIndent = currentIndent;
-      }
-
-      return result.join('\n').trim();
-    } catch (e) {
-      console.error('YAML formatting error:', e);
-      // If parsing fails, return the original string
-      return yamlString;
-    }
-  };
 
   const hasCreationArtifacts = clusterData?.command || clusterData?.task_yaml;
 
