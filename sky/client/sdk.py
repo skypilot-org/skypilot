@@ -1857,6 +1857,7 @@ def api_start(
     host: str = '127.0.0.1',
     foreground: bool = False,
     enable_basic_auth: bool = False,
+    port: int = 46580,
 ) -> None:
     """Starts the API server.
 
@@ -1872,6 +1873,7 @@ def api_start(
             the current process).
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
+        port: The port to deploy the API server.
     Returns:
         None
     """
@@ -1880,7 +1882,7 @@ def api_start(
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
-    is_local_api_server = server_common.is_api_server_local()
+    is_local_api_server = server_common.is_api_server_local(startup=True)
     if not is_local_api_server:
         server_url = server_common.get_server_url()
         with ux_utils.print_exception_no_traceback():
@@ -1891,7 +1893,7 @@ def api_start(
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
-                                                   enable_basic_auth)
+                                                   enable_basic_auth, port)
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')

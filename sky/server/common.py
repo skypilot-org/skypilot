@@ -44,7 +44,9 @@ else:
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
-DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
+DEFAULT_SERVER_HOST = '127.0.0.1'
+DEFAULT_SERVER_PORT = 46580
+DEFAULT_SERVER_URL = f'http://{DEFAULT_SERVER_HOST}:{DEFAULT_SERVER_PORT}'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
 AVAILABLE_LOCAL_API_SERVER_URLS = [
     f'http://{host}:46580' for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
@@ -183,10 +185,18 @@ def get_cookies_from_response(
 
 
 @annotations.lru_cache(scope='global')
-def get_server_url(host: Optional[str] = None) -> str:
-    endpoint = DEFAULT_SERVER_URL
+def get_server_url(
+    host: Optional[str] = None, port: int = DEFAULT_SERVER_PORT) -> str:
+    endpoint = None
     if host is not None:
-        endpoint = f'http://{host}:46580'
+        endpoint = f'http://{host}:{port}'
+    else:
+        try:
+            with open(server_constants.API_SERVER_PORT_FILE, 'r') as f:
+                port = f.read().strip()
+            endpoint = f'http://{DEFAULT_SERVER_HOST}:{port}'
+        except (FileNotFoundError, OSError):
+            endpoint = DEFAULT_SERVER_URL
 
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
@@ -216,8 +226,40 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(startup: bool = False):
+    """Checks if the API server is local.
+
+    Args:
+        startup: Whether this is called during startup, before the API server
+            is started. This has different behavior as we don't assume that the
+            port file is created yet.
+            
+            If startup == False we check if the server_url is both local and
+            the port is equal to the port in the port file. If the port file
+            does not exist we return False.
+            
+            If startup == True we do the same as above, except we ignore the
+            port file and just check if the host is local.
+
+    Returns:
+        bool: True if the API server is local, False otherwise.
+    """
+    server_url = get_server_url()
+    server_parsed = parse.urlparse(server_url)
+    port = server_parsed.port
+    
+    try:
+        with open(server_constants.API_SERVER_PORT_FILE, 'r') as f:
+            port_file_port = f.read().strip()
+    except (FileNotFoundError, OSError):
+        if not startup:
+            return False
+
+    if not startup:
+        return (port == int(port_file_port)
+                and server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS)
+
+    return server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS
 
 
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
@@ -327,9 +369,10 @@ def get_request_id(response: 'requests.Response') -> RequestId:
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
-                      enable_basic_auth: bool = False):
+                      enable_basic_auth: bool = False,
+                      port: int = DEFAULT_SERVER_PORT):
     """Starts a SkyPilot API server locally."""
-    server_url = get_server_url(host)
+    server_url = get_server_url(host, port)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
     with rich_utils.client_status('Starting SkyPilot API server, '
@@ -338,7 +381,7 @@ def _start_api_server(deploy: bool = False,
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        if not is_api_server_local():
+        if not is_api_server_local(startup=True):
             raise RuntimeError(f'Cannot start API server: {get_server_url()} '
                                'is not a local URL')
 
@@ -571,7 +614,8 @@ def get_skypilot_version_on_disk() -> str:
 def check_server_healthy_or_start_fn(deploy: bool = False,
                                      host: str = '127.0.0.1',
                                      foreground: bool = False,
-                                     enable_basic_auth: bool = False):
+                                     enable_basic_auth: bool = False,
+                                     port: int = DEFAULT_SERVER_PORT):
     api_server_status = None
     try:
         api_server_status, _ = check_server_healthy()
@@ -581,7 +625,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
         endpoint = get_server_url()
-        if not is_api_server_local():
+        if not is_api_server_local(startup=True):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the
@@ -590,9 +634,20 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
+            try:
+                os.makedirs(os.path.dirname(server_constants.API_SERVER_PORT_FILE), exist_ok=True)
+                with open(server_constants.API_SERVER_PORT_FILE, 'w') as f:
+                    f.write(str(port))
+            except (FileNotFoundError, OSError):
+                raise RuntimeError((
+                    'Failed to write port file '
+                    f'{server_constants.API_SERVER_PORT_FILE}'
+                )) from exc
+
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host, foreground, enable_basic_auth)
+                _start_api_server(deploy, host, foreground, enable_basic_auth,
+                                  port)
 
 
 def check_server_healthy_or_start(func):

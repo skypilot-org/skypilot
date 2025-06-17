@@ -5503,14 +5503,20 @@ def api():
               default=False,
               required=False,
               help='Enable basic authentication in the SkyPilot API server.')
+@click.option('--port',
+              default=46580,
+              type=int,
+              required=False,
+              help='The port to deploy the SkyPilot API server.')
 @usage_lib.entrypoint
 def api_start(deploy: bool, host: Optional[str], foreground: bool,
-              enable_basic_auth: bool):
+              enable_basic_auth: bool, port: int):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
                   host=host,
                   foreground=foreground,
-                  enable_basic_auth=enable_basic_auth)
+                  enable_basic_auth=enable_basic_auth,
+                  port=port)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
