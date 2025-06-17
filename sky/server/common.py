@@ -532,7 +532,15 @@ def check_server_healthy(
             logger.debug('API server version using unknown scheme: %s', sv)
             server_is_older = False
         version_info = _get_version_info_hint(api_server_info)
-        if is_api_server_local():
+        
+        server_local = False
+        if int(sv) < 10:
+            # If the server is older than 10, there won't be a port file yet
+            server_local = is_api_server_local(startup=True)
+        else:
+            server_local = is_api_server_local()
+        
+        if server_local:
             # For local server, just hint user to restart the server to get
             # a consistent version.
             msg = _LOCAL_SERVER_VERSION_MISMATCH_WARNING.format(
