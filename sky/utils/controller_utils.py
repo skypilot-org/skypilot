@@ -2,7 +2,6 @@
 import copy
 import dataclasses
 import enum
-import getpass
 import os
 import tempfile
 import typing
@@ -495,10 +494,12 @@ def shared_controller_vars_to_fill(
     env_vars: Dict[str, str] = {
         env.env_key: str(int(env.get())) for env in env_options.Options
     }
+    current_user = common_utils.get_current_user().name
+    assert current_user is not None
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
         # running in a container.
-        constants.USER_ENV_VAR: getpass.getuser(),
+        constants.USER_ENV_VAR: current_user,
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',

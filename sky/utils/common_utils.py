@@ -2,7 +2,6 @@
 
 import difflib
 import functools
-import getpass
 import hashlib
 import inspect
 import io
@@ -26,6 +25,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -439,7 +439,7 @@ def user_and_hostname_hash() -> str:
     thus changing the SG name makes these clusters unrecognizable.
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    return f'{getpass.getuser()}-{hostname_hash}'
+    return f'{common_utils.get_current_user().name}-{hostname_hash}'
 
 
 def read_yaml(path: Optional[str]) -> Dict[str, Any]:
@@ -754,7 +754,8 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or getpass.getuser()
+    username = username or common_utils.get_current_user().name
+    assert username is not None
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

@@ -320,14 +320,23 @@ def launch(
                     handle=local_handle,
                     all_file_mounts=controller_task.file_mounts,
                     storage_mounts=controller_task.storage_mounts)
-                assert isinstance(controller_task.run, str)
+                run_script = controller_task.run
+                assert isinstance(run_script, str)
+                # Manually add the envs variable to the run script. Originally
+                # this is done in ray jobs submission but now we have to do it
+                # manually because there is no ray runtime on the API server.
+                env_cmds = [
+                    f'export {k}={v!r}'
+                    for k, v in controller_task.envs.items()
+                ]
+                run_script = '\n'.join(env_cmds + [run_script])
                 # For high availability recovery.
                 dump_script_path = managed_job_utils.get_ha_dump_script_path(
                     consolidation_mode_job_id)
                 dump_script_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(dump_script_path, 'w', encoding='utf-8') as script_f:
-                    script_f.write(controller_task.run)
-                backend.run_on_head(local_handle, controller_task.run)
+                    script_f.write(run_script)
+                backend.run_on_head(local_handle, run_script)
                 return consolidation_mode_job_id, local_handle
 
 
