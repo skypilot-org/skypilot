@@ -20,6 +20,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
 } from '@/components/utils';
+import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -74,15 +75,27 @@ function ClusterDetails() {
   // GPU metrics state
   const [matchedClusterName, setMatchedClusterName] = useState(null);
   const [isLoadingClusterMatch, setIsLoadingClusterMatch] = useState(false);
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+    
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
+  }, []);
 
   // Fetch available clusters from Grafana and find matching cluster
   const fetchMatchingCluster = useCallback(async () => {
-    if (!window['SKYPILOT_GRAFANA_URL'] || !clusterData?.cluster) return;
+    if (!isGrafanaAvailable || !clusterData?.cluster) return;
 
     setIsLoadingClusterMatch(true);
     try {
-      const grafanaUrl =
-        window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
+      const grafanaUrl = getGrafanaUrl();
       const endpoint =
         '/api/datasources/proxy/1/api/v1/label/label_skypilot_cluster/values';
 
@@ -111,19 +124,18 @@ function ClusterDetails() {
     } finally {
       setIsLoadingClusterMatch(false);
     }
-  }, [clusterData?.cluster]);
+  }, [clusterData?.cluster, isGrafanaAvailable]);
 
   // Fetch matching cluster when component mounts and Grafana is available
   useEffect(() => {
-    if (window['SKYPILOT_GRAFANA_URL'] && clusterData?.cluster) {
+    if (isGrafanaAvailable && clusterData?.cluster) {
       fetchMatchingCluster();
     }
-  }, [clusterData?.cluster, fetchMatchingCluster]);
+  }, [clusterData?.cluster, fetchMatchingCluster, isGrafanaAvailable]);
 
   // Function to build Grafana panel URL with filters
   const buildGrafanaMetricsUrl = (panelId) => {
-    const grafanaUrl =
-      window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
+    const grafanaUrl = getGrafanaUrl();
     // Use the matched cluster name if available, otherwise fall back to the display name
     const clusterParam = matchedClusterName || clusterData?.cluster || '$__all';
 
@@ -241,6 +253,7 @@ function ClusterDetails() {
             buildGrafanaMetricsUrl={buildGrafanaMetricsUrl}
             matchedClusterName={matchedClusterName}
             isLoadingClusterMatch={isLoadingClusterMatch}
+            isGrafanaAvailable={isGrafanaAvailable}
           />
         ) : null}
 
@@ -274,6 +287,7 @@ function ActiveTab({
   buildGrafanaMetricsUrl,
   matchedClusterName,
   isLoadingClusterMatch,
+  isGrafanaAvailable,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -547,7 +561,7 @@ function ActiveTab({
       {/* GPU Metrics Section - Only show for Kubernetes in-cluster */}
       {clusterData &&
         clusterData.full_infra === 'Kubernetes (in-cluster)' &&
-        window['SKYPILOT_GRAFANA_URL'] && (
+        isGrafanaAvailable && (
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div className="p-5">

@@ -1362,8 +1362,6 @@ async def serve_dashboard(full_path: str):
     Raises:
         HTTPException: If the path is invalid or file not found.
     """
-    grafana_url = skypilot_config.get_nested(('dashboard', 'grafana_url'), None)
-
     # Try to serve the staticfile directly e.g. /skypilot.svg,
     # /favicon.ico, and /_next/, etc.
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
@@ -1377,12 +1375,6 @@ async def serve_dashboard(full_path: str):
         with open(index_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        if grafana_url is not None:
-            grafana_script = f"""
-<script>
-window.SKYPILOT_GRAFANA_URL = {json.dumps(grafana_url)};
-</script>"""
-            content = content.replace('</head>', f'{grafana_script}\n</head>')
         return fastapi.responses.HTMLResponse(content=content)
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')

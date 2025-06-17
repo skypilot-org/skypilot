@@ -8,6 +8,7 @@ import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import { checkGrafanaAvailability, getGrafanaUrl, buildGrafanaUrl, openGrafana } from '@/utils/grafana';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
@@ -313,15 +314,27 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     to: 'now',
   });
   const [isLoadingHosts, setIsLoadingHosts] = useState(false);
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+    
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
+  }, []);
 
   // Function to fetch available hosts from Prometheus
   const fetchAvailableHosts = async () => {
-    if (!window['SKYPILOT_GRAFANA_URL']) return;
+    if (!isGrafanaAvailable) return;
 
     setIsLoadingHosts(true);
     try {
-      const grafanaUrl =
-        window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
+      const grafanaUrl = getGrafanaUrl();
 
       const endpoints = ['/api/datasources/proxy/1/api/v1/label/node/values'];
 
@@ -364,27 +377,14 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
 
   // Fetch hosts when component mounts and Grafana is available
   useEffect(() => {
-    if (
-      window['SKYPILOT_GRAFANA_URL'] &&
-      nodesInContext &&
-      nodesInContext.length > 0
-    ) {
+    if (isGrafanaAvailable && nodesInContext && nodesInContext.length > 0) {
       fetchAvailableHosts();
     }
-  }, [nodesInContext]);
-
-  // Function to open Grafana
-  const openGrafana = (path = '/') => {
-    // Use the configured Grafana URL if available, otherwise construct default
-    const grafanaUrl =
-      window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
-    window.open(`${grafanaUrl}${path}`, '_blank');
-  };
+  }, [nodesInContext, isGrafanaAvailable]);
 
   // Function to build Grafana panel URL with filters
-  const buildGrafanaUrl = (panelId) => {
-    const grafanaUrl =
-      window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
+  const buildGrafanaUrlForContext = (panelId) => {
+    const grafanaUrl = getGrafanaUrl();
     const hostParam = selectedHosts === '$__all' ? '$__all' : selectedHosts;
 
     return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
@@ -413,8 +413,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-lg font-semibold">Available GPUs</h4>
-            {/* Add Grafana link button for in-cluster contexts when grafana_url is configured TODO(romilb): Add contextName === 'in-cluster' condition check later.*/}
-            {window['SKYPILOT_GRAFANA_URL'] && (
+            {/* Add Grafana link button for in-cluster contexts when Grafana is available */}
+            {isGrafanaAvailable && (
               <button
                 // TODO(aylei): make the dashboard path stable
                 onClick={() =>
@@ -535,7 +535,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
           )}
 
           {/* GPU Metrics Section */}
-          {window['SKYPILOT_GRAFANA_URL'] &&
+          {isGrafanaAvailable &&
             nodesInContext &&
             nodesInContext.length > 0 && (
               <>
@@ -619,7 +619,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   <div className="bg-white rounded-md">
                     <div className="p-2">
                       <iframe
-                        src={buildGrafanaUrl('6')}
+                        src={buildGrafanaUrlForContext('6')}
                         width="100%"
                         height="400"
                         frameBorder="0"
@@ -634,7 +634,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   <div className="bg-white rounded-md">
                     <div className="p-2">
                       <iframe
-                        src={buildGrafanaUrl('18')}
+                        src={buildGrafanaUrlForContext('18')}
                         width="100%"
                         height="400"
                         frameBorder="0"
@@ -649,7 +649,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   <div className="bg-white rounded-md">
                     <div className="p-2">
                       <iframe
-                        src={buildGrafanaUrl('10')}
+                        src={buildGrafanaUrlForContext('10')}
                         width="100%"
                         height="400"
                         frameBorder="0"
