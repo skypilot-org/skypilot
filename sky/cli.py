@@ -5498,10 +5498,19 @@ def api():
               'to manage the process lifecycle and collect logs directly. '
               'This is useful when the API server is managed by systems '
               'like systemd and Kubernetes.')
+@click.option('--enable-basic-auth',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Enable basic authentication in the SkyPilot API server.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str], foreground: bool):
+def api_start(deploy: bool, host: Optional[str], foreground: bool,
+              enable_basic_auth: bool):
     """Starts the SkyPilot API server locally."""
-    sdk.api_start(deploy=deploy, host=host, foreground=foreground)
+    sdk.api_start(deploy=deploy,
+                  host=host,
+                  foreground=foreground,
+                  enable_basic_auth=enable_basic_auth)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
