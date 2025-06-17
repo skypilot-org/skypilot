@@ -59,7 +59,7 @@ Supported operations:
 
 CSV file example:
 
-.. code-block:: csv
+.. code-block:: bash
 
     username,password,role
     user1,password1,admin

@@ -58,11 +58,11 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
+    'casbin',
+    'sqlalchemy_adapter',
 ]
 
 server_dependencies = [
-    'casbin',
-    'sqlalchemy_adapter',
     'passlib',
 ]
 

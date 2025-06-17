@@ -5,7 +5,9 @@ import logging
 import os
 from typing import Generator, List
 
+import casbin
 import filelock
+import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import models
@@ -321,10 +323,5 @@ def _policy_lock() -> Generator[None, None, None]:
                            f'file if you believe it is stale.') from e
 
 
-if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER,
-                  'false').lower() == 'true':
-    import casbin
-    import sqlalchemy_adapter
-
-    # Singleton instance of PermissionService for other modules to use.
-    permission_service = PermissionService()
+# Singleton instance of PermissionService for other modules to use.
+permission_service = PermissionService()
