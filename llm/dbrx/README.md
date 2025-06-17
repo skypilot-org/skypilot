@@ -224,12 +224,12 @@ After playing with the model, you can deploy the model with autoscaling and load
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --secret HF_TOKEN
+$ HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --secret HF_TOKEN
 ```
 
 Wait until the service is ready:
 ```console
-watch -n10 sky serve status dbrx
+$ watch -n10 sky serve status dbrx
 ```
 
 <details>
@@ -250,7 +250,7 @@ dbrx          2   1        xx.yy.zz.245  18 mins ago  1x GCP([Spot]{'A100-80GB':
 
 Get a single endpoint that load-balances across replicas:
 ```console
-ENDPOINT=$(sky serve status --endpoint dbrx)
+$ ENDPOINT=$(sky serve status --endpoint dbrx)
 ```
 
 > **Tip:** SkyServe fully manages the lifecycle of your replicas. For example, if a spot replica is preempted, the controller will automatically replace it. This significantly reduces the operational burden while saving costs.
@@ -276,7 +276,7 @@ curl $ENDPOINT/v1/chat/completions \
 
 To shut down all resources:
 ```console
-sky serve down dbrx
+$ sky serve down dbrx
 ```
 
 See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
