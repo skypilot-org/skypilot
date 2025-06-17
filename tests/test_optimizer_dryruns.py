@@ -9,11 +9,11 @@ from click import testing as cli_testing
 import pytest
 
 import sky
-from sky import cli
 from sky import clouds
 from sky import exceptions
 from sky import optimizer
 from sky import skypilot_config
+from sky.client import cli
 from sky.utils import registry
 from sky.utils import resources_utils
 
