@@ -256,7 +256,10 @@ class HTTPEndpoint(SocketEndpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
-        return f'http://{os.path.join(super().url(host), self.path)}'
+        super_url = os.path.join(super().url(host), self.path)
+        if 'http://' in super_url:
+            return super_url
+        return f'http://{super_url}'
 
 
 @dataclasses.dataclass
@@ -266,7 +269,10 @@ class HTTPSEndpoint(SocketEndpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
-        return f'https://{os.path.join(super().url(host), self.path)}'
+        super_url = os.path.join(super().url(host), self.path)
+        if 'https://' in super_url:
+            return super_url
+        return f'https://{super_url}'
 
 
 def query_ports_passthrough(
