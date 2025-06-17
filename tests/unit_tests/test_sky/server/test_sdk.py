@@ -135,7 +135,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     test_endpoint = "http://test.skypilot.co"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, basic_auth_enabled=False))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
         client_sdk.api_login(test_endpoint)
 
         # Verify the endpoint is written to config file
@@ -147,7 +151,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with existing config
     test_endpoint_2 = "http://test2.skypilot.co"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, basic_auth_enabled=False))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
         client_sdk.api_login(test_endpoint_2)
 
         # Verify the endpoint is updated in config file
@@ -162,7 +170,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with endpoint ending with a slash
     test_endpoint_with_slash = "http://test3.skypilot.co/"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, basic_auth_enabled=False))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
         client_sdk.api_login(test_endpoint_with_slash)
         config = skypilot_config.get_user_config()
         # Endpoint should be stored without the trailing slash
@@ -172,7 +184,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with https endpoint
     test_https_endpoint = "https://secure.skypilot.co"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, basic_auth_enabled=False))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
         client_sdk.api_login(test_https_endpoint)
         config = skypilot_config.get_user_config()
         assert config["api_server"]["endpoint"] == test_https_endpoint
@@ -181,7 +197,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with https endpoint ending with a slash
     test_https_endpoint_with_slash = "https://secure.skypilot.co/"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, basic_auth_enabled=False))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
         client_sdk.api_login(test_https_endpoint_with_slash)
         config = skypilot_config.get_user_config()
         # Endpoint should be stored without the trailing slash
@@ -191,7 +211,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with endpoint containing port number
     test_endpoint_with_port = "http://localhost:8080"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, basic_auth_enabled=False))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
         client_sdk.api_login(test_endpoint_with_port)
         config = skypilot_config.get_user_config()
         assert config["api_server"]["endpoint"] == test_endpoint_with_port
@@ -200,10 +224,15 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Test with endpoint containing port number and trailing slash
     test_endpoint_with_port_slash = "http://localhost:8080/"
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
-        test_user={}
+        test_user = {}
         test_user['id'] = "b673d4fd"
         test_user['name'] = "test"
-        mock_check.return_value = (server_common.ApiServerStatus.HEALTHY, server_common.ApiServerInfo(status=server_common.ApiServerStatus.HEALTHY, user=test_user, basic_auth_enabled=True))
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                user=test_user,
+                basic_auth_enabled=True))
         client_sdk.api_login(test_endpoint_with_port_slash)
         config = skypilot_config.get_user_config()
         # Endpoint should be stored without the trailing slash
