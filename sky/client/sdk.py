@@ -1909,10 +1909,11 @@ def api_start(
                        f'then `sky api start --port={port}`.'
                        f'{colorama.Style.RESET_ALL}')
     else:
-        logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
-                    f'{api_server_url}\n'
-                    f'{ux_utils.INDENT_LAST_SYMBOL}'
-                    f'View API server logs at: {constants.API_SERVER_LOGS}')
+        logger.info(
+            f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
+            f'{api_server_url}\n'
+            f'{ux_utils.INDENT_LAST_SYMBOL}'
+            f'View API server logs at: {constants.API_SERVER_LOGS}')
 
 
 @usage_lib.entrypoint

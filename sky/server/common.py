@@ -184,15 +184,17 @@ def get_cookies_from_response(
     return cookies
 
 
-def get_server_url(
-    host: Optional[str] = None, port: int = DEFAULT_SERVER_PORT) -> str:
+def get_server_url(host: Optional[str] = None,
+                   port: int = DEFAULT_SERVER_PORT) -> str:
     endpoint = None
     if host is not None:
         endpoint = f'http://{host}:{port}'
     else:
         try:
-            with open(server_constants.API_SERVER_PORT_FILE, 'r') as f:
-                port = f.read().strip()
+            with open(server_constants.API_SERVER_PORT_FILE,
+                      'r',
+                      encoding='utf-8') as f:
+                port = int(f.read().strip())
             endpoint = f'http://{DEFAULT_SERVER_HOST}:{port}'
         except (FileNotFoundError, OSError):
             endpoint = DEFAULT_SERVER_URL
@@ -225,19 +227,19 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local(
-    server_url: Optional[str] = None, startup: bool = False) -> bool:
+def is_api_server_local(server_url: Optional[str] = None,
+                        startup: bool = False) -> bool:
     """Checks if the API server is local.
 
     Args:
         startup: Whether this is called during startup, before the API server
             is started. This has different behavior as we don't assume that the
             port file is created yet.
-            
+
             If startup == False we check if the server_url is both local and
             the port is equal to the port in the port file. If the port file
             does not exist we return False.
-            
+
             If startup == True we do the same as above, except we ignore the
             port file and just check if the host is local.
 
@@ -248,17 +250,18 @@ def is_api_server_local(
         server_url = get_server_url()
     server_parsed = parse.urlparse(server_url)
     port = server_parsed.port
-    
+
     try:
-        with open(server_constants.API_SERVER_PORT_FILE, 'r') as f:
+        with open(server_constants.API_SERVER_PORT_FILE, 'r',
+                  encoding='utf-8') as f:
             port_file_port = f.read().strip()
     except (FileNotFoundError, OSError):
         if not startup:
             return False
 
     if not startup:
-        return (port == int(port_file_port)
-                and server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS)
+        return (port == int(port_file_port) and
+                server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS)
 
     return server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS
 
@@ -374,8 +377,9 @@ def _start_api_server(deploy: bool = False,
                       port: int = DEFAULT_SERVER_PORT):
     """Starts a SkyPilot API server locally."""
     server_url = get_server_url(host, port)
-    assert is_api_server_local(server_url, startup=True), (
-        f'server url {server_url} is not a local url')
+    assert is_api_server_local(
+        server_url,
+        startup=True), (f'server url {server_url} is not a local url')
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
@@ -637,14 +641,17 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
             try:
-                os.makedirs(os.path.dirname(server_constants.API_SERVER_PORT_FILE), exist_ok=True)
-                with open(server_constants.API_SERVER_PORT_FILE, 'w') as f:
+                os.makedirs(os.path.dirname(
+                    server_constants.API_SERVER_PORT_FILE),
+                            exist_ok=True)
+                with open(server_constants.API_SERVER_PORT_FILE,
+                          'w',
+                          encoding='utf-8') as f:
                     f.write(str(port))
             except (FileNotFoundError, OSError):
-                raise RuntimeError((
-                    'Failed to write port file '
-                    f'{server_constants.API_SERVER_PORT_FILE}'
-                )) from exc
+                raise RuntimeError(
+                    ('Failed to write port file '
+                     f'{server_constants.API_SERVER_PORT_FILE}')) from exc
 
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
