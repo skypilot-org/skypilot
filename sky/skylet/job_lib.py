@@ -1016,8 +1016,8 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
 
 
 @init_db
-def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
-    """Returns the relative paths to the log files for job with globbing."""
+def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
+    """Returns the relative paths to the log files for jobs with globbing."""
     assert _DB is not None
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
     _DB.cursor.execute(
@@ -1025,12 +1025,16 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _DB.cursor.fetchall()
-    run_timestamps = {}
+    job_to_dir = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
-        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-        run_timestamps[str(job_id)] = run_timestamp
-    return message_utils.encode_payload(run_timestamps)
+        if row[JobInfoLoc.LOG_PATH.value]:
+            job_to_dir[str(job_id)] = row[JobInfoLoc.LOG_PATH.value]
+        else:
+            run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+            job_to_dir[str(job_id)] = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                                   run_timestamp)
+    return message_utils.encode_payload(job_to_dir)
 
 
 class JobLibCodeGen:
@@ -1190,12 +1194,14 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_run_timestamp_with_globbing(cls,
-                                        job_ids: Optional[List[str]]) -> str:
+    def get_log_dirs_for_jobs(cls, job_ids: Optional[List[str]]) -> str:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.run_timestamp_with_globbing_payload(job_ids)',
+            # TODO(aylei): backward compatibility, remove after 0.12.0.
+            'log_dirs = job_lib.get_log_dir_for_jobs(job_ids) if '
+            'hasattr(job_lib, "get_log_dir_for_jobs") else '
+            'job_lib.run_timestamp_with_globbing_payload(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

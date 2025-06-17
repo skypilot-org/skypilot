@@ -3848,32 +3848,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             A dictionary mapping job_id to log path.
         """
-        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
-        returncode, run_timestamps, stderr = self.run_on_head(
-            handle,
-            code,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
+        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(job_ids)
+        returncode, job_to_dir, stderr = self.run_on_head(handle,
+                                                          code,
+                                                          stream_logs=False,
+                                                          require_outputs=True,
+                                                          separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = message_utils.decode_payload(run_timestamps)
-        if not run_timestamps:
+        job_to_dir: Dict[str, str] = message_utils.decode_payload(job_to_dir)
+        if not job_to_dir:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
             return {}
 
-        job_ids = list(run_timestamps.keys())
-        run_timestamps = list(run_timestamps.values())
+        job_ids = list(job_to_dir.keys())
+        dirs = list(job_to_dir.values())
         remote_log_dirs = [
-            os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-            for run_timestamp in run_timestamps
+            # TODO(aylei): backward compatibility for legacy runtime that
+            # returns run_timestamp only, remove after 0.12.0
+            (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
+                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs
         ]
-        local_log_dirs = [
-            os.path.join(local_dir, run_timestamp)
-            for run_timestamp in run_timestamps
-        ]
+        local_log_dirs = [(dir.replace(constants.SKY_LOGS_DIRECTORY, local_dir)
+                           if constants.SKY_LOGS_DIRECTORY in dir else
+                           os.path.join(local_dir, dir)) for dir in dirs]
 
         runners = handle.get_command_runners()
 
@@ -4045,8 +4045,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # get the run_timestamp
         # the function takes in [job_id]
-        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(
-            [str(job_id)])
+        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
         returncode, run_timestamps, stderr = self.run_on_head(
             handle,
             code,
