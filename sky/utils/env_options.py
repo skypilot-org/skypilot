@@ -19,8 +19,15 @@ class Options(enum.Enum):
     # will not be multiple identities, and skipping the check can increase
     # robustness.
     SKIP_CLOUD_IDENTITY_CHECK = ('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', False)
+    # Internal: this is used to check if the current environment is running in
+    # Buildkite. Buildkite agent will set this environment variable to "true"
+    # before running the tests.
+    # We need some special handling for Buildkite in the codebase, i.e.
+    # we need to set the host to 0.0.0.0 for localhost in the codebase.
+    RUNNING_IN_BUILDKITE = ('BUILDKITE', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
+        super().__init__()
         self.env_var = env_var
         self.default = default
 

@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.utils import env_options
 from sky.utils import resources_utils
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
@@ -244,8 +245,16 @@ class SocketEndpoint(Endpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
-        if os.environ.get('BUILDKITE', None) and 'localhost' in host:
-            host = '0.0.0.0'
+        if env_options.Options.RUNNING_IN_BUILDKITE.get(
+        ) and 'localhost' in host:
+            # Buildkite runs sky in a docker container, and kind cluster in
+            # other containers. The controller pod acquired via k8s
+            # from the kind cluster doesn't know its inside the container.
+            # So we need a special environment to be set in env_options
+            # so that sky will upload to controller.
+            # And controller will know to use host.docker.internal
+            # instead of localhost.
+            host = 'host.docker.internal'
         return f'{host}{":" + str(self.port) if self.port else ""}'
 
 
