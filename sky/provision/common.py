@@ -246,8 +246,6 @@ class SocketEndpoint(Endpoint):
         host = override_ip if override_ip else self.host
         if 'localhost' in host or '127.0.0.1' in host:
             host = 'host.docker.internal'
-        if 'http://' in host:
-            host = host.replace('http://', '')
         return f'{host}{":" + str(self.port) if self.port else ""}'
 
 
@@ -258,8 +256,7 @@ class HTTPEndpoint(SocketEndpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
-        super_url = os.path.join(super().url(host), self.path)
-        return f'{super_url}'
+        return f'http://{os.path.join(super().url(host), self.path)}'
 
 
 @dataclasses.dataclass
@@ -269,8 +266,7 @@ class HTTPSEndpoint(SocketEndpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
-        super_url = os.path.join(super().url(host), self.path)
-        return f'{super_url}'
+        return f'https://{os.path.join(super().url(host), self.path)}'
 
 
 def query_ports_passthrough(

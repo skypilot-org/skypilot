@@ -28,14 +28,12 @@ import os
 import shlex
 import tempfile
 from typing import Dict, List, Tuple
-from unittest import mock
 
 import pytest
 from smoke_tests import smoke_tests_utils
 
 from sky import serve
 from sky import skypilot_config
-from sky.provision import common
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 

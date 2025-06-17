@@ -297,8 +297,8 @@ def up(
             assert task.service is not None
             protocol = ('http'
                         if task.service.tls_credential is None else 'https')
-            logger.info(
-                f'socket_endpoint: {socket_endpoint}, protocol: {protocol}')
+            socket_endpoint = socket_endpoint.replace('https://', '').replace(
+                'http://', '')
             endpoint = f'{protocol}://{socket_endpoint}'
 
         logger.info(
