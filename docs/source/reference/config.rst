@@ -76,6 +76,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`local_kueue_name <config-yaml-kubernetes-local-kueue-name>`: skypilot-local-queue
 
   :ref:`ssh <config-yaml-ssh>`:
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
@@ -1077,6 +1078,14 @@ Example:
             emptyDir:
                 medium: Memory
                 sizeLimit: 3Gi
+
+.. _config-yaml-kubernetes-local-kueue-name:
+
+``kubernetes.local_kueue_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If using Kueue, name of the local queue to use for SkyPilot jobs.
+
 
 .. _config-yaml-ssh:
 
