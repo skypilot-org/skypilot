@@ -92,6 +92,13 @@ class DiskAttachMode(enum.Enum):
     READ_WRITE = 'read_write'
 
 
+class DiskAccessMode(enum.Enum):
+    """Disk access mode."""
+    READ_WRITE_ONCE = 'ReadWriteOnce'
+    READ_WRITE_MANY = 'ReadWriteMany'
+    READ_ONLY_MANY = 'ReadOnlyMany'
+
+
 @dataclasses.dataclass
 class ClusterName:
     display_name: str

@@ -244,6 +244,28 @@ provider:
             selector:
                 component: {{cluster_name_on_cloud}}-head
 
+    {%- if pvcs %}
+    pvcs:
+    {%- for pvc in pvcs %}
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: {{pvc.name}}
+        namespace: {{k8s_namespace}}
+      spec:
+        accessModes:
+          - {{pvc.access_mode}}
+        {%- if pvc.storage_class_name %}
+        storageClassName: {{pvc.storage_class_name}}
+        {%- endif %}
+        resources:
+          requests:
+            storage: {{pvc.disk_size}}Gi
+      autoDelete: {{pvc.auto_delete}}
+      path: {{pvc.path}}
+    {%- endfor %}
+    {%- endif %}
+
 # Specify the pod type for the ray head node (as configured below).
 head_node_type: ray_head_default
 # Specify the allowed pod types for this ray cluster and the resources they provide.

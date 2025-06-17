@@ -676,14 +676,17 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 def _create_persistent_volume_claim(namespace: str, context: Optional[str],
                                     pvc_spec: Dict[str, Any]) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
-    try:
-        kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
-            name=pvc_spec['metadata']['name'], namespace=namespace)
+    name = pvc_spec['metadata']['name']
+    field_selector = f'metadata.name={name}'
+    pvcs = (
+        kubernetes.core_api(context).list_namespaced_persistent_volume_claim(
+            namespace, field_selector=field_selector).items)
+    if pvcs:
+        logger.info(f'Updating PVC: {name}')
+        kubernetes.core_api(context).patch_namespaced_persistent_volume_claim(
+            name, namespace, pvc_spec)
         return
-    except kubernetes.api_exception() as e:
-        if e.status != 404:  # Not found
-            raise
-
+    logger.info(f'Creating PVC: {name}')
     kubernetes.core_api(context).create_namespaced_persistent_volume_claim(
         namespace=namespace, body=pvc_spec)
 
@@ -820,6 +823,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
+    pvcs = config.provider_config.get('pvcs', [])
+
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         if head_pod_name is None and i == 0:
@@ -867,6 +872,32 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 existing_rules)
             pod_spec_copy['spec']['affinity'] = pod_spec_config
 
+        # Create PVCs for the pod
+        pvcs_copy = copy.deepcopy(pvcs)
+        for pvc in pvcs_copy:
+            # Remove auto_delete from the pvc spec
+            pvc.pop('autoDelete', None)
+            path = pvc.pop('path', None)
+            original_name = pvc['metadata']['name']
+            new_name = f'{original_name}-{i}'
+            pvc['metadata']['name'] = new_name
+            if 'labels' not in pvc['metadata']:
+                pvc['metadata']['labels'] = {}
+            pvc['metadata']['labels']['pod_name'] = pod_spec_copy['metadata'][
+                'name']
+            pvc['metadata']['labels']['original_name'] = original_name
+            _create_persistent_volume_claim(namespace, context, pvc)
+            # Update the pod spec to mount the PVC
+            pod_spec_copy['spec']['volumes'].append({
+                'name': new_name,
+                'persistentVolumeClaim': {
+                    'claimName': new_name
+                }
+            })
+            pod_spec_copy['spec']['containers'][0]['volumeMounts'].append({
+                'name': new_name,
+                'mountPath': path
+            })
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU
         # slice nodes. We need this toleration to allow the pod to be scheduled
@@ -1070,10 +1101,12 @@ def _delete_services(name_prefix: str, namespace: str,
                                         resource_name=service_name)
 
 
-def _terminate_node(namespace: str,
-                    context: Optional[str],
-                    pod_name: str,
-                    is_head: bool = False) -> None:
+def _terminate_node(
+        namespace: str,
+        context: Optional[str],
+        pod_name: str,
+        is_head: bool = False,
+        pvc_auto_delete_map: Optional[Dict[str, bool]] = None) -> None:
     """Terminate a pod and its associated services."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
@@ -1095,6 +1128,32 @@ def _terminate_node(namespace: str,
             grace_period_seconds=0),
         resource_type='pod',
         resource_name=pod_name)
+
+    # Try to delete the PVCs for the pod
+    pvcs = kubernetes.core_api(context).list_namespaced_persistent_volume_claim(
+        namespace,
+        label_selector=f'pod_name={pod_name}',
+        _request_timeout=kubernetes.API_TIMEOUT).items
+    for pvc in pvcs:
+        if 'original_name' not in pvc.metadata.labels:
+            logger.warning(
+                f'PVC {pvc.metadata.name} has no original_name label')
+            continue
+        original_pvc_name = pvc.metadata.labels['original_name']
+        pvc_name = pvc.metadata.name
+        if (pvc_auto_delete_map and original_pvc_name in pvc_auto_delete_map and
+                not pvc_auto_delete_map[original_pvc_name]):
+            logger.info(f'Skipping deleting PVC: {pvc_name}')
+            continue
+        logger.info(f'Deleting PVC: {pvc_name}')
+        _delete_k8s_resource_with_retry(
+            delete_func=lambda pvc_name=pvc_name: kubernetes.core_api(
+                context).delete_namespaced_persistent_volume_claim(
+                    name=pvc_name,
+                    namespace=namespace,
+                    _request_timeout=config_lib.DELETION_TIMEOUT),
+            resource_type='pvc',
+            resource_name=pvc_name)
 
 
 def _terminate_deployment(cluster_name: str, namespace: str,
@@ -1158,12 +1217,18 @@ def terminate_instances(
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
+    pvcs = provider_config.get('pvcs', [])
+    pvc_auto_delete_map = {
+        pvc['metadata']['name']: pvc['autoDelete'] for pvc in pvcs
+    }
+
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
             return
         logger.debug(f'Terminating instance {pod_name}: {pod}')
-        _terminate_node(namespace, context, pod_name, _is_head(pod))
+        _terminate_node(namespace, context, pod_name, _is_head(pod),
+                        pvc_auto_delete_map)
 
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
