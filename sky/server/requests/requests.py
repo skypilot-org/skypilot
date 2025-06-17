@@ -332,11 +332,12 @@ def managed_job_status_refresh_event():
     # pylint: disable=import-outside-toplevel
     from sky.jobs import constants as managed_job_constants
     from sky.skylet import events
+    if not managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+        return
     event = events.ManagedJobEvent()
     while True:
         time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
-        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
-            event.run()
+        event.run()
 
 
 @dataclasses.dataclass
