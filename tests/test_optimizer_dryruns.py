@@ -671,26 +671,30 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
 
 def test_ordered_resources(enable_all_clouds):
     captured_output = io.StringIO()
-    sys.stdout = captured_output  # Redirect stdout to the StringIO object
+    original_stdout = sys.stdout
+    try:
+        sys.stdout = captured_output  # Redirect stdout to the StringIO object
 
-    with sky.Dag() as dag:
-        task = sky.Task('test_task')
-        task.set_resources([
-            sky.Resources(accelerators={'V100': 1}),
-            sky.Resources(accelerators={'T4': 1}),
-            sky.Resources(accelerators={'K80': 1}),
-            sky.Resources(accelerators={'T4': 4}),
-        ])
-    dag = sky.optimize(dag)
-    cli_runner = cli_testing.CliRunner()
-    request_id = sky.launch(task, dryrun=True)
-    result = cli_runner.invoke(cli.api_logs, [request_id])
-    assert not result.exit_code
+        with sky.Dag() as dag:
+            task = sky.Task('test_task')
+            task.set_resources([
+                sky.Resources(accelerators={'V100': 1}),
+                sky.Resources(accelerators={'T4': 1}),
+                sky.Resources(accelerators={'K80': 1}),
+                sky.Resources(accelerators={'T4': 4}),
+            ])
+        dag = sky.optimize(dag)
+        cli_runner = cli_testing.CliRunner()
+        request_id = sky.launch(task, dryrun=True)
+        result = cli_runner.invoke(cli.api_logs, [request_id])
+        assert not result.exit_code
 
-    # Access the captured output
-    output = captured_output.getvalue()
-    assert any('V100' in line and '✔' in line for line in output.splitlines()), \
-        'Expected to find a line with V100 and ✔ indicating V100 was chosen'
+        # Access the captured output
+        output = captured_output.getvalue()
+        assert any('V100' in line and '✔' in line for line in output.splitlines()), \
+            'Expected to find a line with V100 and ✔ indicating V100 was chosen'
+    finally:
+        sys.stdout = original_stdout  # Restore original stdout
 
 
 def test_disk_tier_mismatch(enable_all_clouds):
