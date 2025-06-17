@@ -252,6 +252,11 @@ Format:
 
 - ``d``, ``day``: days
 
+.. maybe instead of warning, have it be a note?
+.. warning::
+
+  The time will be rounded up to the nearest minute. For example, ``10m30s`` will be rounded to ``11m``.
+
 
 Example:
 
@@ -473,7 +478,7 @@ If unspecified, defaults to ``false`` (on-demand instances).
 ``resources.disk_size``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
+Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
 
@@ -485,6 +490,11 @@ Units supported (case-insensitive):
 - G/GB (gigabytes, 2^30 bytes)
 - T/TB (terabytes, 2^40 bytes)
 - P/PB (petabytes, 2^50 bytes)
+
+.. maybe instead of warning, have it be a note?
+.. warning::
+
+   The disk size will be rounded down to the nearest gigabyte. For example, ``1500MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
