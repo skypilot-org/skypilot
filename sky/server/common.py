@@ -251,6 +251,17 @@ def is_api_server_local(server_url: Optional[str] = None,
     server_parsed = parse.urlparse(server_url)
     port = server_parsed.port
 
+    # Short circuit since this is true in all cases
+    if server_parsed.hostname not in AVAILBLE_LOCAL_API_SERVER_HOSTS:
+        return False
+
+    # On startup, we don't care if the port file exists yet, so we return True
+    # to allow the server to start. If it is being port forwarded from a remote
+    # server, we will killing the server of fail starting the server due to a
+    # port mismatch.
+    if startup:
+        return True
+
     try:
         with open(server_constants.API_SERVER_PORT_FILE, 'r',
                   encoding='utf-8') as f:
@@ -259,11 +270,9 @@ def is_api_server_local(server_url: Optional[str] = None,
         if not startup:
             return False
 
-    if not startup:
-        return (port == int(port_file_port) and
-                server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS)
-
-    return server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS
+    # This should always be true unless the port file was never created due to
+    # the API server being killed.
+    return port == int(port_file_port)
 
 
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
