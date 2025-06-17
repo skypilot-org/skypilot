@@ -280,7 +280,7 @@ available_node_types:
         {% if k8s_local_kueue_name %}
         annotations:
             kueue.x-k8s.io/retriable-in-group: "false"
-            kueue.x-k8s.io/pod-group-total-count: {{num_nodes|string}}
+            kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
         {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
