@@ -76,7 +76,7 @@ class AutostopConfig:
 
     @classmethod
     def from_yaml_config(
-        cls, config: Union[bool, int, Dict[str, Any], None]
+        cls, config: Union[bool, int, str, Dict[str, Any], None]
     ) -> Optional['AutostopConfig']:
         if isinstance(config, bool):
             if config:
@@ -86,6 +86,11 @@ class AutostopConfig:
 
         if isinstance(config, int):
             return cls(idle_minutes=config, down=False, enabled=True)
+
+        if isinstance(config, str):
+            return cls(idle_minutes=parse_time_minutes(config),
+                       down=False,
+                       enabled=True)
 
         if isinstance(config, dict):
             # If we have a dict, autostop is enabled. (Only way to disable is
@@ -134,12 +139,12 @@ class Resources:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[Optional[str], str], str, None] = None,
-        disk_size: Optional[int] = None,
+        disk_size: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
-        autostop: Union[bool, int, Dict[str, Any], None] = None,
+        autostop: Union[bool, int, str, Dict[str, Any], None] = None,
         priority: Optional[int] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
@@ -300,11 +305,7 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            if round(disk_size) != disk_size:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'OS disk size must be an integer. Got: {disk_size}.')
-            self._disk_size = int(disk_size)
+            self._disk_size = int(parse_memory_resource(disk_size, 'disk_size'))
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
@@ -730,25 +731,27 @@ class Resources:
             self._memory = None
             return
 
-        self._memory = str(memory)
-        if isinstance(memory, str):
-            if memory.endswith(('+', 'x')):
-                # 'x' is used internally for make sure our resources used by
-                # jobs controller (memory: 3x) to have enough memory based on
-                # the vCPUs.
-                num_memory_gb = memory[:-1]
-            else:
-                num_memory_gb = memory
-
-            try:
-                memory_gb = float(num_memory_gb)
-            except ValueError:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'The "memory" field should be either a number or '
-                        f'a string "<number>+". Found: {memory!r}') from None
+        memory = parse_memory_resource(str(memory),
+                                       'memory',
+                                       ret_type=float,
+                                       allow_plus=True,
+                                       allow_x=True)
+        self._memory = memory
+        if memory.endswith(('+', 'x')):
+            # 'x' is used internally for make sure our resources used by
+            # jobs controller (memory: 3x) to have enough memory based on
+            # the vCPUs.
+            num_memory_gb = memory[:-1]
         else:
-            memory_gb = float(memory)
+            num_memory_gb = memory
+
+        try:
+            memory_gb = float(num_memory_gb)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'The "memory" field should be either a number or '
+                    f'a string "<number>+". Found: {memory!r}') from None
 
         if memory_gb <= 0:
             with ux_utils.print_exception_no_traceback():
@@ -839,7 +842,7 @@ class Resources:
 
     def _set_autostop_config(
         self,
-        autostop: Union[bool, int, Dict[str, Any], None],
+        autostop: Union[bool, int, str, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
 
@@ -909,6 +912,7 @@ class Resources:
             else:
                 volume['attach_mode'] = read_write_mode
             if volume['storage_type'] == network_type:
+                # TODO(luca): add units to this disk_size as well
                 if ('disk_size' in volume and
                         round(volume['disk_size']) != volume['disk_size']):
                     with ux_utils.print_exception_no_traceback():
@@ -2104,7 +2108,9 @@ class Resources:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
-            resources_fields['disk_size'] = int(resources_fields['disk_size'])
+            # although it will end up being an int, we don't know at this point
+            # if it has units or not, so we store it as a string
+            resources_fields['disk_size'] = str(resources_fields['disk_size'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', False)
 
@@ -2382,8 +2388,37 @@ def _maybe_add_docker_prefix_to_image_id(
             image_id_dict[k] = f'docker:{v}'
 
 
+def parse_time_minutes(time: str) -> int:
+    """Convert a time string to minutes.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+
+    Returns:
+        Time in minutes as an integer
+    """
+    time_str = str(time)
+
+    if time_str.isdecimal():
+        # We assume it is already in minutes to maintain backwards
+        # compatibility
+        return int(time_str)
+
+    time_str = time_str.lower()
+    for unit, multiplier in constants.TIME_UNITS.items():
+        if time_str.endswith(unit):
+            try:
+                value = int(time_str[:-len(unit)])
+                return math.ceil(value * multiplier)
+            except ValueError:
+                continue
+
+    raise ValueError(f'Invalid time format: {time}')
+
+
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
                           field_name: str,
+                          ret_type: type = int,
                           unit: str = 'g',
                           allow_plus: bool = False,
                           allow_x: bool = False,
@@ -2396,7 +2431,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
         allow_plus: Whether to allow '+' prefix
         allow_x: Whether to allow 'x' suffix
     """
-    assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
 
     error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
                 f' got {resource_qty_str}'
@@ -2420,22 +2455,24 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
         else:
             raise ValueError(error_msg)
 
-    if resource_str.isdecimal():
+    try:
         # We assume it is already in the wanted units to maintain backwards
         # compatibility
+        ret_type(resource_str)
         return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
 
     resource_str = resource_str.lower()
-    for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
+    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
         if resource_str.endswith(mem_unit):
             try:
-                value = int(resource_str[:-len(mem_unit)])
-                converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
-                if not allow_rounding and int(converted) != converted:
+                value = ret_type(resource_str[:-len(mem_unit)])
+                converted = (value * multiplier /
+                             constants.MEMORY_SIZE_UNITS[unit])
+                if not allow_rounding and ret_type(converted) != converted:
                     raise ValueError(error_msg)
-                # math.ceil should equal int() if allowed_rounding is False
-                # otherwise, we ceil so we don't under provision
-                converted = math.ceil(converted)
+                converted = ret_type(converted)
                 return f'{converted}{plus}{x}'
             except ValueError:
                 continue
