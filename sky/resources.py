@@ -1972,6 +1972,7 @@ class Resources:
 
         # Parse resources.accelerators field.
         accelerators_original = config.get('accelerators')
+        accelerators = accelerators_original
         if config and accelerators_original is not None:
             if isinstance(accelerators_original, str):
                 accelerators_list = cls._parse_accelerators_from_str(
