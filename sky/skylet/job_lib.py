@@ -62,6 +62,7 @@ class JobInfoLoc(enum.IntEnum):
     END_AT = 7
     RESOURCES = 8
     PID = 9
+    METADATA = 10
 
 
 def create_table(cursor, conn):
@@ -101,7 +102,8 @@ def create_table(cursor, conn):
         start_at FLOAT DEFAULT -1,
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
-        pid INTEGER DEFAULT -1)""")
+        pid INTEGER DEFAULT -1,
+        metadata TEXT DEFAULT '{}')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -114,6 +116,12 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'jobs',
+                                 'metadata',
+                                 'TEXT',
+                                 value_to_replace_existing_entries='{}')
     conn.commit()
 
 
@@ -334,16 +342,19 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> int:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, ?)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
+         run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
@@ -531,6 +542,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
+            'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
     return records
 
@@ -799,9 +811,10 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
         jobs = get_job_queue()
         print(format_job_queue(jobs))
     """
+    # only want to show git commit if it exists in one of them
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
+        'STATUS', 'LOG', 'GIT COMMIT'
     ])
     for job in jobs:
         job_table.add_row([
@@ -816,6 +829,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
             job['resources'],
             job['status'].colored_str(),
             job['log_path'],
+            job.get('metadata', {}).get('git_commit', ''),
         ])
     return job_table
 
@@ -1013,7 +1027,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+                resources_str: str, metadata: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1024,12 +1038,21 @@ class JobLibCodeGen:
             '\nif int(constants.SKYLET_VERSION) < 9: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
-            '\njob_id = job_lib.add_job('
+            '\njob_id = None',
+            '\nif int(constants.SKYLET_VERSION) < 14: '
+            '\n job_id = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
-            'print("Job ID: " + str(job_id), flush=True)',
+            '\nelse: '
+            '\n job_id = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r})',
+            '\nprint("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)
 

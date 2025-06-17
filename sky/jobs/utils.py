@@ -983,6 +983,9 @@ def dump_managed_job_queue() -> str:
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
+        if not job['metadata']:
+            job['metadata'] = {}
+
         cluster_name = generate_managed_job_cluster_name(
             job['task_name'], job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -1144,6 +1147,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'GIT_COMMIT',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
@@ -1252,6 +1256,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                job_tasks[0].get('metadata', {}).get('git_commit', ''),
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
@@ -1293,6 +1298,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                task.get('metadata', {}).get('git_commit', ''),
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
@@ -1468,7 +1474,8 @@ class ManagedJobCodeGen:
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
                 managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r})
+                                  {task.name!r}, {resources_str!r},
+                                  {task.metadata!r})
                 """)
         return cls._build(code)
 
