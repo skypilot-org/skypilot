@@ -231,6 +231,22 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
     return ret[0], ret[1]
 
 
+def _parse_secret_var(secret_var: str) -> Tuple[str, str]:
+    """Parse secret vars into a (KEY, VAL) pair."""
+    if '=' not in secret_var:
+        value = os.environ.get(secret_var)
+        if value is None:
+            raise click.UsageError(
+                f'{secret_var} is not set in local environment.')
+        return (secret_var, value)
+    ret = tuple(secret_var.split('=', 1))
+    if len(ret) != 2:
+        raise click.UsageError(
+            f'Invalid secret var: {secret_var}. Must be in the form of KEY=VAL '
+            'or KEY.')
+    return ret[0], ret[1]
+
+
 def _async_call_or_wait(request_id: str, async_call: bool,
                         request_name: str) -> Any:
     short_request_id = request_id[:8]
@@ -456,6 +472,23 @@ _TASK_OPTIONS = [
 
         3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
         same value of ``$MY_ENV3`` in the local environment.""",
+    ),
+    click.option(
+        '--secret',
+        required=False,
+        type=_parse_secret_var,
+        multiple=True,
+        help="""\
+        Secret variable to set on the remote node. These variables will be
+        redacted in logs and YAML outputs for security. It can be specified
+        multiple times. Examples:
+
+        \b
+        1. ``--secret API_KEY=secret123``: set ``$API_KEY`` on the cluster to
+        be secret123.
+
+        2. ``--secret JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be
+        the same value of ``$JWT_SECRET`` in the local environment.""",
     )
 ]
 _TASK_OPTIONS_WITH_NAME = [
@@ -868,6 +901,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
+    secret: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
@@ -916,7 +950,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
+                                                 env_overrides=env,
+                                                 secret_overrides=secret)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -935,6 +971,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.set_resources({sky.Resources()})
         # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
         task.update_envs(env)
+        task.update_secrets(secret)
 
     # Override.
     if workdir is not None:
@@ -1243,6 +1280,7 @@ def launch(
         image_id: Optional[str],
         env_file: Optional[Dict[str, str]],
         env: List[Tuple[str, str]],
+        secret: List[Tuple[str, str]],
         disk_size: Optional[int],
         disk_tier: Optional[str],
         network_tier: Optional[str],
@@ -1297,6 +1335,7 @@ def launch(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -1413,6 +1452,7 @@ def exec(cluster: Optional[str],
          image_id: Optional[str],
          env_file: Optional[Dict[str, str]],
          env: List[Tuple[str, str]],
+         secret: List[Tuple[str, str]],
          cpus: Optional[str],
          memory: Optional[str],
          disk_size: Optional[int],
@@ -1511,6 +1551,7 @@ def exec(cluster: Optional[str],
         image_id=image_id,
         num_nodes=num_nodes,
         env=env,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4224,6 +4265,7 @@ def jobs_launch(
     job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
@@ -4271,6 +4313,7 @@ def jobs_launch(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4604,6 +4647,7 @@ def _generate_task_with_service(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret: Optional[List[Tuple[str, str]]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Optional[Tuple[str]],
@@ -4636,6 +4680,7 @@ def _generate_task_with_service(
         use_spot=use_spot,
         image_id=image_id,
         env=env,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4745,6 +4790,7 @@ def serve_up(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Tuple[str],
@@ -4805,6 +4851,7 @@ def serve_up(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -4853,11 +4900,12 @@ def serve_up(
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(
-        service_name: str, service_yaml: Tuple[str, ...],
-        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
-        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
-        use_spot: Optional[bool], image_id: Optional[str],
-        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        service_name: str, service_yaml: Tuple[str,
+                                               ...], workdir: Optional[str],
+        infra: Optional[str], cloud: Optional[str], region: Optional[str],
+        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
+        image_id: Optional[str], env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
@@ -4909,6 +4957,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
@@ -5449,10 +5498,19 @@ def api():
               'to manage the process lifecycle and collect logs directly. '
               'This is useful when the API server is managed by systems '
               'like systemd and Kubernetes.')
+@click.option('--enable-basic-auth',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Enable basic authentication in the SkyPilot API server.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str], foreground: bool):
+def api_start(deploy: bool, host: Optional[str], foreground: bool,
+              enable_basic_auth: bool):
     """Starts the SkyPilot API server locally."""
-    sdk.api_start(deploy=deploy, host=host, foreground=foreground)
+    sdk.api_start(deploy=deploy,
+                  host=host,
+                  foreground=foreground,
+                  enable_basic_auth=enable_basic_auth)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
