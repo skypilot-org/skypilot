@@ -86,31 +86,33 @@ class TestBackwardCompatibility:
                           check=False).returncode != 0:
             raise Exception('uv not found')
 
-        install_from_pypi = base_branch.startswith('pypi/')
-        if install_from_pypi:
-            pypi_version = base_branch.split('/')[1]
-            pip_install_cmd = f'uv pip install "{pypi_version}[all]"'
-        else:
-            pip_install_cmd = 'uv pip install -e .[all]'
-
         # Clone base SkyPilot version
         if self.BASE_SKY_DIR.exists():
             self._run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
 
-        if self._is_git_sha(base_branch):
-            # For git SHA, clone first, fetch the specific commit, then checkout
-            self._run_cmd(
-                f'git clone https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}'
-            )
-            self._run_cmd(f'cd {self.BASE_SKY_DIR} && '
-                          f'git fetch -v --prune -- origin {base_branch} && '
-                          f'git checkout -f {base_branch}')
+        install_from_pypi = base_branch.startswith('pypi/')
+        if install_from_pypi:
+            pypi_version = base_branch.split('/')[1]
+            pip_install_cmd = f'uv pip install "{pypi_version}[all]"'
+            self._run_cmd(f'mkdir -p {self.BASE_SKY_DIR}')
         else:
-            # For branch names, use -b flag
-            self._run_cmd(
-                f'git clone -b {base_branch} '
-                f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
-            )
+            pip_install_cmd = 'uv pip install -e .[all]'
+
+            if self._is_git_sha(base_branch):
+                # For git SHA, clone first, fetch the specific commit, then checkout
+                self._run_cmd(
+                    f'git clone https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}'
+                )
+                self._run_cmd(
+                    f'cd {self.BASE_SKY_DIR} && '
+                    f'git fetch -v --prune -- origin {base_branch} && '
+                    f'git checkout -f {base_branch}')
+            else:
+                # For branch names, use -b flag
+                self._run_cmd(
+                    f'git clone -b {base_branch} '
+                    f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
+                )
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
