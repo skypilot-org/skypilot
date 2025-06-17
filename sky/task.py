@@ -1459,12 +1459,11 @@ class Task:
 
         # Add secrets with redaction if requested
         secrets = self.secrets
-        if secrets:
-            if redact_secrets:
-                secrets = {
-                    k: '<redacted>' if isinstance(v, str) else v
-                    for k, v in secrets.items()
-                }
+        if secrets and redact_secrets:
+            secrets = {
+                k: '<redacted>' if isinstance(v, str) else v
+                for k, v in secrets.items()
+            }
         add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
