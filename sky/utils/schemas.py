@@ -6,7 +6,6 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
-from sky import resources
 from sky.skylet import constants
 
 
@@ -46,7 +45,7 @@ _AUTOSTOP_SCHEMA = {
             #   autostop: 5
             'anyOf': [{
                 'type': 'string',
-                'pattern': resources.TIME_PATTERN,
+                'pattern': constants.TIME_PATTERN,
                 'minimum': 0,
             }, {
                 'type': 'integer',
@@ -199,7 +198,7 @@ def _get_single_resources_schema():
                         'disk_size': {
                             'anyOf': [{
                                 'type': 'string',
-                                'pattern': resources.MEMORY_SIZE_PATTERN,
+                                'pattern': constants.MEMORY_SIZE_PATTERN,
                             }, {
                                 'type': 'integer',
                             }],
@@ -228,7 +227,7 @@ def _get_single_resources_schema():
             'disk_size': {
                 'anyOf': [{
                     'type': 'string',
-                    'pattern': resources.MEMORY_SIZE_PATTERN,
+                    'pattern': constants.MEMORY_SIZE_PATTERN,
                 }, {
                     'type': 'integer',
                 }],
@@ -429,7 +428,7 @@ def get_storage_schema():
                     'disk_size': {
                         'anyOf': [{
                             'type': 'string',
-                            'pattern': resources.MEMORY_SIZE_PATTERN,
+                            'pattern': constants.MEMORY_SIZE_PATTERN,
                         }, {
                             'type': 'integer',
                         }],

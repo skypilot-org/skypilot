@@ -38,40 +38,6 @@ RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
 
-TIME_UNITS = {
-    's': 1 / 60,
-    'sec': 1 / 60,
-    'm': 1,
-    'min': 1,
-    'h': 60,
-    'hr': 60,
-    'd': 24 * 60,
-    'day': 24 * 60,
-}
-
-TIME_PATTERN = (
-    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
-
-MEMORY_SIZE_UNITS = {
-    'b': 1,
-    'k': 2**10,
-    'kb': 2**10,
-    'm': 2**20,
-    'mb': 2**20,
-    'g': 2**30,
-    'gb': 2**30,
-    't': 2**40,
-    'tb': 2**40,
-    'p': 2**50,
-    'pb': 2**50,
-}
-
-MEMORY_SIZE_PATTERN = (
-    '^[0-9]+('
-    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
-    ')?$/i')
-MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
-
 
 @dataclasses.dataclass
 class AutostopConfig:
@@ -2315,7 +2281,7 @@ def parse_time_minutes(time: str) -> int:
         return int(time_str)
 
     time_str = time_str.lower()
-    for unit, multiplier in TIME_UNITS.items():
+    for unit, multiplier in constants.TIME_UNITS.items():
         if time_str.endswith(unit):
             try:
                 value = int(time_str[:-len(unit)])
@@ -2341,7 +2307,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
         allow_plus: Whether to allow '+' prefix
         allow_x: Whether to allow 'x' suffix
     """
-    assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
 
     error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
                 f' got {resource_qty_str}'
@@ -2374,11 +2340,12 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
         pass
 
     resource_str = resource_str.lower()
-    for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
+    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
         if resource_str.endswith(mem_unit):
             try:
                 value = ret_type(resource_str[:-len(mem_unit)])
-                converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
+                converted = (value * multiplier /
+                             constants.MEMORY_SIZE_UNITS[unit])
                 if not allow_rounding and ret_type(converted) != converted:
                     raise ValueError(error_msg)
                 converted = ret_type(converted)
