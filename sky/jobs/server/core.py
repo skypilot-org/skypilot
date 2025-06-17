@@ -233,7 +233,7 @@ def launch(
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         consolidation_mode_job_id = None
-        if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+        if managed_job_utils.is_consolidation_mode():
             # Create local directory for the managed job.
             pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
             set_job_info_kwargs = {

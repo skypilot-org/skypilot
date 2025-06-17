@@ -330,9 +330,9 @@ def refresh_cluster_status_event():
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
-    from sky.jobs import constants as managed_job_constants
+    from sky.jobs import utils as managed_job_utils
     from sky.skylet import events
-    if not managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
+    if not managed_job_utils.is_consolidation_mode():
         return
     event = events.ManagedJobEvent()
     while True:

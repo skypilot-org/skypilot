@@ -33,7 +33,9 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -122,6 +124,46 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(backoff.current_backoff())
+
+
+# Use LRU Cache so that the check is only done once.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+    # Check whether the consolidation mode config is changed.
+    if consolidation_mode:
+        controller_cn = (
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
+        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'{colorama.Fore.RED}Consolidation mode is '
+                                 f'enabled, but the controller cluster '
+                                 f'{controller_cn} is still running. Please '
+                                 'terminate the controller cluster first.'
+                                 f'{colorama.Style.RESET_ALL}')
+    else:
+        all_jobs = managed_job_state.get_managed_jobs()
+        if all_jobs:
+            nonterminal_jobs = (
+                managed_job_state.get_nonterminal_job_ids_by_name(
+                    None, all_users=True))
+            if nonterminal_jobs:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'{colorama.Fore.RED}Consolidation mode '
+                                     'is disabled, but there are still '
+                                     f'{len(nonterminal_jobs)} managed jobs '
+                                     'running. Please terminate those jobs '
+                                     f'first.{colorama.Style.RESET_ALL}')
+            else:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are {len(all_jobs)} jobs from previous '
+                    'consolidation mode. Reset the `jobs.controller.'
+                    'consolidation_mode` to `true` and run `sky jobs queue` '
+                    'to see those jobs. Switching to normal mode will '
+                    f'lose the job history.{colorama.Style.RESET_ALL}')
+    return consolidation_mode
 
 
 def get_job_status(backend: 'backends.CloudVmRayBackend',

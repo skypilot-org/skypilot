@@ -72,7 +72,3 @@ DASHBOARD_SETUP_CMD = (
     'fi')
 
 DEFAULT_PRIORITY = 500
-
-CONSOLIDATE_WITH_API_SERVER = True
-
-CONSOLIDATION_CLUSTER_NAME = 'local-controller-consolidation'

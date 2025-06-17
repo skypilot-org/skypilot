@@ -899,30 +899,50 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
-    controller_resources_schema = {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'controller': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'resources': resources_schema,
-                    'high_availability': {
-                        'type': 'boolean',
-                    },
-                    'autostop': _AUTOSTOP_SCHEMA,
-                }
+
+    def _get_controller_schema(add_consolidation_mode: bool = False):
+        controller_properties = {
+            'resources': resources_schema,
+            'high_availability': {
+                'type': 'boolean',
+                'default': False,
             },
-            'bucket': {
-                'type': 'string',
-                'pattern': '^(https|s3|gs|r2|cos)://.+',
-                'required': [],
+            'autostop': _AUTOSTOP_SCHEMA,
+        }
+        mutually_exclusive_check: dict = {}
+        if add_consolidation_mode:
+            controller_properties['consolidation_mode'] = {
+                'type': 'boolean',
+                'default': False,
+            }
+            # Ensure users cannot specify both high_availability and
+            # consolidation_mode at the same time.
+            mutually_exclusive_check = _check_not_both_fields_present(
+                'high_availability', 'consolidation_mode')
+
+        # Schema for the controller section.
+        controller_schema: dict = {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': controller_properties,
+            **mutually_exclusive_check,
+        }
+
+        return {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'controller': controller_schema,
+                'bucket': {
+                    'type': 'string',
+                    'pattern': '^(https|s3|gs|r2|cos)://.+',
+                    'required': [],
+                }
             }
         }
-    }
+
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -1430,8 +1450,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': controller_resources_schema,
-            'serve': controller_resources_schema,
+            'jobs': _get_controller_schema(add_consolidation_mode=True),
+            'serve': _get_controller_schema(add_consolidation_mode=False),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
