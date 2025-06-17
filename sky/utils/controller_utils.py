@@ -696,7 +696,7 @@ def get_controller_resources(
 
 
 def _setup_proxy_command_on_controller(
-        controller_launched_cloud: Optional['clouds.Cloud'],
+        controller_launched_cloud: 'clouds.Cloud',
         user_config: Dict[str, Any]) -> config_utils.Config:
     """Sets up proxy command on the controller.
 
@@ -732,8 +732,6 @@ def _setup_proxy_command_on_controller(
     # possible that peering is not set up), but it may catch some
     # obvious errors.
     config = config_utils.Config.from_dict(user_config)
-    if controller_launched_cloud is None:
-        return config
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
     ssh_proxy_command = config.get_nested(proxy_command_key, None)
@@ -750,7 +748,7 @@ def _setup_proxy_command_on_controller(
 
 
 def replace_skypilot_config_path_in_file_mounts(
-        cloud: Optional['clouds.Cloud'], file_mounts: Optional[Dict[str, str]]):
+        cloud: 'clouds.Cloud', file_mounts: Optional[Dict[str, str]]):
     """Replaces the SkyPilot config path in file mounts with the real path."""
     # TODO(zhwu): This function can be moved to `backend_utils` once we have
     # more predefined file mounts that needs to be replaced after the cluster

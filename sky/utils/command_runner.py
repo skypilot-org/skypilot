@@ -1001,6 +1001,7 @@ class LocalProcessCommandRunner(CommandRunner):
             cmd: Union[str, List[str]],
             *,
             require_outputs: bool = False,
+            port_forward: Optional[List[Tuple[int, int]]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -1013,7 +1014,7 @@ class LocalProcessCommandRunner(CommandRunner):
             skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
-        del ssh_mode, connect_timeout  # Unused.
+        del port_forward, ssh_mode, connect_timeout  # Unused.
 
         command = self._get_command_to_run(cmd,
                                            process_stream,

@@ -44,7 +44,6 @@ from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.jobs import constants as jobs_constants
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -2208,20 +2207,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
-            self,
-            *,
-            cluster_name: str,
-            cluster_name_on_cloud: str,
-            cluster_yaml: Optional[str],
-            launched_nodes: int,
-            launched_resources: resources_lib.Resources,
-            stable_internal_external_ips: Optional[List[Tuple[str,
-                                                              str]]] = None,
-            stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
+        self,
+        *,
+        cluster_name: str,
+        cluster_name_on_cloud: str,
+        cluster_yaml: Optional[str],
+        launched_nodes: int,
+        launched_resources: resources_lib.Resources,
+        stable_internal_external_ips: Optional[List[Tuple[str, str]]] = None,
+        stable_ssh_ports: Optional[List[int]] = None,
+        cluster_info: Optional[provision_common.ClusterInfo] = None,
+        is_local_handle: bool = False,
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -2241,6 +2240,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.is_local_handle = is_local_handle
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2256,7 +2256,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user}')
+                f'\n\tssh_user={self.ssh_user},'
+                f'\n\tis_local_handle={self.is_local_handle})')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2448,6 +2449,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                             avoid_ssh_control: bool = False
                            ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
+        if self.is_local_handle:
+            return [command_runner.LocalProcessCommandRunner()]
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
@@ -2671,6 +2674,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             if state['_cluster_yaml'] is not None and not os.path.exists(
                     os.path.expanduser(state['_cluster_yaml'])):
                 state['_cluster_yaml'] = None
+
+        if version < 11:
+            state['is_local_handle'] = False
 
         self.__dict__.update(state)
 
@@ -3273,7 +3279,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _sync_file_mounts(
         self,
-        handle: Optional[CloudVmRayResourceHandle],
+        handle: CloudVmRayResourceHandle,
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
@@ -3285,19 +3291,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
         assert here that all storage_mounts are MOUNT mode.
         """
-        if handle is not None:
-            launched_resources = handle.launched_resources.assert_launchable()
-            controller_launched_cloud = launched_resources.cloud
-            cluster_name = handle.cluster_name
-        else:
-            controller_launched_cloud = None
-            cluster_name = jobs_constants.CONSOLIDATION_CLUSTER_NAME
+        launched_resources = handle.launched_resources.assert_launchable()
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
-                controller_launched_cloud, all_file_mounts)
+                launched_resources.cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
             self._execute_storage_mounts(handle, storage_mounts)
-            self._set_storage_mounts_metadata(cluster_name, storage_mounts)
+            self._set_storage_mounts_metadata(handle.cluster_name,
+                                              storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -3952,7 +3953,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return returncode
 
     def tail_managed_job_logs(self,
-                              handle: Optional[CloudVmRayResourceHandle],
+                              handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
                               controller: bool = False,
@@ -3969,31 +3970,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
-        if handle is None:
-            runner = command_runner.LocalProcessCommandRunner()
-            returncode = runner.run(
+        # Refer to the notes in tail_logs.
+        try:
+            returncode = self.run_on_head(
+                handle,
                 code,
                 stream_logs=True,
                 process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
-        else:
-            # Refer to the notes in tail_logs.
-            try:
-                returncode = self.run_on_head(
-                    handle,
-                    code,
-                    stream_logs=True,
-                    process_stream=False,
-                    ssh_mode=command_runner.SshMode.INTERACTIVE,
-                )
-            except SystemExit as e:
-                assert isinstance(e.code, int)
-                returncode = e.code
+        except SystemExit as e:
+            returncode = e.code
         return returncode
 
     def sync_down_managed_job_logs(
             self,
-            handle: Optional[CloudVmRayResourceHandle],
+            handle: CloudVmRayResourceHandle,
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
             controller: bool = False,
@@ -4012,9 +4004,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # if job_name and job_id should not both be specified
         assert job_name is None or job_id is None, (job_name, job_id)
-        local_runner = None
-        if handle is None:
-            local_runner = command_runner.LocalProcessCommandRunner()
 
         if job_id is None:
             # generate code to get the job_id
@@ -4022,23 +4011,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # TODO: Only get the latest job_id, since that's the only one we use
             code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
                 job_name=job_name)
-            if local_runner is not None:
-                returncode, job_ids_payload, stderr = local_runner.run(
-                    code,
-                    stream_logs=False,
-                    require_outputs=True,
-                    separate_stderr=True)
-            else:
-                returncode, job_ids_payload, stderr = self.run_on_head(
-                    handle,
-                    code,
-                    stream_logs=False,
-                    require_outputs=True,
-                    separate_stderr=True)
+            returncode, job_ids, stderr = self.run_on_head(handle,
+                                                           code,
+                                                           stream_logs=False,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-            job_ids = message_utils.decode_payload(job_ids_payload)
+            job_ids = message_utils.decode_payload(job_ids)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -4057,7 +4038,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        if local_runner is not None:
+        if handle.is_local_handle:
             # In consolidation mode, we dont submit a ray job, therefore no
             # run_timestamp is available. We use a dummy run_timestamp here.
             run_timestamps = {
@@ -4099,11 +4080,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          f'Job {job_id} local logs: {local_log_dir}'
                          f'{colorama.Style.RESET_ALL}')
 
-            if local_runner is not None:
-                runners = [local_runner]
-            else:
-                assert handle is not None
-                runners = handle.get_command_runners()
+            runners = handle.get_command_runners()
 
             def _rsync_down(args) -> None:
                 """Rsync down logs from remote nodes.
@@ -4152,22 +4129,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
                 signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
-            if local_runner is not None:
-                local_runner.run(code,
-                                 log_path=os.path.expanduser(log_file),
-                                 stream_logs=False,
-                                 require_outputs=False)
-            else:
-                # We redirect the output to the log file
-                # and disable the STDOUT and STDERR
-                self.run_on_head(
-                    handle,
-                    code,
-                    log_path=os.path.expanduser(log_file),
-                    stream_logs=False,
-                    process_stream=False,
-                    ssh_mode=command_runner.SshMode.INTERACTIVE,
-                )
+            # We redirect the output to the log file
+            # and disable the STDOUT and STDERR
+            self.run_on_head(
+                handle,
+                code,
+                log_path=os.path.expanduser(log_file),
+                stream_logs=False,
+                process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+            )
 
         logger.debug(f'{colorama.Fore.CYAN}'
                      f'Job {job_id} logs: {local_log_dir}'
@@ -4872,7 +4843,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_cluster_ever_up=False,
             prev_config_hash=prev_config_hash)
 
-    def _execute_file_mounts(self, handle: Optional[CloudVmRayResourceHandle],
+    def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
                              file_mounts: Optional[Dict[Path, Path]]):
         """Executes file mounts.
 
@@ -4887,15 +4858,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         start = time.time()
+        runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
-        if handle is not None:
-            runners = handle.get_command_runners()
-            handle_cloud = str(handle.launched_resources.cloud)
-        else:
-            runners = [command_runner.LocalProcessCommandRunner()]
-            handle_cloud = None
         num_threads = subprocess_utils.get_max_workers_for_file_mounts(
-            file_mounts, handle_cloud)
+            file_mounts, str(handle.launched_resources.cloud))
 
         # Check the files and warn
         for dst, src in file_mounts.items():
@@ -5021,7 +4987,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(ux_utils.finishing_message('Synced file_mounts.', log_path))
 
     def _execute_storage_mounts(
-            self, handle: Optional[CloudVmRayResourceHandle],
+            self, handle: CloudVmRayResourceHandle,
             storage_mounts: Optional[Dict[Path, storage_lib.Storage]]):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Handle cases where `storage_mounts` is None. This occurs when users
@@ -5044,16 +5010,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if not storage_mounts:
             return
         start = time.time()
+        runners = handle.get_command_runners()
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
-        if handle is not None:
-            runners = handle.get_command_runners()
-            handle_cloud = str(handle.launched_resources.cloud)
-            cluster_name = handle.cluster_name
-        else:
-            runners = [command_runner.LocalProcessCommandRunner()]
-            handle_cloud = None
-            cluster_name = jobs_constants.CONSOLIDATION_CLUSTER_NAME
-        num_threads = subprocess_utils.get_parallel_threads(handle_cloud)
 
         plural = 's' if len(storage_mounts) > 1 else ''
         rich_utils.force_update_status(
@@ -5070,7 +5030,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageExternalDeletionError(
                         f'The bucket, {storage_obj.name!r}, could not be '
-                        f'mounted on cluster {cluster_name!r}. Please '
+                        f'mounted on cluster {handle.cluster_name!r}. Please '
                         'verify that the bucket exists. The cluster started '
                         'successfully without mounting the bucket.')
             # Get the first store and use it to mount
