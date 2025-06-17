@@ -1090,6 +1090,9 @@ def get_config_schema():
                         }
                     }
                 },
+                'local_kueue_name': {
+                    'type': 'string',
+                },
             }
         },
         'ssh': {
