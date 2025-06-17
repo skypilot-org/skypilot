@@ -14,10 +14,7 @@ from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
 from sky.utils import subprocess_utils as subprocess_utils
 
-GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
-RSYNC_FILTER_GITIGNORE: str
-RSYNC_FILTER_SKYIGNORE: str
 RSYNC_EXCLUDE_OPTION: str
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
 
