@@ -247,13 +247,11 @@ class SocketEndpoint(Endpoint):
         host = override_ip if override_ip else self.host
         if env_options.Options.RUNNING_IN_BUILDKITE.get(
         ) and 'localhost' in host:
-            # Buildkite runs sky in a docker container, and kind cluster in
-            # other containers. The controller pod acquired via k8s
-            # from the kind cluster doesn't know its inside the container.
-            # So we need a special environment to be set in env_options
-            # so that sky will upload to controller.
-            # And controller will know to use host.docker.internal
-            # instead of localhost.
+            # When running in Buildkite, we need to use 'host.docker.internal'
+            # instead of 'localhost' because the controller pod from the kind
+            # cluster doesn't know it's inside a container. This allows proper
+            # communication between the SkyPilot container and the kind cluster
+            # container.
             host = 'host.docker.internal'
         return f'{host}{":" + str(self.port) if self.port else ""}'
 
