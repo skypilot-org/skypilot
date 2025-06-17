@@ -28,7 +28,7 @@ export const checkGrafanaAvailability = async () => {
         method: 'GET',
         credentials: 'include',
         headers: {
-          'Accept': 'application/json',
+          Accept: 'application/json',
         },
         // Use a short timeout to avoid blocking the UI
         signal: AbortSignal.timeout(5000),
@@ -37,7 +37,8 @@ export const checkGrafanaAvailability = async () => {
       // Consider Grafana available if we get any response from the Grafana API
       // This includes 200 (OK), 401 (Unauthorized), 403 (Forbidden), etc.
       // A 401/403 means Grafana is running but requires authentication
-      grafanaAvailabilityCache = response.status >= 200 && response.status < 500;
+      grafanaAvailabilityCache =
+        response.status >= 200 && response.status < 500;
       return grafanaAvailabilityCache;
     } catch (error) {
       console.debug('Grafana availability check failed:', error);
@@ -84,4 +85,4 @@ export const openGrafana = (path = '/') => {
 export const resetGrafanaAvailabilityCache = () => {
   grafanaAvailabilityCache = null;
   grafanaCheckPromise = null;
-}; 
+};

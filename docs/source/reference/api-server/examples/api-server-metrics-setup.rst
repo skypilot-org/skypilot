@@ -13,6 +13,12 @@ a fully functional monitoring solution out of the box.
    knobs described below can be set via ``helm upgrade`` during the initial
    installation or a later upgrade.
 
+
+.. image:: ../../../images/metrics/api-srv-metrics.jpg
+    :alt: Grafana dashboard
+    :align: center
+    :width: 80%
+
 Quickstart: enable the full metrics stack
 -----------------------------------------
 
@@ -37,17 +43,15 @@ You can access Grafana at the ``/grafana`` endpoint:
    HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller --namespace $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
    echo http://$HOST/grafana
 
-
-TODO: Add a screenshot of the Grafana dashboard.
-
-
 Metrics exposed
 ---------------
 
-The endpoint ``/metrics`` on the SkyPilot API server exposes the following metrics in standard Prometheus format:
+The endpoint ``/grafana`` on the SkyPilot API server exposes the following metrics in standard Prometheus format:
 
-* Endpoint-level stats: HTTP request latency & status-code counters (e.g., calls and latency to ``/api/v1/jobs``)
-* TODO: Add more here?
+* API Server uptime
+* Requests per second grouped by HTTP status code
+* Request duration grouped by percentile
+* Requests per second grouped by endpoint path
 
 You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>` to directly export GPU memory, utilization and power consumption.
 
@@ -65,19 +69,3 @@ All three default to ``false`` so you can mix & match:
 * **Fully managed Prometheus + Grafana** – set ``apiService.metrics.enabled: true``, ``prometheus.enabled: true``, and ``grafana.enabled: true``. The chart will deploy a fully managed Prometheus + Grafana stack.
 * **External Prometheus / Grafana** – set *only* ``apiService.metrics.enabled: true``. The API server will expose the metrics on the ``/metrics`` endpoint and the pod will be annotated with ``prometheus.io/scrape: true`` to enable automatic scraping by prometheus.
 * **External Grafana, internal Prometheus** – enable ``prometheus`` but disable ``grafana``. Point your existing Grafana at the Prometheus service created by the chart.
-
-
-TODO: Remove this. Link from SkyPilot dashboard
------------------------------------------------
-
-When Grafana is enabled you can surface a link directly on the SkyPilot
-Web dashboard by setting the following in your SkyPilot config
-(:ref:`via Helm <sky-api-server-config>`):
-
-.. code-block:: yaml
-
-    dashboard:
-      grafana_url: http://my.grafana.example.com
-
-The UI will show a *Metrics* button that deep-links into your chosen
-Grafana instance.

@@ -172,7 +172,7 @@ export function TopBar() {
       const available = await checkGrafanaAvailability();
       setIsGrafanaAvailable(available);
     };
-    
+
     if (typeof window !== 'undefined') {
       checkGrafana();
     }

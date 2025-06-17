@@ -1217,8 +1217,6 @@ def get_config_schema():
         },
     }
 
-
-
     workspace_schema = {'type': 'string'}
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']

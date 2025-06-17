@@ -8,7 +8,12 @@ import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
-import { checkGrafanaAvailability, getGrafanaUrl, buildGrafanaUrl, openGrafana } from '@/utils/grafana';
+import {
+  checkGrafanaAvailability,
+  getGrafanaUrl,
+  buildGrafanaUrl,
+  openGrafana,
+} from '@/utils/grafana';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
@@ -322,7 +327,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
       const available = await checkGrafanaAvailability();
       setIsGrafanaAvailable(available);
     };
-    
+
     if (typeof window !== 'undefined') {
       checkGrafana();
     }
