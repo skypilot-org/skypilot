@@ -6,6 +6,7 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
+from sky import resources
 from sky.skylet import constants
 
 
@@ -43,14 +44,20 @@ _AUTOSTOP_SCHEMA = {
         {
             # Shorthand to set idle_minutes by directly specifying, e.g.
             #   autostop: 5
-            'type': 'integer',
-            'minimum': 0,
+            'anyOf': [{
+                'type': 'string',
+                'pattern': resources.TIME_PATTERN,
+                'minimum': 0,
+            }, {
+                'type': 'integer',
+            }]
         },
         {
             'type': 'object',
             'required': [],
             'additionalProperties': False,
             'properties': {
+                # TODO(luca): update field to use time units as well.
                 'idle_minutes': {
                     'type': 'integer',
                     'minimum': 0,
@@ -190,7 +197,12 @@ def _get_single_resources_schema():
                     'type': 'object',
                     'properties': {
                         'disk_size': {
-                            'type': 'integer',
+                            'anyOf': [{
+                                'type': 'string',
+                                'pattern': resources.MEMORY_SIZE_PATTERN,
+                            }, {
+                                'type': 'integer',
+                            }],
                         },
                         'disk_tier': {
                             'type': 'string',
@@ -214,7 +226,12 @@ def _get_single_resources_schema():
                 },
             },
             'disk_size': {
-                'type': 'integer',
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': resources.MEMORY_SIZE_PATTERN,
+                }, {
+                    'type': 'integer',
+                }],
             },
             'disk_tier': {
                 'type': 'string',
@@ -370,6 +387,7 @@ def get_resources_schema():
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -409,7 +427,12 @@ def get_storage_schema():
                 'type': 'object',
                 'properties': {
                     'disk_size': {
-                        'type': 'integer',
+                        'anyOf': [{
+                            'type': 'string',
+                            'pattern': resources.MEMORY_SIZE_PATTERN,
+                        }, {
+                            'type': 'integer',
+                        }],
                     },
                     'disk_tier': {
                         'type': 'string',
