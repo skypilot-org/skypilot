@@ -150,7 +150,7 @@ Here, a cluster queue and a local queue are created.
     kind: LocalQueue
     metadata:
       # A local queue is in a namespace
-      namespace: "skypilot"
+      namespace: "default"
       name: "skypilot-local-queue"
     spec:
       clusterQueue: "skypilot-cluster-queue"
@@ -159,8 +159,6 @@ To create the cluster and local queues above, save the snippet to ``kueue.yaml``
 
 .. code-block:: bash
 
-    # if 'skypilot' namespace does not exist, create it
-    kubectl create namespace skypilot
     # create the cluster and local queue
     kubectl apply -f kueue.yaml
 
