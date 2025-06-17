@@ -685,6 +685,7 @@ def download_logs(
             f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
             f'-r --sync-down {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
         spinner_message='Retrieving job logs')
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
