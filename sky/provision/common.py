@@ -247,11 +247,12 @@ class SocketEndpoint(Endpoint):
         host = override_ip if override_ip else self.host
         if env_options.Options.RUNNING_IN_BUILDKITE.get(
         ) and 'localhost' in host:
-            # When running in Buildkite, we need to use 'host.docker.internal'
-            # instead of 'localhost' because the controller pod from the kind
-            # cluster doesn't know it's inside a container. This allows proper
-            # communication between the SkyPilot container and the kind cluster
-            # container.
+            # In Buildkite CI, we run a kind (Kubernetes in Docker) cluster.
+            # The controller pod runs inside this kind cluster, which itself
+            # runs in a container. When the pod tries to access 'localhost',
+            # it can't reach the host machine's localhost. Using
+            # 'host.docker.internal' allows the pod to properly communicate
+            # with services running on the host machine's localhost.
             host = 'host.docker.internal'
         return f'{host}{":" + str(self.port) if self.port else ""}'
 
