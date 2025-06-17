@@ -718,6 +718,9 @@ def status(
             else:
                 protocol = ('https'
                             if service_record['tls_encrypted'] else 'http')
+                if endpoint is not None:
+                    endpoint = endpoint.replace('https://',
+                                                '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
 
     return service_records
