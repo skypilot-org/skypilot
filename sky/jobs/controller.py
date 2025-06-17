@@ -152,6 +152,20 @@ class JobsController:
         Other exceptions may be raised depending on the backend.
         """
 
+        latest_task_id, last_task_prev_status = (
+            managed_job_state.get_latest_task_id_status(self._job_id))
+        is_resume = False
+        if (latest_task_id is not None and last_task_prev_status !=
+                managed_job_state.ManagedJobStatus.PENDING):
+            assert latest_task_id >= task_id, (latest_task_id, task_id)
+            if latest_task_id > task_id:
+                logger.info(f'Task {task_id} ({task.name}) has already '
+                            'been executed. Skipping...')
+                return True
+            if latest_task_id == task_id:
+                # Start recovery.
+                is_resume = True
+
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
         if task.run is None:
@@ -171,42 +185,72 @@ class JobsController:
             return True
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
-        submitted_at = time.time()
-        if task_id == 0:
-            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
-                self._backend.run_timestamp)
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id)
-        managed_job_state.set_starting(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            submitted_at,
-            resources_str=backend_utils.get_task_resources_str(
-                task, is_managed_job=True),
-            specs={
-                'max_restarts_on_errors':
-                    self._strategy_executor.max_restarts_on_errors
-            },
-            callback_func=callback_func)
-        logger.info(
-            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
-            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+        if not is_resume:
+            submitted_at = time.time()
+            if task_id == 0:
+                submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                    self._backend.run_timestamp)
+            managed_job_state.set_starting(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str=backend_utils.get_task_resources_str(
+                    task, is_managed_job=True),
+                specs={
+                    'max_restarts_on_errors':
+                        self._strategy_executor.max_restarts_on_errors
+                },
+                callback_func=callback_func)
+            logger.info(f'Submitted managed job {self._job_id} '
+                        f'(task: {task_id}, name: {task.name!r}); '
+                        f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
         logger.info('Started monitoring.')
 
-        remote_job_submitted_at = self._strategy_executor.launch()
-        assert remote_job_submitted_at is not None, remote_job_submitted_at
+        # Only do the initial cluster launch if not resuming from a controller
+        # failure. Otherwise, we will transit to recovering immediately.
+        remote_job_submitted_at = time.time()
+        if not is_resume:
+            remote_job_submitted_at = self._strategy_executor.launch()
+            assert remote_job_submitted_at is not None, remote_job_submitted_at
 
-        managed_job_state.set_started(job_id=self._job_id,
-                                      task_id=task_id,
-                                      start_time=remote_job_submitted_at,
-                                      callback_func=callback_func)
+        if not is_resume:
+            managed_job_state.set_started(job_id=self._job_id,
+                                          task_id=task_id,
+                                          start_time=remote_job_submitted_at,
+                                          callback_func=callback_func)
 
         while True:
+            # NOTE: if we are resuming from a controller failure, we only keep
+            # monitoring if the job is in RUNNING state. For all other cases,
+            # we will directly transit to recovering since we have no idea what
+            # the cluster status is.
+            force_transit_to_recovering = False
+            if is_resume:
+                prev_status = managed_job_state.get_job_status_with_task_id(
+                    job_id=self._job_id, task_id=task_id)
+                if prev_status is not None:
+                    if prev_status.is_terminal():
+                        return (prev_status ==
+                                managed_job_state.ManagedJobStatus.SUCCEEDED)
+                    if (prev_status ==
+                            managed_job_state.ManagedJobStatus.CANCELLING):
+                        # If the controller is down when cancelling the job,
+                        # we re-raise the error to run the `_cleanup` function
+                        # again to clean up any remaining resources.
+                        raise exceptions.ManagedJobUserCancelledError(
+                            'Recovering cancel signal.')
+                if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+                    force_transit_to_recovering = True
+                # This resume logic should only be triggered once.
+                is_resume = False
+
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
@@ -221,8 +265,19 @@ class JobsController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = managed_job_utils.get_job_status(
-                self._backend, cluster_name)
+            # NOTE: If fetching the job status fails or we force to transit to
+            # recovering, we will set the job status to None, which will force
+            # enter the recovering logic.
+            job_status = None
+            if not force_transit_to_recovering:
+                try:
+                    job_status = managed_job_utils.get_job_status(
+                        self._backend, cluster_name)
+                except exceptions.FetchClusterInfoError as fetch_e:
+                    logger.info(
+                        'Failed to fetch the job status. Start recovery.\n'
+                        f'Exception: {common_utils.format_exception(fetch_e)}\n'
+                        f'Traceback: {traceback.format_exc()}')
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 success_end_time = managed_job_utils.try_to_get_job_end_time(
@@ -379,7 +434,17 @@ class JobsController:
             if handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
-                if resources.need_cleanup_after_preemption_or_failure():
+                # If we are forcing to transit to recovering, we need to clean
+                # up the cluster as it is possible that we already submitted the
+                # job to the worker cluster, but state is not updated yet. In
+                # this case, it is possible that we will double-submit the job
+                # to the worker cluster. So we always clean up the cluster here.
+                # TODO(tian,cooperc): We can check if there is a running job on
+                # the worker cluster, and if so, we can skip the cleanup.
+                # Challenge: race condition when the worker cluster thought it
+                # does not have a running job yet but later the job is launched.
+                if (resources.need_cleanup_after_preemption_or_failure() or
+                        force_transit_to_recovering):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
@@ -389,9 +454,11 @@ class JobsController:
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
-            managed_job_state.set_recovering(job_id=self._job_id,
-                                             task_id=task_id,
-                                             callback_func=callback_func)
+            managed_job_state.set_recovering(
+                job_id=self._job_id,
+                task_id=task_id,
+                force_transit_to_recovering=force_transit_to_recovering,
+                callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,

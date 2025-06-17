@@ -21,6 +21,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import filelock
+import yaml
 
 import sky
 from sky import backends
@@ -196,7 +197,8 @@ def _get_cluster_config_template(cloud):
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
-        clouds.Nebius: 'nebius-ray.yml.j2'
+        clouds.Nebius: 'nebius-ray.yml.j2',
+        clouds.Hyperbolic: 'hyperbolic-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -786,34 +788,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        del zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'SCPError:' in x.strip())
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, SCPError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in catalog.regions('scp'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _ibm_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -1112,6 +1086,21 @@ class FailoverCloudErrorHandlerV2:
         if isinstance(error, exceptions.InvalidCloudCredentials):
             _add_to_blocked_resources(
                 blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
+    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'SCP handler error: {error}')
+        # Block SCP if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.SCP()))
         else:
             FailoverCloudErrorHandlerV2._default_handler(
                 blocked_resources, launchable_resources, region, zones, error)
@@ -2301,12 +2290,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
-            if os.path.exists(self.cluster_yaml):
-                # It is possible that the cluster yaml is not available when
-                # the handle is unpickled for service replicas from the
-                # controller with older version.
-                config = global_user_state.get_cluster_yaml_dict(
-                    self.cluster_yaml)
+            # It is possible that the cluster yaml is not available when
+            # the handle is unpickled for service replicas from the
+            # controller with older version.
+            yaml_str = global_user_state.get_cluster_yaml_str(self.cluster_yaml)
+            if yaml_str is None:
+                # If the cluster yaml is not available,
+                # we skip updating the cluster info.
+                return
+            config = yaml.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2498,6 +2490,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 raise RuntimeError(
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
+            self._update_cluster_info()
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andyl): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner. Now this
+        # is required for rsync as using deployment in rsync seems to cause
+        # some unknown issues.
+        # TODO(andyl): Should check through the real cluster info. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                controller_utils.high_availability_specified(
+                    self.cluster_name)):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
@@ -3177,7 +3184,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Capture task YAML and command
         task_config = None
         if task is not None:
-            task_config = task.to_yaml_config()
+            task_config = task.to_yaml_config(redact_secrets=True)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3301,7 +3308,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
-            setup_envs = task.envs.copy()
+            setup_envs = task.envs_and_secrets
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
@@ -4289,29 +4296,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # successfully removed cluster as no exception was raised
                 returncode = 0
 
-        elif terminate and isinstance(cloud, clouds.SCP):
-            # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.scp import node_provider
-            config['provider']['cache_stopped_nodes'] = not terminate
-            provider = node_provider.SCPNodeProvider(config['provider'],
-                                                     cluster_name_on_cloud)
-            try:
-                if not os.path.exists(provider.metadata.path):
-                    raise node_provider.SCPError(
-                        'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-                        'Metadata file does not exist.')
-
-                with open(provider.metadata.path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                    node_id = next(iter(metadata.values())).get(
-                        'creation', {}).get('virtualServerId', None)
-                    provider.terminate_node(node_id)
-                returncode = 0
-            except node_provider.SCPError as e:
-                returncode = 1
-                stdout = ''
-                stderr = str(e)
-
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
@@ -5184,7 +5168,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
-        env_vars = task.envs.copy()
+        env_vars = task.envs_and_secrets
         # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
         # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:
