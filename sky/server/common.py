@@ -522,8 +522,11 @@ def check_server_healthy(
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
         sv = api_server_info.api_version
         assert sv is not None, 'Server API version is None'
+
+        server_version = 0
         try:
-            server_is_older = int(sv) < _LOCAL_API_VERSION
+            server_version = int(sv)
+            server_is_older = server_version < _LOCAL_API_VERSION
         except ValueError:
             # Raised when the server version using an unknown scheme.
             # Version compatibility checking is expected to handle all legacy
@@ -532,14 +535,14 @@ def check_server_healthy(
             logger.debug('API server version using unknown scheme: %s', sv)
             server_is_older = False
         version_info = _get_version_info_hint(api_server_info)
-        
+
         server_local = False
-        if int(sv) < 10:
+        if server_version < 10:
             # If the server is older than 10, there won't be a port file yet
             server_local = is_api_server_local(startup=True)
         else:
             server_local = is_api_server_local()
-        
+
         if server_local:
             # For local server, just hint user to restart the server to get
             # a consistent version.
