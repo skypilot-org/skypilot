@@ -127,10 +127,6 @@ def _get_cluster_records_and_set_ssh_config(
             If clusters is not None, this field is ignored because cluster list
             can include other users' clusters.
     """
-    # TODO(zhwu): we should move this function into SDK.
-    # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
-    if clusters is not None:
-        all_users = True
     request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
@@ -2457,7 +2453,7 @@ def logs(
               default=False,
               is_flag=True,
               required=False,
-              help='Cancel all jobs on the specified cluster for all users.')
+              help='Allowing cancelling jobs for other users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2500,17 +2496,18 @@ def cancel(
     """
     job_identity_str = ''
     job_ids_to_cancel = None
-    if not jobs and not all and not all_users:
+    if not jobs and not all:
         click.echo(
-            f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
+            f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
             'cancelling the latest running job.'
             f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
-    elif all_users:
-        job_identity_str = 'all users\' jobs'
     else:
         if all:
-            job_identity_str = 'all your jobs'
+            if all_users:
+                job_identity_str = 'all users\' jobs'
+            else:
+                job_identity_str = 'all your jobs'
         if jobs:
             jobs_str = ' '.join(map(str, jobs))
             plural = 's' if len(jobs) > 1 else ''
@@ -2558,7 +2555,7 @@ def cancel(
               '-u',
               default=False,
               is_flag=True,
-              help='Stop all existing clusters for all users.')
+              help='Allowing stopping clusters for other users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2626,7 +2623,7 @@ def stop(
               '-u',
               default=False,
               is_flag=True,
-              help='Autostop all existing clusters for all users.')
+              help='Allowing autostopping clusters for other users.')
 @click.option('--idle-minutes',
               '-i',
               type=int,
@@ -2742,6 +2739,12 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Allowing starting clusters for other users.')
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -2792,6 +2795,7 @@ def start(
     clusters: List[str],
     all: bool,
     yes: bool,
+    all_users: bool,
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -2836,7 +2840,7 @@ def start(
         # UX: frequently users may have only 1 cluster. In this case, be smart
         # and default to that unique choice.
         all_clusters = _get_cluster_records_and_set_ssh_config(
-            clusters=None, refresh=common.StatusRefreshMode.AUTO)
+            clusters=None, refresh=common.StatusRefreshMode.AUTO, all_users=all_users)
         if len(all_clusters) <= 1:
             cluster_records = all_clusters
         else:
@@ -2850,7 +2854,7 @@ def start(
                        'Letting --all take effect.')
 
         all_clusters = _get_cluster_records_and_set_ssh_config(
-            clusters=None, refresh=common.StatusRefreshMode.AUTO)
+            clusters=None, refresh=common.StatusRefreshMode.AUTO, all_users=all_users)
 
         # Get all clusters that are not controllers.
         cluster_records = [
@@ -2860,7 +2864,7 @@ def start(
     if cluster_records is None:
         # Get GLOB cluster names
         cluster_records = _get_cluster_records_and_set_ssh_config(
-            clusters, refresh=common.StatusRefreshMode.AUTO)
+            clusters, refresh=common.StatusRefreshMode.AUTO, all_users=all_users)
 
     if not cluster_records:
         click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
@@ -2961,7 +2965,7 @@ def start(
             _async_call_or_wait(request_id, async_call, 'sky.start')
             if not async_call:
                 # Add ssh config for the cluster
-                _get_cluster_records_and_set_ssh_config(clusters=[name])
+                _get_cluster_records_and_set_ssh_config(clusters=[name], all_users=all_users)
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
@@ -2985,7 +2989,7 @@ def start(
               '-u',
               default=False,
               is_flag=True,
-              help='Tear down all existing clusters for all users.')
+              help='Allowing tearing down clusters by other users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3188,7 +3192,7 @@ def _down_or_stop_clusters(
         names: The names of the clusters to tear down or stop. If empty,
             apply_to_all or all_users must be set.
         apply_to_all: If True, apply the operation to all clusters.
-        all_users: If True, apply the operation to all clusters for all users.
+        all_users: If True, apply the operation for all users.
         down: If True, tear down the clusters.
         no_confirm: If True, skip the confirmation prompt.
         purge: If True, forcefully remove the clusters from the cluster table.
@@ -3202,12 +3206,10 @@ def _down_or_stop_clusters(
         command = 'autostop'
     else:
         command = 'stop'
-    if not names and not apply_to_all and not all_users:
+    if not names and not apply_to_all:
         raise click.UsageError(
             f'`sky {command}` requires either a cluster name or glob '
-            '(see `sky status`), or the -a/--all flag for all your '
-            'clusters, or the -u/--all-users flag for all clusters in '
-            'your team.')
+            '(see `sky status`), or the -a/--all flag for all clusters.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -3227,7 +3229,7 @@ def _down_or_stop_clusters(
         controllers_str = ', '.join(map(repr, controllers))
         names = [
             cluster['name']
-            for cluster in _get_cluster_records_and_set_ssh_config(names)
+            for cluster in _get_cluster_records_and_set_ssh_config(names, all_users=all_users)
             if controller_utils.Controllers.from_name(cluster['name']) is None
         ]
 
@@ -4497,7 +4499,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               is_flag=True,
               default=False,
               required=False,
-              help='Cancel all managed jobs from all users.')
+              help='Allowing cancelling jobs for other users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
@@ -4518,24 +4520,23 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
       $ sky jobs cancel 1 2 3
     """
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+    if sum([bool(job_ids), name is not None, all]) != 1:
         arguments = []
         arguments += [f'--job-ids {job_id_str}'] if job_ids else []
         arguments += [f'--name {name}'] if name is not None else []
         arguments += ['--all'] if all else []
-        arguments += ['--all-users'] if all_users else []
         raise click.UsageError(
-            'Can only specify one of JOB_IDS, --name, or --all/--all-users. '
+            'Can only specify one of JOB_IDS, --name, or --all. '
             f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
         plural = 's' if len(job_ids) > 1 else ''
         job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
                             if job_ids else repr(name))
-        if all_users:
-            job_identity_str = 'all managed jobs FOR ALL USERS'
-        elif all:
-            job_identity_str = 'all managed jobs'
+        if all:
+            job_identity_str = 'all your managed jobs'
+            if all_users:
+                job_identity_str = 'all managed jobs for all users'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
@@ -5574,12 +5575,12 @@ def api_logs(request_id: Optional[str], server_logs: bool,
               is_flag=True,
               default=False,
               required=False,
-              help='Cancel all requests from all users.')
+              help='Allowing cancelling requests for other users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
     """Cancel a request running on SkyPilot API server."""
-    if all or all_users:
+    if all:
         keyword = 'ALL USERS\'' if all_users else 'YOUR'
         user_input = click.prompt(
             f'This will cancel all {keyword} requests.\n'
