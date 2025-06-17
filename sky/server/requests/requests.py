@@ -334,6 +334,10 @@ def managed_job_status_refresh_event():
     from sky.skylet import events
     if not managed_job_utils.is_consolidation_mode():
         return
+    # We run the recovery logic before starting the event loop as those two are
+    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
+    managed_job_utils.ha_recovery_for_consolidation_mode()
+    # After recovery, we start the event loop.
     event = events.ManagedJobEvent()
     while True:
         time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)

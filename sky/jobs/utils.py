@@ -5,6 +5,7 @@ jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import collections
+import datetime
 import enum
 import os
 import pathlib
@@ -34,6 +35,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
@@ -164,6 +166,62 @@ def is_consolidation_mode() -> bool:
                     'to see those jobs. Switching to normal mode will '
                     f'lose the job history.{colorama.Style.RESET_ALL}')
     return consolidation_mode
+
+
+def get_ha_dump_script_path(job_id: int) -> pathlib.Path:
+    """Get the path to the HA dump script for a job."""
+    return pathlib.Path(constants.PERSISTENT_RUN_SCRIPT_DIR).expanduser(
+    ).resolve() / f'sky_job_{job_id}'
+
+
+def ha_recovery_for_consolidation_mode():
+    """Recovery logic for HA mode."""
+    # No setup recovery is needed in consolidation mode, as the API server
+    # already has all runtime installed. Directly start jobs recovery here.
+    # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
+    runner = command_runner.LocalProcessCommandRunner()
+    with open('/tmp/ha_recovery.log', 'w', encoding='utf-8') as f:
+        start = time.time()
+        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
+        for job in managed_job_state.get_managed_jobs():
+            job_id = job['job_id']
+            controller_pid = job['controller_pid']
+
+            # In consolidation mode, it is possible that only the API server
+            # process is restarted, and the controller process is not. In such
+            # case, we need to kill the original controller process to avoid
+            # two processes monitoring the same job and thus have conflicting
+            # manage logic.
+            if controller_pid is not None:
+                try:
+                    if _controller_process_alive(controller_pid, job_id):
+                        subprocess_utils.kill_children_processes(
+                            parent_pids=[controller_pid], force=True)
+                        f.write(f'Killed running controller pid '
+                                f'{controller_pid} for job {job_id}\n')
+                except Exception:  # pylint: disable=broad-except
+                    # _controller_process_alive may raise if psutil fails; we
+                    # should not crash the recovery logic because of this.
+                    f.write('Error checking controller pid '
+                            f'{controller_pid} for job {job_id}\n')
+
+            if job['schedule_state'] not in [
+                    managed_job_state.ManagedJobScheduleState.DONE,
+                    managed_job_state.ManagedJobScheduleState.WAITING
+            ]:
+                dump_script_path = get_ha_dump_script_path(job_id)
+                if not dump_script_path.exists():
+                    f.write(f'Job {job_id}\'s recovery file ({dump_script_path}'
+                            ') does not exist. Skipping recovery. Job '
+                            f'schedule state: {job["schedule_state"]}\n')
+                    continue
+                with open(dump_script_path, 'r', encoding='utf-8') as script_f:
+                    script = script_f.read()
+                runner.run(script)
+                f.write(f'Job {job_id} (file: {dump_script_path}) completed '
+                        f'recovery at {datetime.datetime.now()}\n')
+        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+        f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
 def get_job_status(backend: 'backends.CloudVmRayBackend',

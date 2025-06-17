@@ -321,6 +321,12 @@ def launch(
                     all_file_mounts=controller_task.file_mounts,
                     storage_mounts=controller_task.storage_mounts)
                 assert isinstance(controller_task.run, str)
+                # For high availability recovery.
+                dump_script_path = managed_job_utils.get_ha_dump_script_path(
+                    consolidation_mode_job_id)
+                dump_script_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(dump_script_path, 'w', encoding='utf-8') as script_f:
+                    script_f.write(controller_task.run)
                 backend.run_on_head(local_handle, controller_task.run)
                 return consolidation_mode_job_id, local_handle
 
