@@ -203,7 +203,7 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
 .. _helm-values-apiService-enableUserManagement:
 
 ``apiService.enableUserManagement``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Enable basic auth and user management in the API server. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
@@ -219,7 +219,7 @@ Default: ``false``
 .. _helm-values-apiService-initialBasicAuthCredentials:
 
 ``apiService.initialBasicAuthCredentials``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Initial basic auth credentials for the API server.
 
@@ -237,7 +237,7 @@ Default: ``"skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"``
 .. _helm-values-apiService-initialBasicAuthSecret:
 
 ``apiService.initialBasicAuthSecret``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Initial basic auth secret for the API server. If not specified, a new secret will be created using ``initialBasicAuthCredentials``.
 

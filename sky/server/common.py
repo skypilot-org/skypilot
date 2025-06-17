@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import typing
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Tuple
 from urllib import parse
 import uuid
 
@@ -439,10 +439,10 @@ def _start_api_server(deploy: bool = False,
 
 def check_server_healthy(
     endpoint: Optional[str] = None
-) -> Literal[
+) -> Tuple[Literal[
         # Use an incomplete list of Literals here to enforce raising for other
         # enum values.
-        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH]:
+        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH], ApiServerInfo]:
     """Check if the API server is healthy.
 
     Args:
@@ -519,7 +519,7 @@ def check_server_healthy(
 
         hinted_for_server_install_version_mismatch = True
 
-    return api_server_status
+    return api_server_status, api_server_info
 
 
 def _get_version_info_hint(server_info: ApiServerInfo) -> str:
@@ -574,7 +574,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                      enable_basic_auth: bool = False):
     api_server_status = None
     try:
-        api_server_status = check_server_healthy()
+        api_server_status, _ = check_server_healthy()
         if api_server_status == ApiServerStatus.NEEDS_AUTH:
             endpoint = get_server_url()
             with ux_utils.print_exception_no_traceback():

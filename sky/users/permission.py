@@ -3,12 +3,9 @@ import contextlib
 import hashlib
 import logging
 import os
-import threading
 from typing import Generator, List
 
-import casbin
 import filelock
-import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import models
@@ -26,32 +23,26 @@ POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 
 _enforcer_instance = None
-_lock = threading.Lock()
 
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        global _enforcer_instance
-        if _enforcer_instance is None:
-            # For different threads, we share the same enforcer instance.
-            with _lock:
-                if _enforcer_instance is None:
-                    _enforcer_instance = self
-                    engine = global_user_state.initialize_and_get_db()
-                    adapter = sqlalchemy_adapter.Adapter(engine)
-                    model_path = os.path.join(os.path.dirname(__file__),
-                                              'model.conf')
-                    enforcer = casbin.Enforcer(model_path, adapter)
-                    self.enforcer = enforcer
-                else:
-                    self.enforcer = _enforcer_instance.enforcer
-        else:
-            self.enforcer = _enforcer_instance.enforcer
         with _policy_lock():
-            self._maybe_initialize_basic_auth_user()
-            self._maybe_initialize_policies()
+            global _enforcer_instance
+            if _enforcer_instance is None:
+                _enforcer_instance = self
+                engine = global_user_state.initialize_and_get_db()
+                adapter = sqlalchemy_adapter.Adapter(engine)
+                model_path = os.path.join(os.path.dirname(__file__),
+                                          'model.conf')
+                enforcer = casbin.Enforcer(model_path, adapter)
+                self.enforcer = enforcer
+                self._maybe_initialize_policies()
+                self._maybe_initialize_basic_auth_user()
+            else:
+                self.enforcer = _enforcer_instance.enforcer
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
@@ -330,5 +321,10 @@ def _policy_lock() -> Generator[None, None, None]:
                            f'file if you believe it is stale.') from e
 
 
-# Singleton instance of PermissionService for other modules to use.
-permission_service = PermissionService()
+if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER,
+                  'false').lower() == 'true':
+    import casbin
+    import sqlalchemy_adapter
+
+    # Singleton instance of PermissionService for other modules to use.
+    permission_service = PermissionService()

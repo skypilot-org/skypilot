@@ -58,6 +58,9 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
+]
+
+server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
@@ -163,7 +166,8 @@ extras_require: Dict[str, List[str]] = {
     'nebius': [
         'nebius>=0.2.0',
     ] + aws_dependencies,
-    'hyperbolic': []  # No dependencies needed for hyperbolic
+    'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'server': server_dependencies,
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius

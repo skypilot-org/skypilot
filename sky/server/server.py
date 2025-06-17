@@ -111,6 +111,7 @@ def _basic_auth_401_response(content: str):
         content=content)
 
 
+# TODO(hailong): Remove this function and use request.state.auth_user instead.
 async def _override_user_info_in_request_body(request: fastapi.Request,
                                               auth_user: Optional[models.User]):
     body = await request.body()

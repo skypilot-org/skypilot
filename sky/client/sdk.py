@@ -1994,7 +1994,8 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         raise click.BadParameter('Endpoint must be a valid URL.')
     endpoint = endpoint.rstrip('/')
 
-    server_status = server_common.check_server_healthy(endpoint)
+    server_status, api_server_info = server_common.check_server_healthy(
+        endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
@@ -2127,7 +2128,6 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                 f.write(user_hash)
     else:
         # Check if basic auth is enabled
-        api_server_info = server_common.get_api_server_status(endpoint)
         if api_server_info.basic_auth_enabled:
             if api_server_info.user is None:
                 with ux_utils.print_exception_no_traceback():
