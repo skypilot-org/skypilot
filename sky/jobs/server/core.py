@@ -327,7 +327,9 @@ def launch(
                 dump_script_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(dump_script_path, 'w', encoding='utf-8') as script_f:
                     script_f.write(controller_task.run)
-                backend.run_on_head(local_handle, controller_task.run)
+                backend.run_on_head(local_handle,
+                                    controller_task.run,
+                                    extra_env_vars=controller_task.envs)
                 return consolidation_mode_job_id, local_handle
 
 

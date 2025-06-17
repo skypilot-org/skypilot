@@ -6,7 +6,7 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -57,6 +57,7 @@ class CommandRunner:
             *,
             require_outputs: Literal[False] = ...,
             log_path: str = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
@@ -72,6 +73,7 @@ class CommandRunner:
             *,
             require_outputs: Literal[True],
             log_path: str = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
@@ -88,6 +90,7 @@ class CommandRunner:
             require_outputs: bool = ...,
             log_path: str = ...,
             process_stream: bool = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
             connect_timeout: Optional[int] = ...,
@@ -145,6 +148,7 @@ class SSHCommandRunner(CommandRunner):
             *,
             require_outputs: Literal[False] = ...,
             port_forward: Optional[List[int]] = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -162,6 +166,7 @@ class SSHCommandRunner(CommandRunner):
             *,
             require_outputs: Literal[True],
             port_forward: Optional[List[int]] = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -179,6 +184,7 @@ class SSHCommandRunner(CommandRunner):
             *,
             require_outputs: bool = ...,
             port_forward: Optional[List[int]] = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -217,6 +223,7 @@ class KubernetesCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = ...,
             require_outputs: Literal[False] = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -234,6 +241,7 @@ class KubernetesCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = ...,
             require_outputs: Literal[True],
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -251,6 +259,7 @@ class KubernetesCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = ...,
             require_outputs: bool = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -284,6 +293,7 @@ class LocalProcessCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = ...,
             require_outputs: Literal[False] = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -301,6 +311,7 @@ class LocalProcessCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = ...,
             require_outputs: Literal[True],
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
@@ -318,6 +329,7 @@ class LocalProcessCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = ...,
             require_outputs: bool = ...,
+            extra_env_vars: Optional[Dict[str, str]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,

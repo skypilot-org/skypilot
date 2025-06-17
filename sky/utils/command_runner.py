@@ -6,7 +6,8 @@ import pathlib
 import shlex
 import sys
 import time
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
+                    Union)
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -185,6 +186,7 @@ class CommandRunner:
         skip_num_lines: int,
         source_bashrc: bool = False,
         return_list: bool = False,
+        extra_env_vars: Optional[Dict[str, str]] = None,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -196,23 +198,28 @@ class CommandRunner:
             '--login',
             '-c',
         ]
+        envs = {
+            'OMP_NUM_THREADS': '1',
+            'PYTHONWARNINGS': 'ignore',
+        }
+        if extra_env_vars is not None:
+            envs.update(extra_env_vars)
+        envs_str = 'export'
+        for k, v in envs.items():
+            envs_str += f' {k}={v}'
         if source_bashrc:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
                 # Sourcing bashrc may take a few seconds causing overheads.
                 '-i',
                 shlex.quote(
-                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
+                    f'true && source ~/.bashrc && {envs_str} && ({cmd})'),
             ]
         else:
             # Optimization: this reduces the time for connecting to the remote
             # cluster by 1 second.
             # sourcing ~/.bashrc is not required for internal executions
-            command += [
-                shlex.quote('true && export OMP_NUM_THREADS=1 '
-                            f'PYTHONWARNINGS=ignore && ({cmd})')
-            ]
+            command += [shlex.quote(f'true && {envs_str} && ({cmd})')]
         if not separate_stderr:
             command.append('2>&1')
         if not process_stream and skip_num_lines:
@@ -358,6 +365,7 @@ class CommandRunner:
             cmd: Union[str, List[str]],
             *,
             require_outputs: bool = False,
+            extra_env_vars: Optional[Dict[str, str]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -601,6 +609,7 @@ class SSHCommandRunner(CommandRunner):
             *,
             require_outputs: bool = False,
             port_forward: Optional[List[Tuple[int, int]]] = None,
+            extra_env_vars: Optional[Dict[str, str]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -641,6 +650,7 @@ class SSHCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        del extra_env_vars  # Unused.
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
@@ -807,6 +817,7 @@ class KubernetesCommandRunner(CommandRunner):
             *,
             port_forward: Optional[List[int]] = None,
             require_outputs: bool = False,
+            extra_env_vars: Optional[Dict[str, str]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -848,6 +859,7 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        del extra_env_vars  # Unused.
         # TODO(zhwu): implement port_forward for k8s.
         assert port_forward is None, ('port_forward is not supported for k8s '
                                       f'for now, but got: {port_forward}')
@@ -999,6 +1011,7 @@ class LocalProcessCommandRunner(CommandRunner):
             *,
             require_outputs: bool = False,
             port_forward: Optional[List[Tuple[int, int]]] = None,
+            extra_env_vars: Optional[Dict[str, str]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -1018,7 +1031,8 @@ class LocalProcessCommandRunner(CommandRunner):
                                            separate_stderr,
                                            skip_num_lines=skip_num_lines,
                                            source_bashrc=source_bashrc,
-                                           return_list=True)
+                                           return_list=True,
+                                           extra_env_vars=extra_env_vars)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
