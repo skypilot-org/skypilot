@@ -259,8 +259,6 @@ class HTTPEndpoint(SocketEndpoint):
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
         super_url = os.path.join(super().url(host), self.path)
-        if 'http://' in super_url:
-            return super_url
         return f'http://{super_url}'
 
 
@@ -272,8 +270,6 @@ class HTTPSEndpoint(SocketEndpoint):
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
         super_url = os.path.join(super().url(host), self.path)
-        if 'https://' in super_url:
-            return super_url
         return f'https://{super_url}'
 
 
