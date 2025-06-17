@@ -959,6 +959,31 @@ class SkyPilotReplicaManager(ReplicaManager):
                             f'Launch process for replica {replica_id} '
                             f'exited abnormally with code {p.exitcode}.'
                             ' Terminating...')
+                        # Read from the launch log file instead of non-existent stdout/stderr
+                        launch_log_file_name = (
+                            serve_utils.generate_replica_launch_log_file_name(
+                                self._service_name, replica_id))
+                        try:
+                            with open(launch_log_file_name,
+                                      'r',
+                                      encoding='utf-8') as f:
+                                launch_output = f.read()
+                                if launch_output:
+                                    logger.error(
+                                        f'Launch output for replica {replica_id}:\n{launch_output}'
+                                    )
+                                else:
+                                    logger.error(
+                                        f'Launch log file {launch_log_file_name} is empty'
+                                    )
+                        except FileNotFoundError:
+                            logger.error(
+                                f'Launch log file {launch_log_file_name} not found'
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f'Failed to read launch log file {launch_log_file_name}: {e}'
+                            )
                         info.status_property.sky_launch_status = (
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
