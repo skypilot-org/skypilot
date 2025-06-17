@@ -250,7 +250,7 @@ def launch(
                 managed_job_state.set_pending(consolidation_mode_job_id,
                                               task_id, task.name, resources_str)
 
-        vars_to_fill: Dict[str, Any] = {
+        vars_to_fill = {
             'remote_original_user_yaml_path': remote_original_user_yaml_path,
             'original_user_dag_path': original_user_yaml_path.name,
             'remote_user_yaml_path': remote_user_yaml_path,
@@ -303,26 +303,26 @@ def launch(
                 # workspace A, but the controller is in workspace B, the
                 # intermediate bucket and newly created bucket should be in
                 # workspace A.
-                if managed_job_constants.CONSOLIDATE_WITH_API_SERVER:
-                    local_handle = backend_utils.is_controller_accessible(
-                        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-                        stopped_message='')
-                    backend = backend_utils.get_backend_from_handle(
-                        local_handle)
-                    assert isinstance(backend, backends.CloudVmRayBackend)
-                    backend.sync_file_mounts(
-                        handle=local_handle,
-                        all_file_mounts=controller_task.file_mounts,
-                        storage_mounts=controller_task.storage_mounts)
-                    assert isinstance(controller_task.run, str)
-                    backend.run_on_head(local_handle, controller_task.run)
-                    return consolidation_mode_job_id, local_handle
-                return execution.launch(task=controller_task,
-                                        cluster_name=controller_name,
-                                        stream_logs=stream_logs,
-                                        retry_until_up=True,
-                                        fast=True,
-                                        _disable_controller_check=True)
+                if consolidation_mode_job_id is None:
+                    return execution.launch(task=controller_task,
+                                            cluster_name=controller_name,
+                                            stream_logs=stream_logs,
+                                            retry_until_up=True,
+                                            fast=True,
+                                            _disable_controller_check=True)
+                # Manually launch the scheduler process in consolidation mode.
+                local_handle = backend_utils.is_controller_accessible(
+                    controller=controller_utils.Controllers.JOBS_CONTROLLER,
+                    stopped_message='')
+                backend = backend_utils.get_backend_from_handle(local_handle)
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                backend.sync_file_mounts(
+                    handle=local_handle,
+                    all_file_mounts=controller_task.file_mounts,
+                    storage_mounts=controller_task.storage_mounts)
+                assert isinstance(controller_task.run, str)
+                backend.run_on_head(local_handle, controller_task.run)
+                return consolidation_mode_job_id, local_handle
 
 
 def queue_from_kubernetes_pod(
