@@ -46,7 +46,7 @@ Example:
 Available filters:
 
 - ``jsonPayload.log``: Filter on the log content directly.
-- ``jsonPayload.log_path``: Filter on the log path, which has 
+- ``jsonPayload.log_path``: Filter on the log path, which has job name in the path.
 - ``labels.skypilot_cluster_name``: The name of the SkyPilot cluster.
 - ``labels.skypilot_cluster_id``: The unique ID of the SkyPilot cluster, a cluster with the same name terminated and launched for multiple times will have different IDs.
 
