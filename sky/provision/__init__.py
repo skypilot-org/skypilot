@@ -18,11 +18,13 @@ from sky.provision import common
 from sky.provision import cudo
 from sky.provision import fluidstack
 from sky.provision import gcp
+from sky.provision import hyperbolic
 from sky.provision import kubernetes
 from sky.provision import lambda_cloud
 from sky.provision import nebius
 from sky.provision import oci
 from sky.provision import runpod
+from sky.provision import scp
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere

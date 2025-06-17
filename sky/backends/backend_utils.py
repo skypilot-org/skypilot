@@ -946,6 +946,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
+    elif isinstance(cloud, clouds.Hyperbolic):
+        config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
@@ -2515,7 +2517,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,

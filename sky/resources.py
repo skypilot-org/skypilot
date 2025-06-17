@@ -1,5 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
+import math
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -37,6 +38,40 @@ RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
 
+TIME_UNITS = {
+    's': 1 / 60,
+    'sec': 1 / 60,
+    'm': 1,
+    'min': 1,
+    'h': 60,
+    'hr': 60,
+    'd': 24 * 60,
+    'day': 24 * 60,
+}
+
+TIME_PATTERN = (
+    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
+
+MEMORY_SIZE_UNITS = {
+    'b': 1,
+    'k': 2**10,
+    'kb': 2**10,
+    'm': 2**20,
+    'mb': 2**20,
+    'g': 2**30,
+    'gb': 2**30,
+    't': 2**40,
+    'tb': 2**40,
+    'p': 2**50,
+    'pb': 2**50,
+}
+
+MEMORY_SIZE_PATTERN = (
+    '^[0-9]+('
+    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
+    ')?$/i')
+MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
+
 
 @dataclasses.dataclass
 class AutostopConfig:
@@ -60,7 +95,7 @@ class AutostopConfig:
 
     @classmethod
     def from_yaml_config(
-        cls, config: Union[bool, int, Dict[str, Any], None]
+        cls, config: Union[bool, int, str, Dict[str, Any], None]
     ) -> Optional['AutostopConfig']:
         if isinstance(config, bool):
             if config:
@@ -70,6 +105,11 @@ class AutostopConfig:
 
         if isinstance(config, int):
             return cls(idle_minutes=config, down=False, enabled=True)
+
+        if isinstance(config, str):
+            return cls(idle_minutes=parse_time_minutes(config),
+                       down=False,
+                       enabled=True)
 
         if isinstance(config, dict):
             # If we have a dict, autostop is enabled. (Only way to disable is
@@ -101,7 +141,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 26
+    _VERSION = 27
 
     def __init__(
         self,
@@ -118,12 +158,13 @@ class Resources:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[Optional[str], str], str, None] = None,
-        disk_size: Optional[int] = None,
+        disk_size: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
-        autostop: Union[bool, int, Dict[str, Any], None] = None,
+        autostop: Union[bool, int, str, Dict[str, Any], None] = None,
+        priority: Optional[int] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
@@ -217,6 +258,9 @@ class Resources:
             not supported and will be ignored.
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
+          priority: the priority for this resource configuration. Must be an
+            integer from 0 to 1000, where higher values indicate higher priority.
+            If None, no priority is set.
           volumes: the volumes to mount on the instance.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
@@ -279,11 +323,7 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            if round(disk_size) != disk_size:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'OS disk size must be an integer. Got: {disk_size}.')
-            self._disk_size = int(disk_size)
+            self._disk_size = int(parse_memory_resource(disk_size, 'disk_size'))
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
@@ -357,10 +397,14 @@ class Resources:
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
 
+        # Initialize _priority before calling the setter
+        self._priority: Optional[int] = None
+
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
         self._set_autostop_config(autostop)
+        self._set_priority(priority)
         self._set_volumes(volumes)
 
     def validate(self):
@@ -618,6 +662,14 @@ class Resources:
         return self._autostop_config
 
     @property
+    def priority(self) -> Optional[int]:
+        """The priority for this resource configuration.
+
+        Higher values indicate higher priority. Valid range is 0-1000.
+        """
+        return self._priority
+
+    @property
     def is_image_managed(self) -> Optional[bool]:
         return self._is_image_managed
 
@@ -689,25 +741,27 @@ class Resources:
             self._memory = None
             return
 
-        self._memory = str(memory)
-        if isinstance(memory, str):
-            if memory.endswith(('+', 'x')):
-                # 'x' is used internally for make sure our resources used by
-                # jobs controller (memory: 3x) to have enough memory based on
-                # the vCPUs.
-                num_memory_gb = memory[:-1]
-            else:
-                num_memory_gb = memory
-
-            try:
-                memory_gb = float(num_memory_gb)
-            except ValueError:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'The "memory" field should be either a number or '
-                        f'a string "<number>+". Found: {memory!r}') from None
+        memory = parse_memory_resource(str(memory),
+                                       'memory',
+                                       ret_type=float,
+                                       allow_plus=True,
+                                       allow_x=True)
+        self._memory = memory
+        if memory.endswith(('+', 'x')):
+            # 'x' is used internally for make sure our resources used by
+            # jobs controller (memory: 3x) to have enough memory based on
+            # the vCPUs.
+            num_memory_gb = memory[:-1]
         else:
-            memory_gb = float(memory)
+            num_memory_gb = memory
+
+        try:
+            memory_gb = float(num_memory_gb)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'The "memory" field should be either a number or '
+                    f'a string "<number>+". Found: {memory!r}') from None
 
         if memory_gb <= 0:
             with ux_utils.print_exception_no_traceback():
@@ -796,9 +850,23 @@ class Resources:
 
     def _set_autostop_config(
         self,
-        autostop: Union[bool, int, Dict[str, Any], None],
+        autostop: Union[bool, int, str, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+    def _set_priority(self, priority: Optional[int]) -> None:
+        """Sets the priority for this resource configuration.
+
+        Args:
+            priority: Priority value from 0 to 1000, where higher values
+                indicate higher priority. If None, no priority is set.
+        """
+        if priority is not None:
+            if not 0 <= priority <= 1000:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Priority must be between 0 and 1000. '
+                                     f'Found: {priority}')
+        self._priority = priority
 
     def _set_volumes(
         self,
@@ -852,6 +920,7 @@ class Resources:
             else:
                 volume['attach_mode'] = read_write_mode
             if volume['storage_type'] == network_type:
+                # TODO(luca): add units to this disk_size as well
                 if ('disk_size' in volume and
                         round(volume['disk_size']) != volume['disk_size']):
                     with ux_utils.print_exception_no_traceback():
@@ -1716,6 +1785,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            priority=override.pop('priority', self.priority),
             volumes=override.pop('volumes', self.volumes),
             infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
@@ -1936,6 +2006,7 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['priority'] = config.pop('priority', None)
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
@@ -1955,7 +2026,9 @@ class Resources:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
-            resources_fields['disk_size'] = int(resources_fields['disk_size'])
+            # although it will end up being an int, we don't know at this point
+            # if it has units or not, so we store it as a string
+            resources_fields['disk_size'] = str(resources_fields['disk_size'])
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2006,6 +2079,7 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        add_if_not_none('priority', self.priority)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -2174,6 +2248,9 @@ class Resources:
         if version < 26:
             self._network_tier = state.get('_network_tier', None)
 
+        if version < 27:
+            self._priority = None
+
         self.__dict__.update(state)
 
 
@@ -2219,3 +2296,94 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
+
+
+def parse_time_minutes(time: str) -> int:
+    """Convert a time string to minutes.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+
+    Returns:
+        Time in minutes as an integer
+    """
+    time_str = str(time)
+
+    if time_str.isdecimal():
+        # We assume it is already in minutes to maintain backwards
+        # compatibility
+        return int(time_str)
+
+    time_str = time_str.lower()
+    for unit, multiplier in TIME_UNITS.items():
+        if time_str.endswith(unit):
+            try:
+                value = int(time_str[:-len(unit)])
+                return math.ceil(value * multiplier)
+            except ValueError:
+                continue
+
+    raise ValueError(f'Invalid time format: {time}')
+
+
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
+                          ret_type: type = int,
+                          unit: str = 'g',
+                          allow_plus: bool = False,
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+
+    error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
+                f' got {resource_qty_str}'
+
+    resource_str = str(resource_qty_str)
+
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(error_msg)
+
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(error_msg)
+
+    try:
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        ret_type(resource_str)
+        return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
+
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = ret_type(resource_str[:-len(mem_unit)])
+                converted = value * multiplier / MEMORY_SIZE_UNITS[unit]
+                if not allow_rounding and ret_type(converted) != converted:
+                    raise ValueError(error_msg)
+                converted = ret_type(converted)
+                return f'{converted}{plus}{x}'
+            except ValueError:
+                continue
+
+    raise ValueError(error_msg)

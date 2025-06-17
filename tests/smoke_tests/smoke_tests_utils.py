@@ -783,3 +783,27 @@ def get_response_from_request_id(request_id: str) -> Any:
 def with_config(cmd: str, config_path: str) -> str:
     return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
             f'{cmd}')
+
+
+def _get_controller_pod_name(controller_name: str) -> str:
+    return (
+        'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
+        'APP:.metadata.labels.app --no-headers | '
+        f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
+
+
+def kill_and_wait_controller(controller_name: str) -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    assert controller_name in ['serve', 'jobs'
+                              ], (f'Invalid controller name: {controller_name}')
+    return (
+        f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
+        f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        f'until new_controller_pod=$({_get_controller_pod_name(controller_name)}) && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && '
+        'kubectl get pod $new_controller_pod | grep "1/1"; do '
+        f'  echo "Waiting for new {controller_name} controller pod..."; sleep 5; '
+        'done; '
+        f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
+    )
