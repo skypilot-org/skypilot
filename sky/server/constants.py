@@ -33,4 +33,4 @@ API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
                              'out')
 
-API_SERVER_PORT_FILE = '~/.sky/api_server/port'
+API_SERVER_PORT_FILE = os.path.expanduser('~/.sky/api_server/port')

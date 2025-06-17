@@ -184,7 +184,6 @@ def get_cookies_from_response(
     return cookies
 
 
-@annotations.lru_cache(scope='global')
 def get_server_url(
     host: Optional[str] = None, port: int = DEFAULT_SERVER_PORT) -> str:
     endpoint = None
@@ -226,7 +225,8 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local(startup: bool = False):
+def is_api_server_local(
+    server_url: Optional[str] = None, startup: bool = False) -> bool:
     """Checks if the API server is local.
 
     Args:
@@ -244,7 +244,8 @@ def is_api_server_local(startup: bool = False):
     Returns:
         bool: True if the API server is local, False otherwise.
     """
-    server_url = get_server_url()
+    if server_url is None:
+        server_url = get_server_url()
     server_parsed = parse.urlparse(server_url)
     port = server_parsed.port
     
@@ -373,7 +374,7 @@ def _start_api_server(deploy: bool = False,
                       port: int = DEFAULT_SERVER_PORT):
     """Starts a SkyPilot API server locally."""
     server_url = get_server_url(host, port)
-    assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
+    assert is_api_server_local(server_url, startup=True), (
         f'server url {server_url} is not a local url')
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
@@ -400,6 +401,7 @@ def _start_api_server(deploy: bool = False,
             args += ['--deploy']
         if host is not None:
             args += [f'--host={host}']
+        args += [f'--port={port}']
 
         if foreground:
             # Replaces the current process with the API server
