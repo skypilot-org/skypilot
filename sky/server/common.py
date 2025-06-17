@@ -44,7 +44,9 @@ else:
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
-DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
+DEFAULT_SERVER_HOST = '127.0.0.1'
+DEFAULT_SERVER_PORT = 46580
+DEFAULT_SERVER_URL = f'http://{DEFAULT_SERVER_HOST}:{DEFAULT_SERVER_PORT}'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
 AVAILABLE_LOCAL_API_SERVER_URLS = [
     f'http://{host}:46580' for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
@@ -182,11 +184,20 @@ def get_cookies_from_response(
     return cookies
 
 
-@annotations.lru_cache(scope='global')
-def get_server_url(host: Optional[str] = None) -> str:
-    endpoint = DEFAULT_SERVER_URL
+def get_server_url(host: Optional[str] = None,
+                   port: int = DEFAULT_SERVER_PORT) -> str:
+    endpoint = None
     if host is not None:
-        endpoint = f'http://{host}:46580'
+        endpoint = f'http://{host}:{port}'
+    else:
+        try:
+            with open(server_constants.API_SERVER_PORT_FILE,
+                      'r',
+                      encoding='utf-8') as f:
+                port = int(f.read().strip())
+            endpoint = f'http://{DEFAULT_SERVER_HOST}:{port}'
+        except (FileNotFoundError, OSError):
+            endpoint = DEFAULT_SERVER_URL
 
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
@@ -216,8 +227,52 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(server_url: Optional[str] = None,
+                        startup: bool = False) -> bool:
+    """Checks if the API server is local.
+
+    Args:
+        startup: Whether this is called during startup, before the API server
+            is started. This has different behavior as we don't assume that the
+            port file is created yet.
+
+            If startup == False we check if the server_url is both local and
+            the port is equal to the port in the port file. If the port file
+            does not exist we return False.
+
+            If startup == True we do the same as above, except we ignore the
+            port file and just check if the host is local.
+
+    Returns:
+        bool: True if the API server is local, False otherwise.
+    """
+    if server_url is None:
+        server_url = get_server_url()
+    server_parsed = parse.urlparse(server_url)
+    port = server_parsed.port
+
+    # Short circuit since this is true in all cases
+    if server_parsed.hostname not in AVAILBLE_LOCAL_API_SERVER_HOSTS:
+        return False
+
+    # On startup, we don't care if the port file exists yet, so we return True
+    # to allow the server to start. If it is being port forwarded from a remote
+    # server, we will killing the server of fail starting the server due to a
+    # port mismatch.
+    if startup:
+        return True
+
+    try:
+        with open(server_constants.API_SERVER_PORT_FILE, 'r',
+                  encoding='utf-8') as f:
+            port_file_port = f.read().strip()
+    except (FileNotFoundError, OSError):
+        if not startup:
+            return False
+
+    # This should always be true unless the port file was never created due to
+    # the API server being killed.
+    return port == int(port_file_port)
 
 
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
@@ -327,18 +382,20 @@ def get_request_id(response: 'requests.Response') -> RequestId:
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
-                      enable_basic_auth: bool = False):
+                      enable_basic_auth: bool = False,
+                      port: int = DEFAULT_SERVER_PORT):
     """Starts a SkyPilot API server locally."""
-    server_url = get_server_url(host)
-    assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
-        f'server url {server_url} is not a local url')
+    server_url = get_server_url(host, port)
+    assert is_api_server_local(
+        server_url,
+        startup=True), (f'server url {server_url} is not a local url')
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        if not is_api_server_local():
+        if not is_api_server_local(startup=True):
             raise RuntimeError(f'Cannot start API server: {get_server_url()} '
                                'is not a local URL')
 
@@ -357,6 +414,7 @@ def _start_api_server(deploy: bool = False,
             args += ['--deploy']
         if host is not None:
             args += [f'--host={host}']
+        args += [f'--port={port}']
 
         if foreground:
             # Replaces the current process with the API server
@@ -464,8 +522,11 @@ def check_server_healthy(
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
         sv = api_server_info.api_version
         assert sv is not None, 'Server API version is None'
+
+        server_version = 0
         try:
-            server_is_older = int(sv) < _LOCAL_API_VERSION
+            server_version = int(sv)
+            server_is_older = server_version < _LOCAL_API_VERSION
         except ValueError:
             # Raised when the server version using an unknown scheme.
             # Version compatibility checking is expected to handle all legacy
@@ -474,7 +535,15 @@ def check_server_healthy(
             logger.debug('API server version using unknown scheme: %s', sv)
             server_is_older = False
         version_info = _get_version_info_hint(api_server_info)
-        if is_api_server_local():
+
+        server_local = False
+        if server_version < 10:
+            # If the server is older than 10, there won't be a port file yet
+            server_local = is_api_server_local(startup=True)
+        else:
+            server_local = is_api_server_local()
+
+        if server_local:
             # For local server, just hint user to restart the server to get
             # a consistent version.
             msg = _LOCAL_SERVER_VERSION_MISMATCH_WARNING.format(
@@ -571,7 +640,8 @@ def get_skypilot_version_on_disk() -> str:
 def check_server_healthy_or_start_fn(deploy: bool = False,
                                      host: str = '127.0.0.1',
                                      foreground: bool = False,
-                                     enable_basic_auth: bool = False):
+                                     enable_basic_auth: bool = False,
+                                     port: int = DEFAULT_SERVER_PORT):
     api_server_status = None
     try:
         api_server_status, _ = check_server_healthy()
@@ -581,7 +651,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
         endpoint = get_server_url()
-        if not is_api_server_local():
+        if not is_api_server_local(startup=True):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the
@@ -590,9 +660,23 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
+            try:
+                os.makedirs(os.path.dirname(
+                    server_constants.API_SERVER_PORT_FILE),
+                            exist_ok=True)
+                with open(server_constants.API_SERVER_PORT_FILE,
+                          'w',
+                          encoding='utf-8') as f:
+                    f.write(str(port))
+            except (FileNotFoundError, OSError):
+                raise RuntimeError(
+                    ('Failed to write port file '
+                     f'{server_constants.API_SERVER_PORT_FILE}')) from exc
+
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host, foreground, enable_basic_auth)
+                _start_api_server(deploy, host, foreground, enable_basic_auth,
+                                  port)
 
 
 def check_server_healthy_or_start(func):

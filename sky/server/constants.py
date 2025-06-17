@@ -7,7 +7,7 @@ from sky.skylet import constants
 # API server version, whenever there is a change in API server that requires a
 # restart of the local API server or error out when the client does not match
 # the server version.
-API_VERSION = '9'
+API_VERSION = '10'
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -32,3 +32,5 @@ API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 # The path to the dashboard build output
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
                              'out')
+
+API_SERVER_PORT_FILE = os.path.expanduser('~/.sky/api_server/port')
