@@ -131,7 +131,6 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
-    return True
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
     # Check whether the consolidation mode config is changed.
