@@ -1971,24 +1971,24 @@ class Resources:
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
         # Parse resources.accelerators field.
-        accelerators = config.get('accelerators')
-        if config and accelerators is not None:
-            if isinstance(accelerators, str):
+        accelerators_original = config.get('accelerators')
+        if config and accelerators_original is not None:
+            if isinstance(accelerators_original, str):
                 accelerators_list = cls._parse_accelerators_from_str(
-                    accelerators)
-            elif isinstance(accelerators, dict):
+                    accelerators_original)
+            elif isinstance(accelerators_original, dict):
                 accelerator_names = [
                     f'{k}:{v}' if v is not None else f'{k}'
-                    for k, v in accelerators.items()
+                    for k, v in accelerators_original.items()
                 ]
                 accelerators_list = []
                 for accel_name in accelerator_names:
                     parsed_accels = cls._parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
-            elif isinstance(accelerators, list) or isinstance(
-                    accelerators, set):
+            elif isinstance(accelerators_original, list) or isinstance(
+                    accelerators_original, set):
                 accelerators_list = []
-                for accel_name in accelerators:
+                for accel_name in accelerators_original:
                     parsed_accels = cls._parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
             # now that accelerators is a list, we need to decide which to
@@ -2036,8 +2036,10 @@ class Resources:
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
-            assert isinstance(accelerators, (list, set)), accelerators
-            return type(accelerators)(tmp_resources_list)
+            if isinstance(accelerators_original, list):
+                return tmp_resources_list
+            else:
+                return set(tmp_resources_list)
 
         return {Resources._from_yaml_config_single(config)}
 
