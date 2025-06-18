@@ -209,12 +209,12 @@ Specify job priority by setting the ``job.priority`` field in the :ref:`SkyPilot
 .. code-block:: yaml
 
   job:
-    # Priority of the job, between 0 and 1000 (default: 500).
+    # Priority of the job, between -1000 and 1000 (default: 0).
     #
     # A higher value means that the job is higher priority. High priority jobs
     # are scheduled sooner and will block lower priority jobs from starting
     # until the high priority jobs have started.
-    priority: 500
+    priority: 0
 
 
 All jobs are submitted to a queue. When the scheduler is selecting the next job

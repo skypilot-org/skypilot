@@ -225,7 +225,7 @@ class Resources:
           autostop: the autostop configuration to use. For launched resources,
             may or may not correspond to the actual current autostop config.
           priority: the priority for this resource configuration. Must be an
-            integer from 0 to 1000, where higher values indicate higher priority.
+            integer from -1000 to 1000, where higher values indicate higher priority.
             If None, no priority is set.
           volumes: the volumes to mount on the instance.
           _docker_login_config: the docker configuration to use. This includes
@@ -631,7 +631,7 @@ class Resources:
     def priority(self) -> Optional[int]:
         """The priority for this resource configuration.
 
-        Higher values indicate higher priority. Valid range is 0-1000.
+        Higher values indicate higher priority. Valid range is -1000 to1000.
         """
         return self._priority
 
@@ -824,14 +824,14 @@ class Resources:
         """Sets the priority for this resource configuration.
 
         Args:
-            priority: Priority value from 0 to 1000, where higher values
+            priority: Priority value from -1000 to 1000, where higher values
                 indicate higher priority. If None, no priority is set.
         """
         if priority is not None:
-            if not 0 <= priority <= 1000:
+            if not constants.MIN_PRIORITY <= priority <= constants.MAX_PRIORITY:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Priority must be between 0 and 1000. '
-                                     f'Found: {priority}')
+                    raise ValueError(f'Priority must be between {constants.MIN_PRIORITY} and'
+                                     f' {constants.MAX_PRIORITY}. Found: {priority}')
         self._priority = priority
 
     def _set_volumes(

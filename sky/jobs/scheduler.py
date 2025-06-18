@@ -334,7 +334,7 @@ if __name__ == '__main__':
     parser.add_argument('--priority',
                         type=int,
                         default=500,
-                        help='Job priority (0-1000). Default: 500.')
+                        help='Job priority (-1000 to 1000). Default: 0.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
                args.priority)
