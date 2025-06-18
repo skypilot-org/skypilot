@@ -25,6 +25,9 @@ from sky.utils import common as common_lib
 MASTER_PAYLOADS_URL = "https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/server/requests/payloads.py"
 MASTER_CONSTANTS_URL = "https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/server/constants.py"
 
+# Hint message for API compatibility failures
+API_VERSION_HINT = "If this breaking change is intentional, please bump up API_VERSION in sky/server/constants.py."
+
 
 def fetch_master_api_version() -> str:
     """Fetch the API version from the master branch constants.py."""
@@ -332,8 +335,8 @@ class TestAPICompatibility:
             current_fields.keys())
         if missing_in_current:
             pytest.fail(
-                f"Fields removed from current {model_name} but still exist in master: {missing_in_current}"
-            )
+                f"Fields removed from current {model_name} but still exist in master: {missing_in_current}. "
+                f"{API_VERSION_HINT}")
 
         # Check for new fields (fields added to current)
         # New fields are allowed for API compatibility as long as they have default values.
@@ -350,8 +353,8 @@ class TestAPICompatibility:
             if required_new_fields:
                 pytest.fail(
                     f"New required fields in {model_name} break API compatibility: {required_new_fields}. "
-                    f"New fields must have default values to maintain backward compatibility."
-                )
+                    f"New fields must have default values to maintain backward compatibility. "
+                    f"{API_VERSION_HINT}")
 
         # Check field type compatibility for common fields
         for field_name in master_fields:
@@ -362,7 +365,8 @@ class TestAPICompatibility:
                 if not compare_field_types(master_type, current_type):
                     pytest.fail(
                         f"Type mismatch in {model_name}.{field_name}: "
-                        f"master={master_type} != current={current_type}")
+                        f"master={master_type} != current={current_type}. "
+                        f"{API_VERSION_HINT}")
 
         # Test instance creation and compatibility
         test_data = get_test_data_for_model(model_name)
@@ -417,7 +421,8 @@ class TestAPICompatibility:
             CURRENT_PAYLOADS_CLASSES.keys())
         if missing_models:
             pytest.fail(
-                f"Models removed from current version: {missing_models}")
+                f"Models removed from current version: {missing_models}. "
+                f"{API_VERSION_HINT}")
 
     def test_no_new_models_added(self) -> None:
         """Test that no new models were added locally (would break API compatibility)."""
@@ -426,5 +431,5 @@ class TestAPICompatibility:
             MASTER_PAYLOADS_CLASSES.keys())
         if new_models:
             pytest.fail(
-                f"New models added locally break API compatibility: {new_models}"
-            )
+                f"New models added locally break API compatibility: {new_models}. "
+                f"{API_VERSION_HINT}")
