@@ -3,7 +3,7 @@
 TODO(cooperc): Document lifecycle, and multiprocess layout.
 """
 import argparse
-import multiprocessing
+import asyncio
 import os
 import pathlib
 import shutil
@@ -17,7 +17,6 @@ import filelock
 from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
@@ -31,7 +30,6 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -42,6 +40,9 @@ if typing.TYPE_CHECKING:
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.jobs.controller')
 
+# Global state for active jobs
+active_jobs = {}
+job_tasks = {}
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     dag = dag_utils.load_chain_dag_from_yaml(dag_yaml)
@@ -49,11 +50,12 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     assert dag_name is not None, dag
     return dag, dag_name
 
-
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
     def __init__(self, job_id: int, dag_yaml: str) -> None:
+        from sky.backends import cloud_vm_ray_backend
+        
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
@@ -93,7 +95,7 @@ class JobsController:
 
     def _download_log_and_stream(
         self, task_id: Optional[int],
-        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
+        handle: Optional['sky.backends.cloud_vm_ray_backend.CloudVmRayResourceHandle']
     ) -> None:
         """Downloads and streams the logs of the current job with given task ID.
 
@@ -116,7 +118,7 @@ class JobsController:
                                                  log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
-    def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
+    async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
         When the task is successfully completed, this function returns True,
@@ -251,12 +253,12 @@ class JobsController:
                 # This resume logic should only be triggered once.
                 is_resume = False
 
-            time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+            await asyncio.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
             # Network glitch was observed even in the VM.
             try:
-                backend_utils.check_network_connection()
+                await backend_utils.async_check_network_connection()
             except exceptions.NetworkError:
                 logger.info('Network is not available. Retrying again in '
                             f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
@@ -325,7 +327,7 @@ class JobsController:
             if job_status in job_lib.JobStatus.user_code_failure_states():
                 # Add a grace period before the check of preemption to avoid
                 # false alarm for job failure.
-                time.sleep(5)
+                await asyncio.sleep(5)
 
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted or failed.
@@ -465,14 +467,14 @@ class JobsController:
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
 
-    def run(self):
+    async def run(self):
         """Run controller logic and handle exceptions."""
         task_id = 0
         try:
             succeeded = True
             # We support chain DAGs only for now.
             for task_id, task in enumerate(self._dag.tasks):
-                succeeded = self._run_one_task(task_id, task)
+                succeeded = await self._run_one_task(task_id, task)
                 if not succeeded:
                     break
         except exceptions.ProvisionPrechecksError as e:
@@ -533,165 +535,48 @@ class JobsController:
                 task_id=task_id,
                 task=self._dag.tasks[task_id]))
 
-
-def _run_controller(job_id: int, dag_yaml: str):
-    """Runs the controller in a remote process for interruption."""
-    # The controller needs to be instantiated in the remote process, since
-    # the controller is not serializable.
-    jobs_controller = JobsController(job_id, dag_yaml)
-    jobs_controller.run()
-
-
-def _handle_signal(job_id):
-    """Handle the signal if the user sent it."""
-    signal_file = pathlib.Path(
-        managed_job_utils.SIGNAL_FILE_PREFIX.format(job_id))
-    user_signal = None
-    if signal_file.exists():
-        # Filelock is needed to prevent race condition with concurrent
-        # signal writing.
-        with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open(mode='r', encoding='utf-8') as f:
-                user_signal = f.read().strip()
-                try:
-                    user_signal = managed_job_utils.UserSignal(user_signal)
-                except ValueError:
-                    logger.warning(
-                        f'Unknown signal received: {user_signal}. Ignoring.')
-                    user_signal = None
-            # Remove the signal file, after reading the signal.
-            signal_file.unlink()
-    if user_signal is None:
-        # None or empty string.
-        return
-    assert user_signal == managed_job_utils.UserSignal.CANCEL, (
-        f'Only cancel signal is supported, but {user_signal} got.')
-    raise exceptions.ManagedJobUserCancelledError(
-        f'User sent {user_signal.value} signal.')
-
-
-def _cleanup(job_id: int, dag_yaml: str):
-    """Clean up the cluster(s) and storages.
-
-    (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
-        to be cleaned up after the whole job is finished, as the tasks
-        may share the same storage.
-    (2) Clean up the cluster(s) that are not cleaned up yet, which can happen
-        when the task failed or cancelled. At most one cluster should be left
-        when reaching here, as we currently only support chain DAGs, and only
-        task is executed at a time.
-    """
-    dag, _ = _get_dag_and_name(dag_yaml)
-    for task in dag.tasks:
-        assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, job_id)
-        managed_job_utils.terminate_cluster(cluster_name)
-
-        # Clean up Storages with persistent=False.
-        # TODO(zhwu): this assumes the specific backend.
-        backend = cloud_vm_ray_backend.CloudVmRayBackend()
-        # Need to re-construct storage object in the controller process
-        # because when SkyPilot API server machine sends the yaml config to the
-        # controller machine, only storage metadata is sent, not the storage
-        # object itself.
-        for storage in task.storage_mounts.values():
-            storage.construct()
-        backend.teardown_ephemeral_storage(task)
-
-        # Clean up any files mounted from the local disk, such as two-hop file
-        # mounts.
-        for file_mount in (task.file_mounts or {}).values():
-            try:
-                if not data_utils.is_cloud_store_url(file_mount):
-                    path = os.path.expanduser(file_mount)
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(
-                    f'Failed to clean up file mount {file_mount}: {e}')
-
-
-def start(job_id, dag_yaml):
-    """Start the controller."""
-    controller_process = None
-    cancelling = False
-    task_id = None
+async def run_job_loop(job_id: int, dag_yaml: str):
+    """Background task that runs the job loop."""
+    logger.info(f"Starting job loop for {job_id}")
     try:
-        _handle_signal(job_id)
-        # TODO(suquark): In theory, we should make controller process a
-        #  daemon process so it will be killed after this process exits,
-        #  however daemon process cannot launch subprocesses, explained here:
-        #  https://docs.python.org/3/library/multiprocessing.html#multiprocessing.Process.daemon  # pylint: disable=line-too-long
-        #  So we can only enable daemon after we no longer need to
-        #  start daemon processes like Ray.
-        controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml))
-        controller_process.start()
-        while controller_process.is_alive():
-            _handle_signal(job_id)
-            time.sleep(1)
-    except exceptions.ManagedJobUserCancelledError:
-        dag, _ = _get_dag_and_name(dag_yaml)
-        task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
-        assert task_id is not None, job_id
-        logger.info(
-            f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
-        managed_job_state.set_cancelling(
-            job_id=job_id,
-            callback_func=managed_job_utils.event_callback_func(
-                job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
-        cancelling = True
+        controller = JobsController(job_id, dag_yaml)
+        await controller.run()
+    except asyncio.CancelledError:
+        logger.info(f"Job {job_id} was cancelled")
+        raise
     finally:
-        if controller_process is not None:
-            logger.info(f'Killing controller process {controller_process.pid}.')
-            # NOTE: it is ok to kill or join a killed process.
-            # Kill the controller process first; if its child process is
-            # killed first, then the controller process will raise errors.
-            # Kill any possible remaining children processes recursively.
-            subprocess_utils.kill_children_processes(
-                parent_pids=[controller_process.pid], force=True)
-            controller_process.join()
-            logger.info(f'Controller process {controller_process.pid} killed.')
+        logger.info(f"Job loop ended for {job_id}")
+        if job_id in active_jobs:
+            del active_jobs[job_id]
+        if job_id in job_tasks:
+            del job_tasks[job_id]
 
-        logger.info(f'Cleaning up any cluster for job {job_id}.')
-        # NOTE: Originally, we send an interruption signal to the controller
-        # process and the controller process handles cleanup. However, we
-        # figure out the behavior differs from cloud to cloud
-        # (e.g., GCP ignores 'SIGINT'). A possible explanation is
-        # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
-        # But anyway, a clean solution is killing the controller process
-        # directly, and then cleanup the cluster job_state.
-        _cleanup(job_id, dag_yaml=dag_yaml)
-        logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
+async def start_job(job_id: int, dag_yaml: str):
+    """Start a new job."""
+    if job_id in active_jobs:
+        raise ValueError(f"Job {job_id} already exists")
+    
+    active_jobs[job_id] = True
+    # Create the task and store it
+    task = asyncio.create_task(run_job_loop(job_id, dag_yaml))
+    job_tasks[job_id] = task
+    return task
 
-        if cancelling:
-            assert task_id is not None, job_id  # Since it's set with cancelling
-            managed_job_state.set_cancelled(
-                job_id=job_id,
-                callback_func=managed_job_utils.event_callback_func(
-                    job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
-
-        # We should check job status after 'set_cancelled', otherwise
-        # the job status is not terminal.
-        job_status = managed_job_state.get_status(job_id)
-        assert job_status is not None
-        # The job can be non-terminal if the controller exited abnormally,
-        # e.g. failed to launch cluster after reaching the MAX_RETRY.
-        if not job_status.is_terminal():
-            logger.info(f'Previous job status: {job_status.value}')
-            managed_job_state.set_failed(
-                job_id,
-                task_id=None,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_CONTROLLER,
-                failure_reason=('Unexpected error occurred. For details, '
-                                f'run: sky jobs logs --controller {job_id}'))
-
-        scheduler.job_done(job_id)
-
+async def cancel_job(job_id: int):
+    """Cancel an existing job."""
+    if job_id not in active_jobs:
+        raise ValueError(f"Job {job_id} not found")
+    
+    active_jobs[job_id] = False
+    # Cancel the task if it exists
+    if job_id in job_tasks:
+        task = job_tasks[job_id]
+        task.cancel()
+        try:
+            await task  # Wait for the task to be cancelled
+        except asyncio.CancelledError:
+            pass  # Expected when task is cancelled
+        del job_tasks[job_id]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -703,7 +588,4 @@ if __name__ == '__main__':
                         type=str,
                         help='The path to the user job yaml file.')
     args = parser.parse_args()
-    # We start process with 'spawn', because 'fork' could result in weird
-    # behaviors; 'spawn' is also cross-platform.
-    multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml)
+    asyncio.run(start_job(args.job_id, args.dag_yaml))

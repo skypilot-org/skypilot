@@ -1,0 +1,9 @@
+num_nodes: 1
+
+resources:
+  cpus: 2
+
+run: |
+  echo "Start"
+  echo "Nap time"
+  sleep 10
