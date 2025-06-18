@@ -1,6 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import math
+import re
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -36,6 +37,20 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
+}
+
+MEMORY_SIZE_UNITS = {
+    'b': 1,
+    'k': 2**10,
+    'kb': 2**10,
+    'm': 2**20,
+    'mb': 2**20,
+    'g': 2**30,
+    'gb': 2**30,
+    't': 2**40,
+    'tb': 2**40,
+    'p': 2**50,
+    'pb': 2**50,
 }
 
 
@@ -107,7 +122,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 27
+    _VERSION = 28
 
     def __init__(
         self,
@@ -139,6 +154,7 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
+        _no_missing_accel_warnings: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -362,6 +378,7 @@ class Resources:
 
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
+        self._no_missing_accel_warnings = _no_missing_accel_warnings
 
         # Initialize _priority before calling the setter
         self._priority: Optional[int] = None
@@ -645,6 +662,13 @@ class Resources:
             return False
         return self._requires_fuse
 
+    @property
+    def no_missing_accel_warnings(self) -> bool:
+        """Returns whether to force quiet mode for this resource."""
+        if self._no_missing_accel_warnings is None:
+            return False
+        return self._no_missing_accel_warnings
+
     def set_requires_fuse(self, value: bool) -> None:
         """Sets whether this resource requires FUSE mounting support.
 
@@ -750,6 +774,8 @@ class Resources:
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
+                    assert isinstance(accelerators,
+                                      str), (type(accelerators), accelerators)
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
@@ -1763,6 +1789,8 @@ class Resources:
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override_configs,
+            _no_missing_accel_warnings=override.pop(
+                'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
         assert not override
         return resources
@@ -1829,9 +1857,71 @@ class Resources:
                 del config[alias]
 
     @classmethod
+    def _parse_accelerators_from_str(
+            cls, accelerators: str) -> List[Tuple[str, bool]]:
+        """Parse accelerators string into a list of possible accelerators.
+
+        Returns:
+            A list of possible accelerators. Each element is a tuple of
+            (accelerator_name, was_user_specified).
+        """
+        # sanity check
+        assert isinstance(accelerators, str), accelerators
+
+        manufacturer = None
+        memory = None
+        count = 1
+
+        split = accelerators.split(':')
+        if len(split) == 3:
+            manufacturer, memory, count_str = split
+            count = int(count_str)
+            assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
+                'If specifying a GPU manufacturer, you must also' \
+                'specify the memory size'
+        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            memory = split[0]
+            count = int(split[1])
+        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[1]):
+            manufacturer, memory = split
+        elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            memory = split[0]
+        else:
+            # it is just an accelerator name, not a memory size
+            return [(accelerators, True)]
+
+        # we know we have some case of manufacturer, memory, count, now we
+        # need to convert that to a list of possible accelerators
+        memory_parsed = parse_memory_resource(memory,
+                                              'accelerators',
+                                              allow_plus=True)
+        plus = memory_parsed[-1] == '+'
+        if plus:
+            memory_parsed = memory_parsed[:-1]
+        memory_gb = int(memory_parsed)
+
+        accelerators = [
+            (f'{device}:{count}', False)
+            for device in accelerator_registry.get_devices_by_memory(
+                memory_gb, plus, manufacturer=manufacturer)
+        ]
+
+        return accelerators
+
+    @classmethod
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
+        """Creates a Resources object from a YAML config.
+
+        Args:
+            config: A dict of resource config.
+
+        Returns:
+            A set of Resources objects if any_of is specified, otherwise a list
+            of Resources objects if ordered is specified, otherwise a set with
+            a single Resources object.
+        """
         if config is None:
             return {Resources()}
 
@@ -1885,16 +1975,39 @@ class Resources:
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
         # Parse resources.accelerators field.
-        accelerators = config.get('accelerators')
-        if config and accelerators is not None:
-            if isinstance(accelerators, str):
-                accelerators = {accelerators}
-            elif isinstance(accelerators, dict):
-                accelerators = [
+        accelerators_original = config.get('accelerators')
+        accelerators = accelerators_original
+        if config and accelerators_original is not None:
+            if isinstance(accelerators_original, str):
+                accelerators_list = cls._parse_accelerators_from_str(
+                    accelerators_original)
+            elif isinstance(accelerators_original, dict):
+                accelerator_names = [
                     f'{k}:{v}' if v is not None else f'{k}'
-                    for k, v in accelerators.items()
+                    for k, v in accelerators_original.items()
                 ]
-                accelerators = set(accelerators)
+                accelerators_list = []
+                for accel_name in accelerator_names:
+                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    accelerators_list.extend(parsed_accels)
+            elif isinstance(accelerators_original, list) or isinstance(
+                    accelerators_original, set):
+                accelerators_list = []
+                for accel_name in accelerators_original:
+                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    accelerators_list.extend(parsed_accels)
+            # now that accelerators is a list, we need to decide which to
+            # include in the final set
+            accel_dict: Dict[str, bool] = {}
+            for accel, user_specified in accelerators_list:
+                # If this accelerator is not in dict yet, or if current one is
+                # user specified and existing one is not, update the entry
+                if accel not in accel_dict or (user_specified and
+                                               not accel_dict[accel]):
+                    accel_dict[accel] = user_specified
+            accelerators = {(accel, user_specified)
+                            for accel, user_specified in accel_dict.items()}
+
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1920,20 +2033,23 @@ class Resources:
             # In Task, we store a list of resources, each with 1 accelerator.
             # This for loop is for format conversion.
             tmp_resources_list = []
-            for acc in accelerators:
+            for acc, user_specified in accelerators:
                 tmp_resource = config.copy()
                 tmp_resource['accelerators'] = acc
+                if not user_specified:
+                    tmp_resource['_no_missing_accel_warnings'] = True
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
-            assert isinstance(accelerators, (list, set)), accelerators
-            return type(accelerators)(tmp_resources_list)
+            if isinstance(accelerators_original, list):
+                return tmp_resources_list
+            else:
+                return set(tmp_resources_list)
 
         return {Resources._from_yaml_config_single(config)}
 
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
-
         resources_fields: Dict[str, Any] = {}
 
         # Extract infra field if present
@@ -1995,6 +2111,8 @@ class Resources:
             # although it will end up being an int, we don't know at this point
             # if it has units or not, so we store it as a string
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
+        resources_fields['_no_missing_accel_warnings'] = config.pop(
+            '_no_missing_accel_warnings', False)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2045,6 +2163,9 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        if self._no_missing_accel_warnings is not None:
+            config[
+                '_no_missing_accel_warnings'] = self._no_missing_accel_warnings
         add_if_not_none('priority', self.priority)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
@@ -2216,6 +2337,9 @@ class Resources:
 
         if version < 27:
             self._priority = None
+        if version < 28:
+            self._no_missing_accel_warnings = state.get(
+                '_no_missing_accel_warnings', None)
 
         self.__dict__.update(state)
 
