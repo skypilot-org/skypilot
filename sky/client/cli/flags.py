@@ -312,3 +312,31 @@ def verbose_option(helptext: Optional[str] = None):
                             help=helptext)(func)
 
     return return_option_decorator
+
+
+def all_option(helptext: Optional[str] = None):
+    """A decorator for the --all option."""
+
+    def return_option_decorator(func):
+        return click.option('--all',
+                            '-a',
+                            is_flag=True,
+                            default=False,
+                            required=False,
+                            help=helptext)(func)
+
+    return return_option_decorator
+
+
+def all_users_option(helptext: Optional[str] = None):
+    """A decorator for the --all-users option."""
+
+    def return_option_decorator(func):
+        return click.option('--all-users',
+                            '-u',
+                            is_flag=True,
+                            default=False,
+                            required=False,
+                            help=helptext)(func)
+
+    return return_option_decorator

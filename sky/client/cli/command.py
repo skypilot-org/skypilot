@@ -1804,12 +1804,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
 @cli.command()
 @flags.config_option(expose_value=False)
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all cluster information.')
+@flags.all_option('Show all cluster information.')
 @usage_lib.entrypoint
 def cost_report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -2079,13 +2074,7 @@ def logs(
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel all jobs from current user on the specified cluster.'
-             )
+@flags.all_option('Cancel all jobs from current user on the specified cluster.')
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2178,11 +2167,7 @@ def cancel(
                 nargs=-1,
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              help='Stop all existing clusters.')
+@flags.all_option('Stop all existing clusters.')
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2241,11 +2226,7 @@ def stop(
                 nargs=-1,
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              help='Autostop all existing clusters.')
+@flags.all_option('Autostop all existing clusters.')
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2349,12 +2330,7 @@ def autostop(
                 nargs=-1,
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Start all existing clusters.')
+@flags.all_option('Start all existing clusters.')
 @flags.yes_option()
 @click.option(
     '--idle-minutes-to-autostop',
@@ -2590,11 +2566,7 @@ def start(
                 nargs=-1,
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              help='Tear down all existing clusters.')
+@flags.all_option('Tear down all existing clusters.')
 @click.option('--all-users',
               '-u',
               default=False,
@@ -3067,11 +3039,7 @@ def check(infra_list: Tuple[str],
 @cli.command()
 @flags.config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
-@click.option('--all',
-              '-a',
-              is_flag=True,
-              default=False,
-              help='Show details of all GPU/TPU/accelerator offerings.')
+@flags.all_option('Show details of all GPU/TPU/accelerator offerings.')
 @click.option('--infra',
               default=None,
               type=str,
@@ -3731,12 +3699,7 @@ def storage_ls(verbose: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_storage_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Delete all storage objects.')
+@flags.all_option('Delete all storage objects.')
 @click.option('--yes',
               '-y',
               default=False,
@@ -3975,12 +3938,7 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show jobs from all users.')
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all jobs.')
+@flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
@@ -4070,12 +4028,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               type=str,
               help='Managed job name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
-@click.option('--all',
-              '-a',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Cancel all managed jobs for the current user.')
+@flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
 @click.option('--all-users',
               '-u',
@@ -4679,11 +4632,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 @serve.command('down', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('service_names', required=False, type=str, nargs=-1)
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              help='Tear down all services.')
+@flags.all_option('Tear down all services.')
 @click.option('--purge',
               '-p',
               default=False,
@@ -5128,12 +5077,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 @api.command('cancel', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
-@click.option('--all',
-              '-a',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Cancel all your requests.')
+@flags.all_option('Cancel all your requests.')
 @click.option('--all-users',
               '-u',
               is_flag=True,
