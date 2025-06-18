@@ -2208,20 +2208,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 11
+    _VERSION = 10
 
     def __init__(
-        self,
-        *,
-        cluster_name: str,
-        cluster_name_on_cloud: str,
-        cluster_yaml: Optional[str],
-        launched_nodes: int,
-        launched_resources: resources_lib.Resources,
-        stable_internal_external_ips: Optional[List[Tuple[str, str]]] = None,
-        stable_ssh_ports: Optional[List[int]] = None,
-        cluster_info: Optional[provision_common.ClusterInfo] = None,
-        is_local_handle: bool = False,
+            self,
+            *,
+            cluster_name: str,
+            cluster_name_on_cloud: str,
+            cluster_yaml: Optional[str],
+            launched_nodes: int,
+            launched_resources: resources_lib.Resources,
+            stable_internal_external_ips: Optional[List[Tuple[str,
+                                                              str]]] = None,
+            stable_ssh_ports: Optional[List[int]] = None,
+            cluster_info: Optional[provision_common.ClusterInfo] = None
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -2241,7 +2241,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
-        self.is_local_handle = is_local_handle
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2257,8 +2256,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user},'
-                f'\n\tis_local_handle={self.is_local_handle})')
+                f'\n\tssh_user={self.ssh_user}')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2450,8 +2448,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                             avoid_ssh_control: bool = False
                            ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
-        if self.is_local_handle:
-            return [command_runner.LocalProcessCommandRunner()]
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
@@ -2676,9 +2672,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     os.path.expanduser(state['_cluster_yaml'])):
                 state['_cluster_yaml'] = None
 
-        if version < 11:
-            state['is_local_handle'] = False
-
         self.__dict__.update(state)
 
         # Because the update_cluster_ips and update_ssh_ports
@@ -2701,6 +2694,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+
+
+class LocalResourcesHandle(CloudVmRayResourceHandle):
+    """A handle for local resources."""
+
+    @context_utils.cancellation_guard
+    @annotations.lru_cache(scope='global')
+    @timeline.event
+    def get_command_runners(self,
+                            force_cached: bool = False,
+                            avoid_ssh_control: bool = False
+                           ) -> List[command_runner.CommandRunner]:
+        """Returns a list of local command runners."""
+        del force_cached, avoid_ssh_control  # Unused.
+        return [command_runner.LocalProcessCommandRunner()]
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -4050,7 +4058,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        if handle.is_local_handle:
+        if isinstance(handle, LocalResourcesHandle):
             # In consolidation mode, we dont submit a ray job, therefore no
             # run_timestamp is available. We use a dummy run_timestamp here.
             run_timestamps = {

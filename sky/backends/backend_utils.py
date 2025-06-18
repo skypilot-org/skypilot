@@ -2458,14 +2458,14 @@ def is_controller_accessible(
     if (managed_job_utils.is_consolidation_mode() and
             controller == controller_utils.Controllers.JOBS_CONTROLLER):
         cn = 'local-controller-consolidation'
-        return backends.CloudVmRayResourceHandle(
+        return backends.LocalResourcesHandle(
             cluster_name=cn,
             cluster_name_on_cloud=cn,
             cluster_yaml=None,
             launched_nodes=1,
             launched_resources=sky.Resources(cloud=clouds.Cloud(),
                                              instance_type=cn),
-            is_local_handle=True)
+        )
     if non_existent_message is None:
         non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name
