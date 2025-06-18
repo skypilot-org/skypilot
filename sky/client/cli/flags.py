@@ -194,7 +194,6 @@ TASK_OPTIONS = [
     )
 ]
 
-
 TASK_OPTIONS_WITH_NAME = [
     click.option('--name',
                  '-n',
@@ -203,7 +202,6 @@ TASK_OPTIONS_WITH_NAME = [
                  help=('Task name. Overrides the "name" '
                        'config in the YAML if both are supplied.')),
 ] + TASK_OPTIONS
-
 
 EXTRA_RESOURCES_OPTIONS = [
     click.option(
@@ -239,6 +237,7 @@ EXTRA_RESOURCES_OPTIONS = [
               'If specified, overrides the "ports" config in the YAML. '),
     ),
 ]
+
 
 def config_option(expose_value: bool):
     """A decorator for the --config option.
@@ -283,18 +282,20 @@ def config_option(expose_value: bool):
 
     return return_option_decorator
 
+
 def yes_option():
     """A decorator for the --yes/-y option."""
 
     def return_option_decorator(func):
         return click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')(func)
+                            '-y',
+                            is_flag=True,
+                            default=False,
+                            required=False,
+                            help='Skip confirmation prompt.')(func)
 
     return return_option_decorator
+
 
 def verbose_option(helptext: Optional[str] = None):
     """A decorator for the --verbose/-v option."""
@@ -304,10 +305,10 @@ def verbose_option(helptext: Optional[str] = None):
 
     def return_option_decorator(func):
         return click.option('--verbose',
-              '-v',
-              default=False,
-              is_flag=True,
-              required=False,
-              help=helptext)(func)
+                            '-v',
+                            default=False,
+                            is_flag=True,
+                            required=False,
+                            help=helptext)(func)
 
     return return_option_decorator
