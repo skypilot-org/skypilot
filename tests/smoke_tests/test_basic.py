@@ -1315,3 +1315,104 @@ def test_scp_autodown():
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Hyperbolic Endpoints ----------
+@pytest.mark.hyperbolic
+def test_hyperbolic_ondemand_endpoints():
+    """Test Hyperbolic on-demand endpoint functionality for H100 GPUs."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Create a test YAML for H100 GPU
+    h100_yaml_content = textwrap.dedent("""
+        name: test-h100-ondemand
+        resources:
+          cloud: hyperbolic
+          instance_type: 1x-H100-24-271
+        setup: |
+          echo "Testing H100 on-demand endpoint"
+          nvidia-smi
+        run: |
+          echo "H100 instance is running"
+          python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+          if torch.cuda.is_available():
+              print(f'GPU count: {torch.cuda.device_count()}')
+              print(f'GPU name: {torch.cuda.get_device_name(0)}')
+    """)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(h100_yaml_content)
+        h100_yaml_path = f.name
+
+    try:
+        test = smoke_tests_utils.Test(
+            'hyperbolic_ondemand_endpoints',
+            [
+                # Test H100 instance launch with on-demand endpoints
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra hyperbolic {h100_yaml_path}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky logs {name} 1 --status',
+                # Verify the instance is using on-demand endpoints
+                f'sky exec {name} "echo \\$SKYPILOT_CLUSTER_INFO"',
+                f'sky logs {name} 2 --status',
+                # Test basic functionality
+                f'sky exec {name} "echo H100 on-demand endpoint test successful"',
+                f'sky logs {name} 3 --status',
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout('hyperbolic'),
+        )
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        # Clean up temporary file
+        os.unlink(h100_yaml_path)
+
+
+@pytest.mark.hyperbolic
+def test_hyperbolic_spot_endpoints():
+    """Test Hyperbolic SPOT endpoint functionality for non-H100 GPUs."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Create a test YAML for A100 GPU (uses SPOT endpoints)
+    a100_yaml_content = textwrap.dedent("""
+        name: test-a100-spot
+        resources:
+          cloud: hyperbolic
+          instance_type: 1x-A100-24-271
+        setup: |
+          echo "Testing A100 SPOT endpoint"
+          nvidia-smi
+        run: |
+          echo "A100 instance is running"
+          python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+          if torch.cuda.is_available():
+              print(f'GPU count: {torch.cuda.device_count()}')
+              print(f'GPU name: {torch.cuda.get_device_name(0)}')
+    """)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(a100_yaml_content)
+        a100_yaml_path = f.name
+
+    try:
+        test = smoke_tests_utils.Test(
+            'hyperbolic_spot_endpoints',
+            [
+                # Test A100 instance launch with SPOT endpoints
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra hyperbolic {a100_yaml_path}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky logs {name} 1 --status',
+                # Verify the instance is using SPOT endpoints
+                f'sky exec {name} "echo \\$SKYPILOT_CLUSTER_INFO"',
+                f'sky logs {name} 2 --status',
+                # Test basic functionality
+                f'sky exec {name} "echo A100 SPOT endpoint test successful"',
+                f'sky logs {name} 3 --status',
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout('hyperbolic'),
+        )
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        # Clean up temporary file
+        os.unlink(a100_yaml_path)
