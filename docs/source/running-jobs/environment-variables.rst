@@ -57,8 +57,9 @@ Passing secrets
 
 We recommend passing secrets to any node(s) executing your task by first making
 it available in your current shell, then using ``--secret SECRET`` to pass it to SkyPilot.
-With ``secrets``, the values will be redacted in the :ref:`SkyPilot dashboard <dashboard>`,
-so that it won't be leaked to the other users in your team sharing the same
+
+All secret values are redacted in the :ref:`SkyPilot dashboard <dashboard>`,
+so they won't be visible to other users in your team sharing the same
 :ref:`SkyPilot API server <sky-api-server>`.
 
 .. code-block:: console
