@@ -319,12 +319,6 @@ class TestAPICompatibility:
     def test_model_compatibility(self, model_name: str) -> None:
         """Test that models from current payloads.py are compatible with master branch payloads.py."""
 
-        # Fail if model doesn't exist in master (new model added locally - incompatible)
-        if model_name not in MASTER_PAYLOADS_CLASSES:
-            pytest.fail(
-                f"New model {model_name} added locally but not in master branch - this breaks API compatibility"
-            )
-
         # Get the model classes
         current_model: Type = CURRENT_PAYLOADS_CLASSES[model_name]
         master_model: Type = MASTER_PAYLOADS_CLASSES[model_name]
@@ -341,13 +335,23 @@ class TestAPICompatibility:
                 f"Fields removed from current {model_name} but still exist in master: {missing_in_current}"
             )
 
-        # Check for new fields (fields added to current) - strict mode: any new field breaks compatibility
+        # Check for new fields (fields added to current)
+        # New fields are allowed for API compatibility as long as they have default values.
+        # This uses special handling as described in #5644: ensure new field has a default,
+        # do not set the field for legacy server, and do not dump the field to request body if it equals default.
         extra_in_current = set(current_fields.keys()) - set(
             master_fields.keys())
         if extra_in_current:
-            pytest.fail(
-                f"New fields added locally in {model_name} break API compatibility: {extra_in_current}"
-            )
+            # Check that all new fields have default values (are not required)
+            required_new_fields = [
+                field_name for field_name in extra_in_current
+                if current_fields[field_name]['required']
+            ]
+            if required_new_fields:
+                pytest.fail(
+                    f"New required fields in {model_name} break API compatibility: {required_new_fields}. "
+                    f"New fields must have default values to maintain backward compatibility."
+                )
 
         # Check field type compatibility for common fields
         for field_name in master_fields:
