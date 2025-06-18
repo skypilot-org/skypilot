@@ -94,11 +94,8 @@ class TestBackwardCompatibility:
         if install_from_pypi:
             pypi_version = base_branch.split('/')[1]
             pip_install_cmd = f'uv pip install "{pypi_version}[all]"'
-            self._run_cmd(f'mkdir -p {self.BASE_SKY_DIR}/tests/test_yamls')
-            self._run_cmd(
-                f'cp tests/test_yamls/low_resource_sky_config.yaml '
-                f'{self.BASE_SKY_DIR}/tests/test_yamls/low_resource_sky_config.yaml'
-            )
+            self._run_cmd(f'mkdir -p {self.BASE_SKY_DIR}')
+            self._run_cmd(f'cp -r tests {self.BASE_SKY_DIR}/')
         else:
             pip_install_cmd = 'uv pip install -e .[all]'
 
