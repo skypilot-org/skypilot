@@ -64,6 +64,7 @@ user_table = sqlalchemy.Table(
     Base.metadata,
     sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('password', sqlalchemy.Text),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -301,6 +302,12 @@ def create_table():
             'last_creation_command',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'users',
+            'password',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -358,7 +365,9 @@ def add_or_update_user(user: models.User) -> bool:
 
             # First try INSERT OR IGNORE - this won't fail if user exists
             insert_stmnt = insert_func(user_table).prefix_with(
-                'OR IGNORE').values(id=user.id, name=user.name)
+                'OR IGNORE').values(id=user.id,
+                                    name=user.name,
+                                    password=user.password)
             result = session.execute(insert_stmnt)
 
             # Check if the INSERT actually inserted a row
@@ -366,8 +375,14 @@ def add_or_update_user(user: models.User) -> bool:
 
             if not was_inserted:
                 # User existed, so update it
-                session.query(user_table).filter_by(id=user.id).update(
-                    {user_table.c.name: user.name})
+                if user.password:
+                    session.query(user_table).filter_by(id=user.id).update({
+                        user_table.c.name: user.name,
+                        user_table.c.password: user.password
+                    })
+                else:
+                    session.query(user_table).filter_by(id=user.id).update(
+                        {user_table.c.name: user.name})
 
             session.commit()
             return was_inserted
@@ -377,15 +392,19 @@ def add_or_update_user(user: models.User) -> bool:
             # For PostgreSQL, use INSERT ... ON CONFLICT with RETURNING to
             # detect insert vs update
             insert_func = postgresql.insert
-            insert_stmnt = insert_func(user_table).values(id=user.id,
-                                                          name=user.name)
+            insert_stmnt = insert_func(user_table).values(
+                id=user.id, name=user.name, password=user.password)
 
             # Use a sentinel in the RETURNING clause to detect insert vs update
+            if user.password:
+                set_ = {
+                    user_table.c.name: user.name,
+                    user_table.c.password: user.password
+                }
+            else:
+                set_ = {user_table.c.name: user.name}
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
-                index_elements=[user_table.c.id],
-                set_={
-                    user_table.c.name: user.name
-                }).returning(
+                index_elements=[user_table.c.id], set_=set_).returning(
                     user_table.c.id,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
@@ -407,7 +426,24 @@ def get_user(user_id: str) -> Optional[models.User]:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
         return None
-    return models.User(id=row.id, name=row.name)
+    return models.User(id=row.id, name=row.name, password=row.password)
+
+
+def get_user_by_name(username: str) -> List[models.User]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(user_table).filter_by(name=username).all()
+    if len(rows) == 0:
+        return []
+    return [
+        models.User(id=row.id, name=row.name, password=row.password)
+        for row in rows
+    ]
+
+
+def delete_user(user_id: str) -> None:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(user_table).filter_by(id=user_id).delete()
+        session.commit()
 
 
 @_init_db
@@ -415,7 +451,10 @@ def get_all_users() -> List[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
-    return [models.User(id=row.id, name=row.name) for row in rows]
+    return [
+        models.User(id=row.id, name=row.name, password=row.password)
+        for row in rows
+    ]
 
 
 @_init_db

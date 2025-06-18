@@ -132,6 +132,8 @@ This may show multiple clusters, if you have created several:
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
+.. _dashboard:
+
 Access the dashboard
 ====================
 

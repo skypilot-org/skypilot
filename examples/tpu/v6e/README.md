@@ -26,7 +26,7 @@ $ ssh tpu-v6e
 Examples in this directory (`train-llama3-8b.yaml`) shows how to use TPU v6e to train a Llama3 8b model, using PyTorch (XLA) on the wikitext dataset. To start the training, use the following command:
 
 ```bash
-$ HF_TOKEN=hf_xxx sky launch train-llama3-8b.yaml -c train-llama3-8b --env HF_TOKEN
+$ HF_TOKEN=hf_xxx sky launch train-llama3-8b.yaml -c train-llama3-8b --secret HF_TOKEN
 ```
 
 ### Single-Host Training
@@ -94,7 +94,7 @@ INFO: Job finished (status: SUCCEEDED).
 TPU v6e also supports serving. Examples in this directory (`serve-llama2-7b.yaml`) shows how to use TPU v6e to serve a Llama2 7b model, using PyTorch (XLA) and the JetStream lib. To start the serving, use the following command:
 
 ```bash
-$ HF_TOKEN=hf_xxx sky launch serve-llama2-7b.yaml -c serve-llama2-7b --env HF_TOKEN
+$ HF_TOKEN=hf_xxx sky launch serve-llama2-7b.yaml -c serve-llama2-7b --secret HF_TOKEN
 ```
 
 After the server is ready, you should see the following message:

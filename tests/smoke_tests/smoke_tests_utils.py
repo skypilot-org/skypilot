@@ -780,6 +780,11 @@ def get_response_from_request_id(request_id: str) -> Any:
                        f'{response.status_code} {response.text}')
 
 
+def with_config(cmd: str, config_path: str) -> str:
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
+            f'{cmd}')
+
+
 def _get_controller_pod_name(controller_name: str) -> str:
     return (
         'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'

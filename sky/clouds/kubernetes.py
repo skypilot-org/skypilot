@@ -602,6 +602,10 @@ class Kubernetes(clouds.Cloud):
             None,
             override_configs=resources.cluster_config_overrides)
 
+        k8s_kueue_local_queue_name = skypilot_config.get_nested(
+            ('kubernetes', 'kueue', 'local_queue_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -619,6 +623,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
+            'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
