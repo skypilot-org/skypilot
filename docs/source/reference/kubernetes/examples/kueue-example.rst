@@ -66,6 +66,39 @@ This should output:
     ...
     - pod
 
+(Optional) Patch Kueue to support gang scheduling
+-----------------------------------------------------------
+
+Kueue optionally supports `all or nothing scheduling <https://kueue.sigs.k8s.io/docs/tasks/manage/setup_wait_for_pods_ready/#enabling-waitforpodsready>`_ (gang scheduling) of pods.
+The Kueue config needs to be patched to support gang scheduling. This is especially useful for multinode workloads such as distributed training. 
+
+.. code-block:: bash
+
+    # Extract and patch the config and save it to /tmp/kueueconfig.yaml
+    # This is required because SkyPilot creates and manages workloads as pods
+    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.waitForPodsReady.enable = true' | yq '.waitForPodsReady.blockAdmission = true' > /tmp/kueueconfig.yaml
+    # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
+    kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
+    # Restart the kueue-controller-manager pod with the following command
+    kubectl -n kueue-system rollout restart deployment kueue-controller-manager
+    # Wait for the restart to complete
+    kubectl -n kueue-system rollout status deployment kueue-controller-manager
+
+This change instructs Kueue to admit each workload sequentially, and wait for all pods to be ready before admitting the next workload.
+
+Check that the patch is applied by running the following command:
+
+.. code-block:: bash
+
+    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.waitForPodsReady'
+
+This should output:
+
+.. code-block:: bash
+
+    blockAdmission: true
+    enable: true
+
 
 Create a Kueue resource flavor
 ------------------------------
