@@ -113,7 +113,7 @@ def create_table(cursor, conn):
 
     # `job_info` contains the mapping from job_id to the job_name, as well as
     # information used by the scheduler.
-    cursor.execute(f"""\
+    cursor.execute("""\
         CREATE TABLE IF NOT EXISTS job_info (
         spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -123,7 +123,7 @@ def create_table(cursor, conn):
         env_file_path TEXT,
         user_hash TEXT,
         workspace TEXT DEFAULT NULL,
-        priority INTEGER DEFAULT {constants.DEFAULT_PRIORITY},
+        priority INTEGER DEFAULT 500,
         entrypoint TEXT DEFAULT NULL,
         original_user_yaml_path TEXT DEFAULT NULL)""")
 

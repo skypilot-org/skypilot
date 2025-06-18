@@ -631,7 +631,7 @@ class Resources:
     def priority(self) -> Optional[int]:
         """The priority for this resource configuration.
 
-        Higher values indicate higher priority. Valid range is -1000 to1000.
+        Higher values indicate higher priority. Valid range is -1000 to 1000.
         """
         return self._priority
 

@@ -3762,14 +3762,14 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
-@click.option(
-    '--priority',
-    type=click.IntRange(constants.MIN_PRIORITY, constants.MAX_PRIORITY),
-    default=None,
-    show_default=True,
-    help=
-    f'Job priority from ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
-    f' Default: {constants.DEFAULT_PRIORITY}.')
+@click.option('--priority',
+              type=click.IntRange(constants.MIN_PRIORITY,
+                                  constants.MAX_PRIORITY),
+              default=None,
+              show_default=True,
+              help=f'Job priority from ({constants.MIN_PRIORITY} '
+              f'to {constants.MAX_PRIORITY}). '
+              f'Default: {constants.DEFAULT_PRIORITY}.')
 @click.option(
     '--detach-run',
     '-d',
