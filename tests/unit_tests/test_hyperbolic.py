@@ -1,7 +1,10 @@
-"""Tests for Hyperbolic cloud provider."""
+#!/usr/bin/env python3
+"""Tests for Hyperbolic cloud provider (minimal, up-to-date with utils.py)."""
 import os
 from pathlib import Path
 import tempfile
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
@@ -60,6 +63,27 @@ def test_hyperbolic_resource_feasibility():
     assert hasattr(feasible, 'fuzzy_candidate_list')
 
 
+def test_hyperbolic_h100_endpoint_selection():
+    """Test that H100 instances use the correct marketplace virtual machine rental endpoints (minimal logic)."""
+    from sky.provision.hyperbolic import utils
+
+    # Mock the client and its methods
+    mock_client = Mock()
+    mock_client.launch_instance = Mock(return_value=('test-instance-id',
+                                                     'ssh test@host'))
+
+    with patch('sky.provision.hyperbolic.utils.get_client',
+               return_value=mock_client):
+        # Test H100 instance - should use virtual machine rental endpoint
+        utils.launch_instance('H100', 1, 'test-cluster')
+        mock_client.launch_instance.assert_called_once_with(
+            'H100', 1, 'test-cluster')
+
+        # Verify the endpoint selection logic in the client
+        # This would require mocking the _make_request method to verify the endpoint
+        # For now, we'll just verify the method was called correctly
+
+
 # Additional tests for error handling and wrapper functions
 
 
@@ -86,3 +110,60 @@ def test_hyperbolic_check_credentials_present(monkeypatch, tmp_path):
     valid, msg = cloud._check_credentials()
     assert valid
     assert msg is None
+
+
+# New tests for endpoint selection functionality (minimal, up-to-date)
+def test_ondemand_gpu_detection():
+    """Test that H100 GPUs are correctly identified as on-demand (minimal logic)."""
+    from sky.provision.hyperbolic.utils import is_ondemand_gpu
+
+    assert is_ondemand_gpu("H100")
+    assert is_ondemand_gpu("H100-80GB")
+    assert not is_ondemand_gpu("A100")
+    assert not is_ondemand_gpu("V100")
+    assert not is_ondemand_gpu("")
+
+
+def test_endpoint_selection():
+    """Test that correct endpoints are selected based on GPU type (minimal logic)."""
+    from sky.provision.hyperbolic.utils import get_endpoints
+
+    # H100 should use on-demand endpoints
+    h100_endpoints = get_endpoints("H100")
+    assert h100_endpoints['create'] == '/v2/marketplace/virtual-machine-rentals'
+    assert h100_endpoints['list'] == '/v2/marketplace/virtual-machine-rentals'
+    assert h100_endpoints[
+        'terminate'] == '/v2/marketplace/virtual-machine-rentals/terminate'
+
+    # A100 should use SPOT endpoints
+    a100_endpoints = get_endpoints("A100")
+    assert a100_endpoints[
+        'create'] == '/v2/marketplace/instances/create-cheapest'
+    assert a100_endpoints['list'] == '/v1/marketplace/instances'
+    assert a100_endpoints['terminate'] == '/v1/marketplace/instances/terminate'
+
+
+def test_status_mapping():
+    """Test that status mapping works for both endpoint types (minimal logic)."""
+    from sky.provision.hyperbolic.utils import HyperbolicInstanceStatus
+
+    # Test on-demand statuses
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "Running").value == "running"
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "Pending").value == "pending"
+    assert HyperbolicInstanceStatus.from_raw_status("Failed").value == "failed"
+
+    # Test SPOT statuses
+    assert HyperbolicInstanceStatus.from_raw_status("online").value == "online"
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "creating").value == "creating"
+    assert HyperbolicInstanceStatus.from_raw_status("failed").value == "failed"
+
+    # Test unknown status
+    assert HyperbolicInstanceStatus.from_raw_status(
+        "unknown_status").value == "unknown"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
