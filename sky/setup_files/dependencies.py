@@ -62,6 +62,10 @@ install_requires = [
     'sqlalchemy_adapter',
 ]
 
+server_dependencies = [
+    'passlib',
+]
+
 local_ray = [
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
@@ -161,7 +165,9 @@ extras_require: Dict[str, List[str]] = {
     ],
     'nebius': [
         'nebius>=0.2.0',
-    ] + aws_dependencies
+    ] + aws_dependencies,
+    'hyperbolic': [],  # No dependencies needed for hyperbolic
+    'server': server_dependencies,
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius

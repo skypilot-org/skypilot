@@ -274,7 +274,7 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
     # For example, `roles/iam.serviceAccountUser` can be granted at the
     # skypilot-v1 service account level, which can be checked with
     # service_account_policy = iam.projects().serviceAccounts().getIamPolicy(
-    #    resource=f'projects/{project_id}/serviceAcccounts/{email}').execute()
+    #    resource=f'projects/{project_id}/serviceAccounts/{email}').execute()
     # We now skip the check for `iam.serviceAccounts.actAs` permission for
     # simplicity as it can be granted at the service account level.
     def check_permissions(policy, required_permissions):

@@ -343,30 +343,31 @@ def get_pretty_entrypoint_cmd() -> str:
         # things like 'examples/app.py'.
         argv[0] = basename
 
-    # Redact sensitive environment variable values
-    argv = _redact_env_values(argv)
+    # Redact sensitive values from secrets arguments
+    argv = _redact_secrets_values(argv)
 
     return ' '.join(argv)
 
 
-def _redact_env_values(argv: List[str]) -> List[str]:
-    """Redact sensitive values from --env arguments.
+def _redact_secrets_values(argv: List[str]) -> List[str]:
+    """Redact sensitive values from --secret arguments.
 
     Args:
         argv: Command line arguments
 
     Returns:
-        Modified argv with redacted --env values, or original argv if any error
+        Modified argv with redacted --secret values, or original argv if any
+        error
 
     Examples:
-        ['sky', 'launch', '--env', 'HF_TOKEN=secret'] ->
-        ['sky', 'launch', '--env', 'HF_TOKEN=<redacted>']
+        ['sky', 'launch', '--secret', 'HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN=<redacted>']
 
-        ['sky', 'launch', '--env=HF_TOKEN=secret'] ->
-        ['sky', 'launch', '--env=HF_TOKEN=<redacted>']
+        ['sky', 'launch', '--secret=HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret=HF_TOKEN=<redacted>']
 
-        ['sky', 'launch', '--env', 'HF_TOKEN'] ->
-        ['sky', 'launch', '--env', 'HF_TOKEN'] (no change)
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] (no change)
     """
     try:
         if not argv:
@@ -384,7 +385,7 @@ def _redact_env_values(argv: List[str]) -> List[str]:
                 i += 1
                 continue
 
-            if arg == '--env' and i + 1 < len(argv):
+            if arg == '--secret' and i + 1 < len(argv):
                 result.append(arg)
                 next_arg = argv[i + 1]
                 # Ensure next_arg is a string and handle redaction safely
@@ -395,9 +396,10 @@ def _redact_env_values(argv: List[str]) -> List[str]:
                 else:
                     result.append(next_arg)
                 i += 2
-            elif arg.startswith('--env='):
+            elif arg.startswith('--secret='):
                 # Redact only if there's a value after the key
-                redacted = re.sub(r'^(--env=[^=]+)=.*', r'\1=<redacted>', arg)
+                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
+                                  arg)
                 result.append(redacted)
                 i += 1
             else:
@@ -1017,3 +1019,9 @@ def _get_cgroup_memory_limit() -> Optional[int]:
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
+
+
+def removeprefix(string: str, prefix: str) -> str:
+    if string.startswith(prefix):
+        return string[len(prefix):]
+    return string

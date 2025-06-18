@@ -254,6 +254,13 @@ def _get_cloud_dependencies_installation_commands(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+    enabled_k8s_and_ssh = [
+        repr(cloud)
+        for cloud in enabled_clouds
+        if isinstance(cloud, clouds.Kubernetes)
+    ]
+    k8s_and_ssh_label = ' and '.join(sorted(enabled_k8s_and_ssh))
+    k8s_dependencies_installed = False
 
     for cloud in enabled_clouds:
         cloud_python_dependencies: List[str] = copy.deepcopy(
@@ -285,10 +292,21 @@ def _get_cloud_dependencies_installation_commands(
                 commands.append(
                     '(command -v gke-gcloud-auth-plugin &>/dev/null || '
                     '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # pylint: disable=line-too-long
-        elif isinstance(cloud, clouds.Kubernetes):
+        elif isinstance(cloud, clouds.Nebius):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{step_prefix}Kubernetes{empty_str}" && '
+                f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
+                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
+                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
+                'nebius profile create --profile sky '
+                '--endpoint api.nebius.cloud '
+                '--service-account-file $HOME/.nebius/credentials.json '
+                '&> /dev/null || echo "Unable to create Nebius profile."')
+        elif (isinstance(cloud, clouds.Kubernetes) and
+              not k8s_dependencies_installed):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(
+                f'echo -en "\\r{step_prefix}{k8s_and_ssh_label}{empty_str}" && '
                 # Install k8s + skypilot dependencies
                 'sudo bash -c "if '
                 '! command -v curl &> /dev/null || '
@@ -311,6 +329,7 @@ def _get_cloud_dependencies_installation_commands(
                 'kubectl /usr/local/bin/kubectl)) && '
                 f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # pylint: disable=line-too-long
                 f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # pylint: disable=line-too-long
+            k8s_dependencies_installed = True
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -412,7 +431,7 @@ def download_and_stream_latest_job_log(
         return None
 
     log_dir = list(log_dirs.values())[0]
-    log_file = os.path.join(log_dir, 'run.log')
+    log_file = os.path.expanduser(os.path.join(log_dir, 'run.log'))
 
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for

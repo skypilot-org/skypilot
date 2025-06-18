@@ -9,9 +9,9 @@ import yaml
 
 import sky
 from sky import backends
-from sky import cli
 from sky import exceptions
 from sky import global_user_state
+from sky.client import cli
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import db_utils

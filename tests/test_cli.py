@@ -5,10 +5,10 @@ from unittest import mock
 from click import testing as cli_testing
 import requests
 
-from sky import cli
 from sky import clouds
 from sky import exceptions
 from sky import server
+from sky.client import cli
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'

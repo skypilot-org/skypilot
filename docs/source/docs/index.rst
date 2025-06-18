@@ -309,6 +309,7 @@ Read the research:
    ../admin/workspaces
    ../cloud-setup/cloud-permissions/index
    Admin Policies <../cloud-setup/policy>
+   External Logging Storage <../cloud-setup/external-logging>
 
 .. toctree::
    :hidden:
