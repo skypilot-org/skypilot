@@ -233,17 +233,19 @@ def launch(
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         consolidation_mode_job_id = None
+        # In normal mode the managed job submission is done in the ray job
+        # submission. For consolidation mode, we need to manually submit it.
+        # Check the following function for the normal mode submission:
+        # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::_exec_code_on_head::_maybe_add_managed_job_code  # pylint: disable=line-too-long
         if managed_job_utils.is_consolidation_mode():
             # Create local directory for the managed job.
             pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
-            set_job_info_kwargs = {
-                'workspace': skypilot_config.get_active_workspace(
-                    force_user_workspace=True),
-                'entrypoint': common_utils.get_current_command(),
-            }
             consolidation_mode_job_id = (
                 managed_job_state.set_job_info_without_job_id(
-                    dag.name, **set_job_info_kwargs))
+                    dag.name,
+                    workspace=skypilot_config.get_active_workspace(
+                        force_user_workspace=True),
+                    entrypoint=common_utils.get_current_command()))
             for task_id, task in enumerate(dag.tasks):
                 resources_str = backend_utils.get_task_resources_str(
                     task, is_managed_job=True)

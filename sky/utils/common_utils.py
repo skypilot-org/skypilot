@@ -447,8 +447,7 @@ def user_and_hostname_hash() -> str:
     thus changing the SG name makes these clusters unrecognizable.
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    username = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
-    return f'{username}-{hostname_hash}'
+    return f'{getpass.getuser()}-{hostname_hash}'
 
 
 def read_yaml(path: Optional[str]) -> Dict[str, Any]:

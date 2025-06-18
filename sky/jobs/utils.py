@@ -27,7 +27,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
-from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -129,6 +128,10 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
+# Whether to use consolidation mode or not. When this is enabled, the managed
+# jobs controller will not be running on a separate cluster, but locally on the
+# API Server. Under the hood, we submit the job monitoring logic as processes
+# directly in the API Server.
 # Use LRU Cache so that the check is only done once.
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
@@ -190,16 +193,15 @@ def ha_recovery_for_consolidation_mode():
 
             # In consolidation mode, it is possible that only the API server
             # process is restarted, and the controller process is not. In such
-            # case, we need to kill the original controller process to avoid
-            # two processes monitoring the same job and thus have conflicting
-            # manage logic.
+            # case, we don't need to do anything and the controller process will
+            # just keep running.
             if controller_pid is not None:
                 try:
                     if _controller_process_alive(controller_pid, job_id):
-                        subprocess_utils.kill_children_processes(
-                            parent_pids=[controller_pid], force=True)
-                        f.write(f'Killed running controller pid '
-                                f'{controller_pid} for job {job_id}\n')
+                        f.write(f'Controller pid {controller_pid} for '
+                                f'job {job_id} is still running. '
+                                'Skipping recovery.\n')
+                        continue
                 except Exception:  # pylint: disable=broad-except
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.

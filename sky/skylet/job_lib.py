@@ -4,6 +4,7 @@ This is a remote utility module that provides job queue functionality.
 """
 import enum
 import functools
+import getpass
 import json
 import os
 import pathlib
@@ -915,7 +916,7 @@ def _create_ray_job_submission_client():
 
 
 def _make_ray_job_id(sky_job_id: int) -> str:
-    return f'{sky_job_id}-{common_utils.get_current_user_name()}'
+    return f'{sky_job_id}-{getpass.getuser()}'
 
 
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
