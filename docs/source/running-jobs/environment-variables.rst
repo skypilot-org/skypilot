@@ -1,13 +1,12 @@
 
 .. _env-vars:
 
-Secrets and Environment Variables
+Environment Variables and Secrets
 ================================================
 
-Environment variables are a powerful way to pass configuration and secrets to your tasks. There are two types of environment variables in SkyPilot:
+SkyPilot supports **environment variables** (``envs``) and **secrets** (``secrets``). Use environment variables to pass non-sensitive configuration to your tasks, and use secrets to pass sensitive values.
 
-- :ref:`User-specified environment variables and secrets <user-specified-env-vars>`: Passed by users to tasks, useful for secrets and configuration.
-- :ref:`SkyPilot environment variables <sky-env-vars>`: Predefined by SkyPilot with information about the current cluster and task.
+In addition to :ref:`User-specified environment variables and secrets <user-specified-env-vars>`, SkyPilot also exposes several :ref:`SkyPilot native environment variables <sky-env-vars>`, which contain information about the current cluster and task.
 
 .. _user-specified-env-vars:
 
