@@ -6,24 +6,24 @@ from unittest.mock import patch
 
 import pytest
 
-from sky.client import cli
+from sky.client.cli import command
 
 
 def test_parse_secret_var_with_equals():
     """Test parsing secret vars with KEY=VALUE format."""
-    result = cli._parse_secret_var('API_KEY=secret123')
+    result = command._parse_secret_var('API_KEY=secret123')
     assert result == ('API_KEY', 'secret123')
 
-    result = cli._parse_secret_var(
+    result = command._parse_secret_var(
         'DATABASE_URL=postgresql://user:pass@host:5432/db')
     assert result == ('DATABASE_URL', 'postgresql://user:pass@host:5432/db')
 
     # Test with multiple equals signs (only split on first one)
-    result = cli._parse_secret_var('JWT_SECRET=secret=with=equals')
+    result = command._parse_secret_var('JWT_SECRET=secret=with=equals')
     assert result == ('JWT_SECRET', 'secret=with=equals')
 
     # Test with empty value
-    result = cli._parse_secret_var('EMPTY_SECRET=')
+    result = command._parse_secret_var('EMPTY_SECRET=')
     assert result == ('EMPTY_SECRET', '')
 
 
@@ -31,14 +31,14 @@ def test_parse_secret_var_from_environment():
     """Test parsing secret vars that reference local environment."""
     # Test with environment variable that exists
     with patch.dict(os.environ, {'TEST_SECRET': 'env_secret_value'}):
-        result = cli._parse_secret_var('TEST_SECRET')
+        result = command._parse_secret_var('TEST_SECRET')
         assert result == ('TEST_SECRET', 'env_secret_value')
 
     # Test with environment variable that doesn't exist
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(Exception,
                            match='TEST_SECRET is not set in local environment'):
-            cli._parse_secret_var('TEST_SECRET')
+            command._parse_secret_var('TEST_SECRET')
 
 
 def test_parse_secret_var_error_cases():
@@ -47,7 +47,7 @@ def test_parse_secret_var_error_cases():
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(Exception,
                            match='NONEXISTENT is not set in local environment'):
-            cli._parse_secret_var('NONEXISTENT')
+            command._parse_secret_var('NONEXISTENT')
 
 
 def test_make_task_with_secrets_override():
@@ -74,7 +74,7 @@ secrets:
                    ('NEW_SECRET', 'new_value')]
         envs = [('PUBLIC_VAR', 'public_value')]
 
-        result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+        result = command._make_task_or_dag_from_entrypoint_with_overrides(
             entrypoint=(yaml_file,), env=envs, secret=secrets)
 
         # Should be a Task (single task in YAML)
@@ -99,7 +99,7 @@ secrets:
 
 def test_make_task_with_empty_secrets():
     """Test task creation with empty secrets list."""
-    result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+    result = command._make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=('echo hello',), env=[], secret=[])
 
     assert hasattr(result, 'secrets')
@@ -108,7 +108,7 @@ def test_make_task_with_empty_secrets():
 
 def test_make_task_with_none_secrets():
     """Test task creation with None secrets."""
-    result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+    result = command._make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=('echo hello',), env=[], secret=None)
 
     assert hasattr(result, 'secrets')
@@ -120,7 +120,7 @@ def test_secrets_in_command_line_task():
     secrets = [('API_KEY', 'secret123'), ('DB_PASSWORD', 'password456')]
     envs = [('DEBUG', 'true')]
 
-    result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+    result = command._make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=('python', 'train.py'), env=envs, secret=secrets)
 
     # Check task was created correctly
@@ -136,7 +136,7 @@ def test_secrets_integration_with_resources():
     """Test that secrets work properly with resource settings."""
     secrets = [('DOCKER_PASSWORD', 'docker_secret')]
 
-    result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+    result = command._make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=('echo hello',), secret=secrets, gpus='V100:1')
 
     # Check that secrets are set
@@ -164,7 +164,7 @@ secrets:
         # CLI secrets should override YAML secrets
         secrets = [('API_KEY', 'cli_value'), ('CLI_ONLY', 'cli_secret')]
 
-        result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+        result = command._make_task_or_dag_from_entrypoint_with_overrides(
             entrypoint=(yaml_file,), secret=secrets)
 
         task_secrets = result.secrets
@@ -197,7 +197,7 @@ secrets:
         secrets = [('SHARED_VAR', 'cli_secret_value'),
                    ('SECRET_ONLY', 'secret_val')]
 
-        result = cli._make_task_or_dag_from_entrypoint_with_overrides(
+        result = command._make_task_or_dag_from_entrypoint_with_overrides(
             entrypoint=(yaml_file,), env=envs, secret=secrets)
 
         # Check both dictionaries separately

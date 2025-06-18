@@ -24,9 +24,7 @@ listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
 import collections
-import copy
 import fnmatch
-import functools
 import os
 import pathlib
 import shlex
@@ -40,7 +38,6 @@ from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
 
 import click
 import colorama
-import dotenv
 import requests as requests_lib
 from rich import progress as rich_progress
 import yaml
@@ -57,6 +54,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
+from sky.client.cli import flags
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -215,38 +213,6 @@ def _get_glob_matches(candidate_names: List[str],
     return list(set(glob_storages))
 
 
-def _parse_env_var(env_var: str) -> Tuple[str, str]:
-    """Parse env vars into a (KEY, VAL) pair."""
-    if '=' not in env_var:
-        value = os.environ.get(env_var)
-        if value is None:
-            raise click.UsageError(
-                f'{env_var} is not set in local environment.')
-        return (env_var, value)
-    ret = tuple(env_var.split('=', 1))
-    if len(ret) != 2:
-        raise click.UsageError(
-            f'Invalid env var: {env_var}. Must be in the form of KEY=VAL '
-            'or KEY.')
-    return ret[0], ret[1]
-
-
-def _parse_secret_var(secret_var: str) -> Tuple[str, str]:
-    """Parse secret vars into a (KEY, VAL) pair."""
-    if '=' not in secret_var:
-        value = os.environ.get(secret_var)
-        if value is None:
-            raise click.UsageError(
-                f'{secret_var} is not set in local environment.')
-        return (secret_var, value)
-    ret = tuple(secret_var.split('=', 1))
-    if len(ret) != 2:
-        raise click.UsageError(
-            f'Invalid secret var: {secret_var}. Must be in the form of KEY=VAL '
-            'or KEY.')
-    return ret[0], ret[1]
-
-
 def _async_call_or_wait(request_id: str, async_call: bool,
                         request_name: str) -> Any:
     short_request_id = request_id[:8]
@@ -294,245 +260,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     for (key, value) in env_list:
         env_dict[key] = value
     return list(env_dict.items())
-
-
-def config_option(expose_value: bool):
-    """A decorator for the --config option.
-
-    This decorator is used to parse the --config option.
-
-    Any overrides specified in the command line will be applied to the skypilot
-    config before the decorated function is called.
-
-    If expose_value is True, the decorated function will receive the parsed
-    config overrides as 'config_override' parameter.
-
-    Args:
-        expose_value: Whether to expose the value of the option to the decorated
-            function.
-    """
-
-    def preprocess_config_options(ctx, param, value):
-        del ctx  # Unused.
-        param.name = 'config_override'
-        try:
-            if len(value) == 0:
-                return None
-            else:
-                # Apply the config overrides to the skypilot config.
-                return skypilot_config.apply_cli_config(value)
-        except ValueError as e:
-            raise click.BadParameter(f'{str(e)}') from e
-
-    def return_option_decorator(func):
-        return click.option(
-            '--config',
-            required=False,
-            type=str,
-            multiple=True,
-            expose_value=expose_value,
-            callback=preprocess_config_options,
-            help=('Path to a config file or a comma-separated '
-                  'list of key-value pairs '
-                  '(e.g. "nested.key1=val1,another.key2=val2").'),
-        )(func)
-
-    return return_option_decorator
-
-
-_COMMON_OPTIONS = [
-    click.option('--async/--no-async',
-                 'async_call',
-                 required=False,
-                 is_flag=True,
-                 default=False,
-                 help=('Run the command asynchronously.'))
-]
-
-_TASK_OPTIONS = [
-    click.option(
-        '--workdir',
-        required=False,
-        type=click.Path(exists=True, file_okay=False),
-        help=('If specified, sync this dir to the remote working directory, '
-              'where the task will be invoked. '
-              'Overrides the "workdir" config in the YAML if both are supplied.'
-             )),
-    click.option(
-        '--infra',
-        required=False,
-        type=str,
-        help='Infrastructure to use. '
-        'Format: cloud, cloud/region, cloud/region/zone, '
-        'k8s/context-name, or ssh/node-pool-name. '
-        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
-        # TODO(zhwu): we have to use `\*` to make sure the docs build
-        # not complaining about the `*`, but this will cause `--help`
-        # to show `\*` instead of `*`.
-        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'),
-    click.option(
-        '--cloud',
-        required=False,
-        type=str,
-        help=('The cloud to use. If specified, overrides the "resources.cloud" '
-              'config. Passing "none" resets the config.'),
-        hidden=True),
-    click.option(
-        '--region',
-        required=False,
-        type=str,
-        help=('The region to use. If specified, overrides the '
-              '"resources.region" config. Passing "none" resets the config.'),
-        hidden=True),
-    click.option(
-        '--zone',
-        required=False,
-        type=str,
-        help=('The zone to use. If specified, overrides the '
-              '"resources.zone" config. Passing "none" resets the config.'),
-        hidden=True),
-    click.option(
-        '--num-nodes',
-        required=False,
-        type=int,
-        help=('Number of nodes to execute the task on. '
-              'Overrides the "num_nodes" config in the YAML if both are '
-              'supplied.')),
-    click.option(
-        '--cpus',
-        default=None,
-        type=str,
-        required=False,
-        help=('Number of vCPUs each instance must have (e.g., '
-              '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
-              'This is used to automatically select the instance type.')),
-    click.option(
-        '--memory',
-        default=None,
-        type=str,
-        required=False,
-        help=(
-            'Amount of memory each instance must have in GB (e.g., '
-            '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'
-        )),
-    click.option('--disk-size',
-                 default=None,
-                 type=int,
-                 required=False,
-                 help=('OS disk size in GBs.')),
-    click.option('--disk-tier',
-                 default=None,
-                 type=click.Choice(resources_utils.DiskTier.supported_tiers(),
-                                   case_sensitive=False),
-                 required=False,
-                 help=resources_utils.DiskTier.cli_help_message()),
-    click.option('--network-tier',
-                 default=None,
-                 type=click.Choice(
-                     resources_utils.NetworkTier.supported_tiers(),
-                     case_sensitive=False),
-                 required=False,
-                 help=resources_utils.NetworkTier.cli_help_message()),
-    click.option(
-        '--use-spot/--no-use-spot',
-        required=False,
-        default=None,
-        help=('Whether to request spot instances. If specified, overrides the '
-              '"resources.use_spot" config.')),
-    click.option('--image-id',
-                 required=False,
-                 default=None,
-                 help=('Custom image id for launching the instances. '
-                       'Passing "none" resets the config.')),
-    click.option('--env-file',
-                 required=False,
-                 type=dotenv.dotenv_values,
-                 help="""\
-        Path to a dotenv file with environment variables to set on the remote
-        node.
-
-        If any values from ``--env-file`` conflict with values set by
-        ``--env``, the ``--env`` value will be preferred."""),
-    click.option(
-        '--env',
-        required=False,
-        type=_parse_env_var,
-        multiple=True,
-        help="""\
-        Environment variable to set on the remote node.
-        It can be specified multiple times.
-        Examples:
-
-        \b
-        1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
-
-        2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
-        same value of ``$HOME`` in the local environment where the CLI command
-        is run.
-
-        3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
-        same value of ``$MY_ENV3`` in the local environment.""",
-    ),
-    click.option(
-        '--secret',
-        required=False,
-        type=_parse_secret_var,
-        multiple=True,
-        help="""\
-        Secret variable to set on the remote node. These variables will be
-        redacted in logs and YAML outputs for security. It can be specified
-        multiple times. Examples:
-
-        \b
-        1. ``--secret API_KEY=secret123``: set ``$API_KEY`` on the cluster to
-        be secret123.
-
-        2. ``--secret JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be
-        the same value of ``$JWT_SECRET`` in the local environment.""",
-    )
-]
-_TASK_OPTIONS_WITH_NAME = [
-    click.option('--name',
-                 '-n',
-                 required=False,
-                 type=str,
-                 help=('Task name. Overrides the "name" '
-                       'config in the YAML if both are supplied.')),
-] + _TASK_OPTIONS
-_EXTRA_RESOURCES_OPTIONS = [
-    click.option(
-        '--gpus',
-        required=False,
-        type=str,
-        help=
-        ('Type and number of GPUs to use. Example values: '
-         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-         '(fractional counts are supported by the scheduling framework). '
-         'If a new cluster is being launched by this command, this is the '
-         'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
-         'resources and is used for scheduling the task. '
-         'Overrides the "accelerators" '
-         'config in the YAML if both are supplied. '
-         'Passing "none" resets the config.')),
-    click.option(
-        '--instance-type',
-        '-t',
-        required=False,
-        type=str,
-        help=('The instance type to use. If specified, overrides the '
-              '"resources.instance_type" config. Passing "none" resets the '
-              'config.'),
-    ),
-    click.option(
-        '--ports',
-        required=False,
-        type=str,
-        multiple=True,
-        help=('Ports to open on the cluster. '
-              'If specified, overrides the "ports" config in the YAML. '),
-    ),
-]
 
 
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
@@ -1018,94 +745,6 @@ class _DocumentedCodeCommand(click.Command):
         return super().get_help(ctx)
 
 
-def _with_deprecation_warning(
-        f,
-        original_name: str,
-        alias_name: str,
-        override_command_argument: Optional[Dict[str, Any]] = None):
-
-    @functools.wraps(f)
-    def wrapper(self, *args, **kwargs):
-        override_str = ''
-        if override_command_argument is not None:
-            overrides = []
-            for k, v in override_command_argument.items():
-                if isinstance(v, bool):
-                    if v:
-                        overrides.append(f'--{k}')
-                    else:
-                        overrides.append(f'--no-{k}')
-                else:
-                    overrides.append(f'--{k.replace("_", "-")}={v}')
-            override_str = ' with additional arguments ' + ' '.join(overrides)
-        click.secho(
-            f'WARNING: `{alias_name}` has been renamed to `{original_name}` '
-            f'and will be removed in a future release. Please use the '
-            f'latter{override_str} instead.\n',
-            err=True,
-            fg='yellow')
-        return f(self, *args, **kwargs)
-
-    return wrapper
-
-
-def _override_arguments(callback, override_command_argument: Dict[str, Any]):
-
-    def wrapper(*args, **kwargs):
-        logger.info(f'Overriding arguments: {override_command_argument}')
-        kwargs.update(override_command_argument)
-        return callback(*args, **kwargs)
-
-    return wrapper
-
-
-def _add_command_alias(
-    group: click.Group,
-    command: click.Command,
-    hidden: bool = False,
-    new_group: Optional[click.Group] = None,
-    new_command_name: Optional[str] = None,
-    override_command_argument: Optional[Dict[str, Any]] = None,
-    with_warning: bool = True,
-) -> None:
-    """Add a alias of a command to a group."""
-    if new_group is None:
-        new_group = group
-    if new_command_name is None:
-        new_command_name = command.name
-    if new_group == group and new_command_name == command.name:
-        raise ValueError('Cannot add an alias to the same command.')
-    new_command = copy.deepcopy(command)
-    new_command.hidden = hidden
-    new_command.name = new_command_name
-
-    if override_command_argument:
-        new_command.callback = _override_arguments(new_command.callback,
-                                                   override_command_argument)
-
-    orig = f'sky {group.name} {command.name}'
-    alias = f'sky {new_group.name} {new_command_name}'
-    if with_warning:
-        new_command.invoke = _with_deprecation_warning(
-            new_command.invoke,
-            orig,
-            alias,
-            override_command_argument=override_command_argument)
-    new_group.add_command(new_command, name=new_command_name)
-
-
-def _deprecate_and_hide_command(group, command_to_deprecate,
-                                alternative_command):
-    """Hide a command and show a deprecation note, hinting the alternative."""
-    command_to_deprecate.hidden = True
-    if group is not None:
-        orig = f'sky {group.name} {command_to_deprecate.name}'
-    else:
-        orig = f'sky {command_to_deprecate.name}'
-    command_to_deprecate.invoke = _with_deprecation_warning(
-        command_to_deprecate.invoke, alternative_command, orig)
-
-
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
@@ -1159,7 +798,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=True)
+@flags.config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=False,
                 type=str,
@@ -1190,8 +829,8 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
               help=('(Deprecated) Local docker support is deprecated. '
                     'To run locally, create a local Kubernetes cluster with '
                     '``sky local up``.'))
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
-                    _COMMON_OPTIONS)
+@_add_click_options(flags.TASK_OPTIONS_WITH_NAME + flags.EXTRA_RESOURCES_OPTIONS +
+                    flags.COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1405,7 +1044,7 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=True)
+@flags.config_option(expose_value=True)
 @click.argument('cluster',
                 required=False,
                 type=str,
@@ -1430,8 +1069,8 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
-                    _COMMON_OPTIONS)
+@_add_click_options(flags.TASK_OPTIONS_WITH_NAME + flags.EXTRA_RESOURCES_OPTIONS +
+                    flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(cluster: Optional[str],
@@ -1854,13 +1493,8 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
 
 
 @cli.command()
-@config_option(expose_value=False)
-@click.option('--verbose',
-              '-v',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
 @click.option(
     '--refresh',
     '-r',
@@ -2169,7 +1803,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
 
 @cli.command()
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option('--all',
               '-a',
               default=False,
@@ -2240,7 +1874,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2302,7 +1936,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 
 @cli.command()
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option(
     '--sync-down',
     '-s',
@@ -2440,7 +2074,7 @@ def logs(
 
 
 @cli.command()
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2458,13 +2092,8 @@ def logs(
               is_flag=True,
               required=False,
               help='Cancel all jobs on the specified cluster for all users.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-@_add_click_options(_COMMON_OPTIONS)
+@flags.yes_option()
+@_add_click_options(flags.COMMON_OPTIONS)
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 def cancel(
@@ -2544,7 +2173,7 @@ def cancel(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2559,13 +2188,8 @@ def cancel(
               default=False,
               is_flag=True,
               help='Stop all existing clusters for all users.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-@_add_click_options(_COMMON_OPTIONS)
+@flags.yes_option()
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
@@ -2612,7 +2236,7 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2648,13 +2272,8 @@ def stop(
     required=False,
     help='Use autodown (tear down the cluster; non-restartable), instead '
     'of autostop (restartable).')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-@_add_click_options(_COMMON_OPTIONS)
+@flags.yes_option()
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def autostop(
     clusters: List[str],
@@ -2725,7 +2344,7 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2736,12 +2355,7 @@ def autostop(
               is_flag=True,
               required=False,
               help='Start all existing clusters.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@flags.yes_option()
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -2785,7 +2399,7 @@ def autostop(
     required=False,
     help=('Force start the cluster even if it is already UP. Useful for '
           'upgrading the SkyPilot runtime on the cluster.'))
-@_add_click_options(_COMMON_OPTIONS)
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
@@ -2971,7 +2585,7 @@ def start(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2986,12 +2600,7 @@ def start(
               default=False,
               is_flag=True,
               help='Tear down all existing clusters for all users.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@flags.yes_option()
 @click.option(
     '--purge',
     '-p',
@@ -3004,7 +2613,7 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
-@_add_click_options(_COMMON_OPTIONS)
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
@@ -3410,13 +3019,9 @@ def _down_or_stop_clusters(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('infra_list', required=False, type=str, nargs=-1)
-@click.option('--verbose',
-              '-v',
-              is_flag=True,
-              default=False,
-              help='Show the activated account for each cloud.')
+@flags.verbose_option('Show the activated account for each cloud.')
 @click.option(
     '--workspace',
     '-w',
@@ -3460,7 +3065,7 @@ def check(infra_list: Tuple[str],
 
 
 @cli.command()
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
@@ -4106,13 +3711,8 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
-@click.option('--verbose',
-              '-v',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def storage_ls(verbose: bool):
@@ -4125,7 +3725,7 @@ def storage_ls(verbose: bool):
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('names',
                 required=False,
                 type=str,
@@ -4143,7 +3743,7 @@ def storage_ls(verbose: bool):
               is_flag=True,
               required=False,
               help='Skip confirmation prompt.')
-@_add_click_options(_COMMON_OPTIONS)
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
@@ -4206,15 +3806,15 @@ def jobs():
 
 
 @jobs.command('launch', cls=_DocumentedCodeCommand)
-@config_option(expose_value=True)
+@flags.config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
-                    _COMMON_OPTIONS)
+@_add_click_options(flags.TASK_OPTIONS_WITH_NAME + flags.EXTRA_RESOURCES_OPTIONS +
+                    flags.COMMON_OPTIONS)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -4238,12 +3838,7 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -4358,13 +3953,8 @@ def jobs_launch(
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
-@click.option('--verbose',
-              '-v',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
 @click.option(
     '--refresh',
     '-r',
@@ -4473,7 +4063,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4486,12 +4076,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               default=False,
               required=False,
               help='Cancel all managed jobs for the current user.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@flags.yes_option()
 @click.option('--all-users',
               '-u',
               is_flag=True,
@@ -4549,7 +4134,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4614,7 +4199,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
@@ -4622,7 +4207,7 @@ def jobs_dashboard():
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @usage_lib.entrypoint
 def dashboard() -> None:
     """Starts the dashboard for skypilot."""
@@ -4756,7 +4341,7 @@ def _generate_task_with_service(
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('service_yaml',
                 required=True,
                 type=str,
@@ -4768,13 +4353,8 @@ def _generate_task_with_service(
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+@flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
 def serve_up(
@@ -4875,14 +4455,14 @@ def serve_up(
 # TODO(MaoZiming): Expose mix replica traffic option to user.
 # Currently, we do not mix traffic from old and new replicas.
 @serve.command('update', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('service_name', required=True, type=str)
 @click.argument('service_yaml',
                 required=True,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
+@_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
 @click.option('--mode',
               default=serve_lib.DEFAULT_UPDATE_MODE.value,
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
@@ -4891,12 +4471,7 @@ def serve_up(
               help=('Update mode. If "rolling", SkyServe will update the '
                     'service with rolling update. If "blue_green", SkyServe '
                     'will update the service with blue-green update. '))
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(
@@ -4981,13 +4556,8 @@ def serve_update(
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
-@click.option('--verbose',
-              '-v',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
 @click.option('--endpoint',
               default=False,
               is_flag=True,
@@ -5107,7 +4677,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5119,17 +4689,12 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
               default=False,
               is_flag=True,
               help='Tear down services in failed status.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@flags.yes_option()
 @click.option('--replica-id',
               default=None,
               type=int,
               help='Tear down a given replica')
-@_add_click_options(_COMMON_OPTIONS)
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def serve_down(
@@ -5221,7 +4786,7 @@ def serve_down(
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -5401,8 +4966,8 @@ def local():
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
-@_add_click_options(_COMMON_OPTIONS)
+@flags.config_option(expose_value=False)
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
              cleanup: bool, context_name: Optional[str],
@@ -5457,8 +5022,8 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
-@_add_click_options(_COMMON_OPTIONS)
+@flags.config_option(expose_value=False)
+@_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(async_call: bool):
     """Deletes a local cluster."""
@@ -5521,7 +5086,7 @@ def api_stop():
 
 
 @api.command('logs', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('request_id', required=False, type=str)
 @click.option('--server-logs',
               is_flag=True,
@@ -5561,7 +5126,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5603,7 +5168,7 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 
 @api.command('status', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all-status',
               '-a',
@@ -5611,12 +5176,7 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
               default=False,
               required=False,
               help='Show requests of all statuses.')
-@click.option('--verbose',
-              '-v',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Show more details.')
+@flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_status(request_ids: Optional[List[str]], all_status: bool,
@@ -5647,7 +5207,7 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
 
 
 @api.command('login', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @click.option('--endpoint',
               '-e',
               required=False,
@@ -5663,7 +5223,7 @@ def api_login(endpoint: Optional[str], get_token: bool):
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@flags.config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_info():
     """Shows the SkyPilot API server URL."""

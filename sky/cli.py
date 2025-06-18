@@ -1,9 +1,9 @@
 """The 'sky' command line tool."""
 
-from sky.client import cli as cli_client
+from sky.client.cli import command
 
 
 # For backward compatibility.
 # setup.py uses this file to install the CLI.
 def cli():
-    cli_client.cli()
+    command.cli()
