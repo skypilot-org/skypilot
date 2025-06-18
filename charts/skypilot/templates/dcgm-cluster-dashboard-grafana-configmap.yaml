@@ -10,4 +10,4 @@ metadata:
 data:
   dcgm-cluster-dashboard.json: |
 {{ .Files.Get "manifests/dcgm-cluster-dashboard.json" | indent 4 }}
-{{- end }} 
+{{- end }}

@@ -10,4 +10,4 @@ metadata:
 data:
   dcgm-skycluster-dashboard.json: |
 {{ .Files.Get "manifests/dcgm-cluster-filter-dashboard.json" | indent 4 }}
-{{- end }} 
+{{- end }}
