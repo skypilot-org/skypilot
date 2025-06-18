@@ -7,32 +7,32 @@ Cluster CLI
 -----------
 
 .. _sky-launch:
-.. click:: sky.cli:launch
+.. click:: sky.client.cli:launch
    :prog: sky launch
    :nested: full
 
 .. _sky-stop:
-.. click:: sky.cli:stop
+.. click:: sky.client.cli:stop
    :prog: sky stop
    :nested: full
 
 .. _sky-start:
-.. click:: sky.cli:start
+.. click:: sky.client.cli:start
    :prog: sky start
    :nested: full
 
 .. _sky-down:
-.. click:: sky.cli:down
+.. click:: sky.client.cli:down
    :prog: sky down
    :nested: full
 
 .. _sky-status:
-.. click:: sky.cli:status
+.. click:: sky.client.cli:status
    :prog: sky status
    :nested: full
 
 .. _sky-autostop:
-.. click:: sky.cli:autostop
+.. click:: sky.client.cli:autostop
    :prog: sky autostop
    :nested: full
 
@@ -44,22 +44,22 @@ Cluster jobs CLI
 ~~~~~~~~~~~~~~~~
 
 .. _sky-exec:
-.. click:: sky.cli:exec
+.. click:: sky.client.cli:exec
    :prog: sky exec
    :nested: full
 
 .. _sky-queue:
-.. click:: sky.cli:queue
+.. click:: sky.client.cli:queue
    :prog: sky queue
    :nested: full
 
 .. _sky-cancel:
-.. click:: sky.cli:cancel
+.. click:: sky.client.cli:cancel
    :prog: sky cancel
    :nested: full
 
 .. _sky-logs:
-.. click:: sky.cli:logs
+.. click:: sky.client.cli:logs
    :prog: sky logs
    :nested: full
 
@@ -67,45 +67,45 @@ Managed jobs CLI
 ~~~~~~~~~~~~~~~~~
 
 .. _sky-job-launch:
-.. click:: sky.cli:jobs_launch
+.. click:: sky.client.cli:jobs_launch
    :prog: sky jobs launch
    :nested: full
 
 .. _sky-job-queue:
-.. click:: sky.cli:jobs_queue
+.. click:: sky.client.cli:jobs_queue
    :prog: sky jobs queue
    :nested: full
 
 .. _sky-job-cancel:
-.. click:: sky.cli:jobs_cancel
+.. click:: sky.client.cli:jobs_cancel
    :prog: sky jobs cancel
    :nested: full
 
 .. _sky-job-logs:
-.. click:: sky.cli:jobs_logs
+.. click:: sky.client.cli:jobs_logs
    :prog: sky jobs logs
    :nested: full
 
 Serving CLI
 -------------
 
-.. click:: sky.cli:serve_up
+.. click:: sky.client.cli:serve_up
    :prog: sky serve up
    :nested: full
 
-.. click:: sky.cli:serve_down
+.. click:: sky.client.cli:serve_down
    :prog: sky serve down
    :nested: full
 
-.. click:: sky.cli:serve_status
+.. click:: sky.client.cli:serve_status
    :prog: sky serve status
    :nested: full
 
-.. click:: sky.cli:serve_logs
+.. click:: sky.client.cli:serve_logs
    :prog: sky serve logs
    :nested: full
 
-.. click:: sky.cli:serve_update
+.. click:: sky.client.cli:serve_update
    :prog: sky serve update
    :nested: full
 
@@ -114,12 +114,12 @@ Storage CLI
 ------------
 
 .. _sky-storage-ls:
-.. click:: sky.cli:storage_ls
+.. click:: sky.client.cli:storage_ls
    :prog: sky storage ls
    :nested: full
 
 .. _sky-storage-delete:
-.. click:: sky.cli:storage_delete
+.. click:: sky.client.cli:storage_delete
    :prog: sky storage delete
    :nested: full
 
@@ -130,38 +130,38 @@ API request CLI
 ---------------
 
 .. _sky-api-login:
-.. click:: sky.cli:api_login
+.. click:: sky.client.cli:api_login
    :prog: sky api login
    :nested: full
 
 .. _sky-api-info:
-.. click:: sky.cli:api_info
+.. click:: sky.client.cli:api_info
    :prog: sky api info
    :nested: full
 
 .. _sky-api-logs:
-.. click:: sky.cli:api_logs
+.. click:: sky.client.cli:api_logs
    :prog: sky api logs
    :nested: full
 
 .. _sky-api-status:
-.. click:: sky.cli:api_status
+.. click:: sky.client.cli:api_status
    :prog: sky api status
    :nested: full
 
 .. _sky-api-cancel:
-.. click:: sky.cli:api_cancel
+.. click:: sky.client.cli:api_cancel
    :prog: sky api cancel
    :nested: full
 
 Admin CLI
 ~~~~~~~~~
 
-.. click:: sky.cli:api_stop
+.. click:: sky.client.cli:api_stop
    :prog: sky api stop
    :nested: full
 
-.. click:: sky.cli:api_start
+.. click:: sky.client.cli:api_start
    :prog: sky api start
    :nested: full
 
@@ -170,15 +170,15 @@ Utils: ``show-gpus``/``check``/``cost-report``
 -------------------------------------------------
 
 .. _sky-show-gpus:
-.. click:: sky.cli:show_gpus
+.. click:: sky.client.cli:show_gpus
    :prog: sky show-gpus
    :nested: full
 
 .. _sky-check:
-.. click:: sky.cli:check
+.. click:: sky.client.cli:check
    :prog: sky check
    :nested: full
 
-.. click:: sky.cli:cost_report
+.. click:: sky.client.cli:cost_report
    :prog: sky cost-report
    :nested: full

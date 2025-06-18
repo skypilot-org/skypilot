@@ -1,8 +1,8 @@
 """Permission service for SkyPilot API Server."""
 import contextlib
+import hashlib
 import logging
 import os
-import threading
 from typing import Generator, List
 
 import casbin
@@ -10,9 +10,11 @@ import filelock
 import sqlalchemy_adapter
 
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
+from sky.utils import common_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -23,41 +25,50 @@ POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 
 _enforcer_instance = None
-_lock = threading.Lock()
 
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        self.enforcer = None
-        self.init_lock = threading.Lock()
-
-    def _lazy_initialize(self):
-        if self.enforcer is not None:
-            return
-        with self.init_lock:
-            if self.enforcer is not None:
-                return
+        with _policy_lock():
             global _enforcer_instance
             if _enforcer_instance is None:
-                # For different threads, we share the same enforcer instance.
-                with _lock:
-                    if _enforcer_instance is None:
-                        _enforcer_instance = self
-                        engine = global_user_state.initialize_and_get_db()
-                        adapter = sqlalchemy_adapter.Adapter(engine)
-                        model_path = os.path.join(os.path.dirname(__file__),
-                                                  'model.conf')
-                        enforcer = casbin.Enforcer(model_path, adapter)
-                        self.enforcer = enforcer
+                _enforcer_instance = self
+                engine = global_user_state.initialize_and_get_db()
+                adapter = sqlalchemy_adapter.Adapter(engine)
+                model_path = os.path.join(os.path.dirname(__file__),
+                                          'model.conf')
+                enforcer = casbin.Enforcer(model_path, adapter)
+                self.enforcer = enforcer
+                self._maybe_initialize_policies()
+                self._maybe_initialize_basic_auth_user()
             else:
                 self.enforcer = _enforcer_instance.enforcer
-            with _policy_lock():
-                self._maybe_initialize_policies()
+
+    def _maybe_initialize_basic_auth_user(self) -> None:
+        """Initialize basic auth user if it is enabled."""
+        basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
+        if not basic_auth:
+            return
+        username, password = basic_auth.split(':', 1)
+        if username and password:
+            user_hash = hashlib.md5(
+                username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+            user_info = global_user_state.get_user(user_hash)
+            if user_info:
+                logger.info(f'Basic auth user {username} already exists')
+                return
+            global_user_state.add_or_update_user(
+                models.User(id=user_hash, name=username, password=password))
+            self.enforcer.add_grouping_policy(user_hash,
+                                              rbac.RoleName.ADMIN.value)
+            self.enforcer.save_policy()
+            logger.info(f'Basic auth user {username} initialized')
 
     def _maybe_initialize_policies(self) -> None:
         """Initialize policies if they don't already exist."""
+        # TODO(zhwu): we should avoid running this on client side.
         logger.debug(f'Initializing policies in process: {os.getpid()}')
         self._load_policy_no_lock()
 
@@ -136,7 +147,6 @@ class PermissionService:
 
     def add_user_if_not_exists(self, user_id: str) -> None:
         """Add user role relationship."""
-        self._lazy_initialize()
         with _policy_lock():
             self._add_user_if_not_exists_no_lock(user_id)
 
@@ -154,9 +164,21 @@ class PermissionService:
             return True
         return False
 
+    def delete_user(self, user_id: str) -> None:
+        """Delete user role relationship."""
+        with _policy_lock():
+            # Get current roles
+            self._load_policy_no_lock()
+            # Avoid calling get_user_roles, as it will require the lock.
+            current_roles = self.enforcer.get_roles_for_user(user_id)
+            if not current_roles:
+                logger.warning(f'User {user_id} has no roles')
+                return
+            self.enforcer.remove_grouping_policy(user_id, current_roles[0])
+            self.enforcer.save_policy()
+
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
-        self._lazy_initialize()
         with _policy_lock():
             # Get current roles
             self._load_policy_no_lock()
@@ -189,7 +211,6 @@ class PermissionService:
         Returns:
             A list of role names that the user has.
         """
-        self._lazy_initialize()
         self._load_policy_no_lock()
         return self.enforcer.get_roles_for_user(user_id)
 
@@ -202,7 +223,6 @@ class PermissionService:
         # it is a hot path in every request. It is ok to have a stale policy,
         # as long as it is eventually consistent.
         # self._load_policy_no_lock()
-        self._lazy_initialize()
         return self.enforcer.enforce(user_id, path, method)
 
     def _load_policy_no_lock(self):
@@ -211,7 +231,6 @@ class PermissionService:
 
     def load_policy(self):
         """Load policy from storage with lock."""
-        self._lazy_initialize()
         with _policy_lock():
             self._load_policy_no_lock()
 
@@ -227,7 +246,6 @@ class PermissionService:
         For public workspaces, the permission is granted via a wildcard policy
         ('*').
         """
-        self._lazy_initialize()
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             # When it is not on API server, we allow all users to access all
             # workspaces, as the workspace check has been done on API server.
@@ -255,7 +273,6 @@ class PermissionService:
                    For public workspaces, this should be ['*'].
                    For private workspaces, this should be specific user IDs.
         """
-        self._lazy_initialize()
         with _policy_lock():
             for user in users:
                 logger.debug(f'Adding workspace policy: user={user}, '
@@ -273,7 +290,6 @@ class PermissionService:
                    For public workspaces, this should be ['*'].
                    For private workspaces, this should be specific user IDs.
         """
-        self._lazy_initialize()
         with _policy_lock():
             self._load_policy_no_lock()
             # Remove all existing policies for this workspace
@@ -287,7 +303,6 @@ class PermissionService:
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
-        self._lazy_initialize()
         with _policy_lock():
             self.enforcer.remove_filtered_policy(1, workspace_name)
             self.enforcer.save_policy()
