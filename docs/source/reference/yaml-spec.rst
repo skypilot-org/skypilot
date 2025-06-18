@@ -243,19 +243,9 @@ Format:
   - ``down``: If true, tear down the cluster instead of stopping it
 
 ``<unit>`` can be one of:
-
-- ``s``, ``sec``: seconds
-
 - ``m``, ``min``: minutes
-
 - ``h``, ``hr``: hours
-
 - ``d``, ``day``: days
-
-.. maybe instead of warning, have it be a note?
-.. warning::
-
-  The time will be rounded up to the nearest minute. For example, ``10m30s`` will be rounded to ``11m``.
 
 
 Example:
@@ -491,10 +481,9 @@ Units supported (case-insensitive):
 - T/TB (terabytes, 2^40 bytes)
 - P/PB (petabytes, 2^50 bytes)
 
-.. maybe instead of warning, have it be a note?
 .. warning::
 
-   The disk size will be rounded down to the nearest gigabyte. For example, ``1500MB`` will be rounded to ``1GB``.
+   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
