@@ -7,6 +7,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -206,8 +207,15 @@ def prepare_hosts_info(cluster_name: str,
 
     # Get cluster-level defaults
     cluster_user = cluster_config.get('user', '')
-    cluster_identity_file = cluster_config.get('identity_file', '')
+    cluster_identity_file = os.path.expanduser(
+        cluster_config.get('identity_file', ''))
     cluster_password = cluster_config.get('password', '')
+
+    # Check if cluster identity file exists
+    if cluster_identity_file and not os.path.isfile(cluster_identity_file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'SSH Identity File Missing: {cluster_identity_file}')
 
     hosts_info = []
     for host in cluster_config['hosts']:
@@ -238,9 +246,15 @@ def prepare_hosts_info(cluster_name: str,
             # Use host-specific values or fall back to cluster defaults
             host_user = '' if is_ssh_config_host else host.get(
                 'user', cluster_user)
-            host_identity_file = '' if is_ssh_config_host else host.get(
-                'identity_file', cluster_identity_file)
+            host_identity_file = os.path.expanduser(
+                '' if is_ssh_config_host else host.
+                get('identity_file', cluster_identity_file))
             host_password = host.get('password', cluster_password)
+
+            if host_identity_file and not os.path.isfile(host_identity_file):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'SSH Identity File Missing: {host_identity_file}')
 
             hosts_info.append({
                 'ip': host['ip'],
@@ -305,6 +319,8 @@ def run_remote(node,
         ]
 
         if ssh_key:
+            if not os.path.isfile(ssh_key):
+                raise ValueError(f'SSH key not found: {ssh_key}')
             ssh_cmd.extend(['-i', ssh_key])
 
         ssh_cmd.append(f'{user}@{node}' if user else node)
@@ -722,14 +738,16 @@ def main():
                 # Do not support changing anything besides hosts for now
                 if history is not None:
                     for key in ['user', 'identity_file', 'password']:
-                        if history.get(key) != cluster_config.get(key):
+                        if not args.cleanup and history.get(
+                                key) != cluster_config.get(key):
                             raise ValueError(
                                 f'Cluster configuration has changed for field {key!r}. '
                                 f'Previous value: {history.get(key)}, '
                                 f'Current value: {cluster_config.get(key)}')
                     history_hosts_info = prepare_hosts_info(
                         cluster_name, history)
-                    if history_hosts_info[0] != hosts_info[0]:
+                    if not args.cleanup and history_hosts_info[0] != hosts_info[
+                            0]:
                         raise ValueError(
                             f'Cluster configuration has changed for master node. '
                             f'Previous value: {history_hosts_info[0]}, '
@@ -831,10 +849,6 @@ def deploy_cluster(head_node,
 
     Returns: List of unsuccessful worker nodes.
     """
-    # Ensure SSH key is expanded for paths with ~ (home directory)
-    if ssh_key:
-        ssh_key = os.path.expanduser(ssh_key)
-
     history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
                                      f'{context_name}-history.yaml')
     cert_file_path = os.path.join(NODE_POOLS_INFO_DIR,
@@ -859,7 +873,7 @@ def deploy_cluster(head_node,
         use_ssh_config=head_use_ssh_config,
         # For SkySSHUpLineProcessor
         print_output=True)
-    if result is None:
+    if not cleanup and result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Failed to SSH to head node ({head_node}). '
@@ -1356,7 +1370,7 @@ def deploy_cluster(head_node,
                 merged_file.write(result)
 
         # Replace the kubeconfig with the merged config
-        os.replace(merged_config, kubeconfig_path)
+        shutil.move(merged_config, kubeconfig_path)
 
         # Set the new context as the current context
         run_command(['kubectl', 'config', 'use-context', context_name],

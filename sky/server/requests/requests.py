@@ -9,9 +9,10 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -204,7 +205,8 @@ class Request:
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
-        user_name = global_user_state.get_user(self.user_id).name
+        user = global_user_state.get_user(self.user_id)
+        user_name = user.name if user is not None else None
         return RequestPayload(
             request_id=self.request_id,
             name=self.name,
@@ -391,10 +393,6 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     return cancelled_request_ids
 
 
-_DB_PATH = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
-pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-
-
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -432,6 +430,7 @@ def create_table(cursor, conn):
 
 
 _DB = None
+_init_db_lock = threading.Lock()
 
 
 def init_db(func):
@@ -440,8 +439,15 @@ def init_db(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global _DB
-        if _DB is None:
-            _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+        if _DB is not None:
+            return func(*args, **kwargs)
+        with _init_db_lock:
+            if _DB is None:
+                db_path = os.path.expanduser(
+                    server_constants.API_SERVER_REQUEST_DB_PATH)
+                pathlib.Path(db_path).parents[0].mkdir(parents=True,
+                                                       exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper
@@ -464,7 +470,7 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
-def update_request(request_id: str):
+def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
     yield request

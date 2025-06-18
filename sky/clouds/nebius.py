@@ -9,6 +9,7 @@ from sky import clouds
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
+from sky.provision.nebius import constants as nebius_constants
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -76,8 +77,20 @@ class Nebius(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources  # unused
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+
+        # Check if the accelerators support InfiniBand (H100 or H200) and 8 GPUs
+        if resources.accelerators is not None:
+            for acc_name, acc_count in resources.accelerators.items():
+                if acc_name.lower() in ('h100', 'h200') and acc_count == 8:
+                    # Remove CUSTOM_NETWORK_TIER from unsupported features for
+                    # InfiniBand-capable accelerators
+                    unsupported.pop(
+                        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                        None)
+                    break
+
+        return unsupported
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -227,14 +240,41 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
-            'filesystems': resources_vars_fs
+            'filesystems': resources_vars_fs,
+            'network_tier': resources.network_tier
         }
+
+        docker_run_options = []
 
         if acc_dict is not None:
             # Nebius cloud's docker runtime information does not contain
             # 'nvidia-container-runtime', causing no GPU option to be added to
             # the docker run command. We patch this by adding it here.
-            resources_vars['docker_run_options'] = ['--gpus all']
+            docker_run_options.append('--gpus all')
+
+            # Check for InfiniBand support with network_tier: best
+            is_infiniband_capable = (
+                platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS)
+            if (is_infiniband_capable and
+                    resources.network_tier == resources_utils.NetworkTier.BEST):
+                # For Docker containers, add InfiniBand device access and
+                # IPC_LOCK capability
+                if resources.extract_docker_image() is not None:
+                    docker_run_options.extend(
+                        nebius_constants.INFINIBAND_DOCKER_OPTIONS)
+
+                    # Add InfiniBand environment variables to docker run options
+                    for env_var, env_value in (
+                            nebius_constants.INFINIBAND_ENV_VARS.items()):
+                        docker_run_options.extend(
+                            ['-e', f'{env_var}={env_value}'])
+
+                # For all InfiniBand-capable instances, add env variables
+                resources_vars[
+                    'env_vars'] = nebius_constants.INFINIBAND_ENV_VARS
+
+        if docker_run_options:
+            resources_vars['docker_run_options'] = docker_run_options
 
         return resources_vars
 

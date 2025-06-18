@@ -13,6 +13,20 @@ apiService:
     # echo "Installing admin policy"
     # pip install git+https://github.com/michaelvll/admin-policy-examples
 
+  # Enable basic auth and user management in the API server
+  # If enabled, the user can be created, updated, and deleted in the Dashboard,
+  # and the basic auth will be done in the API server instead of the ingress.
+  # If enabled, the basic auth configuration `ingress.authCredentials`
+  # and `ingress.authSecret` in the ingress will be ignored.
+  enableUserManagement: false
+  # Initial basic auth credentials for the API server
+  # The user in the credentials will be used to create a new admin user in the API server,
+  # and the password can be updated by the user in the Dashboard.
+  # If both `initialBasicAuthCredentials` and `initialBasicAuthSecret` are set,
+  # `initialBasicAuthSecret` will be used.
+  # They are only used when `enableUserManagement` is true.
+  initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
+  initialBasicAuthSecret: null
 
   # Set ~/.sky/config.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
@@ -280,6 +294,9 @@ nebiusCredentials:
   tenantId: null
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
+
+# Extra init containers to run before the api container
+extraInitContainers:
 
 # Set securityContext for the api pod
 podSecurityContext: {}

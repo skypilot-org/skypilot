@@ -3,6 +3,7 @@ import contextlib
 import copy
 import importlib
 from typing import Iterator, Optional, Tuple, Union
+import urllib.parse
 
 import colorama
 
@@ -19,18 +20,34 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_policy_cls(
-        policy: Optional[str]) -> Optional[admin_policy.AdminPolicy]:
-    """Gets admin-defined policy."""
-    if policy is None:
-        return None
+def _is_url(policy_string: str) -> bool:
+    """Check if the policy string is a URL."""
     try:
-        module_path, class_name = policy.rsplit('.', 1)
+        parsed = urllib.parse.urlparse(policy_string)
+        return parsed.scheme in ('http', 'https')
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
+def _get_policy_impl(
+        policy_location: Optional[str]
+) -> Optional[admin_policy.PolicyInterface]:
+    """Gets admin-defined policy."""
+    if policy_location is None:
+        return None
+
+    if _is_url(policy_location):
+        # Use the built-in URL policy class when an URL is specified.
+        return admin_policy.RestfulAdminPolicy(policy_location)
+
+    # Handle module path format
+    try:
+        module_path, class_name = policy_location.rsplit('.', 1)
         module = importlib.import_module(module_path)
     except ImportError as e:
         with ux_utils.print_exception_no_traceback():
             raise ImportError(
-                f'Failed to import policy module: {policy}. '
+                f'Failed to import policy module: {policy_location}. '
                 'Please check if the module is installed in your Python '
                 'environment.') from e
 
@@ -42,19 +59,22 @@ def _get_policy_cls(
                 f'Could not find {class_name} class in module {module_path}. '
                 'Please check with your policy admin for details.') from e
 
-    # Check if the module implements the AdminPolicy interface.
+    # Currently we only allow users to define subclass of AdminPolicy
+    # instead of inheriting from PolicyInterface or PolicyTemplate.
     if not issubclass(policy_cls, admin_policy.AdminPolicy):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'Policy class {policy!r} does not implement the AdminPolicy '
-                'interface. Please check with your policy admin for details.')
-    return policy_cls
+                f'Policy class {policy_cls!r} does not implement the '
+                'AdminPolicy interface. Please check with your policy admin '
+                'for details.')
+    return policy_cls()
 
 
 @contextlib.contextmanager
 def apply_and_use_config_in_current_request(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     request_options: Optional[admin_policy.RequestOptions] = None,
+    at_client_side: bool = False,
 ) -> Iterator['dag_lib.Dag']:
     """Applies an admin policy and override SkyPilot config for current request
 
@@ -66,7 +86,7 @@ def apply_and_use_config_in_current_request(
     Refer to `apply()` for more details.
     """
     original_config = skypilot_config.to_dict()
-    dag, mutated_config = apply(entrypoint, request_options)
+    dag, mutated_config = apply(entrypoint, request_options, at_client_side)
     if mutated_config != original_config:
         with skypilot_config.replace_skypilot_config(mutated_config):
             yield dag
@@ -77,6 +97,7 @@ def apply_and_use_config_in_current_request(
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     request_options: Optional[admin_policy.RequestOptions] = None,
+    at_client_side: bool = False,
 ) -> Tuple['dag_lib.Dag', config_utils.Config]:
     """Applies an admin policy (if registered) to a DAG or a task.
 
@@ -100,21 +121,25 @@ def apply(
     else:
         dag = entrypoint
 
-    policy = skypilot_config.get_nested(('admin_policy',), None)
-    policy_cls = _get_policy_cls(policy)
-    if policy_cls is None:
+    policy_location = skypilot_config.get_nested(('admin_policy',), None)
+    policy = _get_policy_impl(policy_location)
+    if policy is None:
         return dag, skypilot_config.to_dict()
 
-    logger.info(f'Applying policy: {policy}')
+    if at_client_side:
+        logger.info(f'Applying client admin policy: {policy}')
+    else:
+        logger.info(f'Applying server admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, request_options)
+        user_request = admin_policy.UserRequest(task, config, request_options,
+                                                at_client_side)
         try:
-            mutated_user_request = policy_cls.validate_and_mutate(user_request)
+            mutated_user_request = policy.apply(user_request)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(

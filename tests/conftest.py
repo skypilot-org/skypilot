@@ -9,7 +9,12 @@ from typing import List
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
+from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy import orm
+from sqlalchemy import text as sqlalchemy_text
+import sqlalchemy_adapter
 
+from sky import global_user_state
 from sky import sky_logging
 
 # Initialize logger at the top level
@@ -29,6 +34,7 @@ from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
 from common_test_fixtures import mock_services_one_service
 from common_test_fixtures import mock_stream_utils
+from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
@@ -53,7 +59,7 @@ from sky.server import common as server_common
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius'
+    'vast', 'nebius', 'hyperbolic'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -78,7 +84,8 @@ cloud_to_pytest_keyword = {
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
-    'nebius': 'nebius'
+    'nebius': 'nebius',
+    'hyperbolic': 'hyperbolic'
 }
 
 
@@ -152,6 +159,24 @@ def pytest_addoption(parser):
         default=False,
         help='Run tests for Postgres Backend',
     )
+    parser.addoption(
+        '--no-resource-heavy',
+        action='store_true',
+        default=False,
+        help='Skip tests marked as resource_heavy',
+    )
+    parser.addoption(
+        '--helm-version',
+        type=str,
+        default='',
+        help='Version of Helm to use for tests',
+    )
+    parser.addoption(
+        '--helm-package',
+        type=str,
+        default='',
+        help='Package name to use for Helm tests',
+    )
 
 
 def pytest_configure(config):
@@ -197,9 +222,13 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_resource_heavy'] = pytest.mark.skip(
+        reason='skipped, because --no-resource-heavy option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
+    skip_marks['postgres'] = pytest.mark.skip(
+        reason='skipped, because --postgres option is set')
 
     cloud_to_run = _get_cloud_to_run(config)
     generic_cloud = _generic_cloud(config)
@@ -232,6 +261,14 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
+        if ('no_postgres' in item.keywords) and config.getoption('--postgres'):
+            item.add_marker(skip_marks['postgres'])
+
+        # Skip tests marked as resource_heavy if --no-resource-heavy is set
+        marks = [mark.name for mark in item.iter_markers()]
+        if 'resource_heavy' in marks and config.getoption(
+                '--no-resource-heavy'):
+            item.add_marker(skip_marks['no_resource_heavy'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -471,4 +508,69 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield
+
+
+@pytest.fixture(autouse=True)
+def patch_db_create_for_parallel_tests(monkeypatch):
+    """Mock Base.metadata.create_all with file lock to prevent race conditions in parallel execution."""
+
+    # Store the original create_all method
+    original_create_all = global_user_state.Base.metadata.create_all
+
+    def create_all_with_lock(bind=None, **kwargs):
+        """Wrapper for Base.metadata.create_all with file lock to prevent race conditions."""
+        # Use file lock to ensure only one process creates tables at a time
+        # Use a constant path in ~/.sky so all test processes can see the same lock file
+        lock_file_path = os.path.expanduser('~/.sky/test_db_create_all.lock')
+
+        with open(lock_file_path, 'w') as lock_file:
+            try:
+                # Acquire exclusive lock - blocks other processes until we're done
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                # Create all tables - the lock prevents race conditions during table creation
+                # SQLAlchemy's create_all() handles existing tables gracefully with checkfirst=True
+                original_create_all(bind=bind, **kwargs)
+
+            finally:
+                # Lock is automatically released when file is closed
+                pass
+
+    # Patch the method
+    monkeypatch.setattr(global_user_state.Base.metadata, 'create_all',
+                        create_all_with_lock)
+
+    yield
+
+
+@pytest.fixture(autouse=True)
+def patch_casbin_adapter_for_parallel_tests(monkeypatch):
+    """Mock Casbin SQLAlchemy Adapter initialization with file lock to prevent race conditions in parallel execution."""
+
+    # Store the original Adapter class
+    original_adapter_init = sqlalchemy_adapter.Adapter.__init__
+
+    def adapter_init_with_lock(self, engine, *args, **kwargs):
+        """Wrapper for sqlalchemy_adapter.Adapter.__init__ with file lock to prevent race conditions."""
+        # Use file lock to ensure only one process creates casbin tables at a time
+        # Use a constant path in ~/.sky so all test processes can see the same lock file
+        lock_file_path = os.path.expanduser('~/.sky/test_casbin_adapter.lock')
+
+        with open(lock_file_path, 'w') as lock_file:
+            try:
+                # Acquire exclusive lock - blocks other processes until we're done
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                # Initialize the adapter - the lock prevents race conditions during table creation
+                original_adapter_init(self, engine, *args, **kwargs)
+
+            finally:
+                # Lock is automatically released when file is closed
+                pass
+
+    # Patch the method
+    monkeypatch.setattr(sqlalchemy_adapter.Adapter, '__init__',
+                        adapter_init_with_lock)
+
     yield

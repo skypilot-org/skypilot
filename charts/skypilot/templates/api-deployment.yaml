@@ -40,6 +40,13 @@ spec:
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
           value: {{ .Release.Name | quote }}
+        {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
+        - name: SKYPILOT_INITIAL_BASIC_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "skypilot.initialBasicAuthSecretName" . }}
+              key: auth
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -47,6 +54,10 @@ spec:
         {{- if .Values.kubernetesCredentials.inclusterNamespace }}
         - name: SKYPILOT_IN_CLUSTER_NAMESPACE
           value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
+        {{- end }}
+        {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
+        - name: KUBECONFIG
+          value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
@@ -86,6 +97,10 @@ spec:
           echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
           # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
           ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
+          if [ ! -s /root/.kube/config ]; then
+            echo "{}" > /root/.kube/config
+          fi
           {{- end }}
           # Nebius credentials mounting
           # Since the ~/.nebius directory is also used by the Nebius CLI, we mount the credentials to /root/.nebius_credentials
@@ -117,11 +132,11 @@ spec:
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start --deploy --foreground
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
           else
             # For backward compatibility, run in background if --foreground is not supported.
-            # TODO(aylei): this will bedropped in 0.11.0.
-            if sky api start --deploy; then
+            # TODO(aylei): this will be dropped in 0.11.0.
+            if sky api start {{ include "skypilot.apiArgs" . }}; then
               tail -n+0 -f /root/.sky/api_server/server.log
             else
               cat /root/.sky/api_server/server.log
@@ -171,8 +186,18 @@ spec:
           subPath: gcp-cred.json
         {{- end }}
         {{- if .Values.kubernetesCredentials.useKubeconfig }}
+        {{- if .Values.apiService.sshNodePools }}
+        - name: kube-config
+          mountPath: /var/skypilot/kubeconfig
+        {{- else }}
         - name: kube-config
           mountPath: /root/.kube
+        {{- end }}
+        {{- end }}
+        {{- if .Values.apiService.sshNodePools }}
+        - name: state-volume
+          mountPath: /root/.kube
+          subPath: .kube
         {{- end }}
         {{- if .Values.runpodCredentials.enabled }}
         - name: runpod-config
@@ -305,6 +330,10 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
+      {{- if .Values.extraInitContainers }}
+      {{- toYaml .Values.extraInitContainers | nindent 6 }}
+      {{- end }}
+
       volumes:
       {{- if .Values.storage.enabled }}
       - name: state-volume

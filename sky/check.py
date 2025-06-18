@@ -1,6 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
-import itertools
 import os
 import traceback
 from types import ModuleType
@@ -12,10 +11,12 @@ import colorama
 from sky import clouds as sky_clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -23,6 +24,30 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+
+logger = sky_logging.init_logger(__name__)
+
+
+def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
+    # Use allowed_clouds from config if it exists, otherwise check all
+    # clouds. Also validate names with get_cloud_tuple.
+    config_allowed_cloud_names = skypilot_config.get_nested(
+        ('allowed_clouds',),
+        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME])
+    # filter out the clouds that are disabled in the workspace config
+    workspace_disabled_clouds = []
+    for cloud in config_allowed_cloud_names:
+        cloud_config = skypilot_config.get_workspace_cloud(cloud.lower(),
+                                                           workspace=workspace)
+        cloud_disabled = cloud_config.get('disabled', False)
+        if cloud_disabled:
+            workspace_disabled_clouds.append(cloud.lower())
+
+    config_allowed_cloud_names = [
+        c for c in config_allowed_cloud_names
+        if c.lower() not in workspace_disabled_clouds
+    ]
+    return config_allowed_cloud_names
 
 
 def check_capabilities(
@@ -70,14 +95,17 @@ def check_capabilities(
 
         def check_one_cloud_one_capability(
             payload: Tuple[Tuple[str, Union[sky_clouds.Cloud, ModuleType]],
-                           sky_cloud.CloudCapability]
+                           sky_cloud.CloudCapability, bool]
         ) -> Optional[Tuple[sky_cloud.CloudCapability, bool, Optional[Union[
                 str, Dict[str, str]]]]]:
+            cloud_tuple, capability, allowed = payload
+            if not allowed:
+                return (capability, False, f'{cloud_tuple[0]} is not included '
+                        'in allowed_clouds in ~/.sky/config.yaml')
             with skypilot_config.local_active_workspace_ctx(
                     current_workspace_name):
                 # Have to override again for specific thread, as the
                 # local_active_workspace_ctx is thread-local.
-                cloud_tuple, capability = payload
                 _, cloud = cloud_tuple
                 try:
                     ok, reason = cloud.check_credentials(capability)
@@ -103,8 +131,10 @@ def check_capabilities(
 
         if clouds is not None:
             cloud_list = clouds
+            check_explicit = True
         else:
             cloud_list = get_all_clouds()
+            check_explicit = False
 
         clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
 
@@ -128,6 +158,8 @@ def check_capabilities(
             c for c in config_allowed_cloud_names
             if c not in workspace_disabled_clouds
         ]
+        global_user_state.set_allowed_clouds(
+            [c for c in config_allowed_cloud_names], current_workspace_name)
 
         # Use disallowed_cloud_names for logging the clouds that will be
         # disabled because they are not included in allowed_clouds in
@@ -135,24 +167,15 @@ def check_capabilities(
         disallowed_cloud_names = [
             c for c in get_all_clouds() if c not in config_allowed_cloud_names
         ]
-        # Check only the clouds which are allowed in the config.
-        clouds_to_check = [
-            c for c in clouds_to_check if c[0] in config_allowed_cloud_names
-        ]
 
-        combinations = list(itertools.product(clouds_to_check, capabilities))
+        combinations = []
+        for c in clouds_to_check:
+            allowed = c[0] in config_allowed_cloud_names
+            if allowed or check_explicit:
+                for capability in capabilities:
+                    combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
-        if not config_allowed_cloud_names:
-            for capability in capabilities:
-                global_user_state.set_enabled_clouds([], capability,
-                                                     current_workspace_name)
-        if not combinations:
-            echo(
-                _summary_message(enabled_clouds, cloud2ctx2text,
-                                 current_workspace_name, hide_workspace_str,
-                                 disallowed_cloud_names))
-            return {}
 
         workspace_str = f' for workspace: {current_workspace_name!r}'
         if hide_workspace_str:
@@ -172,7 +195,7 @@ def check_capabilities(
             if check_result is None:
                 continue
             capability, ok, ctx2text = check_result
-            cloud_tuple, _ = combination
+            cloud_tuple, _, _ = combination
             cloud_repr = cloud_tuple[0]
             if isinstance(ctx2text, dict):
                 cloud2ctx2text[cloud_repr] = ctx2text
@@ -345,18 +368,30 @@ def get_cached_enabled_clouds_or_refresh(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
+    active_workspace = skypilot_config.get_active_workspace()
+    allowed_clouds_changed = False
+    cached_allowed_clouds = global_user_state.get_allowed_clouds(
+        active_workspace)
+    skypilot_config_allowed_clouds = _get_workspace_allowed_clouds(
+        active_workspace)
+    if sorted(cached_allowed_clouds) != sorted(skypilot_config_allowed_clouds):
+        allowed_clouds_changed = True
+
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        capability, skypilot_config.get_active_workspace())
-    if not cached_enabled_clouds:
+        capability, active_workspace)
+    if not cached_enabled_clouds or allowed_clouds_changed:
         try:
-            check_capability(capability, quiet=True)
+            check_capability(capability, quiet=True, workspace=active_workspace)
+            if allowed_clouds_changed:
+                global_user_state.set_allowed_clouds(
+                    skypilot_config_allowed_clouds, active_workspace)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
         cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-            capability, skypilot_config.get_active_workspace())
+            capability, active_workspace)
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
@@ -386,7 +421,8 @@ def get_cloud_credential_file_mounts(
         cloud_file_mounts = cloud.get_credential_file_mounts()
         for remote_path, local_path in cloud_file_mounts.items():
             if os.path.exists(os.path.expanduser(local_path)):
-                file_mounts[remote_path] = local_path
+                file_mounts[remote_path] = os.path.realpath(
+                    os.path.expanduser(local_path))
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.
@@ -526,7 +562,7 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             # TODO: This is a hack to remove the 'ssh-' prefix from the
             # context name. Once we have a separate kubeconfig for SSH,
             # this will not be required.
-            cleaned_context = context.lstrip('ssh-')
+            cleaned_context = common_utils.removeprefix(context, 'ssh-')
         else:
             cleaned_context = context
         symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(filtered_contexts) -

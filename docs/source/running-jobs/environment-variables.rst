@@ -1,58 +1,53 @@
 
 .. _env-vars:
 
-Secrets and Environment Variables
+Environment Variables and Secrets
 ================================================
 
-Environment variables are a powerful way to pass configuration and secrets to your tasks. There are two types of environment variables in SkyPilot:
+SkyPilot supports **environment variables** (``envs``) and **secrets** (``secrets``). Use environment variables to pass non-sensitive configuration to your tasks, and use secrets to pass sensitive values.
 
-- :ref:`User-specified environment variables <user-specified-env-vars>`: Passed by users to tasks, useful for secrets and configuration.
-- :ref:`SkyPilot environment variables <sky-env-vars>`: Predefined by SkyPilot with information about the current cluster and task.
+In addition to :ref:`User-specified environment variables and secrets <user-specified-env-vars>`, SkyPilot also exposes several :ref:`SkyPilot native environment variables <sky-env-vars>`, which contain information about the current cluster and task.
 
 .. _user-specified-env-vars:
 
-User-specified environment variables
+User-specified environment variables and secrets
 ------------------------------------------------------------------
 
-User-specified environment variables are useful for passing secrets and any arguments or configuration needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
+User can specify either environment variables (for non-sensitive configuration values) or secrets needed for your tasks:
 
-You can specify environment variables to be made available to a task in several ways:
+- Environment variables are available in ``file_mounts``, ``setup``, and ``run``.
+- Secrets are available in ``setup`` and ``run``.
 
-- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`:
+You can specify environment variables and secrets to be made available to a task in several ways:
+
+- ``envs`` and ``secrets`` fields (dict) in a :ref:`task YAML <yaml-spec>`:
 
   .. code-block:: yaml
 
     envs:
       MYVAR: val
 
+    secrets:
+      HF_TOKEN: null
+      WANDB_API_KEY: null
 
-- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>`, which is a path to a `dotenv` file (takes precedence over the above):
+
+- ``--env`` and ``--secret`` flags in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
+
+  .. code-block:: console
+
+    $ sky launch --env MYVAR=val --secret HF_TOKEN task.yaml
+
+- ``--env-file`` flag is only available for environment variables in ``sky launch/exec`` :ref:`CLI <cli>`, which is a path to a `dotenv` file (takes precedence over the above):
 
   .. code-block:: text
 
     # sky launch example.yaml --env-file my_app.env
     # cat my_app.env
     MYVAR=val
-    WANDB_API_KEY=MY_WANDB_API_KEY
-    HF_TOKEN=MY_HF_TOKEN
+    LEARNING_RATE=1e-4
 
-- ``--env`` flag in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
-
-.. tip::
-
-  To mark an environment variable as required and make SkyPilot forcefully check
-  its existence (errors out if not specified), set it to an empty string or
-  ``null`` in the task YAML. For example, ``WANDB_API_KEY`` and ``HF_TOKEN`` in
-  the following task YAML are marked as required:
-
-  .. code-block:: yaml
-
-    envs:
-      WANDB_API_KEY:
-      HF_TOKEN: null
-      MYVAR: val
-
-The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the ``${MYVAR}`` syntax.
+The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the bash syntax ``${MYVAR}``.
 
 .. _passing-secrets:
 
@@ -60,22 +55,46 @@ Passing secrets
 ~~~~~~~~~~~~~~~
 
 We recommend passing secrets to any node(s) executing your task by first making
-it available in your current shell, then using ``--env SECRET`` to pass it to SkyPilot:
+it available in your current shell, then using ``--secret SECRET`` to pass it to SkyPilot.
+
+All secret values are redacted in the :ref:`SkyPilot dashboard <dashboard>`,
+so they won't be visible to other users in your team sharing the same
+:ref:`SkyPilot API server <sky-api-server>`.
 
 .. code-block:: console
 
-  $ sky launch -c mycluster --env HF_TOKEN --env WANDB_API_KEY task.yaml
-  $ sky exec mycluster --env WANDB_API_KEY task.yaml
+  $ sky launch -c mycluster --secret HF_TOKEN --secret WANDB_API_KEY task.yaml
+  $ sky exec mycluster --secret HF_TOKEN --secret WANDB_API_KEY task.yaml
 
 .. tip::
 
-  You do not need to pass the value directly such as ``--env
-  WANDB_API_KEY=1234``. When the value is not specified (e.g., ``--env WANDB_API_KEY``),
+  To mark an environment variable or secret as required and make SkyPilot forcefully check
+  its existence (errors out if not specified), set it to ``null`` in the task YAML. For example,
+  ``LEARNING_RATE``, ``HF_TOKEN``, and ``WANDB_API_KEY`` in the following task YAML are marked as required:
+
+  .. code-block:: yaml
+
+    envs:
+      BATCH_SIZE: 32
+      LEARNING_RATE: null
+
+    secrets:
+      HF_TOKEN: null
+      WANDB_API_KEY: null
+
+
+.. tip::
+
+  You do not need to pass the value directly such as ``--secret
+  WANDB_API_KEY=1234`` or ``--env BATCH_SIZE=32``. When the value is not specified
+  (e.g., ``--secret WANDB_API_KEY`` or ``--env BATCH_SIZE``),
   SkyPilot reads it from local environment variables.
 
 
 Using in ``file_mounts``
 ~~~~~~~~~~~~~~~~~~~~~~~~
+
+User-specified environment variables (``envs``) are available in the ``file_mounts`` section of a task YAML, so that you can use environment variables to customize the bucket names, local paths, etc.
 
 .. code-block:: yaml
 
@@ -103,7 +122,7 @@ Read more at `examples/using_file_mounts_with_env_vars.yaml <https://github.com/
 Using in ``setup`` and ``run``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-All user-specified environment variables are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
+All user-specified environment variables (``envs``) and secrets (``secrets``) are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
 
 For example, this is useful for passing secrets (see below) or passing configuration:
 
@@ -113,12 +132,16 @@ For example, this is useful for passing secrets (see below) or passing configura
     envs:
       MODEL_NAME: decapoda-research/llama-65b-hf
 
+    secrets:
+      HF_TOKEN: null
+
     run: |
+      python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
       python train.py --model_name ${MODEL_NAME} <other args>
 
 .. code-block:: console
 
-    $ sky launch --env MODEL_NAME=decapoda-research/llama-7b-hf task.yaml  # Override.
+    $ sky launch --env MODEL_NAME=decapoda-research/llama-7b-hf --secret HF_TOKEN task.yaml  # Override.
 
 See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vllm/serve.yaml#L4-L5>`_ and `llm/vicuna/train.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vicuna/train.yaml#L111-L116>`_.
 

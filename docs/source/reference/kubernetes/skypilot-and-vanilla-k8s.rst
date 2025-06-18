@@ -67,7 +67,8 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
 
    envs:
      MODEL_NAME: google/gemma-2b-it
-     HF_TOKEN: myhftoken
+   secrets:
+     HF_TOKEN: null
 
    resources:
      image_id: docker:vllm/vllm-openai:latest

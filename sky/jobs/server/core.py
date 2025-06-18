@@ -1,9 +1,6 @@
 """SDK functions for managed jobs."""
 import os
-import signal
-import subprocess
 import tempfile
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
@@ -37,6 +34,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import sky
@@ -88,6 +86,9 @@ def launch(
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
+
+    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
@@ -101,14 +102,47 @@ def launch(
                     'name only and comment out the task names (so that they '
                     'will be auto-generated) .')
         task_names.add(task_.name)
-        if task_.job_priority is not None:
-            if (priority is not None and priority != task_.job_priority):
+
+        # Check for priority in resources first, then fall back to job priority
+        task_priority = None
+        if task_.resources:
+            # Convert set to list to access elements by index
+            resources_list = list(task_.resources)
+            # Take first resource's priority as reference
+            task_priority = resources_list[0].priority
+
+            # Check all other resources have same priority
+            for resource in resources_list[1:]:
+                if resource.priority != task_priority:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Task {task_.name!r}: All resources must have the '
+                            'same priority. Found priority '
+                            f'{resource.priority} but expected {task_priority}.'
+                        )
+
+            # Check for conflict between resources priority and job
+            # priority
+            if task_.job_priority is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Task {task_.name!r}: Cannot specify both '
+                        f'resources.priority ({task_priority}) and '
+                        f'job.priority ({task_.job_priority}). Please use only '
+                        'one priority specification method.')
+
+        # Fall back to job priority if no resources priority found
+        if task_priority is None:
+            task_priority = task_.job_priority
+
+        if task_priority is not None:
+            if (priority is not None and priority != task_priority):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Multiple tasks in the DAG have different priorities. '
                         'Either specify a priority in only one task, or set '
                         'the same priority for each task.')
-            priority = task_.job_priority
+            priority = task_priority
 
     if priority is None:
         priority = managed_job_constants.DEFAULT_PRIORITY
@@ -175,12 +209,20 @@ def launch(
                     controller_utils.translate_local_file_mounts_to_two_hop(
                         task_))
 
+    # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as f:
+                                     mode='w') as f, \
+         tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
+                                     mode='w') as original_user_yaml_path:
+        original_user_yaml_path.write(user_dag_str)
+        original_user_yaml_path.flush()
+
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
+        remote_original_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
@@ -189,6 +231,8 @@ def launch(
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         vars_to_fill = {
+            'remote_original_user_yaml_path': remote_original_user_yaml_path,
+            'original_user_dag_path': original_user_yaml_path.name,
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
             'local_to_controller_file_mounts': local_to_controller_file_mounts,
@@ -199,8 +243,6 @@ def launch(
             'remote_env_file_path': remote_env_file_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
-            'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
-            'dashboard_user_id': common.SERVER_ID,
             'priority': priority,
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
@@ -231,7 +273,7 @@ def launch(
 
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
-        with common.with_server_user_hash():
+        with common.with_server_user():
             # Always launch the controller in the default workspace.
             with skypilot_config.local_active_workspace_ctx(
                     skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
@@ -354,20 +396,7 @@ def _maybe_restart_controller(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
         handle = core.start(
             cluster_name=jobs_controller_type.value.cluster_name)
-    # Make sure the dashboard is running when the controller is restarted.
-    # We should not directly use execution.launch() and have the dashboard cmd
-    # in the task setup because since we are using detached_setup, it will
-    # become a job on controller which messes up the job IDs (we assume the
-    # job ID in controller's job queue is consistent with managed job IDs).
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Starting dashboard...')):
-        runner = handle.get_command_runners()[0]
-        runner.run(
-            f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
-            f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
-            stream_logs=True,
-        )
+
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
 
@@ -378,7 +407,8 @@ def _maybe_restart_controller(
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
-          all_users: bool = False) -> List[Dict[str, Any]]:
+          all_users: bool = False,
+          job_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -441,6 +471,13 @@ def queue(refresh: bool,
 
         jobs = list(filter(user_hash_matches_or_missing, jobs))
 
+    accessible_workspaces = workspaces_core.get_workspaces()
+    jobs = list(
+        filter(
+            lambda job: job.get('workspace', skylet_constants.
+                                SKYPILOT_DEFAULT_WORKSPACE) in
+            accessible_workspaces, jobs))
+
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -449,6 +486,9 @@ def queue(refresh: bool,
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
+    if job_ids:
+        jobs = [job for job in jobs if job['job_id'] in job_ids]
 
     return jobs
 
@@ -571,55 +611,6 @@ def tail_logs(name: Optional[str],
                                          follow=follow,
                                          controller=controller,
                                          tail=tail)
-
-
-def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
-    """Opens a dashboard for managed jobs (needs controller to be UP)."""
-    # TODO(SKY-1212): ideally, the controller/dashboard server should expose the
-    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
-    # see if the controller is UP first, which is slow; (2) not have to run SSH
-    # port forwarding first (we'd just launch a local dashboard which would make
-    # REST API calls to the controller dashboard server).
-    logger.info('Starting dashboard')
-    hint = ('Dashboard is not available if jobs controller is not up. Run '
-            'a managed job first or run: sky jobs queue --refresh')
-    handle = _maybe_restart_controller(
-        refresh=refresh,
-        stopped_message=hint,
-        spinner_message='Checking jobs controller')
-
-    # SSH forward a free local port to remote's dashboard port.
-    remote_port = skylet_constants.SPOT_DASHBOARD_REMOTE_PORT
-    free_port = common_utils.find_free_port(remote_port)
-    runner = handle.get_command_runners()[0]
-    port_forward_command = ' '.join(
-        runner.port_forward_command(port_forward=[(free_port, remote_port)],
-                                    connect_timeout=1))
-    port_forward_command = (
-        f'{port_forward_command} '
-        f'> ~/sky_logs/api_server/dashboard-{common_utils.get_user_hash()}.log '
-        '2>&1')
-    logger.info(f'Forwarding port: {colorama.Style.DIM}{port_forward_command}'
-                f'{colorama.Style.RESET_ALL}')
-
-    ssh_process = subprocess.Popen(port_forward_command,
-                                   shell=True,
-                                   start_new_session=True)
-    time.sleep(3)  # Added delay for ssh_command to initialize.
-    logger.info(f'{colorama.Fore.GREEN}Dashboard is now available at: '
-                f'http://127.0.0.1:{free_port}{colorama.Style.RESET_ALL}')
-
-    return free_port, ssh_process.pid
-
-
-def stop_dashboard_forwarding(pid: int) -> None:
-    # Exit the ssh command when the context manager is closed.
-    try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
-    except ProcessLookupError:
-        # This happens if jobs controller is auto-stopped.
-        pass
-    logger.info('Forwarding port closed. Exiting.')
 
 
 @usage_lib.entrypoint

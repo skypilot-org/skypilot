@@ -1,6 +1,9 @@
 import os
 import pathlib
+import re
 import subprocess
+import tempfile
+import textwrap
 from typing import Sequence
 
 import pytest
@@ -58,6 +61,11 @@ class TestBackwardCompatibility:
     def _run_cmd(self, cmd: str):
         subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
 
+    def _is_git_sha(self, ref: str) -> bool:
+        """Check if the reference looks like a git SHA (commit hash)."""
+        # Git SHAs are hexadecimal strings, typically 7-40 characters long
+        return bool(re.match(r'^[0-9a-f]{7,40}$', ref.lower()))
+
     def _wait_for_managed_job_status(self, job_name: str,
                                      status: Sequence[sky.ManagedJobStatus]):
         return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -82,10 +90,31 @@ class TestBackwardCompatibility:
         if self.BASE_SKY_DIR.exists():
             self._run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
 
-        self._run_cmd(
-            f'git clone -b {base_branch} '
-            f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
-        )
+        install_from_pypi = base_branch.startswith('pypi/')
+        if install_from_pypi:
+            pypi_version = base_branch.split('/')[1]
+            pip_install_cmd = f'uv pip install "{pypi_version}[all]"'
+            self._run_cmd(f'mkdir -p {self.BASE_SKY_DIR}')
+            self._run_cmd(f'cp -r tests {self.BASE_SKY_DIR}/ && '
+                          f'cp -r examples {self.BASE_SKY_DIR}/')
+        else:
+            pip_install_cmd = 'uv pip install -e .[all]'
+
+            if self._is_git_sha(base_branch):
+                # For git SHA, clone first, fetch the specific commit, then checkout
+                self._run_cmd(
+                    f'git clone https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}'
+                )
+                self._run_cmd(
+                    f'cd {self.BASE_SKY_DIR} && '
+                    f'git fetch -v --prune -- origin {base_branch} && '
+                    f'git checkout -f {base_branch}')
+            else:
+                # For branch names, use -b flag
+                self._run_cmd(
+                    f'git clone -b {base_branch} '
+                    f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
+                )
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
@@ -98,7 +127,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
-            'uv pip install -e .[all]',)
+            f'{pip_install_cmd}')
 
         # Install current version in current environment
         self._run_cmd(
@@ -174,12 +203,27 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
+    @pytest.mark.no_kubernetes
     def test_autostop_functionality(self, generic_cloud: str):
         """Test autostop functionality across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
+        task_yaml = textwrap.dedent("""\
+            resources:
+              autostop:
+                idle_minutes: 5
+            """)
+
+        with tempfile.NamedTemporaryFile(prefix='autostop_',
+                                         delete=False,
+                                         mode='w') as f:
+            f.write(task_yaml)
+            yaml_path = f.name
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            # Set intiial autostop in base
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} {yaml_path}',
+            f'sky status | grep {cluster_name} | grep "5m"',
+            # Change the autostop time in current
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -258,12 +302,16 @@ class TestBackwardCompatibility:
         def wait_for_status(job_name: str,
                             status: Sequence[sky.ManagedJobStatus]):
             return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=job_name, job_status=status, timeout=300)
+                job_name=job_name,
+                job_status=status,
+                timeout=600 if generic_cloud == 'kubernetes' else 300)
 
+        blocking_seconds_for_cancel_job = 2000 if generic_cloud == 'kubernetes' else 1000
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
-                launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-old-0',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
                 launch_job(f'{managed_job_name}-old-1', 'echo hi'),
                 wait_for_status(f'{managed_job_name}-old-1',
                                 [sky.ManagedJobStatus.SUCCEEDED]),
@@ -275,7 +323,8 @@ class TestBackwardCompatibility:
                     sky.ManagedJobStatus.CANCELLING
                 ]),
                 # Cover jobs launched in the new version and still running after upgrade
-                launch_job(f'{managed_job_name}-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-0',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
                 launch_job(f'{managed_job_name}-1', 'echo hi; sleep 400'),
                 wait_for_status(f'{managed_job_name}-0',
                                 [sky.ManagedJobStatus.RUNNING]),
@@ -287,7 +336,8 @@ class TestBackwardCompatibility:
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
                 launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
                 # Cover cancelling jobs launched in the new version
-                launch_job(f'{managed_job_name}-3', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-3',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 f'sky jobs cancel -y -n {managed_job_name}-0',
                 f'sky jobs cancel -y -n {managed_job_name}-3',

@@ -204,14 +204,14 @@ Job queueing and priority
 Job queueing and priority are supported by managed jobs.
 
 
-Specify job priority by setting the ``job.priority`` field in the job YAML.
+Specify job priority by setting the ``job.priority`` field in the :ref:`SkyPilot YAML <yaml-spec-job-priority>`.
 
 .. code-block:: yaml
 
   job:
     # Priority of the job, between 0 and 1000 (default: 500).
     #
-    # A lower value means that the job is higher priority. High priority jobs
+    # A higher value means that the job is higher priority. High priority jobs
     # are scheduled sooner and will block lower priority jobs from starting
     # until the high priority jobs have started.
     priority: 500
@@ -344,7 +344,7 @@ Jobs restarts on user code failure
 Preemptions or hardware failures will be auto-recovered, but **by default, user code failures (non-zero exit codes) are not auto-recovered**.
 
 In some cases, you may want a job to automatically restart even if it fails in application code. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To specify this, you
-can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the job YAML file.
+can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
 
 .. code-block:: yaml
 

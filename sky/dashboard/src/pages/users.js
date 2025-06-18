@@ -1,6 +1,11 @@
 import React from 'react';
 import Head from 'next/head';
-import { Users } from '@/components/users';
+import dynamic from 'next/dynamic';
+
+const Users = dynamic(
+  () => import('@/components/users').then((mod) => mod.Users),
+  { ssr: false }
+);
 
 export default function UsersPage() {
   return (

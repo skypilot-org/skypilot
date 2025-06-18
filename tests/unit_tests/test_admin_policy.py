@@ -1,16 +1,22 @@
+import contextlib
 import importlib
 import os
+import subprocess
 import sys
-from typing import Optional, Tuple
+import tempfile
+import time
+from typing import Iterator, Optional, Tuple
 from unittest import mock
 
 import pytest
+import requests
 
 import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.utils import admin_policy_utils
+from sky.utils import common_utils
 from sky.utils import config_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -203,3 +209,262 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
     assert skypilot_config.get_nested(
         ('kubernetes', 'allowed_contexts'),
         None) is None, 'Global skypilot config should be restored after request'
+
+
+def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
+    # Test with task that has no specific autostop configuration
+    dag, _ = _load_task_and_apply_policy(
+        task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
+    for resource in dag.tasks[0].resources:
+        assert resource.autostop_config is not None
+        assert resource.autostop_config.enabled is True
+        assert resource.autostop_config.idle_minutes == 10
+
+    # Test with resources having different autostop configurations
+    task.set_resources([
+        # Resource with autostop over limit (should be capped at 10 minutes)
+        sky.Resources(cpus='16+', autostop={
+            'idle_minutes': 20,
+            'down': True
+        }),
+    ])
+
+    dag, _ = _load_task_and_apply_policy(
+        task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
+
+    resources = dag.tasks[0].resources
+
+    assert resources[0].autostop_config is not None
+    assert resources[0].autostop_config.enabled is True
+    assert resources[0].autostop_config.idle_minutes == 10
+    assert resources[0].autostop_config.down is True  # default
+
+
+def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
+    """Test UseLocalGcpCredentialsPolicy for various scenarios."""
+    from example_policy.client_policy import UseLocalGcpCredentialsPolicy
+
+    test_creds_path = '/path/to/service-account.json'
+    policy = UseLocalGcpCredentialsPolicy()
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        fresh_task.run = None
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = policy.apply(user_request)
+
+        # Check that the credentials file is mounted
+        expected_mount_path = ('~/.config/gcloud/'
+                               'application_default_credentials.json')
+        assert expected_mount_path in mutated_request.task.file_mounts
+        assert (mutated_request.task.file_mounts[expected_mount_path] ==
+                test_creds_path)
+
+        # Check that the gcloud auth command is set as the run command
+        expected_auth_cmd = ('gcloud auth activate-service-account '
+                             '--key-file ~/.config/gcloud/'
+                             'application_default_credentials.json')
+        assert mutated_request.task.run == expected_auth_cmd
+
+    # task.run has existing command
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        original_run_cmd = 'echo "hello world"'
+        fresh_task.run = original_run_cmd
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = policy.apply(user_request)
+
+        # Check that the gcloud auth command is prepended
+        expected_auth_cmd = ('gcloud auth activate-service-account '
+                             '--key-file ~/.config/gcloud/'
+                             'application_default_credentials.json')
+        expected_full_cmd = f'{expected_auth_cmd} && {original_run_cmd}'
+        assert mutated_request.task.run == expected_full_cmd
+
+    env_without_creds = {
+        k: v
+        for k, v in os.environ.items()
+        if k != 'GOOGLE_APPLICATION_CREDENTIALS'
+    }
+    with mock.patch.dict(os.environ, env_without_creds, clear=True):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        original_run_cmd = fresh_task.run
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = policy.apply(user_request)
+
+        # Check that the entire gcloud directory is mounted
+        assert '~/.config/gcloud' in mutated_request.task.file_mounts
+        assert (mutated_request.task.file_mounts['~/.config/gcloud'] ==
+                '~/.config/gcloud')
+
+        # Check that the run command is unchanged
+        assert mutated_request.task.run == original_run_cmd
+
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        fresh_task.file_mounts = {'/existing/mount': '/local/path'}
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mutated_request = policy.apply(user_request)
+
+        # Check that both existing and new mounts are present
+        assert '/existing/mount' in mutated_request.task.file_mounts
+        expected_mount_path = ('~/.config/gcloud/'
+                               'application_default_credentials.json')
+        assert expected_mount_path in mutated_request.task.file_mounts
+        assert len(mutated_request.task.file_mounts) == 2
+
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=False)
+        mutated_request = policy.apply(user_request)
+        # Should skip the policy at client-side
+        assert mutated_request.task.file_mounts is None
+
+
+def test_restful_policy(add_example_policy_paths, task):
+    """Test RestfulAdminPolicy for various scenarios."""
+
+    # Test successful request and response
+    with mock.patch('requests.post') as mock_post:
+        mutated_task = sky.Task(name='test-task-mutated')
+        mutated_task.set_resources([sky.Resources(cpus='4+')])
+        mutated_config = sky.Config()
+        mutated_request = sky.MutatedUserRequest(task=mutated_task,
+                                                 skypilot_config=mutated_config)
+        mock_post.return_value.raise_for_status.return_value = None
+        mock_post.return_value.json.return_value = mutated_request.encode()
+
+        dag, _ = _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
+
+        mock_post.assert_called_once()
+
+        assert dag.tasks[0].name == 'test-task-mutated'
+        assert len(dag.tasks[0].resources) == 1
+
+    # Test network error
+    with mock.patch('requests.post') as mock_post:
+        mock_post.side_effect = requests.exceptions.ConnectionError(
+            'Connection failed')
+
+        with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                           match='Failed to validate request with admin '
+                           'policy URL http://localhost:8080'):
+            _load_task_and_apply_policy(
+                task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
+
+    # Test HTTP error status
+    with mock.patch('requests.post') as mock_post:
+        mock_post.return_value.raise_for_status.side_effect = (
+            requests.exceptions.HTTPError('404 Client Error'))
+
+        with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                           match='Failed to validate request with admin '
+                           'policy URL http://localhost:8080'):
+            _load_task_and_apply_policy(
+                task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
+
+    # Test policy that adds resources and modifies configuration
+    with mock.patch('requests.post') as mock_post:
+        mock_post.return_value.raise_for_status.return_value = None
+
+        mutated_task = sky.Task(name='test-task')
+        mutated_task.set_resources([
+            sky.Resources(cpus='2+', use_spot=True),
+            sky.Resources(accelerators={'V100': 1})
+        ])
+        mutated_task.run = 'echo "Policy modified command"'
+
+        mutated_config = sky.Config()
+        mutated_config.set_nested(('aws', 'use_spot'), True)
+
+        mutated_request = sky.MutatedUserRequest(task=mutated_task,
+                                                 skypilot_config=mutated_config)
+        mock_post.return_value.json.return_value = mutated_request.encode()
+
+        dag, config = _load_task_and_apply_policy(
+            task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
+
+        assert dag.tasks[0].run == 'echo "Policy modified command"'
+        assert config.get_nested(('aws', 'use_spot'), False) is True
+
+
+@contextlib.contextmanager
+def _policy_server(policy: str) -> Iterator[str]:
+    port = common_utils.find_free_port(start_port=8080)
+    env = os.environ.copy()
+    # Clear the SKYPILOT_CONFIG to avoid conflicts with the test environment
+    env.pop('SKYPILOT_CONFIG', None)
+    # Add the example_policy to the PYTHONPATH
+    pypath = os.path.join(POLICY_PATH, 'example_policy')
+    if env.get('PYTHONPATH'):
+        pypath = pypath + ':' + env['PYTHONPATH']
+    env['PYTHONPATH'] = pypath
+    proc = subprocess.Popen(
+        f'python {POLICY_PATH}/example_server/policy_server.py --port {port} --policy {policy}',
+        shell=True,
+        env=env)
+    start_time = time.time()
+    server_ready = False
+    while time.time() - start_time < 5.0:
+        try:
+            response = requests.get(f'http://localhost:{port}', timeout=0.1)
+            if response.status_code == 200:
+                server_ready = True
+                break
+        except (requests.exceptions.RequestException,
+                requests.exceptions.ConnectionError):
+            pass
+        time.sleep(0.1)
+
+    if not server_ready:
+        proc.terminate()
+        raise RuntimeError(
+            f'Policy server on port {port} failed to start within 5 seconds')
+    try:
+        yield f'http://localhost:{port}'
+    finally:
+        proc.terminate()
+
+
+def test_restful_policy_server(add_example_policy_paths, task):
+    with _policy_server('DoNothingPolicy') as url, \
+        tempfile.NamedTemporaryFile() as temp_file:
+        temp_file.write(f'admin_policy: {url}'.encode('utf-8'))
+        temp_file.flush()
+
+        _load_task_and_apply_policy(task, temp_file.name)
+
+    with _policy_server('AddLabelsPolicy') as url, \
+        tempfile.NamedTemporaryFile() as temp_file:
+        temp_file.write(f'admin_policy: {url}'.encode('utf-8'))
+        temp_file.flush()
+
+        _, config = _load_task_and_apply_policy(task, temp_file.name)
+        assert 'app' in config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should be set')
+
+    with _policy_server('DoNothingPolicy') as url, \
+        tempfile.NamedTemporaryFile() as temp_file:
+        temp_file.write(f'admin_policy: {url}/set_autostop'.encode('utf-8'))
+        temp_file.flush()
+
+        dag, _ = _load_task_and_apply_policy(task, temp_file.name)
+        for r in dag.tasks[0].resources:
+            assert r.autostop_config is not None
+            assert r.autostop_config.enabled is True
+            assert r.autostop_config.idle_minutes == 10

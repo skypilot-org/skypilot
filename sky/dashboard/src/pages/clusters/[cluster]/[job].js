@@ -186,7 +186,7 @@ export function JobDetailPage() {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="clusters">
+      <>
         <JobHeader
           cluster={cluster}
           job={job}
@@ -315,7 +315,7 @@ export function JobDetailPage() {
             </div>
           </div>
         )}
-      </Layout>
+      </>
     </>
   );
 }

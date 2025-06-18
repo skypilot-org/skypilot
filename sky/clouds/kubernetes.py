@@ -2,6 +2,8 @@
 from enum import Enum
 import os
 import re
+import subprocess
+import tempfile
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -19,6 +21,8 @@ from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.kubernetes.utils import is_tpu_on_gke
+from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -180,17 +184,6 @@ class Kubernetes(clouds.Cloud):
         context = resources.region
         if context is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
-        # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
-            context)
-        if is_exec_auth:
-            assert isinstance(message, str), message
-            # Controllers cannot spin up new pods with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to down itself with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.AUTODOWN] = message
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
@@ -263,8 +256,8 @@ class Kubernetes(clouds.Cloud):
             # Try kubeconfig if present
             current_context = (
                 kubernetes_utils.get_current_kube_config_context_name())
-            if (current_context is None and
-                    kubernetes_utils.is_incluster_config_available()):
+            if ((current_context is None or current_context.startswith('ssh-'))
+                    and kubernetes_utils.is_incluster_config_available()):
                 # If no kubeconfig contexts found, use in-cluster if available
                 current_context = kubernetes.in_cluster_context_name()
             allowed_contexts = []
@@ -525,8 +518,12 @@ class Kubernetes(clouds.Cloud):
         cpus = k.cpus
         mem = k.memory
         # Optionally populate accelerator information.
-        acc_count = k.accelerator_count if k.accelerator_count else 0
-        acc_type = k.accelerator_type if k.accelerator_type else None
+        acc_type = k.accelerator_type
+        acc_count = k.accelerator_count
+        if acc_type is not None and is_tpu_on_gke(acc_type):
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+        else:
+            acc_count = acc_count or 0
 
         def _get_image_id(resources: 'resources_lib.Resources') -> str:
             image_id_dict = resources.image_id
@@ -612,20 +609,17 @@ class Kubernetes(clouds.Cloud):
             # If remote_identity is not a dict, use
             k8s_service_account_name = remote_identity
 
-        if (k8s_service_account_name ==
-                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-            # SA name doesn't matter since automounting credentials is disabled
-            k8s_service_account_name = 'default'
-            k8s_automount_sa_token = 'false'
-        elif (k8s_service_account_name ==
-              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
-            # Use the default service account
+        lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+        sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
+
+        if k8s_service_account_name == lc or k8s_service_account_name == sa:
+            # Use the default service account if remote identity is not set.
+            # For LOCAL_CREDENTIALS, this is for in-cluster authentication
+            # which needs a serviceaccount (specifically for SSH node pools
+            # which uses in-cluster authentication internally, and we would
+            # like to support exec-auth when the user is also using SSH infra)
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
-            k8s_automount_sa_token = 'true'
-        else:
-            # User specified a custom service account
-            k8s_automount_sa_token = 'true'
 
         fuse_device_required = bool(resources.requires_fuse)
 
@@ -702,6 +696,16 @@ class Kubernetes(clouds.Cloud):
             'num-cpus': str(max(int(cpus), 1)),
         }
 
+        # Get the storage class name for high availability controller's PVC
+        k8s_ha_storage_class_name = skypilot_config.get_nested(
+            ('kubernetes', 'high_availability', 'storage_class_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+
+        k8s_kueue_local_queue_name = skypilot_config.get_nested(
+            ('kubernetes', 'kueue', 'local_queue_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -717,8 +721,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
-            'k8s_automount_sa_token': k8s_automount_sa_token,
+            'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
+            'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
@@ -746,6 +751,9 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_SETUP_SCRIPT_PATH),
             'k8s_high_availability_deployment_run_script_dir':
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_restarting_signal_file':
+                (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
+            'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
@@ -892,6 +900,7 @@ class Kubernetes(clouds.Cloud):
         """Checks if the user has access credentials to
         Kubernetes."""
         # Check for port forward dependencies
+        logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
         if reasons is not None:
             formatted = '\n'.join(
@@ -954,10 +963,28 @@ class Kubernetes(clouds.Cloud):
         return ''.join(message_parts)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+        credential_paths = kubernetes_utils.get_kubeconfig_paths()
+        if credential_paths:
+            # For single kubeconfig path, keep the original path.
+            kubeconfig_file = credential_paths[0]
+            if len(credential_paths) > 1:
+                # For multiple kubeconfig paths, merge them into a single file.
+                # TODO(aylei): GC merged kubeconfig files.
+                kubeconfig_file = tempfile.NamedTemporaryFile(
+                    prefix='merged-kubeconfig-', suffix='.yaml',
+                    delete=False).name
+                subprocess.run(
+                    'kubectl config view --flatten '
+                    f'> {kubeconfig_file}',
+                    shell=True,
+                    check=True)
+            if os.path.exists(kubeconfig_file):
+                # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
+                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file)  # pylint: disable=line-too-long
+
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+            return {kubernetes.DEFAULT_KUBECONFIG_PATH: kubeconfig_file}
         else:
             return {}
 

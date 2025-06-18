@@ -40,6 +40,7 @@ import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
+import { apiClient } from '@/data/connectors/client';
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -121,113 +122,179 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   return null;
 };
 
+// Workspace badge component for private/public status
+const WorkspaceBadge = ({ isPrivate }) => {
+  if (isPrivate) {
+    return (
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+        Private
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+      Public
+    </span>
+  );
+};
+
 // Workspace card component
-const WorkspaceCard = ({ workspace, onDelete, onEdit, router }) => (
-  <Card key={workspace.name}>
-    <CardHeader>
-      <CardTitle className="text-base font-normal">
-        <span className="font-semibold">Workspace:</span> {workspace.name}
-      </CardTitle>
-    </CardHeader>
-    <CardContent className="text-sm pb-2">
-      <div className="py-2 flex items-center justify-between">
-        <div className="flex items-center text-gray-600">
-          <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
-          <span>Clusters (Running / Total)</span>
-        </div>
-        <button
-          onClick={() => {
-            router.push({
-              pathname: '/clusters',
-              query: { workspace: workspace.name },
-            });
-          }}
-          className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-        >
-          {workspace.runningClusterCount} / {workspace.totalClusterCount}
-        </button>
-      </div>
-      <div className="py-2 flex items-center justify-between border-t border-gray-100">
-        <div className="flex items-center text-gray-600">
-          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
-          <span>Managed Jobs</span>
-        </div>
-        <button
-          onClick={() => {
-            router.push({
-              pathname: '/jobs',
-              query: { workspace: workspace.name },
-            });
-          }}
-          className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-        >
-          {workspace.managedJobsCount}
-        </button>
-      </div>
-    </CardContent>
+const WorkspaceCard = ({
+  workspace,
+  onDelete,
+  onEdit,
+  router,
+  rawWorkspacesData,
+  checkPermissionAndAct,
+  roleLoading,
+}) => {
+  const handleEdit = () => {
+    checkPermissionAndAct('cannot edit workspace', () => {
+      onEdit(workspace.name);
+    });
+  };
 
-    <div className="px-6 pb-3 text-sm pt-3">
-      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
-        Enabled Infra
-      </h4>
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {workspace.clouds.map((cloud) => (
-          <div key={cloud} className="flex items-center text-gray-700">
-            <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
-            <span>{cloud}</span>
+  // Get the workspace configuration to check if it's private
+  const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
+  const isPrivate = workspaceConfig.private === true;
+
+  return (
+    <Card key={workspace.name}>
+      <CardHeader>
+        <CardTitle className="text-base font-normal">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-semibold">Workspace:</span> {workspace.name}
+            </div>
+            <WorkspaceBadge isPrivate={isPrivate} />
           </div>
-        ))}
-      </div>
-    </div>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm pb-2">
+        <div className="py-2 flex items-center justify-between">
+          <div className="flex items-center text-gray-600">
+            <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+            <span>Clusters (Running / Total)</span>
+          </div>
+          <button
+            onClick={() => {
+              router.push({
+                pathname: '/clusters',
+                query: { workspace: workspace.name },
+              });
+            }}
+            className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+          >
+            {workspace.runningClusterCount} / {workspace.totalClusterCount}
+          </button>
+        </div>
+        <div className="py-2 flex items-center justify-between border-t border-gray-100">
+          <div className="flex items-center text-gray-600">
+            <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+            <span>Managed Jobs</span>
+          </div>
+          <button
+            onClick={() => {
+              router.push({
+                pathname: '/jobs',
+                query: { workspace: workspace.name },
+              });
+            }}
+            className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+          >
+            {workspace.managedJobsCount}
+          </button>
+        </div>
+      </CardContent>
 
-    <CardFooter className="flex justify-end pt-3 gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onDelete(workspace.name)}
-        disabled={workspace.name === 'default'}
-        title={
-          workspace.name === 'default'
-            ? 'Cannot delete default workspace'
-            : 'Delete workspace'
-        }
-        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-      >
-        Delete
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onEdit(workspace.name)}
-      >
-        Edit
-      </Button>
-    </CardFooter>
-  </Card>
-);
+      <div className="px-6 pb-3 text-sm pt-3">
+        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+          Enabled Infra
+        </h4>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {workspace.clouds.map((cloud) => (
+            <div key={cloud} className="flex items-center text-gray-700">
+              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+              <span>{cloud}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <CardFooter className="flex justify-end pt-3 gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onDelete(workspace.name)}
+          disabled={workspace.name === 'default' || roleLoading}
+          title={
+            workspace.name === 'default'
+              ? 'Cannot delete default workspace'
+              : 'Delete workspace'
+          }
+          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+        >
+          {roleLoading ? (
+            <div className="flex items-center">
+              <CircularProgress size={12} className="mr-1" />
+              <span>Delete</span>
+            </div>
+          ) : (
+            'Delete'
+          )}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleEdit}
+          disabled={roleLoading}
+        >
+          {roleLoading ? (
+            <div className="flex items-center">
+              <CircularProgress size={12} className="mr-1" />
+              <span>Edit</span>
+            </div>
+          ) : (
+            'Edit'
+          )}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
 
 // Create new workspace card component
-const CreateWorkspaceCard = ({ onClick }) => (
-  <Card
-    key="create-new"
-    className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
-    onClick={onClick}
-  >
-    <div className="flex-1 flex items-center justify-center p-6">
-      <div className="text-center">
-        <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
-          <span className="text-3xl text-sky-600">+</span>
+const CreateWorkspaceCard = ({
+  onClick,
+  checkPermissionAndAct,
+  roleLoading,
+}) => {
+  const handleClick = () => {
+    checkPermissionAndAct('cannot create workspace', onClick);
+  };
+
+  return (
+    <Card
+      key="create-new"
+      className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
+      onClick={handleClick}
+    >
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
+            <span className="text-3xl text-sky-600">+</span>
+          </div>
+          <h3 className="text-lg font-medium text-sky-700 mb-2">
+            Create New Workspace
+          </h3>
+          <p className="text-sm text-gray-500">
+            Set up a new workspace with custom infrastructure configurations
+          </p>
         </div>
-        <h3 className="text-lg font-medium text-sky-700 mb-2">
-          Create New Workspace
-        </h3>
-        <p className="text-sm text-gray-500">
-          Set up a new workspace with custom infrastructure configurations
-        </p>
       </div>
-    </div>
-  </Card>
-);
+    </Card>
+  );
+};
 
 // Statistics summary component
 const StatsSummary = ({
@@ -302,8 +369,75 @@ export function Workspaces() {
     error: null,
   });
 
+  // Permission denial dialog state
+  const [permissionDenialState, setPermissionDenialState] = useState({
+    open: false,
+    message: '',
+    userName: '',
+  });
+
+  // User role cache
+  const [userRoleCache, setUserRoleCache] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(false);
+
   const router = useRouter();
   const isMobile = useMobile();
+
+  // Function to get user role with caching
+  const getUserRole = async () => {
+    // Return cached result if available and less than 5 minutes old
+    if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
+      return userRoleCache;
+    }
+
+    setRoleLoading(true);
+    try {
+      const response = await apiClient.get(`/users/role`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get user role');
+      }
+      const data = await response.json();
+      const roleData = {
+        role: data.role,
+        name: data.name,
+        timestamp: Date.now(),
+      };
+      setUserRoleCache(roleData);
+      setRoleLoading(false);
+      return roleData;
+    } catch (error) {
+      setRoleLoading(false);
+      throw error;
+    }
+  };
+
+  // Function to handle permission check with smooth UX
+  const checkPermissionAndAct = async (action, actionCallback) => {
+    try {
+      const roleData = await getUserRole();
+
+      if (roleData.role !== 'admin') {
+        setPermissionDenialState({
+          open: true,
+          message: action,
+          userName: roleData.name.toLowerCase(),
+        });
+        return false;
+      }
+
+      actionCallback();
+      return true;
+    } catch (error) {
+      console.error('Failed to check user role:', error);
+      setPermissionDenialState({
+        open: true,
+        message: `Error: ${error.message}`,
+        userName: '',
+      });
+      return false;
+    }
+  };
 
   const fetchData = async (showLoading = false) => {
     if (showLoading) {
@@ -443,11 +577,13 @@ export function Workspaces() {
   }, []);
 
   const handleDeleteWorkspace = (workspaceName) => {
-    setDeleteState({
-      confirmOpen: true,
-      workspaceToDelete: workspaceName,
-      deleting: false,
-      error: null,
+    checkPermissionAndAct('cannot delete workspace', () => {
+      setDeleteState({
+        confirmOpen: true,
+        workspaceToDelete: workspaceName,
+        deleting: false,
+        error: null,
+      });
     });
   };
 
@@ -463,7 +599,11 @@ export function Workspaces() {
         deleting: false,
         error: null,
       });
-      await fetchData();
+
+      // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
+      dashboardCache.invalidate(getWorkspaces);
+
+      await fetchData(true); // Show loading during refresh
     } catch (error) {
       console.error('Error deleting workspace:', error);
       setDeleteState((prev) => ({
@@ -490,6 +630,12 @@ export function Workspaces() {
       workspaceToDelete: null,
       deleting: false,
       error: null,
+    });
+  };
+
+  const handleEditAllConfigs = () => {
+    checkPermissionAndAct('cannot edit config', () => {
+      router.push('/config');
     });
   };
 
@@ -520,15 +666,23 @@ export function Workspaces() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => router.push('/config')}
+            onClick={handleEditAllConfigs}
             className="ml-4 px-2 py-1 text-xs"
             disabled={
               loading ||
+              roleLoading ||
               !rawWorkspacesData ||
               Object.keys(rawWorkspacesData).length === 0
             }
           >
-            Edit All Configs
+            {roleLoading ? (
+              <div className="flex items-center">
+                <CircularProgress size={12} className="mr-1" />
+                <span>Edit All Configs</span>
+              </div>
+            ) : (
+              'Edit All Configs'
+            )}
           </Button>
         </div>
         <div className="flex items-center">
@@ -575,9 +729,16 @@ export function Workspaces() {
               onDelete={handleDeleteWorkspace}
               onEdit={(name) => router.push(`/workspaces/${name}`)}
               router={router}
+              rawWorkspacesData={rawWorkspacesData}
+              checkPermissionAndAct={checkPermissionAndAct}
+              roleLoading={roleLoading}
             />
           ))}
-          <CreateWorkspaceCard onClick={() => router.push('/workspace/new')} />
+          <CreateWorkspaceCard
+            onClick={() => router.push('/workspace/new')}
+            checkPermissionAndAct={checkPermissionAndAct}
+            roleLoading={roleLoading}
+          />
         </div>
       )}
 
@@ -601,6 +762,50 @@ export function Workspaces() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Permission Denial Dialog */}
+      <Dialog
+        open={permissionDenialState.open}
+        onOpenChange={(open) =>
+          setPermissionDenialState((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent className="sm:max-w-md transition-all duration-200 ease-in-out">
+          <DialogHeader>
+            <DialogTitle>Permission Denied</DialogTitle>
+            <DialogDescription>
+              {roleLoading ? (
+                <div className="flex items-center py-2">
+                  <CircularProgress size={16} className="mr-2" />
+                  <span>Checking permissions...</span>
+                </div>
+              ) : (
+                <>
+                  {permissionDenialState.userName ? (
+                    <>
+                      {permissionDenialState.userName} is logged in as non-admin
+                      and {permissionDenialState.message}.
+                    </>
+                  ) : (
+                    permissionDenialState.message
+                  )}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setPermissionDenialState((prev) => ({ ...prev, open: false }))
+              }
+              disabled={roleLoading}
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteState.confirmOpen} onOpenChange={handleCancelDelete}>

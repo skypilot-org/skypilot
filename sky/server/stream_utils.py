@@ -42,21 +42,16 @@ async def log_streamer(request_id: Optional[str],
                        plain_logs: bool = False,
                        tail: Optional[int] = None,
                        follow: bool = True) -> AsyncGenerator[str, None]:
-    """Streams the logs of a request."""
+    """Streams the logs of a request.
 
-    # Buffer the lines in memory and flush them in chunks to improve log tailing
-    # throughput.
-    buffer: List[str] = []
-    buffer_bytes = 0
-    last_flush_time = asyncio.get_event_loop().time()
-
-    async def flush_buffer() -> AsyncGenerator[str, None]:
-        nonlocal buffer, buffer_bytes, last_flush_time
-        if buffer:
-            yield ''.join(buffer)
-            buffer.clear()
-            buffer_bytes = 0
-            last_flush_time = asyncio.get_event_loop().time()
+    Args:
+        request_id: The request ID to check whether the log tailing process
+            should be stopped.
+        log_path: The path to the log file.
+        plain_logs: Whether to show plain logs.
+        tail: The number of lines to tail. If None, tail the whole file.
+        follow: Whether to follow the log file.
+    """
 
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
@@ -100,81 +95,106 @@ async def log_streamer(request_id: Optional[str],
         if show_request_waiting_spinner:
             yield status_msg.stop()
 
-    # Find last n lines of the log file. Do not read the whole file into memory.
     async with aiofiles.open(log_path, 'rb') as f:
-        if tail is not None:
-            # TODO(zhwu): this will include the control lines for rich status,
-            # which may not lead to exact tail lines when showing on the client
-            # side.
-            lines: Deque[str] = collections.deque(maxlen=tail)
-            async for line_str in _yield_log_file_with_payloads_skipped(f):
-                lines.append(line_str)
-            for line_str in lines:
-                yield line_str
+        async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
+                                          follow):
+            yield chunk
 
-        last_heartbeat_time = asyncio.get_event_loop().time()
 
-        while True:
-            # Sleep 0 to yield control to allow other coroutines to run,
-            # while keeps the loop tight to make log stream responsive.
-            await asyncio.sleep(0)
-            line: Optional[bytes] = await f.readline()
+async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
+                         request_id: Optional[str] = None,
+                         plain_logs: bool = False,
+                         tail: Optional[int] = None,
+                         follow: bool = True) -> AsyncGenerator[str, None]:
+    """Tail the opened log file, buffer the lines and flush in chunks."""
 
-            current_time = asyncio.get_event_loop().time()
-            if not line:
-                if buffer and (current_time -
-                               last_flush_time) >= _BUFFER_TIMEOUT:
-                    async for chunk in flush_buffer():
-                        yield chunk
+    if tail is not None:
+        # Find last n lines of the log file. Do not read the whole file into
+        # memory.
+        # TODO(zhwu): this will include the control lines for rich status,
+        # which may not lead to exact tail lines when showing on the client
+        # side.
+        lines: Deque[str] = collections.deque(maxlen=tail)
+        async for line_str in _yield_log_file_with_payloads_skipped(f):
+            lines.append(line_str)
+        for line_str in lines:
+            yield line_str
 
-                if request_id is not None:
-                    request_task = requests_lib.get_request(request_id)
-                    if request_task.status > requests_lib.RequestStatus.RUNNING:
-                        if (request_task.status ==
-                                requests_lib.RequestStatus.CANCELLED):
-                            yield (f'{request_task.name!r} request {request_id}'
-                                   ' cancelled\n')
-                        break
-                if not follow:
+    last_heartbeat_time = asyncio.get_event_loop().time()
+
+    # Buffer the lines in memory and flush them in chunks to improve log
+    # tailing throughput.
+    buffer: List[str] = []
+    buffer_bytes = 0
+    last_flush_time = asyncio.get_event_loop().time()
+
+    async def flush_buffer() -> AsyncGenerator[str, None]:
+        nonlocal buffer, buffer_bytes, last_flush_time
+        if buffer:
+            yield ''.join(buffer)
+            buffer.clear()
+            buffer_bytes = 0
+            last_flush_time = asyncio.get_event_loop().time()
+
+    while True:
+        # Sleep 0 to yield control to allow other coroutines to run,
+        # while keeps the loop tight to make log stream responsive.
+        await asyncio.sleep(0)
+        current_time = asyncio.get_event_loop().time()
+        # Flush the buffer when it is not empty and the buffer is full or the
+        # flush timeout is reached.
+        if buffer and (buffer_bytes >= _BUFFER_SIZE or
+                       (current_time - last_flush_time) >= _BUFFER_TIMEOUT):
+            async for chunk in flush_buffer():
+                yield chunk
+
+        line: Optional[bytes] = await f.readline()
+        if not line:
+            if request_id is not None:
+                request_task = requests_lib.get_request(request_id)
+                if request_task.status > requests_lib.RequestStatus.RUNNING:
+                    if (request_task.status ==
+                            requests_lib.RequestStatus.CANCELLED):
+                        buffer.append(
+                            f'{request_task.name!r} request {request_id}'
+                            ' cancelled\n')
                     break
+            if not follow:
+                break
 
-                current_time = asyncio.get_event_loop().time()
-                if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
-                    # Currently just used to keep the connection busy, refer to
-                    # https://github.com/skypilot-org/skypilot/issues/5750 for
-                    # more details.
-                    yield message_utils.encode_payload(
-                        rich_utils.Control.HEARTBEAT.encode(''))
-                    last_heartbeat_time = current_time
+            if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
+                # Currently just used to keep the connection busy, refer to
+                # https://github.com/skypilot-org/skypilot/issues/5750 for
+                # more details.
+                buffer.append(
+                    message_utils.encode_payload(
+                        rich_utils.Control.HEARTBEAT.encode('')))
+                last_heartbeat_time = current_time
 
-                # Sleep shortly to avoid storming the DB and CPU, this has
-                # little impact on the responsivness here since we are waiting
-                # for a new line to come in.
-                await asyncio.sleep(0.1)
+            # Sleep shortly to avoid storming the DB and CPU, this has
+            # little impact on the responsivness here since we are waiting
+            # for a new line to come in.
+            await asyncio.sleep(0.1)
+            continue
+
+        # Refresh the heartbeat time, this is a trivial optimization for
+        # performance but it helps avoid unnecessary heartbeat strings
+        # being printed when the client runs in an old version.
+        last_heartbeat_time = asyncio.get_event_loop().time()
+        line_str = line.decode('utf-8')
+        if plain_logs:
+            is_payload, line_str = message_utils.decode_payload(
+                line_str, raise_for_mismatch=False)
+            # TODO(aylei): implement heartbeat mechanism for plain logs,
+            # sending invisible characters might be okay.
+            if is_payload:
                 continue
+        buffer.append(line_str)
+        buffer_bytes += len(line_str.encode('utf-8'))
 
-            # Refresh the heartbeat time, this is a trivial optimization for
-            # performance but it helps avoid unnecessary heartbeat strings
-            # being printed when the client runs in an old version.
-            last_heartbeat_time = asyncio.get_event_loop().time()
-            line_str = line.decode('utf-8')
-            if plain_logs:
-                is_payload, line_str = message_utils.decode_payload(
-                    line_str, raise_for_mismatch=False)
-                # TODO(aylei): implement heartbeat mechanism for plain logs,
-                # sending invisible characters might be okay.
-                if is_payload:
-                    continue
-
-            # Add to buffer
-            buffer.append(line_str)
-            buffer_bytes += len(line_str.encode('utf-8'))
-
-            # Check if we should flush the buffer
-            if (buffer_bytes >= _BUFFER_SIZE or
-                (current_time - last_flush_time) >= _BUFFER_TIMEOUT):
-                async for chunk in flush_buffer():
-                    yield chunk
+    # Flush remaining lines in the buffer.
+    async for chunk in flush_buffer():
+        yield chunk
 
 
 def stream_response(

@@ -29,9 +29,11 @@ file_mounts:
 
 envs:
   # These env vars are required but should be passed in at launch time.
-  HF_TOKEN: ''
   START_IDX: ''
   END_IDX: ''
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 setup: |
   pip install numpy==1.26.4
