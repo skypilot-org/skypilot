@@ -9,8 +9,8 @@ import time
 from click import testing as cli_testing
 
 import sky
-from sky import cli
 from sky import exceptions
+from sky.client import cli
 from sky.utils import registry
 
 
