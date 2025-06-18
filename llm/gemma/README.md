@@ -30,7 +30,7 @@ For detailed installation instructions, please refer to the [installation guide]
 
 We can host the model with a single instance:
 ```bash
-HF_TOKEN="xxx" sky launch -c gemma serve.yaml --env HF_TOKEN
+HF_TOKEN=xxx sky launch -c gemma serve.yaml --secret HF_TOKEN
 ```
 
 After the cluster is launched, we can access the model with the following command:
@@ -69,7 +69,7 @@ curl http://$IP:8000/v1/chat/completions \
 
 Using the same YAML, we can easily scale the model serving across multiple instances, regions and clouds with SkyServe:
 ```bash
-HF_TOKEN="xxx" sky serve up -n gemma serve.yaml --env HF_TOKEN
+HF_TOKEN=xxx sky serve up -n gemma serve.yaml --secret HF_TOKEN
 ```
 
 > Notice the only change is from `sky launch` to `sky serve up`. The same YAML can be used without changes.
