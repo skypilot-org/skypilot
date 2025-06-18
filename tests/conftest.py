@@ -172,6 +172,12 @@ def pytest_addoption(parser):
         default='',
         help='Package name to use for Helm tests',
     )
+    parser.addoption('--jobs-consolidation',
+                     action='store_true',
+                     default=False,
+                     help='Enable consolidation mode in tests by overriding '
+                     'sky.jobs.utils.is_consolidation_mode to always return '
+                     'True.')
 
 
 def pytest_configure(config):
@@ -503,4 +509,21 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def override_consolidation_mode(request):
+    """Override sky.jobs.utils.is_consolidation_mode to always return True.
+
+    This is activated when tests are run with the --jobs-consolidation flag.
+    It forces consolidation mode regardless of the user configuration so that
+    smoke tests that rely on this behavior can be executed easily.
+    """
+    if not request.config.getoption('--jobs-consolidation'):
+        yield
+        return
+
+    import sky.jobs.utils as job_utils
+    job_utils.is_consolidation_mode = lambda: True
     yield
