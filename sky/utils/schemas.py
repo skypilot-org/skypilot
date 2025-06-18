@@ -909,32 +909,23 @@ def get_config_schema():
             },
             'autostop': _AUTOSTOP_SCHEMA,
         }
-        mutually_exclusive_check: dict = {}
         if add_consolidation_mode:
             controller_properties['consolidation_mode'] = {
                 'type': 'boolean',
                 'default': False,
             }
-            # Ensure users cannot specify both high_availability and
-            # consolidation_mode at the same time.
-            mutually_exclusive_check = _check_not_both_fields_present(
-                'high_availability', 'consolidation_mode')
-
-        # Schema for the controller section.
-        controller_schema: dict = {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': controller_properties,
-            **mutually_exclusive_check,
-        }
 
         return {
             'type': 'object',
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'controller': controller_schema,
+                'controller': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': controller_properties,
+                },
                 'bucket': {
                     'type': 'string',
                     'pattern': '^(https|s3|gs|r2|cos)://.+',
