@@ -1090,8 +1090,15 @@ def get_config_schema():
                         }
                     }
                 },
-                'local_kueue_name': {
-                    'type': 'string',
+                'kueue': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'local_queue_name': {
+                            'type': 'string',
+                        },
+                    },
                 },
             }
         },

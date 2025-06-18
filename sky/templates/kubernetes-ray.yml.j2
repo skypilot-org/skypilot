@@ -273,11 +273,11 @@ available_node_types:
             {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
             skypilot-binpack: "gpu"
             {% endif %}
-            {% if k8s_local_kueue_name %}
-            kueue.x-k8s.io/queue-name: {{k8s_local_kueue_name}}
+            {% if k8s_kueue_local_queue_name %}
+            kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% endif %}
-        {% if k8s_local_kueue_name %}
+        {% if k8s_kueue_local_queue_name %}
         annotations:
             kueue.x-k8s.io/retriable-in-group: "false"
             kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"

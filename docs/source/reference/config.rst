@@ -76,7 +76,8 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
-    :ref:`local_kueue_name <config-yaml-kubernetes-local-kueue-name>`: skypilot-local-queue
+    :ref:`kueue <config-yaml-kubernetes-kueue>`:
+      :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
 
   :ref:`ssh <config-yaml-ssh>`:
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
@@ -1079,12 +1080,19 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
-.. _config-yaml-kubernetes-local-kueue-name:
+.. _config-yaml-kubernetes-kueue:
 
-``kubernetes.local_kueue_name``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``kubernetes.kueue``
+~~~~~~~~~~~~~~~~~~~~~
 
-If using Kueue, name of the local queue to use for SkyPilot jobs.
+Kueue configuration (optional).
+
+.. _config-yaml-kubernetes-kueue-local-queue-name:
+
+``kubernetes.kueue.local_queue_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
 
 
 .. _config-yaml-ssh:

@@ -186,7 +186,8 @@ For the SkyPilot API server to submit jobs to a kueue, the following config shou
 .. code-block:: yaml
 
     kubernetes:
-      local_kueue_name: skypilot-local-queue
+      kueue:
+        local_queue_name: skypilot-local-queue
 
 The config above allows the API server to submit jobs using the local queue.
 
