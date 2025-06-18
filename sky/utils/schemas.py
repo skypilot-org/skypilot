@@ -1090,6 +1090,16 @@ def get_config_schema():
                         }
                     }
                 },
+                'kueue': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'local_queue_name': {
+                            'type': 'string',
+                        },
+                    },
+                },
             }
         },
         'ssh': {
