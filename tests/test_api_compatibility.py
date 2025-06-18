@@ -51,7 +51,7 @@ def check_api_version_compatibility() -> bool:
     return current_version == master_version
 
 
-def fetch_master_payloads_module():
+def fetch_master_payloads_module() -> Any:
     """Fetch and load the master branch payloads.py as a module."""
     # Download the master payloads.py file
     with urllib.request.urlopen(MASTER_PAYLOADS_URL) as response:
@@ -72,7 +72,7 @@ def fetch_master_payloads_module():
     return master_module
 
 
-def get_request_body_classes(module):
+def get_request_body_classes(module) -> Dict[str, Type]:
     """Get all request body classes from a module."""
     return {
         name: cls
@@ -316,7 +316,7 @@ class TestAPICompatibility:
     """Test API compatibility between current payloads.py and master branch payloads.py."""
 
     @pytest.mark.parametrize('model_name', REQUEST_BODIES)
-    def test_model_compatibility(self, model_name: str):
+    def test_model_compatibility(self, model_name: str) -> None:
         """Test that models from current payloads.py are compatible with master branch payloads.py."""
 
         # Fail if model doesn't exist in master (new model added locally - incompatible)
@@ -406,7 +406,7 @@ class TestAPICompatibility:
                         f"current={current_val} ({type(current_val)}) != master={master_val} ({type(master_val)})"
                     )
 
-    def test_no_models_removed(self):
+    def test_no_models_removed(self) -> None:
         """Test that no models were removed from the current version compared to master."""
 
         missing_models = set(MASTER_PAYLOADS_CLASSES.keys()) - set(
@@ -415,7 +415,7 @@ class TestAPICompatibility:
             pytest.fail(
                 f"Models removed from current version: {missing_models}")
 
-    def test_no_new_models_added(self):
+    def test_no_new_models_added(self) -> None:
         """Test that no new models were added locally (would break API compatibility)."""
 
         new_models = set(CURRENT_PAYLOADS_CLASSES.keys()) - set(
