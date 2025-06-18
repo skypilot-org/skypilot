@@ -2,12 +2,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-dcgm-grafana-dashboard
+  name: {{ .Release.Name }}-dcgm-skycluster-dashboard
   namespace: {{ .Release.Namespace }}
   labels:
     app: {{ .Release.Name }}-api
     grafana_dashboard: "true"
 data:
-  dcgm-grafana-dashboard.json: |
+  dcgm-skycluster-dashboard.json: |
 {{ .Files.Get "manifests/dcgm-cluster-filter-dashboard.json" | indent 4 }}
 {{- end }} 

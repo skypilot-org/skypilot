@@ -6,7 +6,7 @@ Monitoring Cluster-wide GPU Metrics
 SkyPilot provides native integration with Nvidia DCGM to surface 
 real-time GPU metrics directly in the SkyPilot dashboard. 
 
-.. image:: ../../../images/metrics/gpu-metrics.jpg
+.. image:: ../../../images/metrics/gpu-metrics.png
     :alt: GPU metrics dashboard
     :align: center
     :width: 80%
