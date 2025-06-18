@@ -93,6 +93,7 @@ class UserSignal(enum.Enum):
 # ====== internal functions ======
 def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
     """Terminate the cluster."""
+    from sky import core  # pylint: disable=import-outside-toplevel
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11
@@ -109,8 +110,7 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            request_id = sdk.down(cluster_name)
-            sdk.stream_and_get(request_id)
+            core.down(cluster_name)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
