@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import textwrap
@@ -60,6 +61,11 @@ class TestBackwardCompatibility:
     def _run_cmd(self, cmd: str):
         subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
 
+    def _is_git_sha(self, ref: str) -> bool:
+        """Check if the reference looks like a git SHA (commit hash)."""
+        # Git SHAs are hexadecimal strings, typically 7-40 characters long
+        return bool(re.match(r'^[0-9a-f]{7,40}$', ref.lower()))
+
     def _wait_for_managed_job_status(self, job_name: str,
                                      status: Sequence[sky.ManagedJobStatus]):
         return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -84,10 +90,31 @@ class TestBackwardCompatibility:
         if self.BASE_SKY_DIR.exists():
             self._run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
 
-        self._run_cmd(
-            f'git clone -b {base_branch} '
-            f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
-        )
+        install_from_pypi = base_branch.startswith('pypi/')
+        if install_from_pypi:
+            pypi_version = base_branch.split('/')[1]
+            pip_install_cmd = f'uv pip install "{pypi_version}[all]"'
+            self._run_cmd(f'mkdir -p {self.BASE_SKY_DIR}')
+            self._run_cmd(f'cp -r tests {self.BASE_SKY_DIR}/ && '
+                          f'cp -r examples {self.BASE_SKY_DIR}/')
+        else:
+            pip_install_cmd = 'uv pip install -e .[all]'
+
+            if self._is_git_sha(base_branch):
+                # For git SHA, clone first, fetch the specific commit, then checkout
+                self._run_cmd(
+                    f'git clone https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}'
+                )
+                self._run_cmd(
+                    f'cd {self.BASE_SKY_DIR} && '
+                    f'git fetch -v --prune -- origin {base_branch} && '
+                    f'git checkout -f {base_branch}')
+            else:
+                # For branch names, use -b flag
+                self._run_cmd(
+                    f'git clone -b {base_branch} '
+                    f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
+                )
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
@@ -100,7 +127,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
-            'uv pip install -e .[all]',)
+            f'{pip_install_cmd}')
 
         # Install current version in current environment
         self._run_cmd(
