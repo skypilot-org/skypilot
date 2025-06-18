@@ -45,6 +45,45 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+def _maybe_upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
+    """Maybe upload files to the controller.
+
+    In consolidation mode, we don't need to upload files to the controller as
+    the API server and the controller are colocated.
+    """
+    local_to_controller_file_mounts: Dict[str, str] = {}
+
+    if managed_job_utils.is_consolidation_mode():
+        return local_to_controller_file_mounts
+
+    if storage_lib.get_cached_enabled_storage_cloud_names_or_refresh():
+        for task_ in dag.tasks:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task_, task_type='jobs')
+    else:
+        # We do not have any cloud storage available, so fall back to
+        # two-hop file_mount uploading.
+        # Note: we can't easily hack sync_storage_mounts() to upload
+        # directly to the controller, because the controller may not
+        # even be up yet.
+        for task_ in dag.tasks:
+            if task_.storage_mounts:
+                # Technically, we could convert COPY storage_mounts that
+                # have a local source and do not specify `store`, but we
+                # will not do that for now. Only plain file_mounts are
+                # supported.
+                raise exceptions.NotSupportedError(
+                    'Cloud-based file_mounts are specified, but no cloud '
+                    'storage is available. Please specify local '
+                    'file_mounts only.')
+
+            # Merge file mounts from all tasks.
+            local_to_controller_file_mounts.update(
+                controller_utils.translate_local_file_mounts_to_two_hop(task_))
+
+    return local_to_controller_file_mounts
+
+
 @timeline.event
 @usage_lib.entrypoint
 def launch(
@@ -182,34 +221,7 @@ def launch(
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
 
-        local_to_controller_file_mounts = {}
-
-        if storage_lib.get_cached_enabled_storage_cloud_names_or_refresh():
-            for task_ in dag.tasks:
-                controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                    task_, task_type='jobs')
-
-        else:
-            # We do not have any cloud storage available, so fall back to
-            # two-hop file_mount uploading.
-            # Note: we can't easily hack sync_storage_mounts() to upload
-            # directly to the controller, because the controller may not
-            # even be up yet.
-            for task_ in dag.tasks:
-                if task_.storage_mounts:
-                    # Technically, we could convert COPY storage_mounts that
-                    # have a local source and do not specify `store`, but we
-                    # will not do that for now. Only plain file_mounts are
-                    # supported.
-                    raise exceptions.NotSupportedError(
-                        'Cloud-based file_mounts are specified, but no cloud '
-                        'storage is available. Please specify local '
-                        'file_mounts only.')
-
-                # Merge file mounts from all tasks.
-                local_to_controller_file_mounts.update(
-                    controller_utils.translate_local_file_mounts_to_two_hop(
-                        task_))
+    local_to_controller_file_mounts = _maybe_upload_files_to_controller(dag)
 
     # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
