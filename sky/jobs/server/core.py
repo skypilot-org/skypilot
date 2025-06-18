@@ -312,8 +312,7 @@ def launch(
                                             _disable_controller_check=True)
                 # Manually launch the scheduler process in consolidation mode.
                 local_handle = backend_utils.is_controller_accessible(
-                    controller=controller_utils.Controllers.JOBS_CONTROLLER,
-                    stopped_message='')
+                    controller=controller, stopped_message='')
                 backend = backend_utils.get_backend_from_handle(local_handle)
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 backend.sync_file_mounts(
@@ -330,12 +329,16 @@ def launch(
                     for k, v in controller_task.envs.items()
                 ]
                 run_script = '\n'.join(env_cmds + [run_script])
-                # For high availability recovery.
-                dump_script_path = managed_job_utils.get_ha_dump_script_path(
-                    consolidation_mode_job_id)
-                dump_script_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(dump_script_path, 'w', encoding='utf-8') as script_f:
-                    script_f.write(run_script)
+                # High availability recovery.
+                if controller_utils.high_availability_specified(
+                        controller_name):
+                    dump_script_path = (
+                        managed_job_utils.get_ha_dump_script_path(
+                            consolidation_mode_job_id))
+                    dump_script_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(dump_script_path, 'w',
+                              encoding='utf-8') as script_f:
+                        script_f.write(run_script)
                 backend.run_on_head(local_handle, run_script)
                 return consolidation_mode_job_id, local_handle
 
