@@ -86,7 +86,8 @@ so they won't be visible to other users in your team sharing the same
 .. tip::
 
   You do not need to pass the value directly such as ``--secret
-  WANDB_API_KEY=1234``. When the value is not specified (e.g., ``--secret WANDB_API_KEY``),
+  WANDB_API_KEY=1234`` or ``--env BATCH_SIZE=32``. When the value is not specified
+  (e.g., ``--secret WANDB_API_KEY`` or ``--env BATCH_SIZE``),
   SkyPilot reads it from local environment variables.
 
 
