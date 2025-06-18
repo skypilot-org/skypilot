@@ -7,23 +7,24 @@ from unittest.mock import patch
 import pytest
 
 from sky.client.cli import command
+from sky.client.cli import flags
 
 
 def test_parse_secret_var_with_equals():
     """Test parsing secret vars with KEY=VALUE format."""
-    result = command._parse_secret_var('API_KEY=secret123')
+    result = flags._parse_secret_var('API_KEY=secret123')
     assert result == ('API_KEY', 'secret123')
 
-    result = command._parse_secret_var(
+    result = flags._parse_secret_var(
         'DATABASE_URL=postgresql://user:pass@host:5432/db')
     assert result == ('DATABASE_URL', 'postgresql://user:pass@host:5432/db')
 
     # Test with multiple equals signs (only split on first one)
-    result = command._parse_secret_var('JWT_SECRET=secret=with=equals')
+    result = flags._parse_secret_var('JWT_SECRET=secret=with=equals')
     assert result == ('JWT_SECRET', 'secret=with=equals')
 
     # Test with empty value
-    result = command._parse_secret_var('EMPTY_SECRET=')
+    result = flags._parse_secret_var('EMPTY_SECRET=')
     assert result == ('EMPTY_SECRET', '')
 
 
@@ -31,14 +32,14 @@ def test_parse_secret_var_from_environment():
     """Test parsing secret vars that reference local environment."""
     # Test with environment variable that exists
     with patch.dict(os.environ, {'TEST_SECRET': 'env_secret_value'}):
-        result = command._parse_secret_var('TEST_SECRET')
+        result = flags._parse_secret_var('TEST_SECRET')
         assert result == ('TEST_SECRET', 'env_secret_value')
 
     # Test with environment variable that doesn't exist
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(Exception,
                            match='TEST_SECRET is not set in local environment'):
-            command._parse_secret_var('TEST_SECRET')
+            flags._parse_secret_var('TEST_SECRET')
 
 
 def test_parse_secret_var_error_cases():
@@ -47,7 +48,7 @@ def test_parse_secret_var_error_cases():
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(Exception,
                            match='NONEXISTENT is not set in local environment'):
-            command._parse_secret_var('NONEXISTENT')
+            flags._parse_secret_var('NONEXISTENT')
 
 
 def test_make_task_with_secrets_override():
