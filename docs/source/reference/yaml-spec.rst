@@ -39,6 +39,7 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
+    :ref:`network_tier <yaml-spec-resources-network-tier>`: best
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
@@ -443,6 +444,33 @@ OR
 
   resources:
     disk_tier: best
+
+
+.. _yaml-spec-resources-network-tier:
+
+``resources.network_tier``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Network tier to use (optional).
+
+Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
+
+If ``'best'`` is specified, use the best network tier available on the specified instance. This can enable features like:
+
+- **GCP**: Premium networking for better performance and lower latency
+- **Nebius**: InfiniBand support for high-performance GPU communication
+- **Kubernetes**: Enhanced networking capabilities
+
+.. code-block:: yaml
+
+  resources:
+    network_tier: standard
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    network_tier: best
 
 
 .. _yaml-spec-resources-ports:
