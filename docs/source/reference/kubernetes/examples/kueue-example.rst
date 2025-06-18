@@ -66,11 +66,11 @@ This should output:
     ...
     - pod
 
-(Optional) Patch Kueue to support all or nothing scheduling
+(Optional) Patch Kueue to support gang scheduling
 -----------------------------------------------------------
 
 Kueue optionally supports `all or nothing scheduling <https://kueue.sigs.k8s.io/docs/tasks/manage/setup_wait_for_pods_ready/#enabling-waitforpodsready>`_ (gang scheduling) of pods.
-The Kueue config needs to be patched to support all or nothing scheduling.
+The Kueue config needs to be patched to support gang scheduling. This is especially useful for multinode workloads such as distributed training. 
 
 .. code-block:: bash
 
