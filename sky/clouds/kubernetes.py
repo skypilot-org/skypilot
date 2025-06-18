@@ -8,7 +8,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
-import requests
 
 from sky import catalog
 from sky import clouds
@@ -655,13 +654,16 @@ class Kubernetes(clouds.Cloud):
         # k8s_resource_key is properly saved
         cluster_type = self._detect_cluster_type(
             region.name if region else 'default')
-        tcpx_enabled = (cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
-        if (tcpx_enabled and k8s_resource_key is not None and 
-            k8s_resource_key == kubernetes_utils.get_gpu_resource_key()):
-            # Extract nvidia GPU resources from k8s_resource_key and move to TCPX daemon
+        tcpx_enabled = (
+            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+        if (tcpx_enabled and k8s_resource_key is not None and
+                k8s_resource_key == kubernetes_utils.get_gpu_resource_key()):
+            # Extract nvidia GPU resources from
+            # k8s_resource_key and move to TCPX daemon
             k8s_tcpx_resource_key = k8s_resource_key
             k8s_tcpx_accelerator_count = str(acc_count)
-            # Remove GPU resources from ray-node by setting k8s_resource_key to None
+            # Remove GPU resources from ray-node by setting
+            # k8s_resource_key to None
             k8s_resource_key = None
         else:
             # Normal case: no TCPX GPU extraction needed
@@ -672,7 +674,7 @@ class Kubernetes(clouds.Cloud):
         # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
-            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
+            # Only proceed if CUSTOM_NETWOgRK_TIER is supported by this cluster
             unsupported_features = self._unsupported_features_for_resources(
                 resources)
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
