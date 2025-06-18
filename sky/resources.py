@@ -830,8 +830,9 @@ class Resources:
         if priority is not None:
             if not constants.MIN_PRIORITY <= priority <= constants.MAX_PRIORITY:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Priority must be between {constants.MIN_PRIORITY} and'
-                                     f' {constants.MAX_PRIORITY}. Found: {priority}')
+                    raise ValueError(
+                        f'Priority must be between {constants.MIN_PRIORITY} and'
+                        f' {constants.MAX_PRIORITY}. Found: {priority}')
         self._priority = priority
 
     def _set_volumes(
