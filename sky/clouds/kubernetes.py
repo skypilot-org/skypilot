@@ -31,11 +31,7 @@ from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
-    import yaml
-
     from sky import resources as resources_lib
-else:
-    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -101,10 +97,6 @@ class KubernetesHighPerformanceNetworkType(Enum):
         """Check if this cluster type requires TCPXO daemon."""
         return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
 
-
-# Check if KUBECONFIG is set, and use it if it is.
-DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
-CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
@@ -674,7 +666,7 @@ class Kubernetes(clouds.Cloud):
         # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
-            # Only proceed if CUSTOM_NETWOgRK_TIER is supported by this cluster
+            # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
             unsupported_features = self._unsupported_features_for_resources(
                 resources)
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
