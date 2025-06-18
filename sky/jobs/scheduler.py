@@ -93,8 +93,8 @@ def _start_controller(job_id: int, dag_yaml_path: str,
                           f'{dag_yaml_path} --job-id {job_id};')
 
     # If the command line here is changed, please also update
-    # utils._controller_process_alive. `--job-id X` should be at
-    # the end.
+    # utils._controller_process_alive. The substring `--job-id X`
+    # should be in the command.
     run_cmd = (f'{activate_python_env_cmd}'
                f'{source_environment_cmd}'
                f'{run_controller_cmd}')
