@@ -3767,7 +3767,7 @@ def jobs():
     type=click.IntRange(constants.MIN_PRIORITY, constants.MAX_PRIORITY),
     default=None,
     show_default=True,
-    help=f'Job priority ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
+    help=f'Job priority from ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
     f' Default: {constants.DEFAULT_PRIORITY}.')
 @click.option(
     '--detach-run',

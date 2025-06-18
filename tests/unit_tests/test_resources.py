@@ -894,11 +894,12 @@ def test_priority_basic():
 def test_priority_validation():
     """Test priority field validation with invalid values."""
     # Test invalid priority - below range
-    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
-        Resources(priority=-1)
+    error_message = f'Priority must be between {constants.MIN_PRIORITY} and {constants.MAX_PRIORITY}'
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=-1001)
 
     # Test invalid priority - above range
-    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
+    with pytest.raises(ValueError, match=error_message):
         Resources(priority=1001)
 
 
