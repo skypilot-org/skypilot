@@ -915,7 +915,7 @@ def _create_ray_job_submission_client():
 
 
 def _make_ray_job_id(sky_job_id: int) -> str:
-    return f'{sky_job_id}-{common_utils.get_current_user().name}'
+    return f'{sky_job_id}-{common_utils.get_current_user_name()}'
 
 
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],

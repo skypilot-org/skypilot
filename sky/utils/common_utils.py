@@ -2,6 +2,7 @@
 
 import difflib
 import functools
+import getpass
 import hashlib
 import inspect
 import io
@@ -298,6 +299,13 @@ def get_current_user() -> 'models.User':
     return models.User.get_current_user()
 
 
+def get_current_user_name() -> str:
+    """Returns the current user name."""
+    name = common_utils.get_current_user().name
+    assert name is not None
+    return name
+
+
 def set_current_user(user: 'models.User'):
     """Sets the current user."""
     global _current_user
@@ -439,7 +447,8 @@ def user_and_hostname_hash() -> str:
     thus changing the SG name makes these clusters unrecognizable.
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    return f'{common_utils.get_current_user().name}-{hostname_hash}'
+    username = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
+    return f'{username}-{hostname_hash}'
 
 
 def read_yaml(path: Optional[str]) -> Dict[str, Any]:
@@ -754,8 +763,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or common_utils.get_current_user().name
-    assert username is not None
+    username = username or common_utils.get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
