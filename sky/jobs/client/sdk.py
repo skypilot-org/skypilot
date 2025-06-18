@@ -7,6 +7,7 @@ import webbrowser
 import click
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
@@ -68,32 +69,35 @@ def launch(
     """
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        if _need_confirmation:
-            request_id = sdk.optimize(dag)
-            sdk.stream_and_get(request_id)
-            prompt = f'Launching a managed job {dag.name!r}. Proceed?'
-            if prompt is not None:
-                click.confirm(prompt,
-                              default=True,
-                              abort=True,
-                              show_default=True)
+    # Apply the client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag, at_client_side=True)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = sdk.validate(dag)
+    if _need_confirmation:
+        if dag_id is not None:
+            request_id = sdk.optimize(dag_id=dag_id)
+        else:
+            request_id = sdk.optimize(dag=dag)
+        sdk.stream_and_get(request_id)
+        prompt = f'Launching a managed job {dag.name!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-        body = payloads.JobsLaunchBody(
-            task=dag_str,
-            name=name,
-        )
-        response = requests.post(
-            f'{server_common.get_server_url()}/jobs/launch',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
-        return server_common.get_request_id(response)
+    client_common.upload_mounts_to_api_server(upload_list)
+    body = payloads.JobsLaunchBody(name=name,)
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
+        body.task = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    response = requests.post(
+        f'{server_common.get_server_url()}/jobs/launch',
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
+        timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
+    )
+    return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint

@@ -5,6 +5,7 @@ from typing import List, Optional, Union
 
 import click
 
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
@@ -58,33 +59,38 @@ def up(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
-        if _need_confirmation:
-            prompt = f'Launching a new service {service_name!r}. Proceed?'
-            if prompt is not None:
-                click.confirm(prompt,
-                              default=True,
-                              abort=True,
-                              show_default=True)
+    # Apply the client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag, at_client_side=True)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = sdk.validate(dag)
+    if dag_id is not None:
+        request_id = sdk.optimize(dag_id=dag_id)
+    else:
+        request_id = sdk.optimize(dag=dag)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
+    sdk.stream_and_get(request_id)
+    if _need_confirmation:
+        prompt = f'Launching a new service {service_name!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    client_common.upload_mounts_to_api_server(upload_list)
+
+    body = payloads.ServeUpBody(service_name=service_name,)
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-
-        body = payloads.ServeUpBody(
-            task=dag_str,
-            service_name=service_name,
-        )
-        response = requests.post(
-            f'{server_common.get_server_url()}/serve/up',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
-        return server_common.get_request_id(response)
+        body.task = dag_str
+    response = requests.post(
+        f'{server_common.get_server_url()}/serve/up',
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
+        timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
+    )
+    return server_common.get_request_id(response)
 
 
 @context.contextual
@@ -121,32 +127,41 @@ def update(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
-        if _need_confirmation:
-            click.confirm(f'Updating service {service_name!r}. Proceed?',
-                          default=True,
-                          abort=True,
-                          show_default=True)
+    # Apply client-side admin policy.
+    dag, config = admin_policy_utils.apply(dag, at_client_side=True)
+    dag, upload_list = client_common.prepare_upload_mounts_to_api_server(dag)
+    with skypilot_config.replace_skypilot_config(config):
+        # Validate the dag, server-side policy will be applied here if any.
+        dag_id = sdk.validate(dag)
+    if dag_id is not None:
+        request_id = sdk.optimize(dag_id=dag_id)
+    else:
+        request_id = sdk.optimize(dag=dag)
+    sdk.stream_and_get(request_id)
+    if _need_confirmation:
+        click.confirm(f'Updating service {service_name!r}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
+    client_common.upload_mounts_to_api_server(upload_list)
+    body = payloads.ServeUpdateBody(
+        service_name=service_name,
+        mode=mode,
+    )
+    if dag_id is not None:
+        body.dag_id = dag_id
+    else:
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-        body = payloads.ServeUpdateBody(
-            task=dag_str,
-            service_name=service_name,
-            mode=mode,
-        )
+        body.task = dag_str
 
-        response = requests.post(
-            f'{server_common.get_server_url()}/serve/update',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
-        return server_common.get_request_id(response)
+    response = requests.post(
+        f'{server_common.get_server_url()}/serve/update',
+        json=json.loads(body.model_dump_json(exclude_unset=True)),
+        timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
+    )
+    return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint

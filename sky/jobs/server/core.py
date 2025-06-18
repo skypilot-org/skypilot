@@ -24,9 +24,9 @@ from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
-from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
@@ -49,6 +49,7 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
+    config: Optional[config_utils.Config] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -59,6 +60,8 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
+        stream_logs: Whether to stream logs to the console.
+        config: The skypilot config to use for the launch request, if any.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -77,10 +80,6 @@ def launch(
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    # Always apply the policy again here, even though it might have been applied
-    # in the CLI. This is to ensure that we apply the policy to the final DAG
-    # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(dag)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -209,6 +208,10 @@ def launch(
                     controller_utils.translate_local_file_mounts_to_two_hop(
                         task_))
 
+    if config is not None:
+        controller_config = config
+    else:
+        controller_config = skypilot_config.get_server_config()
     # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f, \
@@ -250,7 +253,7 @@ def launch(
                 # TODO(aylei): the mutated config will not be updated
                 # afterwards without recreate the controller. Need to
                 # revisit this.
-                local_user_config=mutated_user_config,
+                local_user_config=controller_config,
             ),
         }
 

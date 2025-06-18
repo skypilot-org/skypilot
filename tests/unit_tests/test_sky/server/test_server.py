@@ -10,10 +10,10 @@ import fastapi
 import pytest
 import uvicorn
 
+from sky import dag as dag_lib
 from sky.server import server
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import context
 
 
 @mock.patch('uvicorn.run')
@@ -106,7 +106,8 @@ def test_no_deploy_flag_uses_default_workers(mock_executor_start,
 @pytest.mark.asyncio
 async def test_validate():
     """Test the validate endpoint."""
-    mock_dag = mock.MagicMock()
+    mock_dag = dag_lib.Dag()
+    mock_dag.name = "test"
     mock_validate_body = mock.MagicMock()
     mock_validate_body.dag = 'test_dag_yaml'
     mock_validate_body.request_options = {}

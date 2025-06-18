@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
-from sky import admin_policy
 from sky import backends
 from sky import catalog
 from sky import check as sky_check
@@ -29,9 +28,9 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
-from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -51,22 +50,24 @@ logger = sky_logging.init_logger(__name__)
 
 @usage_lib.entrypoint
 def optimize(
-    dag: 'dag_lib.Dag',
+    dag: Optional['dag_lib.Dag'] = None,
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     blocked_resources: Optional[List['resources_lib.Resources']] = None,
     quiet: bool = False,
-    request_options: Optional[admin_policy.RequestOptions] = None
+    config: Optional[config_utils.Config] = None,
 ) -> 'dag_lib.Dag':
     """Finds the best execution plan for the given DAG.
 
     Args:
-        dag: the DAG to optimize.
+        dag: an DAG literal to optimize, mutually exclusive with dag_id.
         minimize: whether to minimize cost or time.
         blocked_resources: a list of resources that should not be used.
         quiet: whether to suppress logging.
         request_options: Request options used in enforcing admin policies.
             This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+        config: a config to replace the current skypilot config for current
+            request, if any.
     Returns:
         The optimized DAG.
 
@@ -75,12 +76,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    # TODO: We apply the admin policy only on the first DAG optimization which
-    # is shown on `sky launch`. The optimizer is also invoked during failover,
-    # but we do not apply the admin policy there. We should apply the admin
-    # policy in the optimizer, but that will require some refactoring.
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options) as dag:
+    with skypilot_config.replace_skypilot_config(config):
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
