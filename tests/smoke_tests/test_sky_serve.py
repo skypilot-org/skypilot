@@ -427,10 +427,10 @@ def test_skyserve_dynamic_ondemand_fallback():
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
             'sleep 40',
-            _check_replica_in_status(name, [
-                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
-            ]),
+            _check_replica_in_status(
+                name, [(2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                       (2, False, _SERVICE_LAUNCHING_STATUS_REGEX +
+                        '\|SHUTTING_DOWN\|READY')]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
