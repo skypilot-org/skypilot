@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from sky import cli
+from sky.client import cli
 
 
 def test_parse_secret_var_with_equals():
@@ -222,7 +222,7 @@ def test_null_secrets_override_with_cli():
 
     import yaml
 
-    from sky.cli import _make_task_or_dag_from_entrypoint_with_overrides
+    from sky.client.cli import _make_task_or_dag_from_entrypoint_with_overrides
 
     # Create YAML with null secrets
     yaml_content = {
@@ -271,7 +271,7 @@ def test_null_secrets_without_cli_override_fails():
     import pytest
     import yaml
 
-    from sky.cli import _make_task_or_dag_from_entrypoint_with_overrides
+    from sky.client.cli import _make_task_or_dag_from_entrypoint_with_overrides
 
     # Create YAML with null secrets
     yaml_content = {
@@ -304,7 +304,7 @@ def test_mixed_null_and_non_null_secrets():
 
     import yaml
 
-    from sky.cli import _make_task_or_dag_from_entrypoint_with_overrides
+    from sky.client.cli import _make_task_or_dag_from_entrypoint_with_overrides
 
     # Create YAML with mixed secrets
     yaml_content = {
@@ -345,7 +345,7 @@ def test_cli_override_non_null_secrets():
 
     import yaml
 
-    from sky.cli import _make_task_or_dag_from_entrypoint_with_overrides
+    from sky.client.cli import _make_task_or_dag_from_entrypoint_with_overrides
 
     # Create YAML with non-null secrets
     yaml_content = {

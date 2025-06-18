@@ -28,6 +28,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -659,6 +660,12 @@ def write_cluster_config(
                 excluded_clouds.add(cloud_obj)
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+
+    logging_agent = logs.get_logging_agent()
+    if logging_agent:
+        for k, v in logging_agent.get_credential_file_mounts().items():
+            assert k not in credentials, f'{k} already in credentials'
+            credentials[k] = v
 
     private_key_path, _ = auth.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}

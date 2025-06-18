@@ -1380,6 +1380,35 @@ def get_config_schema():
         }
     }
 
+    logs_schema = {
+        'type': 'object',
+        'required': ['store'],
+        'additionalProperties': False,
+        'properties': {
+            'store': {
+                'type': 'string',
+                'case_insensitive_enum': ['gcp'],
+            },
+            'gcp': {
+                'type': 'object',
+                'properties': {
+                    'project_id': {
+                        'type': 'string',
+                    },
+                    'credentials_file': {
+                        'type': 'string',
+                    },
+                    'additional_labels': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(
@@ -1412,6 +1441,7 @@ def get_config_schema():
             'workspaces': workspaces_schema,
             'provision': provision_configs,
             'rbac': rbac_schema,
+            'logs': logs_schema,
             **cloud_configs,
         },
     }
