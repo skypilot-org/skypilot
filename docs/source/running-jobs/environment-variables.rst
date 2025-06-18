@@ -48,7 +48,7 @@ You can specify environment variables and secrets to be made available to a task
     MYVAR=val
     LEARNING_RATE=1e-4
 
-The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via bash ``${MYVAR}`` syntax.
+The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the bash syntax ``${MYVAR}``.
 
 .. _passing-secrets:
 
