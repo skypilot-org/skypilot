@@ -5,7 +5,7 @@ import requests
 
 from sky import clouds
 from sky import server
-from sky.client import cli
+from sky.client.cli import command
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -50,61 +50,62 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda --all
         """
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.show_gpus, [])
+        result = cli_runner.invoke(command.show_gpus, [])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['--all'])
+        result = cli_runner.invoke(command.show_gpus, ['--all'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['V100:4'])
+        result = cli_runner.invoke(command.show_gpus, ['V100:4'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, [':4'])
+        result = cli_runner.invoke(command.show_gpus, [':4'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['V100:0'])
+        result = cli_runner.invoke(command.show_gpus, ['V100:0'])
         assert isinstance(result.exception, SystemExit)
 
-        result = cli_runner.invoke(cli.show_gpus, ['V100:-2'])
+        result = cli_runner.invoke(command.show_gpus, ['V100:-2'])
         assert isinstance(result.exception, SystemExit)
 
-        result = cli_runner.invoke(cli.show_gpus,
+        result = cli_runner.invoke(command.show_gpus,
                                    ['--cloud', 'aws', '--region', 'us-west-1'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['--infra', 'aws/us-west-1'])
+        result = cli_runner.invoke(command.show_gpus,
+                                   ['--infra', 'aws/us-west-1'])
         assert not result.exit_code
 
         for cloud in CLOUDS_TO_TEST:
-            result = cli_runner.invoke(cli.show_gpus, ['--infra', cloud])
+            result = cli_runner.invoke(command.show_gpus, ['--infra', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(cli.show_gpus,
+            result = cli_runner.invoke(command.show_gpus,
                                        ['--cloud', cloud, '--all'])
             assert not result.exit_code
 
-            result = cli_runner.invoke(cli.show_gpus,
+            result = cli_runner.invoke(command.show_gpus,
                                        ['V100', '--cloud', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(cli.show_gpus,
+            result = cli_runner.invoke(command.show_gpus,
                                        ['V100:4', '--cloud', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(cli.show_gpus,
+            result = cli_runner.invoke(command.show_gpus,
                                        ['V100:4', '--cloud', cloud, '--all'])
             assert isinstance(result.exception, SystemExit)
 
     def test_k8s_alias_check(self):
         cli_runner = cli_testing.CliRunner()
 
-        result = cli_runner.invoke(cli.check, ['k8s'])
+        result = cli_runner.invoke(command.check, ['k8s'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.check, ['kubernetes'])
+        result = cli_runner.invoke(command.check, ['kubernetes'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.check, ['notarealcloud'])
+        result = cli_runner.invoke(command.check, ['notarealcloud'])
         assert isinstance(result.exception, ValueError)
 
 
@@ -116,7 +117,7 @@ class TestServerVersion:
         monkeypatch.setattr(server.constants, 'API_VERSION', 3)
         cli_runner = cli_testing.CliRunner()
 
-        result = cli_runner.invoke(cli.status, [])
+        result = cli_runner.invoke(command.status, [])
         assert "Client and local API server version mismatch" in str(
             result.exception)
         assert result.exit_code == 1
@@ -127,7 +128,7 @@ class TestServerVersion:
         monkeypatch.setattr(server.constants, 'API_VERSION', 2)
         cli_runner = cli_testing.CliRunner()
 
-        result = cli_runner.invoke(cli.status, [])
+        result = cli_runner.invoke(command.status, [])
 
         # Verify the error message contains correct versions
         assert "Client and local API server version mismatch" in str(
@@ -185,7 +186,8 @@ class TestHelperFunctions:
             mock_list_cluster_names)
 
         # Test case 1: Get records for specific clusters
-        records = cli._get_cluster_records_and_set_ssh_config(['test-cluster'])
+        records = command._get_cluster_records_and_set_ssh_config(
+            ['test-cluster'])
         assert records == mock_records
         mock_add_cluster.assert_called_once_with('test-cluster', ['1.2.3.4'], {
             'ssh_user': 'ubuntu',
@@ -199,8 +201,8 @@ class TestHelperFunctions:
         mock_remove_cluster.reset_mock()
 
         # Test case 2: Get records for all users
-        records = cli._get_cluster_records_and_set_ssh_config(None,
-                                                              all_users=True)
+        records = command._get_cluster_records_and_set_ssh_config(
+            None, all_users=True)
         assert records == mock_records
         mock_add_cluster.assert_called_once()
         # Should remove old-cluster since it's not in the returned records
@@ -211,7 +213,8 @@ class TestHelperFunctions:
         monkeypatch.setattr('sky.client.sdk.stream_and_get',
                             lambda *args, **kwargs: mock_records_no_handle)
 
-        records = cli._get_cluster_records_and_set_ssh_config(['test-cluster'])
+        records = command._get_cluster_records_and_set_ssh_config(
+            ['test-cluster'])
         assert records == mock_records_no_handle
         # Should remove the cluster from SSH config since it has no handle
         mock_remove_cluster.assert_called_with('test-cluster')
@@ -241,7 +244,8 @@ class TestHelperFunctions:
                             lambda: server_url)
         monkeypatch.setattr('sky.client.sdk.stream_and_get',
                             lambda *args, **kwargs: mock_records_kubernetes)
-        records = cli._get_cluster_records_and_set_ssh_config(['test-cluster'])
+        records = command._get_cluster_records_and_set_ssh_config(
+            ['test-cluster'])
         assert records == mock_records_kubernetes
         mock_add_cluster.assert_called_once()
         added_cluster_args = mock_add_cluster.call_args
