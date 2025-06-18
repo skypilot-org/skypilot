@@ -14,7 +14,6 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
