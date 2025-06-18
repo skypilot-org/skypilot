@@ -442,10 +442,11 @@ def test_skyserve_dynamic_ondemand_fallback():
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -q "1/3"',
-            _check_replica_in_status(
-                name, [(1, True, 'READY'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            _check_replica_in_status(name, [
+                (1, True, 'READY'),
+                (1, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+            ]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
