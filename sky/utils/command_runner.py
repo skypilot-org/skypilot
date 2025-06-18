@@ -184,7 +184,6 @@ class CommandRunner:
         separate_stderr: bool,
         skip_num_lines: int,
         source_bashrc: bool = False,
-        return_list: bool = False,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -226,9 +225,8 @@ class CommandRunner:
                 '; exit ${PIPESTATUS[0]}'
             ]
 
-        if return_list:
-            return command
-        return ' '.join(command)
+        command_str = ' '.join(command)
+        return command_str
 
     def _rsync(
             self,
@@ -1013,17 +1011,17 @@ class LocalProcessCommandRunner(CommandRunner):
         """Use subprocess to run the command."""
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
-        command = self._get_command_to_run(cmd,
-                                           process_stream,
-                                           separate_stderr,
-                                           skip_num_lines=skip_num_lines,
-                                           source_bashrc=source_bashrc,
-                                           return_list=True)
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_num_lines=skip_num_lines,
+                                               source_bashrc=source_bashrc)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
 
         executable = None
+        command = [command_str]
         if not process_stream:
             if stream_logs:
                 command += [
