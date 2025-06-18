@@ -1546,13 +1546,8 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all clusters, including those not owned by the '
-              'current user.')
+@flags.all_users_option('Show all clusters, including those not owned by the '
+                        'current user.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
@@ -1870,12 +1865,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 @cli.command()
 @flags.config_option(expose_value=False)
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all users\' information in full.')
+@flags.all_users_option('Show all users\' information in full.')
 @click.option('--skip-finished',
               '-s',
               default=False,
@@ -2075,12 +2065,8 @@ def logs(
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_option('Cancel all jobs from current user on the specified cluster.')
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel all jobs on the specified cluster for all users.')
+@flags.all_users_option(
+    'Cancel all jobs on the specified cluster for all users.')
 @flags.yes_option()
 @_add_click_options(flags.COMMON_OPTIONS)
 @click.argument('jobs', required=False, type=int, nargs=-1)
@@ -2168,11 +2154,7 @@ def cancel(
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_option('Stop all existing clusters.')
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              help='Stop all existing clusters for all users.')
+@flags.all_users_option('Stop all existing clusters for all users.')
 @flags.yes_option()
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
@@ -2227,11 +2209,7 @@ def stop(
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_option('Autostop all existing clusters.')
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              help='Autostop all existing clusters for all users.')
+@flags.all_users_option('Autostop all existing clusters for all users.')
 @click.option('--idle-minutes',
               '-i',
               type=int,
@@ -2567,11 +2545,7 @@ def start(
                 required=False,
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_option('Tear down all existing clusters.')
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              help='Tear down all existing clusters for all users.')
+@flags.all_users_option('Tear down all existing clusters for all users.')
 @flags.yes_option()
 @click.option(
     '--purge',
@@ -3932,12 +3906,7 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show jobs from all users.')
+@flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -4030,12 +3999,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
-@click.option('--all-users',
-              '-u',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Cancel all managed jobs from all users.')
+@flags.all_users_option('Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
@@ -5080,12 +5044,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 @flags.config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @flags.all_option('Cancel all your requests.')
-@click.option('--all-users',
-              '-u',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Cancel all requests from all users.')
+@flags.all_users_option('Cancel all requests from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
