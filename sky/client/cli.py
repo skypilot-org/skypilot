@@ -1604,7 +1604,7 @@ def _handle_jobs_queue_request(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.get(request_id)
+        managed_jobs_ = sdk.stream_and_get(request_id)
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
