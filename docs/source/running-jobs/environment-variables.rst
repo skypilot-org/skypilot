@@ -13,7 +13,7 @@ In addition to :ref:`User-specified environment variables and secrets <user-spec
 User-specified environment variables and secrets
 ------------------------------------------------------------------
 
-User-specified environment variables are useful for passing secrets and any arguments or configuration needed for your tasks.
+User can specify either environment variables (for non-sensitive configuration values) or secrets needed for your tasks:
 
 - Environment variables are available in ``file_mounts``, ``setup``, and ``run``.
 - Secrets are available in ``setup`` and ``run``.
@@ -47,7 +47,7 @@ You can specify environment variables and secrets to be made available to a task
     MYVAR=val
     LEARNING_RATE=1e-4
 
-The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via bash ``${MYVAR}`` syntax.
+The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the bash syntax ``${MYVAR}``.
 
 .. _passing-secrets:
 
@@ -56,8 +56,9 @@ Passing secrets
 
 We recommend passing secrets to any node(s) executing your task by first making
 it available in your current shell, then using ``--secret SECRET`` to pass it to SkyPilot.
-With ``secrets``, the values will be redacted in the :ref:`SkyPilot dashboard <dashboard>`,
-so that it won't be leaked to the other users in your team sharing the same
+
+All secret values are redacted in the :ref:`SkyPilot dashboard <dashboard>`,
+so they won't be visible to other users in your team sharing the same
 :ref:`SkyPilot API server <sky-api-server>`.
 
 .. code-block:: console
