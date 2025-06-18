@@ -877,14 +877,14 @@ def test_priority_basic():
     assert r.priority is None
 
     # Test with valid priority values
-    r = Resources(priority=0)
-    assert r.priority == 0
+    r = Resources(priority=constants.MIN_PRIORITY)
+    assert r.priority == constants.MIN_PRIORITY
 
-    r = Resources(priority=500)
-    assert r.priority == 500
+    r = Resources(priority=constants.DEFAULT_PRIORITY)
+    assert r.priority == constants.DEFAULT_PRIORITY
 
-    r = Resources(priority=1000)
-    assert r.priority == 1000
+    r = Resources(priority=constants.MAX_PRIORITY)
+    assert r.priority == constants.MAX_PRIORITY
 
     # Test with None explicitly
     r = Resources(priority=None)
@@ -896,11 +896,11 @@ def test_priority_validation():
     # Test invalid priority - below range
     error_message = f'Priority must be between {constants.MIN_PRIORITY} and {constants.MAX_PRIORITY}'
     with pytest.raises(ValueError, match=error_message):
-        Resources(priority=-1001)
+        Resources(priority=constants.MIN_PRIORITY - 1)
 
     # Test invalid priority - above range
     with pytest.raises(ValueError, match=error_message):
-        Resources(priority=1001)
+        Resources(priority=constants.MAX_PRIORITY + 1)
 
 
 def test_priority_yaml_serialization():
@@ -956,7 +956,7 @@ def test_priority_copy():
 def test_priority_with_any_of():
     """Test priority field works with any_of configuration."""
     config = {
-        'priority': 500,  # Base priority
+        'priority': constants.DEFAULT_PRIORITY,  # Base priority
         'any_of': [
             {
                 'cpus': 8,
@@ -981,7 +981,7 @@ def test_priority_with_any_of():
     r_cpus4 = next((r for r in resources_list if r.cpus == '4'), None)
 
     assert r_cpus8 is not None
-    assert r_cpus8.priority == 500  # Base priority
+    assert r_cpus8.priority == constants.DEFAULT_PRIORITY  # Base priority
 
     assert r_cpus4 is not None
     assert r_cpus4.priority == 800  # Override priority
