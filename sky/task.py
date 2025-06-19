@@ -607,6 +607,7 @@ class Task:
             secrets=config.pop('secrets', None),
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            volumes=config.pop('volumes', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -735,6 +736,16 @@ class Task:
         if job is not None and 'priority' in job:
             task.set_job_priority(job['priority'])
 
+        volume_mounts = config.pop('volume_mounts', None)
+        if volume_mounts is not None:
+            task.volume_mounts = []
+            for vol in volume_mounts:
+                common_utils.validate_schema(vol,
+                                             schemas.get_volume_mount_schema(),
+                                             'Invalid volume mount config: ')
+                volume_mount = volume_lib.VolumeMount.from_yaml_config(vol)
+                task.volume_mounts.append(volume_mount)
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -782,19 +793,17 @@ class Task:
         # controllers.
         if self.volume_mounts is not None:
             return None
-        if self._volumes is None:
+        if not self._volumes:
             return None
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             # Shortcut for `dst_path: volume_name`
             if isinstance(vol, str):
-                volume_mount = volume_lib.VolumeMount(dst_path, vol)
+                volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
             elif isinstance(vol, dict):
-                common_utils.validate_schema(vol,
-                                             schemas.get_task_volume_schema(),
-                                             'Invalid volume config: ')
-                assert 'name' in vol, 'Volume name is required.'
-                volume_mount = volume_lib.VolumeMount(dst_path, vol['name'])
+                assert 'name' in vol, 'Volume name must be set.'
+                volume_mount = volume_lib.VolumeMount.resolve(
+                    dst_path, vol['name'])
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)
@@ -837,18 +846,22 @@ class Task:
         for res in self.resources:
             for key, (vol_name, vol_req) in topology.items():
                 req = getattr(res, key)
-                if req is not None and vol_req is not None and req != vol_req:
+                if (req is not None and vol_req is not None and
+                        str(req) != vol_req):
                     raise exceptions.VolumeTopologyConflictError(
                         f'The task requires {key}:{req}, which conflicts with '
                         f'the volume constraint {key}:{vol_req}. Please '
                         f'use different volumes and retry.')
         # No topology conflict, we safely override the topology of resources to
         # satisfy the volume constraints.
-        override_topology = {}
+        override_params = {}
         for key, (vol_name, vol_req) in topology.items():
             if vol_req is not None:
-                override_topology[key] = vol_req
-        self.set_resources_override(override_topology)
+                if key == 'cloud':
+                    override_params[key] = sky.CLOUD_REGISTRY.from_str(vol_req)
+                else:
+                    override_params[key] = vol_req
+        self.set_resources_override(override_params)
         self.volume_mounts = volume_mounts
 
     @property
@@ -872,6 +885,10 @@ class Task:
     @property
     def secrets(self) -> Dict[str, str]:
         return self._secrets
+
+    @property
+    def volumes(self) -> Dict[str, str]:
+        return self._volumes
 
     def update_envs(
             self, envs: Union[None, List[Tuple[str, str]],
@@ -1579,6 +1596,12 @@ class Task:
             })
 
         add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
+        add_if_not_none('volumes', self.volumes)
+        if self.volume_mounts is not None:
+            config['volume_mounts'] = [
+                volume_mount.to_yaml_config()
+                for volume_mount in self.volume_mounts
+            ]
         return config
 
     def get_required_cloud_features(

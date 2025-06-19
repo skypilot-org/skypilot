@@ -6,6 +6,8 @@ import getpass
 import os
 from typing import Any, Dict, Optional
 
+import pydantic
+
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -78,13 +80,12 @@ class KubernetesNodesInfo:
         )
 
 
-@dataclasses.dataclass
-class VolumeConfig:
+class VolumeConfig(pydantic.BaseModel):
     """Configuration for creating a volume."""
     name: str
     type: str
     cloud: str
     region: Optional[str]
     zone: Optional[str]
-    spec: Dict[str, Any]
     name_on_cloud: str
+    spec: Dict[str, Any] = {}

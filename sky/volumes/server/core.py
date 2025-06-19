@@ -121,7 +121,7 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
     config = models.VolumeConfig(
         name=name,
         type=volume_type,
-        cloud=cloud,
+        cloud=str(cloud_obj),
         region=region,
         zone=zone,
         spec=spec,

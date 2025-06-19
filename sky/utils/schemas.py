@@ -523,17 +523,37 @@ def get_storage_schema():
     }
 
 
-def get_task_volume_schema():
-    """Schema for volume config object in task config."""
+def get_volume_mount_schema():
+    """Schema for volume mount object in task config (internal use only)."""
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'name': {
+            'path': {
                 'type': 'string',
             },
+            'volume_name': {
+                'type': 'string',
+            },
+            'volume_config': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+                'properties': {
+                    'cloud': {
+                        'type': 'string',
+                        'case_insensitive_enum': list(constants.ALL_CLOUDS)
+                    },
+                    'region': {
+                        'type': 'string',
+                    },
+                    'zone': {
+                        'type': 'string',
+                    },
+                },
+            }
         }
     }
 
