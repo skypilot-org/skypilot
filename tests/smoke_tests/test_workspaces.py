@@ -11,19 +11,7 @@ from sky import skypilot_config
 
 
 # ---------- Test workspace switching ----------
-@pytest.mark.skip(reason='Skip this until the our test infra supports change '
-                  'the config path for the running API server with the config '
-                  'that contains the workspace information; or, allowing hot '
-                  'reloading of the workspace config.\n'
-                  'To run this test locally, add the following '
-                  'to your ~/.sky/config.yaml:\n'
-                  'workspaces:\n'
-                  '  ws-1: {}\n'
-                  '  ws-2: {}\n'
-                  'and restart the API server.'
-                  'The reason for not using env var SKYPILOT_CONFIG to '
-                  'override the global config is that the project-level config '
-                  'will be ignored in that case.')
+@pytest.mark.no_remote_server
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #
@@ -57,6 +45,7 @@ def test_workspace_switching(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test_workspace_switching',
         [
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws1_config_path}; {smoke_tests_utils.get_cmd_restart_api_server()}',
             # Launch first cluster with workspace ws-default
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws1_config_path}; '
             f'sky launch -y --async -c {name}-1 '
@@ -81,7 +70,7 @@ def test_workspace_switching(generic_cloud: str):
             f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
-            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is \'default\'"',
+            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
             f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws2_config_path}; '
@@ -89,10 +78,11 @@ def test_workspace_switching(generic_cloud: str):
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 && exit 1 || true',
         ],
-        teardown=
-        (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws1_config_path}; sky down -y {name}-1; '
-         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws2_config_path}; sky down -y {name}-2'
-        ),
+        teardown=(
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws1_config_path}; sky down -y {name}-1; '
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={ws2_config_path}; sky down -y {name}-2; '
+            # restore the original config
+            f'{smoke_tests_utils.get_cmd_restart_api_server()}'),
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
