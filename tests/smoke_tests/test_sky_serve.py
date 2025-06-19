@@ -445,7 +445,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             _check_replica_in_status(name, [
                 (1, True, 'READY'),
                 (1, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX) + '\|READY'
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
             ]),
 
             # Wait until 2 spot instances are ready.
