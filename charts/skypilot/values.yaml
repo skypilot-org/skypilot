@@ -315,7 +315,9 @@ prometheus:
       enabled: true
       size: 10Gi
   kube-state-metrics:
-    enabled: false
+    enabled: true
+    metricLabelsAllowlist:
+      - pods=[skypilot-cluster]
   prometheus-node-exporter:
     enabled: false
   prometheus-pushgateway:
@@ -352,6 +354,8 @@ grafana:
       root_url: "%(protocol)s://%(domain)s/grafana"
       enforce_domain: false
       serve_from_sub_path: true
+    security:
+      allow_embedding: true
     auth.proxy:
       enabled: true
       header_name: "X-WEBAUTH-USER"
@@ -371,12 +375,6 @@ grafana:
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true
-  dashboards:
-    default:
-      nvidia-dcgm-exporter:
-        gnetId: 12239
-        revision: 2
-        datasource: prometheus
   # Add dashboard provider configuration to load dashboards from default directory
   dashboardProviders:
     dashboardproviders.yaml:

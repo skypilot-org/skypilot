@@ -8,6 +8,12 @@ import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  checkGrafanaAvailability,
+  getGrafanaUrl,
+  buildGrafanaUrl,
+  openGrafana,
+} from '@/utils/grafana';
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
@@ -305,12 +311,105 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
-  // Function to open Grafana
-  const openGrafana = (path = '/') => {
-    // Use the configured Grafana URL if available, otherwise construct default
-    const grafanaUrl =
-      window['SKYPILOT_GRAFANA_URL'] || `${window.location.origin}/grafana`;
-    window.open(`${grafanaUrl}${path}`, '_blank');
+  // State for filtering controls
+  const [availableHosts, setAvailableHosts] = useState([]);
+  const [selectedHosts, setSelectedHosts] = useState('$__all');
+  const [timeRange, setTimeRange] = useState({
+    from: 'now-1h',
+    to: 'now',
+  });
+  const [isLoadingHosts, setIsLoadingHosts] = useState(false);
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
+  }, []);
+
+  // Function to fetch available hosts from Prometheus
+  const fetchAvailableHosts = async () => {
+    if (!isGrafanaAvailable) return;
+
+    setIsLoadingHosts(true);
+    try {
+      const grafanaUrl = getGrafanaUrl();
+
+      const endpoints = ['/api/datasources/proxy/1/api/v1/label/node/values'];
+
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(`${grafanaUrl}${endpoint}`, {
+            method: 'GET',
+            credentials: 'include', // Include cookies and basic auth credentials
+            headers: {
+              Accept: 'application/json',
+            },
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.data && data.data.length > 0) {
+              setAvailableHosts(data.data.sort());
+              console.log(
+                `Successfully fetched hosts from ${endpoint}:`,
+                data.data
+              );
+              break;
+            }
+          } else {
+            console.log(
+              `HTTP ${response.status} from ${endpoint}: ${response.statusText}`
+            );
+          }
+        } catch (error) {
+          console.log(`Failed to fetch from ${endpoint}:`, error);
+          continue;
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching available hosts:', error);
+    } finally {
+      setIsLoadingHosts(false);
+    }
+  };
+
+  // Fetch hosts when component mounts and Grafana is available
+  useEffect(() => {
+    if (isGrafanaAvailable && nodesInContext && nodesInContext.length > 0) {
+      fetchAvailableHosts();
+    }
+  }, [nodesInContext, isGrafanaAvailable]);
+
+  // Function to build Grafana panel URL with filters
+  const buildGrafanaUrlForContext = (panelId) => {
+    const grafanaUrl = getGrafanaUrl();
+    const hostParam = selectedHosts === '$__all' ? '$__all' : selectedHosts;
+
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
+  };
+
+  // Handle host selection change
+  const handleHostChange = (event) => {
+    setSelectedHosts(event.target.value);
+  };
+
+  // Handle time range preset change
+  const handleTimeRangePreset = (preset) => {
+    const presets = {
+      '15m': { from: 'now-15m', to: 'now' },
+      '1h': { from: 'now-1h', to: 'now' },
+      '6h': { from: 'now-6h', to: 'now' },
+      '24h': { from: 'now-24h', to: 'now' },
+      '7d': { from: 'now-7d', to: 'now' },
+    };
+    setTimeRange(presets[preset]);
   };
 
   return (
@@ -319,8 +418,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-lg font-semibold">Available GPUs</h4>
-            {/* Add Grafana link button for in-cluster contexts when grafana_url is configured */}
-            {contextName === 'in-cluster' && window['SKYPILOT_GRAFANA_URL'] && (
+            {/* Add Grafana link button for in-cluster contexts when Grafana is available */}
+            {isGrafanaAvailable && (
               <button
                 // TODO(aylei): make the dashboard path stable
                 onClick={() =>
@@ -439,6 +538,135 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
               </div>
             </>
           )}
+
+          {/* GPU Metrics Section */}
+          {isGrafanaAvailable &&
+            nodesInContext &&
+            nodesInContext.length > 0 && (
+              <>
+                <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
+
+                {/* Filtering Controls */}
+                <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                  <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                    {/* Host Selection */}
+                    <div className="flex items-center gap-2">
+                      <label
+                        htmlFor="host-select"
+                        className="text-sm font-medium text-gray-700 whitespace-nowrap"
+                      >
+                        Node:
+                      </label>
+                      <select
+                        id="host-select"
+                        value={selectedHosts}
+                        onChange={handleHostChange}
+                        disabled={isLoadingHosts}
+                        className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+                      >
+                        <option value="$__all">All Nodes</option>
+                        {availableHosts.map((host) => (
+                          <option key={host} value={host}>
+                            {host}
+                          </option>
+                        ))}
+                      </select>
+                      {isLoadingHosts && (
+                        <div className="ml-2">
+                          <CircularProgress size={16} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Time Range Selection */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                        Time Range:
+                      </label>
+                      <div className="flex gap-1">
+                        {[
+                          { label: '15m', value: '15m' },
+                          { label: '1h', value: '1h' },
+                          { label: '6h', value: '6h' },
+                          { label: '24h', value: '24h' },
+                          { label: '7d', value: '7d' },
+                        ].map((preset) => (
+                          <button
+                            key={preset.value}
+                            onClick={() => handleTimeRangePreset(preset.value)}
+                            className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                              timeRange.from === `now-${preset.value}` &&
+                              timeRange.to === 'now'
+                                ? 'bg-sky-blue text-white border-sky-blue'
+                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Show current selection info */}
+                  <div className="mt-2 text-xs text-gray-500">
+                    Showing:{' '}
+                    {selectedHosts === '$__all' ? 'All hosts' : selectedHosts} •
+                    Time: {timeRange.from} to {timeRange.to}
+                    {availableHosts.length > 0 && (
+                      <span> • {availableHosts.length} hosts available</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* GPU Utilization */}
+                  <div className="bg-white rounded-md">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaUrlForContext('6')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Utilization"
+                        className="rounded"
+                        key={`gpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* GPU Memory */}
+                  <div className="bg-white rounded-md">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaUrlForContext('18')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Memory"
+                        className="rounded"
+                        key={`gpu-memory-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* GPU Power Consumption */}
+                  <div className="bg-white rounded-md">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaUrlForContext('10')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Power Consumption"
+                        className="rounded"
+                        key={`gpu-power-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
         </div>
       </div>
     </div>
