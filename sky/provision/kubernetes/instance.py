@@ -15,6 +15,7 @@ from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.kubernetes import volume
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -673,21 +674,6 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             raise e
 
 
-def _create_persistent_volume_claim(namespace: str, context: Optional[str],
-                                    pvc_spec: Dict[str, Any]) -> None:
-    """Creates a persistent volume claim for SkyServe controller."""
-    try:
-        kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
-            name=pvc_spec['metadata']['name'], namespace=namespace)
-        return
-    except kubernetes.api_exception() as e:
-        if e.status != 404:  # Not found
-            raise
-
-    kubernetes.core_api(context).create_namespaced_persistent_volume_claim(
-        namespace=namespace, body=pvc_spec)
-
-
 @timeline.event
 def _wait_for_deployment_pod(context,
                              namespace,
@@ -888,7 +874,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             ]
 
         if to_create_deployment:
-            _create_persistent_volume_claim(namespace, context, pvc_spec)
+            volume.create_persistent_volume_claim(namespace, context, pvc_spec)
 
             # It's safe to directly modify the template spec in the deployment spec
             # because controller pod is singleton, i in [0].

@@ -55,6 +55,16 @@ class ProvisionConfig:
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
 
+@dataclasses.dataclass
+class VolumeConfig:
+    """Configuration for creating a volume."""
+    name: str
+    type: str
+    cloud: str
+    region: Optional[str]
+    zone: Optional[str]
+    spec: Dict[str, Any]
+    name_on_cloud: str
 
 # -------------------- output data model -------------------- #
 
