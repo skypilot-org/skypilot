@@ -7,7 +7,10 @@ import Link from 'next/link';
 import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
-import { useClusterDetails, getClusterHistory } from '@/data/connectors/clusters';
+import {
+  useClusterDetails,
+  getClusterHistory,
+} from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
 import {
   RotateCwIcon,
@@ -83,11 +86,11 @@ function ClusterDetails() {
   React.useEffect(() => {
     const checkHistoryCluster = async () => {
       if (!cluster || clusterDetailsLoading || clusterData) return;
-      
+
       setHistoryLoading(true);
       try {
         const historyData = await dashboardCache.get(getClusterHistory);
-        const foundHistoryCluster = historyData.find((c) => c.name === cluster);
+        const foundHistoryCluster = historyData.find((c) => c.cluster_hash === cluster || c.cluster === cluster);
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);
@@ -207,7 +210,9 @@ function ClusterDetails() {
           />
         ) : (
           <div className="flex justify-center items-center py-12">
-            <span className="text-gray-500">Cluster not found in active clusters or history.</span>
+            <span className="text-gray-500">
+              Cluster not found in active clusters or history.
+            </span>
           </div>
         )}
 
@@ -246,7 +251,8 @@ function ActiveTab({
 
   const copyYamlToClipboard = async () => {
     try {
-      const yamlContent = clusterData.task_yaml || clusterData.last_creation_yaml;
+      const yamlContent =
+        clusterData.task_yaml || clusterData.last_creation_yaml;
       const formattedYaml = formatYaml(yamlContent);
       await navigator.clipboard.writeText(formattedYaml);
       setIsCopied(true);
@@ -267,17 +273,21 @@ function ActiveTab({
     }
   };
 
-  const hasCreationArtifacts = clusterData?.last_creation_command || clusterData?.last_creation_yaml || clusterData?.command || clusterData?.task_yaml;
+  const hasCreationArtifacts =
+    clusterData?.last_creation_command ||
+    clusterData?.last_creation_yaml ||
+    clusterData?.command ||
+    clusterData?.task_yaml;
 
   // Helper functions for historical clusters
   const formatDuration = (durationSeconds) => {
     if (!durationSeconds || durationSeconds === 0) {
       return '-';
     }
-    
+
     const hours = Math.floor(durationSeconds / 3600);
     const minutes = Math.floor((durationSeconds % 3600) / 60);
-    
+
     if (hours > 0) {
       return `${hours}h ${minutes}m`;
     } else if (minutes > 0) {
@@ -318,7 +328,9 @@ function ActiveTab({
                 <div className="text-gray-600 font-medium text-base">
                   Cluster
                 </div>
-                <div className="text-base mt-1">{clusterData.cluster || clusterData.name}</div>
+                <div className="text-base mt-1">
+                  {clusterData.cluster || clusterData.name}
+                </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
@@ -379,7 +391,7 @@ function ActiveTab({
                     : 'N/A'}
                 </div>
               </div>
-              
+
               {/* Show duration and cost for historical clusters */}
               {isHistoricalCluster ? (
                 <>
@@ -439,20 +451,26 @@ function ActiveTab({
 
                   <div className="space-y-4 mt-3">
                     {/* Creation Command */}
-                    {(clusterData.command || clusterData.last_creation_command) && (
+                    {(clusterData.command ||
+                      clusterData.last_creation_command) && (
                       <div>
                         <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
                           <code className="text-sm text-gray-800 font-mono break-all">
-                            {clusterData.command || clusterData.last_creation_command}
+                            {clusterData.command ||
+                              clusterData.last_creation_command}
                           </code>
                         </div>
                       </div>
                     )}
 
                     {/* Task YAML - Collapsible */}
-                    {(clusterData.task_yaml || clusterData.last_creation_yaml) &&
-                      (clusterData.task_yaml !== '{}' && clusterData.last_creation_yaml !== '{}') &&
-                      !(clusterData.cluster || clusterData.name)?.startsWith('sky-jobs-controller-') &&
+                    {(clusterData.task_yaml ||
+                      clusterData.last_creation_yaml) &&
+                      clusterData.task_yaml !== '{}' &&
+                      clusterData.last_creation_yaml !== '{}' &&
+                      !(clusterData.cluster || clusterData.name)?.startsWith(
+                        'sky-jobs-controller-'
+                      ) &&
                       !(clusterData.cluster || clusterData.name)?.startsWith(
                         'sky-serve-controller-'
                       ) && (
@@ -492,7 +510,10 @@ function ActiveTab({
                           {isYamlExpanded && (
                             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                               <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
-                                {formatYaml(clusterData.task_yaml || clusterData.last_creation_yaml)}
+                                {formatYaml(
+                                  clusterData.task_yaml ||
+                                    clusterData.last_creation_yaml
+                                )}
                               </pre>
                             </div>
                           )}

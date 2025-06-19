@@ -131,10 +131,10 @@ const formatDuration = (durationSeconds) => {
   if (!durationSeconds || durationSeconds === 0) {
     return '-';
   }
-  
+
   const hours = Math.floor(durationSeconds / 3600);
   const minutes = Math.floor((durationSeconds % 3600) / 60);
-  
+
   if (hours > 0) {
     return `${hours}h ${minutes}m`;
   } else if (minutes > 0) {
@@ -143,7 +143,6 @@ const formatDuration = (durationSeconds) => {
     return '<1m';
   }
 };
-
 
 export function Clusters() {
   const router = useRouter();
@@ -379,7 +378,7 @@ export function Clusters() {
               placeholder="Filter by cluster name"
               value={nameFilter}
               onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+              className="h-8 w-32 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
             />
             {nameFilter && (
               <button
@@ -519,26 +518,28 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    
+
     try {
       const activeClusters = await dashboardCache.get(getClusters);
-      
+
       if (showHistory) {
         const historyClusters = await dashboardCache.get(getClusterHistory);
         // Mark clusters as active or historical for UI distinction
-        const markedActiveClusters = activeClusters.map(cluster => ({
+        const markedActiveClusters = activeClusters.map((cluster) => ({
           ...cluster,
-          isHistorical: false
+          isHistorical: false,
         }));
-        const markedHistoryClusters = historyClusters.map(cluster => ({
+        const markedHistoryClusters = historyClusters.map((cluster) => ({
           ...cluster,
-          isHistorical: true
+          isHistorical: true,
         }));
         // Combine and remove duplicates (prefer active over historical)
         const combinedData = [...markedActiveClusters];
-        markedHistoryClusters.forEach(histCluster => {
-          const existsInActive = activeClusters.some(activeCluster => 
-            (activeCluster.cluster || activeCluster.name) === (histCluster.cluster || histCluster.name)
+        markedHistoryClusters.forEach((histCluster) => {
+          const existsInActive = activeClusters.some(
+            (activeCluster) =>
+              (activeCluster.cluster || activeCluster.name) ===
+              (histCluster.cluster || histCluster.name)
           );
           if (!existsInActive) {
             combinedData.push(histCluster);
@@ -547,9 +548,9 @@ export function ClusterTable({
         setData(combinedData);
       } else {
         // Mark active clusters for consistency
-        const markedActiveClusters = activeClusters.map(cluster => ({
+        const markedActiveClusters = activeClusters.map((cluster) => ({
           ...cluster,
-          isHistorical: false
+          isHistorical: false,
         }));
         setData(markedActiveClusters);
       }
@@ -557,7 +558,7 @@ export function ClusterTable({
       console.error('Error fetching cluster data:', error);
       setData([]);
     }
-    
+
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
@@ -656,167 +657,179 @@ export function ClusterTable({
   return (
     <div>
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('cluster')}
-              >
-                Cluster{getSortDirection('cluster')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('workspace')}
-              >
-                Workspace{getSortDirection('workspace')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
-              >
-                Resources{getSortDirection('resources_str')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('time')}
-              >
-                Started{getSortDirection('time')}
-              </TableHead>
-              {showHistory && (
+        <div className="overflow-x-auto">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
                 <TableHead
                   className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('duration')}
+                  onClick={() => requestSort('status')}
                 >
-                  Duration{getSortDirection('duration')}
+                  Status{getSortDirection('status')}
                 </TableHead>
-              )}
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('autostop')}
-              >
-                Autostop{getSortDirection('autostop')}
-              </TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('cluster')}
+                >
+                  Cluster{getSortDirection('cluster')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden sm:table-cell"
+                  onClick={() => requestSort('user')}
+                >
+                  User{getSortDirection('user')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  onClick={() => requestSort('workspace')}
+                >
+                  Workspace{getSortDirection('workspace')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden lg:table-cell"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden xl:table-cell"
+                  onClick={() => requestSort('resources_str')}
+                >
+                  Resources{getSortDirection('resources_str')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('time')}
+                >
+                  Started{getSortDirection('time')}
+                </TableHead>
+                {showHistory && (
+                  <TableHead
+                    className="sortable whitespace-nowrap hidden lg:table-cell"
+                    onClick={() => requestSort('duration')}
+                  >
+                    Duration{getSortDirection('duration')}
+                  </TableHead>
+                )}
+                <TableHead
+                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  onClick={() => requestSort('autostop')}
+                >
+                  Autostop{getSortDirection('autostop')}
+                </TableHead>
+                <TableHead className="sticky right-0 bg-white">
+                  Actions
+                </TableHead>
+              </TableRow>
+            </TableHeader>
 
-          <TableBody>
-            {loading && isInitialLoad ? (
-              <TableRow>
-                <TableCell
-                  colSpan={9}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
-              paginatedData.map((item, index) => {
-                return (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <StatusBadge status={item.status} />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/clusters/${item.cluster || item.name}`}
-                        className="text-blue-600"
-                      >
-                        {item.cluster || item.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{item.user}</TableCell>
-                    <TableCell>
-                      <Link
-                        href="/workspaces"
-                        className="text-blue-600 hover:underline"
-                      >
-                        {item.workspace || 'default'}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <NonCapitalizedTooltip
-                        content={item.full_infra || item.infra}
-                        className="text-sm text-muted-foreground"
-                      >
-                        <span>
-                          <Link
-                            href="/infra"
-                            className="text-blue-600 hover:underline"
-                          >
-                            {item.cloud}
-                          </Link>
-                          {item.infra.includes('(') && (
-                            <span>
-                              {' ' +
-                                item.infra.substring(item.infra.indexOf('('))}
-                            </span>
-                          )}
-                        </span>
-                      </NonCapitalizedTooltip>
-                    </TableCell>
-                    <TableCell>
-                      <NonCapitalizedTooltip
-                        content={item.resources_str_full || item.resources_str}
-                        className="text-sm text-muted-foreground"
-                      >
-                        <span>{item.resources_str}</span>
-                      </NonCapitalizedTooltip>
-                    </TableCell>
-                    <TableCell>{relativeTime(item.time)}</TableCell>
-                    {showHistory && (
-                      <TableCell>{formatDuration(item.duration)}</TableCell>
-                    )}
-                    <TableCell>
-                      {item.isHistorical ? '-' : formatAutostop(item.autostop, item.to_down)}
-                    </TableCell>
-                    <TableCell className="text-left">
-                      {!item.isHistorical && (
-                        <Status2Actions
-                          cluster={item.cluster}
-                          status={item.status}
-                          onOpenSSHModal={onOpenSSHModal}
-                          onOpenVSCodeModal={onOpenVSCodeModal}
-                        />
+            <TableBody>
+              {loading && isInitialLoad ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedData.length > 0 ? (
+                paginatedData.map((item, index) => {
+                  return (
+                    <TableRow key={index}>
+                      <TableCell>
+                        <StatusBadge status={item.status} />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/clusters/${item.isHistorical ? item.cluster_hash : (item.cluster || item.name)}`}
+                          className="text-blue-600"
+                        >
+                          {item.cluster || item.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {item.user}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <Link
+                          href="/workspaces"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.workspace || 'default'}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <NonCapitalizedTooltip
+                          content={item.full_infra || item.infra}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>
+                            <Link
+                              href="/infra"
+                              className="text-blue-600 hover:underline"
+                            >
+                              {item.cloud}
+                            </Link>
+                            {item.infra.includes('(') && (
+                              <span>
+                                {' ' +
+                                  item.infra.substring(item.infra.indexOf('('))}
+                              </span>
+                            )}
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell className="hidden xl:table-cell">
+                        <NonCapitalizedTooltip
+                          content={
+                            item.resources_str_full || item.resources_str
+                          }
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.resources_str}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell>{relativeTime(item.time)}</TableCell>
+                      {showHistory && (
+                        <TableCell className="hidden lg:table-cell">
+                          {formatDuration(item.duration)}
+                        </TableCell>
                       )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={9}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No active clusters
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+                      <TableCell className="hidden md:table-cell">
+                        {item.isHistorical
+                          ? '-'
+                          : formatAutostop(item.autostop, item.to_down)}
+                      </TableCell>
+                      <TableCell className="text-left sticky right-0 bg-white">
+                        {!item.isHistorical && (
+                          <Status2Actions
+                            cluster={item.cluster}
+                            status={item.status}
+                            onOpenSSHModal={onOpenSSHModal}
+                            onOpenVSCodeModal={onOpenVSCodeModal}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    No active clusters
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}

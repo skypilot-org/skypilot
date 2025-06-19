@@ -345,7 +345,8 @@ def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
 
 
 def _get_status_value_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord, truncate: bool = True) -> int:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> int:
     del truncate
     status = cluster_cost_report_record['status']
     if status is None:
@@ -354,7 +355,8 @@ def _get_status_value_for_cost_report(
 
 
 def _get_status_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord, truncate: bool = True) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
     del truncate
     status = cluster_cost_report_record['status']
     if status is None:
@@ -363,7 +365,8 @@ def _get_status_for_cost_report(
 
 
 def _get_resources_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord, truncate: bool = True) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
     del truncate
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
@@ -376,7 +379,8 @@ def _get_resources_for_cost_report(
 
 
 def _get_price_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord, truncate: bool = True) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
     del truncate
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
@@ -387,7 +391,8 @@ def _get_price_for_cost_report(
 
 
 def _get_estimated_cost_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord, truncate: bool = True) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
     del truncate
     cost = cluster_cost_report_record['total_cost']
 

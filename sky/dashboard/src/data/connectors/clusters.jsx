@@ -108,40 +108,48 @@ export async function getClusters({ clusterNames = null } = {}) {
 
 export async function getClusterHistory() {
   try {
-    const history = await apiClient.fetch('/cost_report');
+    const costReportRequest = await apiClient.get('/cost_report');
+    const id =
+      costReportRequest.headers.get('X-Skypilot-Request-ID') ||
+      costReportRequest.headers.get('X-Request-ID');
+    const costReportResponse = await apiClient.get(`/api/get?request_id=${id}`);
+    const historyContent = await costReportResponse.json();
+    let history = JSON.parse(historyContent.return_value);
+
+    console.log('Raw cluster history data:', history); // Debug log
 
     const historyData = history.map((cluster) => {
-      // Get cloud name from resources string if available
+      // Get cloud name from resources if available
       let cloud = 'Unknown';
-      let region = '';
       if (cluster.cloud) {
         cloud = cluster.cloud;
+      } else if (cluster.resources && cluster.resources.cloud) {
+        cloud = cluster.resources.cloud;
       }
-      
-      // Build region info - cost_report doesn't have detailed region info
-      // so we extract what we can from resources string
-      let region_or_zone = region;
-      const full_region_or_zone = region_or_zone;
-      
+
+      // Get user name - need to look up from user_hash if needed
+      let user_name = cluster.user_name || '-';
+
+      // Extract resource info
+
       return {
-        status: cluster.status ? clusterStatusMap[cluster.status] : 'TERMINATED',
+        status: cluster.status
+          ? clusterStatusMap[cluster.status]
+          : 'TERMINATED',
         cluster: cluster.name,
-        user: cluster.user_name || '-',
+        user: user_name,
         user_hash: cluster.user_hash,
         cloud: cloud,
-        region: region,
+        region: '',
         infra: cloud,
         full_infra: cloud,
-        cpus: cluster.resources?.cpus || '-',
-        mem: cluster.resources?.memory || '-',
-        gpus: cluster.accelerators || {},
-        resources_str: cluster.resources ? `${cluster.num_nodes}x ${cluster.resources}` : '-',
-        resources_str_full: cluster.resources ? `${cluster.num_nodes}x ${cluster.resources}` : '-',
-        time: new Date(cluster.launched_at * 1000),
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
         num_nodes: cluster.num_nodes || 1,
         duration: cluster.duration,
         total_cost: cluster.total_cost,
-        workspace: 'default', // History doesn't have workspace info currently
+        workspace: cluster.workspace || 'default',
         autostop: -1,
         to_down: false,
         cluster_hash: cluster.cluster_hash,
@@ -150,12 +158,16 @@ export async function getClusterHistory() {
         task_yaml: cluster.last_creation_yaml || '{}',
         events: [
           {
-            time: new Date(cluster.launched_at * 1000),
+            time: cluster.launched_at
+              ? new Date(cluster.launched_at * 1000)
+              : new Date(),
             event: 'Cluster created.',
           },
         ],
       };
     });
+
+    console.log('Processed cluster history data:', historyData); // Debug log
     return historyData;
   } catch (error) {
     console.error('Error fetching cluster history:', error);

@@ -1832,7 +1832,8 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
             # to display most recent entry for each controller cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             print(controller_name, cluster_record['status'])
-            if (controller_name not in controllers and cluster_record['status'] is not None):
+            if (controller_name not in controllers and
+                    cluster_record['status'] is not None):
                 controllers[controller_name] = cluster_record
         else:
             normal_cluster_records.append(cluster_record)
