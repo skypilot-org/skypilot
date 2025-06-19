@@ -456,9 +456,8 @@ Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
 
 If ``'best'`` is specified, use the best network tier available on the specified instance. This can enable features like:
 
-- **GCP**: Premium networking for better performance and lower latency
-- **Nebius**: InfiniBand support for high-performance GPU communication
-- **Kubernetes**: Enhanced networking capabilities
+- **GCP VMs/GKE**: GPUDirect-TCPX for high-performance node-to-node GPU communication
+- **Nebius VMs/Managed Kubernetes**: Automatic InfiniBand support for high-performance GPU communication
 
 .. code-block:: yaml
 
