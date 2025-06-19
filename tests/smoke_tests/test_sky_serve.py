@@ -431,9 +431,13 @@ def test_skyserve_dynamic_ondemand_fallback():
                 name,
                 [
                     (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                    # The instance may still be in READY state when we check the status,
-                    # before transitioning to SHUTTING_DOWN.
-                    (2, False,
+                    # The instance may still be in READY state when we check the
+                    # status, before transitioning to SHUTTING_DOWN.
+                    # When in SHUTTING_DOWN state, instances may actually shut
+                    # down and disappear from the status. Therefore, we check
+                    # for 1 instance instead of 2, as the count can be either
+                    # 1 or 2.
+                    (1, False,
                      _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN\|READY')
                 ]),
 
