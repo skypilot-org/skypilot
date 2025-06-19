@@ -457,6 +457,16 @@ def get_storage_schema():
     }
 
 
+def get_volume_schema():
+    """Schema for top-level `volumes:` field in task config."""
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+    }
+
+
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
     # To avoid circular imports, only import when needed.
@@ -735,6 +745,10 @@ def get_task_schema():
             'config': _filter_schema(
                 get_config_schema(),
                 constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            # volumes config is validated separately using get_volume_schema
+            'volumes': {
+                'type': 'object',
+            },
             **_experimental_task_schema(),
         }
     }
