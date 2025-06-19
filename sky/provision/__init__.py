@@ -114,6 +114,7 @@ def apply_volume(provider_name: str,
     """
     raise NotImplementedError
 
+
 @_route_to_cloud_impl
 def delete_volume(provider_name: str,
                   config: models.VolumeConfig) -> models.VolumeConfig:

@@ -805,7 +805,8 @@ def _parse_override_params(
     return override_params
 
 
-def _check_yaml_only(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], bool, str]:
+def _check_yaml_only(
+        entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], bool, str]:
     """Checks if entrypoint is a readable YAML file without confirmation.
 
     Args:
@@ -854,7 +855,8 @@ def _check_yaml_only(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], b
                 invalid_reason = ('yaml.safe_load() failed. Please check if the'
                                   ' path is correct.')
         is_yaml = False
-    return is_yaml, result, yaml_file_provided,invalid_reason
+    return is_yaml, result, yaml_file_provided, invalid_reason
+
 
 def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """Checks if entrypoint is a readable YAML file.
@@ -862,7 +864,8 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     Args:
         entrypoint: Path to a YAML file.
     """
-    is_yaml, result, yaml_file_provided, invalid_reason = _check_yaml_only(entrypoint)
+    is_yaml, result, yaml_file_provided, invalid_reason = _check_yaml_only(
+        entrypoint)
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
@@ -4208,10 +4211,12 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
 
+
 @cli.group(cls=_NaturalOrderGroup)
 def volumes():
     """SkyPilot Volumes CLI."""
     pass
+
 
 @volumes.command('apply', cls=_DocumentedCodeCommand)
 @config_option(expose_value=False)
@@ -4220,26 +4225,55 @@ def volumes():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--name', '-n', required=False, type=str, help='Storage name. Override the name defined in the YAML.')
-@click.option('--infra', required=False, type=str, help='Infra. Format: k8s, k8s/context-name. Override the infra defined in the YAML.')
-@click.option('--type', required=False, type=str, help='Storage type. Format: pvc. Override the type defined in the YAML.')
-@click.option('--size', required=False, type=str, help='Storage size. Override the size defined in the YAML.')
-@click.option('--yes', '-y', is_flag=True, default=False, required=False, help='Skip confirmation prompt.')
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help='Storage name. Override the name defined in the YAML.')
+@click.option(
+    '--infra',
+    required=False,
+    type=str,
+    help=
+    'Infra. Format: k8s, k8s/context-name. Override the infra defined in the YAML.'
+)
+@click.option(
+    '--type',
+    required=False,
+    type=str,
+    help='Storage type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--size',
+              required=False,
+              type=str,
+              help='Storage size. Override the size defined in the YAML.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
-def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], infra: Optional[str], type: Optional[str], size: Optional[str], yes: bool, async_call: bool):
+def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str],
+                  infra: Optional[str], type: Optional[str],
+                  size: Optional[str], yes: bool, async_call: bool):
     # pylint: disable=import-outside-toplevel
     from sky.utils import schemas
 
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
-        is_yaml, volume_config, yaml_file_provided, invalid_reason = _check_yaml_only(entrypoint_str)
+        is_yaml, volume_config, yaml_file_provided, invalid_reason = _check_yaml_only(
+            entrypoint_str)
         if not is_yaml:
             if yaml_file_provided:
-                raise click.BadParameter(f'{entrypoint_str!r} looks like a yaml path but {invalid_reason}')
+                raise click.BadParameter(
+                    f'{entrypoint_str!r} looks like a yaml path but {invalid_reason}'
+                )
             else:
-                raise click.BadParameter(f'{entrypoint_str!r} needs to be a YAML file')
+                raise click.BadParameter(
+                    f'{entrypoint_str!r} needs to be a YAML file')
     volume_config = volume_config or {}
+
     # Override the volume config with CLI options
     def _override_volume_config():
         if name is not None:
@@ -4252,9 +4286,11 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], in
             if 'spec' not in volume_config:
                 volume_config['spec'] = {}
             volume_config['spec']['size'] = size
+
     _override_volume_config()
     logger.info(f'Volume config: {volume_config}')
-    common_utils.validate_schema(volume_config, schemas.get_volume_schema(),'Invalid volumes config')
+    common_utils.validate_schema(volume_config, schemas.get_volume_schema(),
+                                 'Invalid volumes config')
     infra = volume_config.get('infra')
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, None, None, None)
@@ -4262,7 +4298,11 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], in
     volume_config['region'] = region
     volume_config['zone'] = zone
     if not yes:
-        click.confirm(f'Proceed to create volume {volume_config.get("name")!r}?', default=True, abort=True, show_default=True)
+        click.confirm(
+            f'Proceed to create volume {volume_config.get("name")!r}?',
+            default=True,
+            abort=True,
+            show_default=True)
 
     # Call SDK to create volume
     try:

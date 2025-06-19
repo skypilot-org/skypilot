@@ -20,6 +20,7 @@ logger = sky_logging.init_logger(__name__)
 VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
+
 def volume_list() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets the volumes.
@@ -52,7 +53,8 @@ def volume_delete(name: str) -> None:
         raise ValueError(f'Volume name {name!r} not found.')
 
 
-def volume_apply(name: str, type: str, cloud: str, region: Optional[str], zone: Optional[str], spec: Dict[str, Any]) -> None:
+def volume_apply(name: str, type: str, cloud: str, region: Optional[str],
+                 zone: Optional[str], spec: Dict[str, Any]) -> None:
     """Creates or registers a volume."""
     # Reuse the method for cluster name on cloud to generate the storage name on cloud.
     cloud_obj = sky.CLOUD_REGISTRY.from_str(cloud)
@@ -71,7 +73,9 @@ def volume_apply(name: str, type: str, cloud: str, region: Optional[str], zone: 
     logger.info(f'Creating volume {name} on cloud {cloud} with config {config}')
     with _volume_lock(name):
         config = provision.apply_volume(cloud, config)
-        global_user_state.add_volume(name, config, status_lib.VolumeStatus.READY)
+        global_user_state.add_volume(name, config,
+                                     status_lib.VolumeStatus.READY)
+
 
 @contextlib.contextmanager
 def _volume_lock(volume_name: str) -> Generator[None, None, None]:
@@ -81,8 +85,9 @@ def _volume_lock(volume_name: str) -> Generator[None, None, None]:
                                VOLUME_LOCK_TIMEOUT_SECONDS):
             yield
     except filelock.Timeout as e:
-        raise RuntimeError(f'Failed to update user due to a timeout '
-                           f'when trying to acquire the lock at '
-                           f'{VOLUME_LOCK_PATH.format(volume_name=volume_name)}. '
-                           'Please try again or manually remove the lock '
-                           f'file if you believe it is stale.') from e
+        raise RuntimeError(
+            f'Failed to update user due to a timeout '
+            f'when trying to acquire the lock at '
+            f'{VOLUME_LOCK_PATH.format(volume_name=volume_name)}. '
+            'Please try again or manually remove the lock '
+            f'file if you believe it is stale.') from e

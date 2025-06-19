@@ -26,6 +26,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     create_persistent_volume_claim(namespace, context, pvc_spec)
     return config
 
+
 def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Deletes a volume."""
     if config.region is None:
@@ -41,14 +42,15 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     pvc_name = config.name_on_cloud
     logger.info(f'Deleting PVC: {pvc_name}')
     kubernetes_utils.delete_k8s_resource_with_retry(
-            delete_func=lambda pvc_name=pvc_name: kubernetes.core_api(
-                context).delete_namespaced_persistent_volume_claim(
-                    name=pvc_name,
-                    namespace=namespace,
-                    _request_timeout=config_lib.DELETION_TIMEOUT),
-            resource_type='pvc',
-            resource_name=pvc_name)
+        delete_func=lambda pvc_name=pvc_name: kubernetes.core_api(
+            context).delete_namespaced_persistent_volume_claim(
+                name=pvc_name,
+                namespace=namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pvc',
+        resource_name=pvc_name)
     return config
+
 
 def create_persistent_volume_claim(namespace: str, context: Optional[str],
                                    pvc_spec: Dict[str, Any]) -> None:

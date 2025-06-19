@@ -1,8 +1,10 @@
 import os
 import tempfile
+from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky import task
 
 
@@ -667,3 +669,151 @@ def test_docker_login_config_no_mixed_envs_secrets():
             },
             secrets={'SKYPILOT_DOCKER_PASSWORD': 'secret-password'})
         task_obj.set_resources(sky.Resources(image_id='docker:ubuntu:latest'))
+
+
+def make_mock_volume_config(cloud=None, region=None, zone=None):
+
+    class MockVolumeConfig:
+        pass
+
+    v = MockVolumeConfig()
+    v.cloud = cloud
+    v.region = region
+    v.zone = zone
+    return v
+
+
+def make_mock_resource(cloud=None, region=None, zone=None):
+
+    class MockResource:
+
+        def __init__(self, cloud, region, zone):
+            self.cloud = cloud
+            self.region = region
+            self.zone = zone
+
+        def copy(self, **override):
+            # Return a new instance with overridden attributes
+            new = make_mock_resource(
+                override.get('cloud', self.cloud),
+                override.get('region', self.region),
+                override.get('zone', self.zone),
+            )
+            return new
+
+    return MockResource(cloud, region, zone)
+
+
+def test_resolve_volumes_no_volumes():
+    t = task.Task()
+    t._volumes = None
+    t.volume_mounts = None
+    # Should not raise
+    t.resolve_volumes()
+    t._volumes = {}
+    t.resolve_volumes()
+
+
+def test_resolve_volumes_already_resolved():
+    t = task.Task()
+    t.volume_mounts = [object()]
+    t._volumes = {'/mnt': 'vol1'}
+    # Should not raise or do anything
+    t.resolve_volumes()
+
+
+def test_resolve_volumes_single_success():
+    t = task.Task()
+    t._volumes = {'/mnt': 'vol1'}
+    t.resources = [make_mock_resource()]
+    with mock.patch('sky.volumes.volume_mount.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('pickle.loads') as ploads:
+        get_vol.return_value = {'handle': b'abc'}
+        ploads.return_value = make_mock_volume_config(cloud='aws',
+                                                      region='us-west1',
+                                                      zone='a')
+        t.resolve_volumes()
+        # Should override resource topology
+        for r in t.resources:
+            assert r.cloud == 'aws'
+            assert r.region == 'us-west1'
+            assert r.zone == 'a'
+
+
+def test_resolve_volumes_volume_not_found():
+    t = task.Task()
+    t._volumes = {'/mnt': 'vol1'}
+    t.resources = [make_mock_resource()]
+    with mock.patch(
+            'sky.volumes.volume_mount.global_user_state.get_volume_by_name'
+    ) as get_vol:
+        get_vol.return_value = None
+        with pytest.raises(exceptions.VolumeNotFoundError):
+            t.resolve_volumes()
+
+
+def test_resolve_volumes_dict_volume_success():
+    t = task.Task()
+    t._volumes = {'/mnt': {'name': 'vol1'}}
+    t.resources = [make_mock_resource()]
+    with mock.patch('sky.volumes.volume_mount.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('pickle.loads') as ploads, \
+         mock.patch('sky.utils.common_utils.validate_schema') as v_schema:
+        get_vol.return_value = {'handle': b'abc'}
+        ploads.return_value = make_mock_volume_config(cloud='aws')
+        v_schema.return_value = None
+        t.resolve_volumes()
+        for r in t.resources:
+            assert r.cloud == 'aws'
+
+
+def test_resolve_volumes_topology_conflict_between_volumes():
+    t = task.Task()
+    t._volumes = {'/mnt1': 'vol1', '/mnt2': 'vol2'}
+    t.resources = [make_mock_resource()]
+
+    def get_vol_by_name(name):
+        if name == 'vol1':
+            return {'handle': b'abc'}
+        elif name == 'vol2':
+            return {'handle': b'def'}
+    with mock.patch('sky.volumes.volume_mount.global_user_state.get_volume_by_name', side_effect=get_vol_by_name), \
+         mock.patch('pickle.loads') as ploads:
+        # vol1: cloud=aws, vol2: cloud=gcp
+        ploads.side_effect = [
+            make_mock_volume_config(cloud='aws'),
+            make_mock_volume_config(cloud='gcp')
+        ]
+        with pytest.raises(exceptions.VolumeTopologyConflictError):
+            t.resolve_volumes()
+
+
+def test_resolve_volumes_topology_conflict_with_resources():
+    t = task.Task()
+    t._volumes = {'/mnt': 'vol1'}
+    # Resource requires cloud=gcp, volume requires cloud=aws
+    t.resources = [make_mock_resource(cloud='gcp')]
+    with mock.patch('sky.volumes.volume_mount.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('pickle.loads') as ploads:
+        get_vol.return_value = {'handle': b'abc'}
+        ploads.return_value = make_mock_volume_config(cloud='aws')
+        with pytest.raises(exceptions.VolumeTopologyConflictError):
+            t.resolve_volumes()
+
+
+def test_resolve_volumes_override_topology():
+    t = task.Task()
+    t._volumes = {'/mnt': 'vol1'}
+    # Resource has no cloud/region/zone set, should be overridden
+    t.resources = [make_mock_resource()]
+    with mock.patch('sky.volumes.volume_mount.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('pickle.loads') as ploads:
+        get_vol.return_value = {'handle': b'abc'}
+        ploads.return_value = make_mock_volume_config(cloud='aws',
+                                                      region='us-west1',
+                                                      zone='a')
+        t.resolve_volumes()
+        for r in t.resources:
+            assert r.cloud == 'aws'
+            assert r.region == 'us-west1'
+            assert r.zone == 'a'

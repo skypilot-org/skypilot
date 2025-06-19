@@ -522,13 +522,18 @@ def get_storage_schema():
     }
 
 
-def get_volume_schema():
-    """Schema for top-level `volumes:` field in task config."""
+def get_task_volume_schema():
+    """Schema for volume config object in task config."""
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
+        'properties': {
+            'name': {
+                'type': 'string',
+            },
+        }
     }
 
 

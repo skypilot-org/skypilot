@@ -77,6 +77,7 @@ def launch(
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag.resolve_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -85,6 +86,7 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
+    dag.pre_mount_volumes()
     dag.validate()
 
     user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)

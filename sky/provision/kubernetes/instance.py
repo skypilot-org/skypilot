@@ -998,9 +998,6 @@ def stop_instances(
     raise NotImplementedError()
 
 
-
-
-
 def _delete_services(name_prefix: str, namespace: str,
                      context: Optional[str]) -> None:
     """Delete services with the given name prefix.
@@ -1016,13 +1013,14 @@ def _delete_services(name_prefix: str, namespace: str,
         # TODO(andyl): Wait for
         # https://github.com/pylint-dev/pylint/issues/5263.
         # pylint: disable=cell-var-from-loop
-        kubernetes_utils.delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
-            context).delete_namespaced_service(name=service_name,
-                                               namespace=namespace,
-                                               _request_timeout=config_lib.
-                                               DELETION_TIMEOUT),
-                                        resource_type='service',
-                                        resource_name=service_name)
+        kubernetes_utils.delete_k8s_resource_with_retry(
+            delete_func=lambda: kubernetes.core_api(
+                context).delete_namespaced_service(name=service_name,
+                                                   namespace=namespace,
+                                                   _request_timeout=config_lib.
+                                                   DELETION_TIMEOUT),
+            resource_type='service',
+            resource_name=service_name)
 
 
 def _terminate_node(namespace: str,
@@ -1060,26 +1058,28 @@ def _terminate_deployment(cluster_name: str, namespace: str,
 
     # Delete deployment
     deployment_name = _get_deployment_name(cluster_name)
-    kubernetes_utils.delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.apps_api(
-        context).delete_namespaced_deployment(name=deployment_name,
-                                              namespace=namespace,
-                                              _request_timeout=config_lib.
-                                              DELETION_TIMEOUT),
-                                    resource_type='deployment',
-                                    resource_name=deployment_name)
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.apps_api(
+            context).delete_namespaced_deployment(name=deployment_name,
+                                                  namespace=namespace,
+                                                  _request_timeout=config_lib.
+                                                  DELETION_TIMEOUT),
+        resource_type='deployment',
+        resource_name=deployment_name)
 
     # Delete PVCs
     pvc_name = _get_pvc_name(
         cluster_name,
         kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME)
     # pylint: disable=cell-var-from-loop
-    kubernetes_utils.delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
-        context).delete_namespaced_persistent_volume_claim(
-            name=pvc_name,
-            namespace=namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT),
-                                    resource_type='pvc',
-                                    resource_name=pvc_name)
+    kubernetes_utils.delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(
+            context).delete_namespaced_persistent_volume_claim(
+                name=pvc_name,
+                namespace=namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pvc',
+        resource_name=pvc_name)
 
 
 def terminate_instances(

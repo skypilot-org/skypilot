@@ -6,6 +6,7 @@ from typing import List, Optional
 
 if typing.TYPE_CHECKING:
     from sky import task
+    from sky.volumes import volume_mount as volume_mount_lib
 
 
 class Dag:
@@ -82,6 +83,20 @@ class Dag:
         for task in self.tasks:
             task.validate(skip_file_mounts=skip_file_mounts,
                           skip_workdir=skip_workdir)
+
+    def resolve_volumes(self) -> None:
+        for task in self.tasks:
+            task.resolve_volumes()
+
+    def pre_mount_volumes(self) -> None:
+        vol_map = {}
+        # Deduplicate volume mounts.
+        for task in self.tasks:
+            if task.volume_mounts is not None:
+                for volume_mount in task.volume_mounts:
+                    vol_map[volume_mount.volume_name] = volume_mount
+        for volume_mount in vol_map.values():
+            volume_mount.pre_mount()
 
 
 class _DagContext(threading.local):

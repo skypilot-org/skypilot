@@ -4,11 +4,10 @@ from typing import Any, Dict, Optional
 
 class VolumeType(enum.Enum):
     """Volume type."""
-    PVC='pvc'
-    BLOCK_STORAGE='block_storage'
-    OBJECT_STORAGE='object_storage'
-    FILE_SYSTEM='file_system'
-
+    PVC = 'pvc'
+    BLOCK_STORAGE = 'block_storage'
+    OBJECT_STORAGE = 'object_storage'
+    FILE_SYSTEM = 'file_system'
 
 
 class VolumeAccessMode(enum.Enum):

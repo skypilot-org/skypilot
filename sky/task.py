@@ -24,6 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.volumes import volume_mount as volume_mount_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -246,12 +247,14 @@ class Task:
         secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
+        volumes: Optional[Dict[str, str]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
+        volume_mounts: Optional[List[volume_mount_lib.VolumeMount]] = None,
     ):
         """Initializes a Task.
 
@@ -319,6 +322,7 @@ class Task:
         self.setup = setup
         self._envs = envs or {}
         self._secrets = secrets or {}
+        self._volumes = volumes or {}
 
         # Validate Docker login configuration early if both envs and secrets
         # contain Docker variables
@@ -362,7 +366,9 @@ class Task:
         self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
-        self.file_mounts_mapping = file_mounts_mapping
+        self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
+        self.volume_mounts: Optional[List[volume_mount_lib.VolumeMount]] = (
+            volume_mounts)
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -749,6 +755,78 @@ class Task:
         if config is None:
             config = {}
         return Task.from_yaml_config(config)
+
+    def resolve_volumes(self) -> None:
+        """Resolve volumes config to volume mounts.
+
+        Raises:
+            exceptions.VolumeNotFoundError: if any volume is not found.
+            exceptions.VolumeTopologyConflictError: if there is conflict in the
+              volumes and compute topology.
+        """
+        # Volumes has been resolved, a typical case is that the API server
+        # has resolved the volumes and the dag was then submitted to
+        # controllers.
+        if self.volume_mounts is not None:
+            return None
+        if self._volumes is None:
+            return None
+        volume_mounts: List[volume_mount_lib.VolumeMount] = []
+        for dst_path, vol in self._volumes.items():
+            # Shortcut for `dst_path: volume_name`
+            if isinstance(vol, str):
+                volume_mount = volume_mount_lib.VolumeMount(dst_path, vol)
+            elif isinstance(vol, dict):
+                common_utils.validate_schema(vol,
+                                             schemas.get_task_volume_schema(),
+                                             'Invalid volume config: ')
+                assert 'name' in vol, 'Volume name is required.'
+                volume_mount = volume_mount_lib.VolumeMount(
+                    dst_path, vol['name'])
+            else:
+                raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
+            volume_mount.resolve()
+            volume_mounts.append(volume_mount)
+        # Record the required topology and the volume that requires it, e.g.
+        # {'cloud': ('volume_name', 'aws')}
+        topology: Dict[str, Tuple[str, Optional[str]]] = {
+            'cloud': ('', None),
+            'region': ('', None),
+            'zone': ('', None),
+        }
+        for vol in volume_mounts:
+            for key, (vol_name, previous_req) in topology.items():
+                req = getattr(vol.volume_config, key)
+                if req is not None:
+                    if previous_req is not None and req != previous_req:
+                        raise exceptions.VolumeTopologyConflictError(
+                            f'Volume {vol.volume_name} can only be attached on '
+                            f'{key}:{req}, which conflicts with another volume '
+                            f'{vol_name} that requires {key}:{previous_req}.'
+                            f'Please use different volumes and retry.')
+                    topology[key] = (vol_name, req)
+        # Now we have the topology requirements from the intersection of all
+        # volumes. Check if there is topology conflict with the resources.
+        # Volume must have no conflict with ALL resources even if user
+        # specifies 'any_of' resources to ensure no resources will conflict
+        # with the volumes during failover.
+
+        for res in self.resources:
+            for key, (vol_name, vol_req) in topology.items():
+                req = getattr(res, key)
+                if req is not None and vol_req is not None and req != vol_req:
+                    raise exceptions.VolumeTopologyConflictError(
+                        f'The task requires {key}:{req}, which conflicts with '
+                        f'the volume constraint {key}:{vol_req}. Please '
+                        f'use different volumes and retry.')
+        # No topology conflict, we safely override the topology of resources to
+        # satisfy the volume constraints.
+        override_topology = {}
+        for key, (vol_name, vol_req) in topology.items():
+            if vol_req is not None:
+                override_topology[key] = vol_req
+        self.set_resources_override(override_topology)
+        self.volume_mounts = volume_mounts
 
     @property
     def num_nodes(self) -> int:
