@@ -120,7 +120,7 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
 
 .. _auth-proxy-client-secret:
 
-For better security, you can also store the client credentials in a Kubernetes secret instead of passing them as Helm values:
+For better security, you can also store the client details in a Kubernetes secret instead of passing them as Helm values:
 
 .. code-block:: console
 
