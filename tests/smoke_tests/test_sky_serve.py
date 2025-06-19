@@ -322,6 +322,7 @@ def test_skyserve_oci_http():
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -1009,6 +1010,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
+@pytest.mark.kubernetes
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
