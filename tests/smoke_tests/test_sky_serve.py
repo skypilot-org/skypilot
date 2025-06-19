@@ -427,10 +427,10 @@ def test_skyserve_dynamic_ondemand_fallback():
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
             'sleep 40',
-            _check_replica_in_status(
-                name, [(2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                       (2, False, _SERVICE_LAUNCHING_STATUS_REGEX +
-                        '\|SHUTTING_DOWN\|READY')]),
+            _check_replica_in_status(name, [
+                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
+            ]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -442,19 +442,18 @@ def test_skyserve_dynamic_ondemand_fallback():
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -q "1/3"',
-            _check_replica_in_status(name, [
-                (1, True, 'READY'),
-                (1, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
-            ]),
+            _check_replica_in_status(
+                name, [(1, True, 'READY'),
+                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             _check_replica_in_status(name, [(2, True, 'READY'),
                                             (0, False, '')]),
         ],
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
-        f'{_TEARDOWN_SERVICE.format(name=name)}',
+        #f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+        #f'{_TEARDOWN_SERVICE.format(name=name)}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
