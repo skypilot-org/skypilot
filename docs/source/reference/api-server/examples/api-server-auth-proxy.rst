@@ -118,6 +118,21 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
       --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
       --set ingress.oauth2-proxy.client-secret=<CLIENT SECRET>
 
+For better security, you can also store the client credentials in a Kubernetes secret instead of passing them as Helm values:
+
+.. code-block:: console
+
+    $ # Create a secret with your Okta credentials
+    $ kubectl create secret generic oauth2-proxy-credentials -n $NAMESPACE \
+      --from-literal=client-id=<CLIENT ID> \
+      --from-literal=client-secret=<CLIENT SECRET>
+
+    $ # Deploy using the secret
+    $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set ingress.oauth2-proxy.enabled=true \
+      --set ingress.oauth2-proxy.oidc-issuer-url=https://<OKTA URL>.okta.com \
+      --set ingress.oauth2-proxy.client-details-from-secret=oauth2-proxy-credentials
+
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to Okta to sign in.
 
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
