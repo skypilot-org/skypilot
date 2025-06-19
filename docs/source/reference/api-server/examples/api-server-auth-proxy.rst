@@ -118,6 +118,8 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
       --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
       --set ingress.oauth2-proxy.client-secret=<CLIENT SECRET>
 
+.. _auth-proxy-client-secret:
+
 For better security, you can also store the client credentials in a Kubernetes secret instead of passing them as Helm values:
 
 .. code-block:: console
