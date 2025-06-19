@@ -70,8 +70,7 @@ _AUTOSTOP_SCHEMA = {
 }
 
 
-def _get_single_resources_schema():
-    """Schema for a single resource in a resources list."""
+def _get_infra_pattern():
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
@@ -103,7 +102,11 @@ def _get_single_resources_schema():
     infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
                      f'{wildcard_cloud}{wildcard_with_region}|'
                      f'{kubernetes_pattern})$')
+    return infra_pattern
 
+
+def _get_single_resources_schema():
+    """Schema for a single resource in a resources list."""
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -133,7 +136,7 @@ def _get_single_resources_schema():
                 # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
                 #    "k8s/context-name",
                 #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
-                'pattern': infra_pattern,
+                'pattern': _get_infra_pattern(),
             },
             'cpus': {
                 'anyOf': [{
@@ -382,7 +385,11 @@ def get_resources_schema():
         },
     }
 
+
 def get_volume_schema():
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -394,6 +401,9 @@ def get_volume_schema():
             },
             'type': {
                 'type': 'string',
+                'case_insensitive_enum': [
+                    type.value for type in volume.VolumeType
+                ],
             },
             'infra': {
                 'type': 'string',
@@ -408,12 +418,16 @@ def get_volume_schema():
                 # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
                 #    "k8s/context-name",
                 #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
-                'pattern': infra_pattern,
-            },            
+                'pattern': _get_infra_pattern(),
+            },
+            'resource_name': {
+                'type': 'string',
+            },
             'spec': {
                 'type': 'object',
                 'properties': {
                     'size': {
+                        # TODO: add pattern for size
                         'type': 'string',
                     },
                     'storage_class_name': {
@@ -421,6 +435,9 @@ def get_volume_schema():
                     },
                     'access_mode': {
                         'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value for type in volume.AccessMode
+                        ],
                     },
                     'namespace': {
                         'type': 'string',
@@ -429,6 +446,7 @@ def get_volume_schema():
             },
         }
     }
+
 
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel

@@ -51,7 +51,6 @@ from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import jobs as managed_jobs
-from sky import volumes
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
@@ -84,6 +83,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
+from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
     import types
@@ -4228,6 +4228,9 @@ def volumes():
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], infra: Optional[str], type: Optional[str], size: Optional[str], yes: bool, async_call: bool):
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import schemas
+
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
         is_yaml, volume_config, yaml_file_provided, invalid_reason = _check_yaml_only(entrypoint_str)
@@ -4236,10 +4239,9 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], in
                 raise click.BadParameter(f'{entrypoint_str!r} looks like a yaml path but {invalid_reason}')
             else:
                 raise click.BadParameter(f'{entrypoint_str!r} needs to be a YAML file')
-    else:
-        volume_config = {}
+    volume_config = volume_config or {}
     # Override the volume config with CLI options
-    def _override_volume_config(volume_config: Dict[str, Any]) -> Dict[str, Any]:
+    def _override_volume_config():
         if name is not None:
             volume_config['name'] = name
         if infra is not None:
@@ -4247,20 +4249,12 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], in
         if type is not None:
             volume_config['type'] = type
         if size is not None:
-            volume_config['size'] = size
-        return storage_config
-    def _validate_volume_config(volume_config: Dict[str, Any]) -> None:
-        if volume_config.get('name') is None:
-            raise click.BadParameter('Volume name is required')
-        if volume_config.get('infra') is None:
-            raise click.BadParameter('Infra is required')
-        if volume_config.get('type') is None:
-            raise click.BadParameter('Volume type is required')
-        if volume_config.get('size') is None:
-            raise click.BadParameter('Volume size is required')
-    volume_config = _override_volume_config(volume_config)
+            if 'spec' not in volume_config:
+                volume_config['spec'] = {}
+            volume_config['spec']['size'] = size
+    _override_volume_config()
     logger.info(f'Volume config: {volume_config}')
-    _validate_volume_config(volume_config)
+    common_utils.validate_schema(volume_config, schemas.get_volume_schema(),'Invalid volumes config')
     infra = volume_config.get('infra')
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, None, None, None)
@@ -4270,9 +4264,9 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], in
     if not yes:
         click.confirm(f'Proceed to create volume {volume_config.get("name")!r}?', default=True, abort=True, show_default=True)
 
-    # Call SDK to create storage
+    # Call SDK to create volume
     try:
-        request_id = volumes.apply(volume_config)
+        request_id = volumes_sdk.apply(volume_config)
         _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
     except RuntimeError as e:
         logger.error(f'{colorama.Fore.RED}Error applying volume: '

@@ -111,6 +111,23 @@ storage_table = sqlalchemy.Table(
     sqlalchemy.Column('status', sqlalchemy.Text),
 )
 
+volume_table = sqlalchemy.Table(
+    'volumes',
+    Base.metadata,
+    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace',
+                      sqlalchemy.Text,
+                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('last_attached_at',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('last_use', sqlalchemy.Text),
+    sqlalchemy.Column('status', sqlalchemy.Text),
+)
+
 # Table for Cluster History
 # usage_intervals: List[Tuple[int, int]]
 #  Specifies start and end timestamps of cluster.
@@ -1310,6 +1327,89 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': status_lib.StorageStatus[row.status],
         })
     return records
+
+
+@_init_db
+def get_volume() -> List[Dict[str, Any]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(volume_table).all()
+    records = []
+    for row in rows:
+        records.append({
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': pickle.loads(row.handle),
+            'user_hash': row.user_hash,
+            'workspace': row.workspace,
+            'last_attached_at': row.last_attached_at,
+            'last_use': row.last_use,
+            'status': status_lib.VolumeStatus[row.status],
+        })
+    return records
+
+
+@_init_db
+def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(volume_table).filter_by(name=name).first()
+    if row:
+        return {
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': pickle.loads(row.handle),
+            'user_hash': row.user_hash,
+            'workspace': row.workspace,
+            'last_attached_at': row.last_attached_at,
+            'last_use': row.last_use,
+            'status': status_lib.VolumeStatus[row.status],
+        }
+    return None
+
+
+@_init_db
+def add_volume(name: str, config: models.VolumeConfig,
+               status: status_lib.VolumeStatus) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    volume_launched_at = int(time.time())
+    handle = pickle.dumps(config)
+    last_use = common_utils.get_current_command()
+    user_hash = common_utils.get_current_user().id
+    active_workspace = skypilot_config.get_active_workspace()
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.add(volume_table.insert().values(
+            name=name,
+            launched_at=volume_launched_at,
+            handle=handle,
+            user_hash=user_hash,
+            workspace=active_workspace,
+            last_attached_at=None,
+            last_use=last_use,
+            status=status.value,
+        ))
+        session.commit()
+
+
+@_init_db
+def update_volume(name: str, last_attached_at: int,
+                  status: status_lib.VolumeStatus) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.last_attached_at: last_attached_at,
+            volume_table.c.status: status.value,
+        })
+        session.commit()
+
+
+@_init_db
+def delete_volume(name: str) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).delete()
+        session.commit()
 
 
 @_init_db
