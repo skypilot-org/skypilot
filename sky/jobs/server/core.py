@@ -103,7 +103,7 @@ def launch(
                     'will be auto-generated) .')
         task_names.add(task_.name)
 
-        # Check for priority in resources first, then fall back to job priority
+        # Check for priority in resources
         task_priority = None
         if task_.resources:
             # Convert set to list to access elements by index
@@ -120,20 +120,6 @@ def launch(
                             'same priority. Found priority '
                             f'{resource.priority} but expected {task_priority}.'
                         )
-
-            # Check for conflict between resources priority and job
-            # priority
-            if task_.job_priority is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Task {task_.name!r}: Cannot specify both '
-                        f'resources.priority ({task_priority}) and '
-                        f'job.priority ({task_.job_priority}). Please use only '
-                        'one priority specification method.')
-
-        # Fall back to job priority if no resources priority found
-        if task_priority is None:
-            task_priority = task_.job_priority
 
         if task_priority is not None:
             if (priority is not None and priority != task_priority):
