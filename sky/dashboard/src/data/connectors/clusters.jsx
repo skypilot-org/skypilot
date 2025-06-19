@@ -88,6 +88,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         workspace: cluster.workspace,
         autostop: cluster.autostop,
         to_down: cluster.to_down,
+        priority: cluster.priority,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
