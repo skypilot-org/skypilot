@@ -1009,8 +1009,8 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
-@pytest.mark.kubernetes
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
