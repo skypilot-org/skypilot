@@ -3282,8 +3282,9 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     format_kubeconfig_exec_auth(config, path)
     return path
 
+
 def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
-                                    resource_name: str) -> None:
+                                   resource_name: str) -> None:
     """Helper to delete Kubernetes resources with 404 handling and retries.
 
     Args:

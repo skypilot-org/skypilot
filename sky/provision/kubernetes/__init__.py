@@ -12,3 +12,4 @@ from sky.provision.kubernetes.network import cleanup_ports
 from sky.provision.kubernetes.network import open_ports
 from sky.provision.kubernetes.network import query_ports
 from sky.provision.kubernetes.volume import apply_volume
+from sky.provision.kubernetes.volume import delete_volume
