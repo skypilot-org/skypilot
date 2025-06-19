@@ -102,6 +102,17 @@ def bootstrap_instances(
     """
     raise NotImplementedError
 
+@_route_to_cloud_impl
+def create_volume(
+        provider_name: str,
+        config: common.VolumeConfig) -> common.VolumeConfig:
+    """Create a storage.
+
+    This function creates a storage with the provided configuration,
+    and returns a StorageConfig object with updated configuration.
+    """
+    raise NotImplementedError
+
 
 @_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,

@@ -51,6 +51,7 @@ from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import jobs as managed_jobs
+from sky import volumes
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
@@ -804,8 +805,8 @@ def _parse_override_params(
     return override_params
 
 
-def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    """Checks if entrypoint is a readable YAML file.
+def _check_yaml_only(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], bool, str]:
+    """Checks if entrypoint is a readable YAML file without confirmation.
 
     Args:
         entrypoint: Path to a YAML file.
@@ -853,6 +854,15 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                 invalid_reason = ('yaml.safe_load() failed. Please check if the'
                                   ' path is correct.')
         is_yaml = False
+    return is_yaml, result, yaml_file_provided,invalid_reason
+
+def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """Checks if entrypoint is a readable YAML file.
+
+    Args:
+        entrypoint: Path to a YAML file.
+    """
+    is_yaml, result, yaml_file_provided, invalid_reason = _check_yaml_only(entrypoint)
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
@@ -4197,6 +4207,77 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
             logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
+
+@cli.group(cls=_NaturalOrderGroup)
+def volumes():
+    """SkyPilot Volumes CLI."""
+    pass
+
+@volumes.command('apply', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
+@click.argument('entrypoint',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--name', '-n', required=False, type=str, help='Storage name. Override the name defined in the YAML.')
+@click.option('--infra', required=False, type=str, help='Infra. Format: k8s, k8s/context-name. Override the infra defined in the YAML.')
+@click.option('--type', required=False, type=str, help='Storage type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--size', required=False, type=str, help='Storage size. Override the size defined in the YAML.')
+@click.option('--yes', '-y', is_flag=True, default=False, required=False, help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
+@usage_lib.entrypoint
+def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str], infra: Optional[str], type: Optional[str], size: Optional[str], yes: bool, async_call: bool):
+    if entrypoint is not None and len(entrypoint) > 0:
+        entrypoint_str = ' '.join(entrypoint)
+        is_yaml, volume_config, yaml_file_provided, invalid_reason = _check_yaml_only(entrypoint_str)
+        if not is_yaml:
+            if yaml_file_provided:
+                raise click.BadParameter(f'{entrypoint_str!r} looks like a yaml path but {invalid_reason}')
+            else:
+                raise click.BadParameter(f'{entrypoint_str!r} needs to be a YAML file')
+    else:
+        volume_config = {}
+    # Override the volume config with CLI options
+    def _override_volume_config(volume_config: Dict[str, Any]) -> Dict[str, Any]:
+        if name is not None:
+            volume_config['name'] = name
+        if infra is not None:
+            volume_config['infra'] = infra
+        if type is not None:
+            volume_config['type'] = type
+        if size is not None:
+            volume_config['size'] = size
+        return storage_config
+    def _validate_volume_config(volume_config: Dict[str, Any]) -> None:
+        if volume_config.get('name') is None:
+            raise click.BadParameter('Volume name is required')
+        if volume_config.get('infra') is None:
+            raise click.BadParameter('Infra is required')
+        if volume_config.get('type') is None:
+            raise click.BadParameter('Volume type is required')
+        if volume_config.get('size') is None:
+            raise click.BadParameter('Volume size is required')
+    volume_config = _override_volume_config(volume_config)
+    logger.info(f'Volume config: {volume_config}')
+    _validate_volume_config(volume_config)
+    infra = volume_config.get('infra')
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, None, None, None)
+    volume_config['cloud'] = cloud
+    volume_config['region'] = region
+    volume_config['zone'] = zone
+    if not yes:
+        click.confirm(f'Proceed to create volume {volume_config.get("name")!r}?', default=True, abort=True, show_default=True)
+
+    # Call SDK to create storage
+    try:
+        request_id = volumes.apply(volume_config)
+        _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
+    except RuntimeError as e:
+        logger.error(f'{colorama.Fore.RED}Error applying volume: '
+                     f'{common_utils.format_exception(e, use_bracket=True)}'
+                     f'{colorama.Style.RESET_ALL}')
 
 
 @cli.group(cls=_NaturalOrderGroup)

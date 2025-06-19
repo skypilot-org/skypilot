@@ -382,6 +382,53 @@ def get_resources_schema():
         },
     }
 
+def get_volume_schema():
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'name': {
+                'type': 'string',
+            },
+            'type': {
+                'type': 'string',
+            },
+            'infra': {
+                'type': 'string',
+                'description':
+                    ('Infrastructure specification in format: '
+                     'cloud[/region[/zone]]. Use "*" as a wildcard.'),
+                # Pattern validates:
+                # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
+                #    "aws/us-east-1/us-east-1a"
+                # 2. Wildcard patterns - e.g. "*", "*/us-east-1",
+                #    "*/*/us-east-1a", "aws/*/us-east-1a"
+                # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
+                #    "k8s/context-name",
+                #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
+                'pattern': infra_pattern,
+            },            
+            'spec': {
+                'type': 'object',
+                'properties': {
+                    'size': {
+                        'type': 'string',
+                    },
+                    'storage_class_name': {
+                        'type': 'string',
+                    },
+                    'access_mode': {
+                        'type': 'string',
+                    },
+                    'namespace': {
+                        'type': 'string',
+                    },
+                },
+            },
+        }
+    }
 
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
