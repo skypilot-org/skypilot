@@ -454,17 +454,11 @@ Network tier to use (optional).
 
 Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
 
-If ``'best'`` is specified, use the best network tier available on the specified instance. This can enable features like:
+If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
 
-- **GCP VMs/GKE**: GPUDirect-TCPX for high-performance node-to-node GPU communication
-- **Nebius VMs/Managed Kubernetes**: Automatic InfiniBand support for high-performance GPU communication
-
-.. code-block:: yaml
-
-  resources:
-    network_tier: standard
-
-OR
+- ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
 
 .. code-block:: yaml
 
