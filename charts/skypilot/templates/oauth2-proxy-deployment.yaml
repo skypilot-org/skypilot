@@ -3,15 +3,13 @@
 {{- if not (index $oauth2 "oidc-issuer-url") -}}
 {{- fail "ingress.oauth2-proxy.oidc-issuer-url is required when OAuth2 proxy is enabled" -}}
 {{- end -}}
-{{- if and (not (index $oauth2 "client-details-from-secret" "enabled")) (eq (index $oauth2 "client-id") "") -}}
-{{- fail "ingress.oauth2-proxy.client-id is required when OAuth2 proxy is enabled and client-details-from-secret is not enabled" -}}
+{{- if and (not (index $oauth2 "client-details-from-secret")) (eq (index $oauth2 "client-id") "") -}}
+{{- fail "ingress.oauth2-proxy.client-id is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
 {{- end -}}
-{{- if and (not (index $oauth2 "client-details-from-secret" "enabled")) (eq (index $oauth2 "client-secret") "") -}}
-{{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled and client-details-from-secret is not enabled" -}}
+{{- if and (not (index $oauth2 "client-details-from-secret")) (eq (index $oauth2 "client-secret") "") -}}
+{{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
 {{- end -}}
-{{- if and (index $oauth2 "client-details-from-secret" "enabled") (eq (index $oauth2 "client-details-from-secret" "secret-name") "") -}}
-{{- fail "ingress.oauth2-proxy.client-details-from-secret.secret-name is required when client-details-from-secret is enabled" -}}
-{{- end -}}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,20 +61,20 @@ spec:
         {{- end }}
         env:
         - name: OAUTH2_PROXY_CLIENT_ID
-          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret" "enabled") }}
+          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret") }}
           valueFrom:
             secretKeyRef:
-              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" "secret-name" }}
-              key: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" "client-id-key" | default "client-id" }}
+              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
+              key: client-id
           {{- else }}
           value: {{ index .Values.ingress "oauth2-proxy" "client-id" | quote }}
           {{- end }}
         - name: OAUTH2_PROXY_CLIENT_SECRET
-          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret" "enabled") }}
+          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret") }}
           valueFrom:
             secretKeyRef:
-              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" "secret-name" }}
-              key: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" "client-secret-key" | default "client-secret" }}
+              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
+              key: client-secret
           {{- else }}
           value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
           {{- end }}
