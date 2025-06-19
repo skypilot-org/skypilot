@@ -21,7 +21,7 @@ run: |
   # Falcon H1 models use Mamba n_groups=2
   # This requires tensor_parallel_size to be 1 or 2
   
-  TP_SIZE=2  # Optimal for throughput
+  TP_SIZE=2
   DP_SIZE=$((SKYPILOT_NUM_GPUS_PER_NODE / TP_SIZE))
   
   echo "=== Falcon H1 Configuration ==="
