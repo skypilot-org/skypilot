@@ -427,19 +427,17 @@ def test_skyserve_dynamic_ondemand_fallback():
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
             'sleep 40',
-            _check_replica_in_status(
-                name,
-                [
-                    (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                    # The instance may still be in READY state when we check the
-                    # status, before transitioning to SHUTTING_DOWN.
-                    # When in SHUTTING_DOWN state, instances may actually shut
-                    # down and disappear from the status. Therefore, we check
-                    # for 1 instance instead of 2, as the count can be either
-                    # 1 or 2.
-                    (1, False,
-                     _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN\|READY')
-                ]),
+            _check_replica_in_status(name, [
+                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+            ]),
+
+            # a) The instance may still be in READY state when we check the
+            # status, before transitioning to SHUTTING_DOWN.
+            # b) And in SHUTTING_DOWN state, it may actually SHUTDOWN and
+            # disappear. So we check 1 instance instead of 2. Because it
+            # can be 1 or 2.
+            f'count=$(sky serve status {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\|SHUTTING_DOWN\|READY" | wc -l); '
+            f'[ "$count" -eq 1 ] || [ "$count" -eq 2 ] || {{ echo "Expected 1 or 2 instances, got $count"; exit 1; }}',
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
