@@ -196,39 +196,6 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
 The UI shows the same information as the CLI ``sky jobs queue -au``.
 
 
-.. _job-priority:
-
-Job queueing and priority
--------------------------
-
-Job queueing and priority are supported by managed jobs.
-
-
-Specify job priority by setting the ``job.priority`` field in the :ref:`SkyPilot YAML <yaml-spec-job-priority>`.
-
-.. code-block:: yaml
-
-  job:
-    # Priority of the job, between -1000 and 1000 (default: 0).
-    #
-    # A higher value means that the job is higher priority. High priority jobs
-    # are scheduled sooner and will block lower priority jobs from starting
-    # until the high priority jobs have started.
-    priority: 0
-
-
-All jobs are submitted to a queue. When the scheduler is selecting the next job
-to schedule, it will select the highest priority job.
-
-If a high priority job is still launching, lower priority jobs will not be
-scheduled (i.e., stay in pending).
-
-.. image:: https://i.imgur.com/8H8ictY.png
-  :width: 800
-  :alt: Job queueing and priority
-
-
-
 .. _spot-jobs:
 
 Running on spot instances
