@@ -1308,35 +1308,3 @@ Port to run your service on each replica.
 
   resources:
     ports: 8080
-
-Managed jobs
-============
-
-When creating a managed job, you can add an optional ``job`` section to your SkyPilot YAML for additional configuration.
-
-Syntax
-
-.. parsed-literal::
-
-  job:
-    :ref:`priority <yaml-spec-job-priority>`: 200
-
-
-Fields
-----------
-
-.. _yaml-spec-job-priority:
-
-``job.priority``
-~~~~~~~~~~~~~~~~
-
-Priority of the job, between -1000 and 1000 (default: 0).
-
-Set the queuing priority of the job. A higher value means that the job is higher
-priority. High priority jobs are scheduled sooner and will block lower priority
-jobs from starting until the high priority jobs have started.
-
-.. code-block:: yaml
-
-  job:
-    priority: 200
