@@ -7,7 +7,8 @@ import Link from 'next/link';
 import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
-import { useClusterDetails } from '@/data/connectors/clusters';
+import { useClusterDetails, getClusterHistory } from '@/data/connectors/clusters';
+import dashboardCache from '@/lib/cache';
 import {
   RotateCwIcon,
   ChevronDownIcon,
@@ -57,6 +58,9 @@ function ClusterDetails() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
+  const [historyData, setHistoryData] = useState(null);
+  const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const isMobile = useMobile();
   const {
     clusterData,
@@ -74,6 +78,32 @@ function ClusterDetails() {
       setIsInitialLoad(false);
     }
   }, [clusterDetailsLoading, isInitialLoad]);
+
+  // Check for historical cluster if active cluster is not found
+  React.useEffect(() => {
+    const checkHistoryCluster = async () => {
+      if (!cluster || clusterDetailsLoading || clusterData) return;
+      
+      setHistoryLoading(true);
+      try {
+        const historyData = await dashboardCache.get(getClusterHistory);
+        const foundHistoryCluster = historyData.find((c) => c.name === cluster);
+        if (foundHistoryCluster) {
+          setHistoryData(foundHistoryCluster);
+          setIsHistoricalCluster(true);
+        }
+      } catch (error) {
+        console.error('Error fetching cluster history:', error);
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+
+    // Only check history if we've finished loading and no active cluster found
+    if (!clusterDetailsLoading && !clusterData) {
+      checkHistoryCluster();
+    }
+  }, [cluster, clusterDetailsLoading, clusterData]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -154,7 +184,7 @@ function ClusterDetails() {
           </div>
         </div>
 
-        {clusterDetailsLoading && isInitialLoad ? (
+        {(clusterDetailsLoading && isInitialLoad) || historyLoading ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
             <span className="text-gray-500">Loading cluster details...</span>
@@ -165,8 +195,21 @@ function ClusterDetails() {
             clusterJobData={clusterJobData}
             clusterJobsLoading={clusterJobsLoading}
             refreshClusterJobsOnly={refreshClusterJobsOnly}
+            isHistoricalCluster={false}
           />
-        ) : null}
+        ) : isHistoricalCluster && historyData ? (
+          <ActiveTab
+            clusterData={historyData}
+            clusterJobData={[]}
+            clusterJobsLoading={false}
+            refreshClusterJobsOnly={() => {}}
+            isHistoricalCluster={true}
+          />
+        ) : (
+          <div className="flex justify-center items-center py-12">
+            <span className="text-gray-500">Cluster not found in active clusters or history.</span>
+          </div>
+        )}
 
         {/* SSH Instructions Modal */}
         <SSHInstructionsModal
@@ -191,6 +234,7 @@ function ActiveTab({
   clusterJobData,
   clusterJobsLoading,
   refreshClusterJobsOnly,
+  isHistoricalCluster = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -202,7 +246,8 @@ function ActiveTab({
 
   const copyYamlToClipboard = async () => {
     try {
-      const formattedYaml = formatYaml(clusterData.task_yaml);
+      const yamlContent = clusterData.task_yaml || clusterData.last_creation_yaml;
+      const formattedYaml = formatYaml(yamlContent);
       await navigator.clipboard.writeText(formattedYaml);
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
@@ -213,7 +258,8 @@ function ActiveTab({
 
   const copyCommandToClipboard = async () => {
     try {
-      await navigator.clipboard.writeText(clusterData.command);
+      const command = clusterData.command || clusterData.last_creation_command;
+      await navigator.clipboard.writeText(command);
       setIsCommandCopied(true);
       setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
     } catch (err) {
@@ -221,7 +267,32 @@ function ActiveTab({
     }
   };
 
-  const hasCreationArtifacts = clusterData?.command || clusterData?.task_yaml;
+  const hasCreationArtifacts = clusterData?.last_creation_command || clusterData?.last_creation_yaml || clusterData?.command || clusterData?.task_yaml;
+
+  // Helper functions for historical clusters
+  const formatDuration = (durationSeconds) => {
+    if (!durationSeconds || durationSeconds === 0) {
+      return '-';
+    }
+    
+    const hours = Math.floor(durationSeconds / 3600);
+    const minutes = Math.floor((durationSeconds % 3600) / 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m`;
+    } else {
+      return '<1m';
+    }
+  };
+
+  const formatCost = (cost) => {
+    if (cost === null || cost === undefined || cost === 0) {
+      return '-';
+    }
+    return `$${cost.toFixed(2)}`;
+  };
 
   return (
     <div>
@@ -229,7 +300,9 @@ function ActiveTab({
       <div className="mb-6">
         <Card>
           <div className="flex items-center justify-between px-4 pt-4">
-            <h3 className="text-lg font-semibold">Details</h3>
+            <h3 className="text-lg font-semibold">
+              {isHistoricalCluster ? 'Historical Cluster Details' : 'Details'}
+            </h3>
           </div>
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
@@ -245,16 +318,20 @@ function ActiveTab({
                 <div className="text-gray-600 font-medium text-base">
                   Cluster
                 </div>
-                <div className="text-base mt-1">{clusterData.cluster}</div>
+                <div className="text-base mt-1">{clusterData.cluster || clusterData.name}</div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
                 <div className="text-base mt-1">{clusterData.user}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Infra</div>
+                <div className="text-gray-600 font-medium text-base">
+                  {isHistoricalCluster ? 'Cloud' : 'Infra'}
+                </div>
                 <div className="text-base mt-1">
-                  {clusterData.infra ? (
+                  {isHistoricalCluster ? (
+                    clusterData.cloud || 'N/A'
+                  ) : clusterData.infra ? (
                     <NonCapitalizedTooltip
                       content={clusterData.full_infra || clusterData.infra}
                       className="text-sm text-muted-foreground"
@@ -302,14 +379,37 @@ function ActiveTab({
                     : 'N/A'}
                 </div>
               </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
-                  Autostop
+              
+              {/* Show duration and cost for historical clusters */}
+              {isHistoricalCluster ? (
+                <>
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Duration
+                    </div>
+                    <div className="text-base mt-1">
+                      {formatDuration(clusterData.duration)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Cost
+                    </div>
+                    <div className="text-base mt-1">
+                      {formatCost(clusterData.total_cost)}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Autostop
+                  </div>
+                  <div className="text-base mt-1">
+                    {formatAutostop(clusterData.autostop, clusterData.to_down)}
+                  </div>
                 </div>
-                <div className="text-base mt-1">
-                  {formatAutostop(clusterData.autostop, clusterData.to_down)}
-                </div>
-              </div>
+              )}
 
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
@@ -339,21 +439,21 @@ function ActiveTab({
 
                   <div className="space-y-4 mt-3">
                     {/* Creation Command */}
-                    {clusterData.command && (
+                    {(clusterData.command || clusterData.last_creation_command) && (
                       <div>
                         <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
                           <code className="text-sm text-gray-800 font-mono break-all">
-                            {clusterData.command}
+                            {clusterData.command || clusterData.last_creation_command}
                           </code>
                         </div>
                       </div>
                     )}
 
                     {/* Task YAML - Collapsible */}
-                    {clusterData.task_yaml &&
-                      clusterData.task_yaml !== '{}' &&
-                      !clusterData.cluster.startsWith('sky-jobs-controller-') &&
-                      !clusterData.cluster.startsWith(
+                    {(clusterData.task_yaml || clusterData.last_creation_yaml) &&
+                      (clusterData.task_yaml !== '{}' && clusterData.last_creation_yaml !== '{}') &&
+                      !(clusterData.cluster || clusterData.name)?.startsWith('sky-jobs-controller-') &&
+                      !(clusterData.cluster || clusterData.name)?.startsWith(
                         'sky-serve-controller-'
                       ) && (
                         <div>
@@ -392,7 +492,7 @@ function ActiveTab({
                           {isYamlExpanded && (
                             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                               <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
-                                {formatYaml(clusterData.task_yaml)}
+                                {formatYaml(clusterData.task_yaml || clusterData.last_creation_yaml)}
                               </pre>
                             </div>
                           )}
@@ -406,15 +506,17 @@ function ActiveTab({
         </Card>
       </div>
 
-      {/* Jobs Table */}
-      <div className="mb-8">
-        <ClusterJobs
-          clusterName={clusterData.cluster}
-          clusterJobData={clusterJobData}
-          loading={clusterJobsLoading}
-          refreshClusterJobsOnly={refreshClusterJobsOnly}
-        />
-      </div>
+      {/* Jobs Table - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ClusterJobs
+            clusterName={clusterData.cluster}
+            clusterJobData={clusterJobData}
+            loading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
+          />
+        </div>
+      )}
     </div>
   );
 }

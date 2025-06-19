@@ -134,6 +134,12 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
     sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('last_creation_yaml',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_creation_command',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -308,6 +314,21 @@ def create_table():
             'password',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+        
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'last_creation_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+        
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'last_creation_command',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+        
         session.commit()
 
 
@@ -605,7 +626,10 @@ def add_or_update_cluster(cluster_name: str,
             requested_resources=pickle.dumps(requested_resources),
             launched_resources=pickle.dumps(launched_resources),
             usage_intervals=pickle.dumps(usage_intervals),
-            user_hash=user_hash)
+            user_hash=user_hash,
+            last_creation_yaml=conditional_values.get('last_creation_yaml'),
+            last_creation_command=conditional_values.get('last_creation_command'),
+        )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[cluster_history_table.c.cluster_hash],
             set_={
@@ -617,7 +641,11 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(launched_resources),
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.user_hash: user_hash
+                cluster_history_table.c.user_hash: user_hash,
+                cluster_history_table.c.last_creation_yaml:
+                    conditional_values.get('last_creation_yaml'),
+                cluster_history_table.c.last_creation_command:
+                    conditional_values.get('last_creation_command'),
             })
         session.execute(do_update_stmt)
 
@@ -1030,37 +1058,75 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_clusters_from_history() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Explicitly select columns from both tables to avoid ambiguity
         rows = session.query(
-            cluster_history_table.join(cluster_table,
-                                       cluster_history_table.c.cluster_hash ==
-                                       cluster_table.c.cluster_hash,
-                                       isouter=True)).all()
+            cluster_history_table.c.cluster_hash,
+            cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.requested_resources,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.last_creation_yaml,
+            cluster_history_table.c.last_creation_command,
+            cluster_table.c.status,
+            cluster_table.c.workspace
+        ).select_from(
+            cluster_history_table.join(
+                cluster_table,
+                cluster_history_table.c.cluster_hash == cluster_table.c.cluster_hash,
+                isouter=True
+            )
+        ).all()
 
-    # '(cluster_hash, name, num_nodes, requested_resources, '
-    #         'launched_resources, usage_intervals) '
     records = []
     for row in rows:
-        # TODO: use namedtuple instead of dict
         user_hash = _get_user_hash_or_current_user(row.user_hash)
-        status = row.status
-        if status is not None:
-            status = status_lib.ClusterStatus[status]
+        launched_at = _get_cluster_launch_time(row.cluster_hash)
+        duration = _get_cluster_duration(row.cluster_hash)
+        
+        # Parse status
+        status = None
+        if row.status:
+            status = status_lib.ClusterStatus[row.status]
+        else:
+            status = status_lib.ClusterStatus.STOPPED  # Default for historical clusters
+        
+        # Parse launched resources safely
+        launched_resources = None
+        if row.launched_resources:
+            try:
+                launched_resources = pickle.loads(row.launched_resources)
+            except (pickle.PickleError, AttributeError):
+                launched_resources = None
+        
+        # Parse usage intervals safely
+        usage_intervals = []
+        if row.usage_intervals:
+            try:
+                usage_intervals = pickle.loads(row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                usage_intervals = []
+        
         record = {
             'name': row.name,
-            'launched_at': _get_cluster_launch_time(row.cluster_hash),
-            'duration': _get_cluster_duration(row.cluster_hash),
+            'launched_at': launched_at,
+            'duration': duration,
             'num_nodes': row.num_nodes,
-            'resources': pickle.loads(row.launched_resources),
+            'resources': launched_resources,
             'cluster_hash': row.cluster_hash,
-            'usage_intervals': pickle.loads(row.usage_intervals),
+            'usage_intervals': usage_intervals,
             'status': status,
             'user_hash': user_hash,
+            'workspace': row.workspace,
+            'last_creation_yaml': row.last_creation_yaml,
+            'last_creation_command': row.last_creation_command,
         }
 
         records.append(record)
 
     # sort by launch time, descending in recency
-    records = sorted(records, key=lambda record: -record['launched_at'])
+    records = sorted(records, key=lambda record: -(record['launched_at'] or 0))
     return records
 
 

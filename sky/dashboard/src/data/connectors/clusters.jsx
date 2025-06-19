@@ -106,6 +106,63 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getClusterHistory() {
+  try {
+    const history = await apiClient.fetch('/cost_report');
+
+    const historyData = history.map((cluster) => {
+      // Get cloud name from resources string if available
+      let cloud = 'Unknown';
+      let region = '';
+      if (cluster.cloud) {
+        cloud = cluster.cloud;
+      }
+      
+      // Build region info - cost_report doesn't have detailed region info
+      // so we extract what we can from resources string
+      let region_or_zone = region;
+      const full_region_or_zone = region_or_zone;
+      
+      return {
+        status: cluster.status ? clusterStatusMap[cluster.status] : 'TERMINATED',
+        cluster: cluster.name,
+        user: cluster.user_name || '-',
+        user_hash: cluster.user_hash,
+        cloud: cloud,
+        region: region,
+        infra: cloud,
+        full_infra: cloud,
+        cpus: cluster.resources?.cpus || '-',
+        mem: cluster.resources?.memory || '-',
+        gpus: cluster.accelerators || {},
+        resources_str: cluster.resources ? `${cluster.num_nodes}x ${cluster.resources}` : '-',
+        resources_str_full: cluster.resources ? `${cluster.num_nodes}x ${cluster.resources}` : '-',
+        time: new Date(cluster.launched_at * 1000),
+        num_nodes: cluster.num_nodes || 1,
+        duration: cluster.duration,
+        total_cost: cluster.total_cost,
+        workspace: 'default', // History doesn't have workspace info currently
+        autostop: -1,
+        to_down: false,
+        cluster_hash: cluster.cluster_hash,
+        usage_intervals: cluster.usage_intervals,
+        command: cluster.last_creation_command || '-',
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: new Date(cluster.launched_at * 1000),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+    return historyData;
+  } catch (error) {
+    console.error('Error fetching cluster history:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,

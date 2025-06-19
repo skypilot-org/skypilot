@@ -30,7 +30,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
@@ -126,6 +126,25 @@ const formatUserDisplay = (username, userId) => {
   return usernameBase;
 };
 
+// Helper function to format duration in a human-readable way
+const formatDuration = (durationSeconds) => {
+  if (!durationSeconds || durationSeconds === 0) {
+    return '-';
+  }
+  
+  const hours = Math.floor(durationSeconds / 3600);
+  const minutes = Math.floor((durationSeconds % 3600) / 60);
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m`;
+  } else {
+    return '<1m';
+  }
+};
+
+
 export function Clusters() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -138,6 +157,7 @@ export function Clusters() {
   const [nameFilter, setNameFilter] = useState('');
   const [workspaces, setWorkspaces] = useState([]);
   const [users, setUsers] = useState([]);
+  const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
 
   // Handle URL query parameters for workspace and user filtering
@@ -312,6 +332,7 @@ export function Clusters() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getClusterHistory);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
@@ -330,6 +351,28 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
+          <div className="flex items-center ml-6 space-x-3">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showHistory}
+                onChange={(e) => setShowHistory(e.target.checked)}
+                className="sr-only"
+              />
+              <div
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                    showHistory ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </div>
+              <span className="ml-2 text-sm text-gray-700">Show History</span>
+            </label>
+          </div>
           <div className="relative ml-4 mr-2">
             <input
               type="text"
@@ -425,6 +468,7 @@ export function Clusters() {
         workspaceFilter={workspaceFilter}
         userFilter={userFilter}
         nameFilter={nameFilter}
+        showHistory={showHistory}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -458,6 +502,7 @@ export function ClusterTable({
   workspaceFilter,
   userFilter,
   nameFilter,
+  showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -474,12 +519,49 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    const initialData = await dashboardCache.get(getClusters);
-    setData(initialData);
+    
+    try {
+      const activeClusters = await dashboardCache.get(getClusters);
+      
+      if (showHistory) {
+        const historyClusters = await dashboardCache.get(getClusterHistory);
+        // Mark clusters as active or historical for UI distinction
+        const markedActiveClusters = activeClusters.map(cluster => ({
+          ...cluster,
+          isHistorical: false
+        }));
+        const markedHistoryClusters = historyClusters.map(cluster => ({
+          ...cluster,
+          isHistorical: true
+        }));
+        // Combine and remove duplicates (prefer active over historical)
+        const combinedData = [...markedActiveClusters];
+        markedHistoryClusters.forEach(histCluster => {
+          const existsInActive = activeClusters.some(activeCluster => 
+            (activeCluster.cluster || activeCluster.name) === (histCluster.cluster || histCluster.name)
+          );
+          if (!existsInActive) {
+            combinedData.push(histCluster);
+          }
+        });
+        setData(combinedData);
+      } else {
+        // Mark active clusters for consistency
+        const markedActiveClusters = activeClusters.map(cluster => ({
+          ...cluster,
+          isHistorical: false
+        }));
+        setData(markedActiveClusters);
+      }
+    } catch (error) {
+      console.error('Error fetching cluster data:', error);
+      setData([]);
+    }
+    
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [setLoading]);
+  }, [setLoading, showHistory]);
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
@@ -619,6 +701,14 @@ export function ClusterTable({
               >
                 Started{getSortDirection('time')}
               </TableHead>
+              {showHistory && (
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('duration')}
+                >
+                  Duration{getSortDirection('duration')}
+                </TableHead>
+              )}
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('autostop')}
@@ -651,10 +741,10 @@ export function ClusterTable({
                     </TableCell>
                     <TableCell>
                       <Link
-                        href={`/clusters/${item.cluster}`}
+                        href={`/clusters/${item.cluster || item.name}`}
                         className="text-blue-600"
                       >
-                        {item.cluster}
+                        {item.cluster || item.name}
                       </Link>
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
@@ -696,16 +786,21 @@ export function ClusterTable({
                       </NonCapitalizedTooltip>
                     </TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
+                    {showHistory && (
+                      <TableCell>{formatDuration(item.duration)}</TableCell>
+                    )}
                     <TableCell>
-                      {formatAutostop(item.autostop, item.to_down)}
+                      {item.isHistorical ? '-' : formatAutostop(item.autostop, item.to_down)}
                     </TableCell>
                     <TableCell className="text-left">
-                      <Status2Actions
-                        cluster={item.cluster}
-                        status={item.status}
-                        onOpenSSHModal={onOpenSSHModal}
-                        onOpenVSCodeModal={onOpenVSCodeModal}
-                      />
+                      {!item.isHistorical && (
+                        <Status2Actions
+                          cluster={item.cluster}
+                          status={item.status}
+                          onOpenSSHModal={onOpenSSHModal}
+                          onOpenVSCodeModal={onOpenVSCodeModal}
+                        />
+                      )}
                     </TableCell>
                   </TableRow>
                 );
