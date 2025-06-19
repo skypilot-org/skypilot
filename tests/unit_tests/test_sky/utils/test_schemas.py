@@ -3,6 +3,7 @@ import unittest
 
 import jsonschema
 
+from sky.skylet import constants
 from sky.utils import schemas
 
 
@@ -140,10 +141,10 @@ class TestResourcesSchema(unittest.TestCase):
         # Invalid priority configurations
         invalid_priority_configs = [
             {
-                'priority': -1
+                'priority': constants.MIN_PRIORITY - 1
             },  # Below minimum
             {
-                'priority': 1001
+                'priority': constants.MAX_PRIORITY + 1
             },  # Above maximum
             {
                 'priority': 'high'

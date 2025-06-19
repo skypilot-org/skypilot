@@ -468,3 +468,7 @@ MEMORY_SIZE_PATTERN = (
     f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
     ')?$/i')
 MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
+
+MIN_PRIORITY = -1000
+MAX_PRIORITY = 1000
+DEFAULT_PRIORITY = 0
