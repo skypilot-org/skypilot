@@ -465,7 +465,6 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
-@pytest.mark.resource_heavy
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -584,7 +583,6 @@ def test_skyserve_auto_restart():
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -613,7 +611,6 @@ def test_skyserve_cancel(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -664,7 +661,6 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
@@ -689,7 +685,6 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -727,7 +722,6 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -787,7 +781,6 @@ def test_skyserve_rolling_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -833,7 +826,6 @@ def test_skyserve_fast_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -962,7 +954,6 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -1058,7 +1049,6 @@ def test_skyserve_https(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""
