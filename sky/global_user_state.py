@@ -1330,7 +1330,16 @@ def get_storage() -> List[Dict[str, Any]]:
 
 
 @_init_db
-def get_volume() -> List[Dict[str, Any]]:
+def get_volume_names_start_with(starts_with: str) -> List[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(volume_table).filter(
+            volume_table.c.name.like(f'{starts_with}%')).all()
+    return [row.name for row in rows]
+
+
+@_init_db
+def get_volumes() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(volume_table).all()
@@ -1379,7 +1388,15 @@ def add_volume(name: str, config: models.VolumeConfig,
     active_workspace = skypilot_config.get_active_workspace()
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.add(volume_table.insert().values(
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(volume_table).values(
             name=name,
             launched_at=volume_launched_at,
             handle=handle,
@@ -1388,7 +1405,9 @@ def add_volume(name: str, config: models.VolumeConfig,
             last_attached_at=None,
             last_use=last_use,
             status=status.value,
-        ))
+        )
+        do_update_stmt = insert_stmnt.on_conflict_do_nothing()
+        session.execute(do_update_stmt)
         session.commit()
 
 

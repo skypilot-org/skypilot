@@ -1,5 +1,5 @@
+"""Volume types and access modes."""
 import enum
-from typing import Any, Dict, Optional
 
 
 class VolumeType(enum.Enum):

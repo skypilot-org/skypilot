@@ -373,7 +373,7 @@ class StorageBody(RequestBody):
 class VolumeApplyBody(RequestBody):
     """The request body for the volume apply endpoint."""
     name: str
-    type: str
+    volume_type: str
     cloud: str
     region: Optional[str] = None
     zone: Optional[str] = None
@@ -382,7 +382,7 @@ class VolumeApplyBody(RequestBody):
 
 class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
-    name: str
+    names: List[str]
 
 
 class EndpointsBody(RequestBody):

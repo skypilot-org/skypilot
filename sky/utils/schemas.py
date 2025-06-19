@@ -393,7 +393,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': [],
+        'required': ['name', 'type', 'infra'],
         'additionalProperties': False,
         'properties': {
             'name': {
@@ -425,9 +425,10 @@ def get_volume_schema():
             },
             'spec': {
                 'type': 'object',
+                'required': [],
                 'properties': {
                     'size': {
-                        # TODO: add pattern for size
+                        # TODO(hailong): add pattern for size
                         'type': 'string',
                     },
                     'storage_class_name': {
@@ -436,7 +437,7 @@ def get_volume_schema():
                     'access_mode': {
                         'type': 'string',
                         'case_insensitive_enum': [
-                            type.value for type in volume.AccessMode
+                            type.value for type in volume.VolumeAccessMode
                         ],
                     },
                     'namespace': {

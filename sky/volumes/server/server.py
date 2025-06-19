@@ -1,31 +1,15 @@
 """REST API for storage management."""
 
-import contextlib
-import hashlib
-import os
-from typing import Any, Dict, Generator, List
-
 import fastapi
-import filelock
-from passlib.hash import apr_md5_crypt
 
 import sky
 from sky import clouds
-from sky import global_user_state
-from sky import models
-from sky import provision
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
-from sky.server.requests import requests as api_requests
 from sky.server.requests import requests as requests_lib
-from sky.skylet import constants
-from sky.users import permission
-from sky.users import rbac
-from sky.utils import common
-from sky.utils import common_utils
+from sky.volumes import volume
 from sky.volumes.server import core
-from sky.volumes.server import volume
 
 logger = sky_logging.init_logger(__name__)
 
@@ -61,11 +45,8 @@ async def volume_delete(request: fastapi.Request,
 async def volume_apply(request: fastapi.Request,
                        volume_apply_body: payloads.VolumeApplyBody) -> None:
     """Creates or registers a volume."""
-    volume_name = volume_apply_body.name
     volume_cloud = volume_apply_body.cloud
-    volume_region = volume_apply_body.region
-    volume_zone = volume_apply_body.zone
-    volume_type = volume_apply_body.type
+    volume_type = volume_apply_body.volume_type
     volume_spec = volume_apply_body.spec
 
     supported_volume_types = [
