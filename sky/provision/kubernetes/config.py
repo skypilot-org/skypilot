@@ -62,6 +62,9 @@ def bootstrap_instances(
                                            config.provider_config)
         _configure_autoscaler_cluster_role_binding(namespace, context,
                                                    config.provider_config)
+
+        if config.provider_config.get('priority', None) is not None:
+            _configure_priority_class(context, config.provider_config)
         # SkyPilot system namespace is required for FUSE mounting. Here we just
         # create the namespace and set up the necessary permissions.
         #
@@ -485,6 +488,35 @@ def _configure_autoscaler_cluster_role_binding(
     kubernetes.auth_api(context).create_cluster_role_binding(binding)
     logger.info('_configure_autoscaler_cluster_role_binding: '
                 f'{created_msg(binding_field, name)}')
+
+
+def _configure_priority_class(context, provider_config: Dict[str, Any]) -> None:
+    priority_class_field = 'priority'
+    priority_class = provider_config[priority_class_field]
+    name = priority_class['metadata']['name']
+    field_selector = f'metadata.name={name}'
+    priority_classes = (kubernetes.scheduling_api(context).list_priority_class(
+        field_selector=field_selector).items)
+    if priority_classes:
+        assert len(priority_classes) == 1
+        existing_priority_class = priority_classes[0]
+        new_priority_class = kubernetes_utils.dict_to_k8s_object(
+            priority_class, 'V1PriorityClass')
+        if new_priority_class.value == existing_priority_class.value:
+            logger.debug('_configure_priority_class: '
+                         f'{using_existing_msg(priority_class_field, name)}')
+            return
+        logger.info('_configure_priority_class: '
+                    f'{updating_existing_msg(priority_class_field, name)}')
+        kubernetes.scheduling_api(context).patch_priority_class(
+            name, priority_class)
+        return
+
+    logger.debug('_configure_priority_class: '
+                 f'{not_found_msg(priority_class_field, name)}')
+    kubernetes.scheduling_api(context).create_priority_class(priority_class)
+    logger.debug('_configure_priority_class: '
+                 f'{created_msg(priority_class_field, name)}')
 
 
 def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):

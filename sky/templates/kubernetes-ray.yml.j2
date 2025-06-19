@@ -188,6 +188,9 @@ provider:
         - apiGroups: [ "networking.k8s.io" ]   # Required for exposing services.
           resources: [ "ingressclasses" ]
           verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "scheduling.k8s.io" ]
+          resources: [ "priorityclasses" ]
+          verbs: [ "list", "create", "patch" ]
 
     # Bind cluster role to the service account
     autoscaler_cluster_role_binding:
@@ -204,6 +207,15 @@ provider:
             kind: ClusterRole
             name: skypilot-service-account-cluster-role
             apiGroup: rbac.authorization.k8s.io
+
+    {% if priority is not none %}
+    priority:
+        apiVersion: scheduling.k8s.io/v1
+        kind: PriorityClass
+        metadata:
+          name: skypilot-priority-{{priority}}
+        value: {{priority}}
+    {% endif %}
 
     services:
       # Service to expose the head node pod's SSH port.
@@ -287,6 +299,9 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if priority is not none %}
+        priorityClassName: skypilot-priority-{{priority}}
+        {% endif %}
 
         # Add node selector if GPU/TPUs are requested:
         {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) %}

@@ -658,6 +658,7 @@ class Kubernetes(clouds.Cloud):
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
             'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
+            'priority': resources.priority,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

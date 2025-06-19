@@ -204,6 +204,13 @@ def apps_api(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+def scheduling_api(context: Optional[str] = None):
+    _load_config(context)
+    return kubernetes.client.SchedulingV1Api()
+
+
+@_api_logging_decorator('urllib3', logging.ERROR)
+@annotations.lru_cache(scope='request')
 def batch_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.BatchV1Api()
