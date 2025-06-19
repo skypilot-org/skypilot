@@ -608,6 +608,47 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
         ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
 
+Optional: Set up GPU monitoring and metrics
+-------------------------------------------
+
+SkyPilot dashboard can be optionally configured to expose GPU metrics and API server metrics.
+
+.. raw:: html
+
+   <div style="display: flex; gap: 20px; margin: 10px auto; justify-content: center; max-width: 1200px; align-items: end;">
+     <div style="flex: 1; text-align: center; display: flex; flex-direction: column; height: 350px;">
+       <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+         <img src="../../_images/api-srv-metrics.jpg" alt="API Server Metrics Dashboard" style="width: 100%; max-width: 600px;">
+       </div>
+       <p style="margin-top: 5px; margin-bottom: 0;">API Server Metrics Dashboard</p>
+     </div>
+     <div style="flex: 1; text-align: center; display: flex; flex-direction: column; height: 350px;">
+       <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+         <img src="../../_images/gpu-metrics.png" alt="GPU Metrics Dashboard" style="width: 100%; max-width: 600px;">
+       </div>
+       <p style="margin-top: 5px; margin-bottom: 0;">GPU Metrics Dashboard</p>
+     </div>
+   </div>
+
+To enable metrics, set ``apiService.metrics.enabled=true``, ``prometheus.enabled=true`` and ``grafana.enabled=true`` in the Helm chart.
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.metrics.enabled=true \
+      --set prometheus.enabled=true \
+      --set grafana.enabled=true
+
+
+For detailed setup instructions (including how to set up external Prometheus and Grafana), see:
+
+* :ref:`API Server Metrics Setup <api-server-metrics-setup>`
+* :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
+
+
+
 Upgrade the API server
 -----------------------
 
