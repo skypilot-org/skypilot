@@ -436,8 +436,6 @@ LOGGING_CONFIG_DIR = '~/.sky/logging'
 
 # Resources constants
 TIME_UNITS = {
-    's': 1 / 60,
-    'sec': 1 / 60,
     'm': 1,
     'min': 1,
     'h': 60,
