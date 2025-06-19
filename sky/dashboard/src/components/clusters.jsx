@@ -132,16 +132,32 @@ const formatDuration = (durationSeconds) => {
     return '-';
   }
 
-  const hours = Math.floor(durationSeconds / 3600);
-  const minutes = Math.floor((durationSeconds % 3600) / 60);
+  // Convert to a whole number if it's a float
+  durationSeconds = Math.floor(durationSeconds);
 
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  } else if (minutes > 0) {
-    return `${minutes}m`;
-  } else {
-    return '<1m';
+  const units = [
+    { value: 31536000, label: 'y' }, // years (365 days)
+    { value: 2592000, label: 'mo' }, // months (30 days)
+    { value: 86400, label: 'd' }, // days
+    { value: 3600, label: 'h' }, // hours
+    { value: 60, label: 'm' }, // minutes
+    { value: 1, label: 's' }, // seconds
+  ];
+
+  let remaining = durationSeconds;
+  let result = '';
+  let count = 0;
+
+  for (const unit of units) {
+    if (remaining >= unit.value && count < 2) {
+      const value = Math.floor(remaining / unit.value);
+      result += `${value}${unit.label} `;
+      remaining %= unit.value;
+      count++;
+    }
   }
+
+  return result.trim() || '0s';
 };
 
 export function Clusters() {
@@ -745,7 +761,7 @@ export function ClusterTable({
                       </TableCell>
                       <TableCell>
                         <Link
-                          href={`/clusters/${item.isHistorical ? item.cluster_hash : (item.cluster || item.name)}`}
+                          href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
                           className="text-blue-600"
                         >
                           {item.cluster || item.name}
@@ -823,7 +839,7 @@ export function ClusterTable({
                     colSpan={9}
                     className="text-center py-6 text-gray-500"
                   >
-                    No active clusters
+                    {showHistory ? 'No clusters found' : 'No active clusters'}
                   </TableCell>
                 </TableRow>
               )}

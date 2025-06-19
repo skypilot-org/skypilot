@@ -621,9 +621,10 @@ def add_or_update_cluster(cluster_name: str,
         creation_info = {}
         if conditional_values.get('last_creation_yaml') is not None:
             creation_info = {
-                'last_creation_yaml': conditional_values.get('last_creation_yaml'),
-                'last_creation_command': conditional_values.get(
-                    'last_creation_command'),
+                'last_creation_yaml':
+                    conditional_values.get('last_creation_yaml'),
+                'last_creation_command':
+                    conditional_values.get('last_creation_command'),
             }
 
         insert_stmnt = insert_func(cluster_history_table).values(

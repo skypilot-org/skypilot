@@ -90,7 +90,9 @@ function ClusterDetails() {
       setHistoryLoading(true);
       try {
         const historyData = await dashboardCache.get(getClusterHistory);
-        const foundHistoryCluster = historyData.find((c) => c.cluster_hash === cluster || c.cluster === cluster);
+        const foundHistoryCluster = historyData.find(
+          (c) => c.cluster_hash === cluster || c.cluster === cluster
+        );
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);
@@ -285,16 +287,32 @@ function ActiveTab({
       return '-';
     }
 
-    const hours = Math.floor(durationSeconds / 3600);
-    const minutes = Math.floor((durationSeconds % 3600) / 60);
+    // Convert to a whole number if it's a float
+    durationSeconds = Math.floor(durationSeconds);
 
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    } else if (minutes > 0) {
-      return `${minutes}m`;
-    } else {
-      return '<1m';
+    const units = [
+      { value: 31536000, label: 'y' }, // years (365 days)
+      { value: 2592000, label: 'mo' }, // months (30 days)
+      { value: 86400, label: 'd' }, // days
+      { value: 3600, label: 'h' }, // hours
+      { value: 60, label: 'm' }, // minutes
+      { value: 1, label: 's' }, // seconds
+    ];
+
+    let remaining = durationSeconds;
+    let result = '';
+    let count = 0;
+
+    for (const unit of units) {
+      if (remaining >= unit.value && count < 2) {
+        const value = Math.floor(remaining / unit.value);
+        result += `${value}${unit.label} `;
+        remaining %= unit.value;
+        count++;
+      }
     }
+
+    return result.trim() || '0s';
   };
 
   const formatCost = (cost) => {

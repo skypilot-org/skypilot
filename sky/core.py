@@ -319,34 +319,27 @@ def cost_report() -> List[Dict[str, Any]]:
         return cost
 
     def _update_record_with_resources(record: Dict[str, Any]) -> None:
-        """Add the individual resource fields to the record for dashboard compatibility."""
+        """Add the individual resource fields for dashboard compatibility."""
         if record is None:
             return
         resources = record.get('resources')
         if resources is None:
             return
-        record['cloud'] = (f'{resources.cloud}'
-                          if resources.cloud else None)
-        record['region'] = (f'{resources.region}'
-                           if resources.region else None)
-        record['cpus'] = (f'{resources.cpus}'
-                         if resources.cpus else None)
-        record['memory'] = (f'{resources.memory}'
-                           if resources.memory else None)
+        record['cloud'] = (f'{resources.cloud}' if resources.cloud else None)
+        record['region'] = (f'{resources.region}' if resources.region else None)
+        record['cpus'] = (f'{resources.cpus}' if resources.cpus else None)
+        record['memory'] = (f'{resources.memory}' if resources.memory else None)
         record['accelerators'] = (f'{resources.accelerators}'
-                                 if resources.accelerators else None)
-        
+                                  if resources.accelerators else None)
+
         # Add resources_str and resources_str_full for dashboard compatibility
         num_nodes = record.get('num_nodes', 1)
-        try:
-            resource_str_simple = resources_utils.format_resource(resources, simplify=True)
-            resource_str_full = resources_utils.format_resource(resources, simplify=False)
-            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-        except Exception:
-            # Fallback to basic string representation if formatting fails
-            record['resources_str'] = f'{num_nodes}x {resources}'
-            record['resources_str_full'] = f'{num_nodes}x {resources}'
+        resource_str_simple = resources_utils.format_resource(resources,
+                                                              simplify=True)
+        resource_str_full = resources_utils.format_resource(resources,
+                                                            simplify=False)
+        record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+        record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
 
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = get_total_cost(cluster_report)
