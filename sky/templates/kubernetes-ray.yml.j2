@@ -356,6 +356,11 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% for volume_mount in volume_mounts %}
+        - name: {{volume_mount.name}}
+          persistentVolumeClaim:
+            claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endfor %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -725,6 +730,10 @@ available_node_types:
           - name: fusermount-shared-dir
             mountPath: {{k8s_fusermount_shared_dir}}
           {% endif %}
+          {% for volume_mount in volume_mounts %}
+          - name: {{volume_mount.name}}
+            mountPath: {{volume_mount.path}}
+          {% endfor %}
           resources:
             requests:
               cpu: {{cpus}}

@@ -73,6 +73,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1327,6 +1328,7 @@ class RetryingVmProvisioner(object):
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
+        volume_mounts: Optional[List[volume_lib.VolumeMount]],
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1432,7 +1434,9 @@ class RetryingVmProvisioner(object):
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists)
+                    keep_launch_fields_in_existing_config=cluster_exists,
+                    volume_mounts=volume_mounts,
+                )
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -2081,7 +2085,9 @@ class RetryingVmProvisioner(object):
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
                     prev_cluster_ever_up=prev_cluster_ever_up,
-                    skip_if_config_hash_matches=skip_if_config_hash_matches)
+                    skip_if_config_hash_matches=skip_if_config_hash_matches,
+                    volume_mounts=task.volume_mounts,
+                )
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,

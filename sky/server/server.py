@@ -567,7 +567,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
         # Resolve the volumes before admin policy and validation.
-        dag.resolve_volumes()
+        dag.resolve_and_validate_volumes()
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of

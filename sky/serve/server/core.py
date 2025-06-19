@@ -141,7 +141,7 @@ def up(
 
     serve_utils.validate_service_task(task)
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    dag.resolve_volumes()
+    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.

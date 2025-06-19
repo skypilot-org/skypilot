@@ -171,7 +171,7 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_volumes()
+    dag.resolve_and_validate_volumes()
     if (not _is_launched_by_jobs_controller and
             not _is_launched_by_sky_serve_controller):
         # Only process pre-mount operations on API server.

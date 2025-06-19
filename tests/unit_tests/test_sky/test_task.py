@@ -709,9 +709,9 @@ def test_resolve_volumes_no_volumes():
     t._volumes = None
     t.volume_mounts = None
     # Should not raise
-    t.resolve_volumes()
+    t.resolve_and_validate_volumes()
     t._volumes = {}
-    t.resolve_volumes()
+    t.resolve_and_validate_volumes()
 
 
 def test_resolve_volumes_already_resolved():
@@ -719,7 +719,7 @@ def test_resolve_volumes_already_resolved():
     t.volume_mounts = [object()]
     t._volumes = {'/mnt': 'vol1'}
     # Should not raise or do anything
-    t.resolve_volumes()
+    t.resolve_and_validate_volumes()
 
 
 def test_resolve_volumes_single_success():
@@ -732,7 +732,7 @@ def test_resolve_volumes_single_success():
         ploads.return_value = make_mock_volume_config(cloud='aws',
                                                       region='us-west1',
                                                       zone='a')
-        t.resolve_volumes()
+        t.resolve_and_validate_volumes()
         # Should override resource topology
         for r in t.resources:
             assert r.cloud == 'aws'
@@ -749,7 +749,7 @@ def test_resolve_volumes_volume_not_found():
     ) as get_vol:
         get_vol.return_value = None
         with pytest.raises(exceptions.VolumeNotFoundError):
-            t.resolve_volumes()
+            t.resolve_and_validate_volumes()
 
 
 def test_resolve_volumes_dict_volume_success():
@@ -762,7 +762,7 @@ def test_resolve_volumes_dict_volume_success():
         get_vol.return_value = {'handle': b'abc'}
         ploads.return_value = make_mock_volume_config(cloud='aws')
         v_schema.return_value = None
-        t.resolve_volumes()
+        t.resolve_and_validate_volumes()
         for r in t.resources:
             assert r.cloud == 'aws'
 
@@ -785,7 +785,7 @@ def test_resolve_volumes_topology_conflict_between_volumes():
             make_mock_volume_config(cloud='gcp')
         ]
         with pytest.raises(exceptions.VolumeTopologyConflictError):
-            t.resolve_volumes()
+            t.resolve_and_validate_volumes()
 
 
 def test_resolve_volumes_topology_conflict_with_resources():
@@ -798,7 +798,7 @@ def test_resolve_volumes_topology_conflict_with_resources():
         get_vol.return_value = {'handle': b'abc'}
         ploads.return_value = make_mock_volume_config(cloud='aws')
         with pytest.raises(exceptions.VolumeTopologyConflictError):
-            t.resolve_volumes()
+            t.resolve_and_validate_volumes()
 
 
 def test_resolve_volumes_override_topology():
@@ -812,7 +812,7 @@ def test_resolve_volumes_override_topology():
         ploads.return_value = make_mock_volume_config(cloud='aws',
                                                       region='us-west1',
                                                       zone='a')
-        t.resolve_volumes()
+        t.resolve_and_validate_volumes()
         for r in t.resources:
             assert r.cloud == 'aws'
             assert r.region == 'us-west1'

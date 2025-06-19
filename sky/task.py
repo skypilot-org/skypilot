@@ -24,7 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.volumes import volume_mount as volume_mount_lib
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -254,7 +254,7 @@ class Task:
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
-        volume_mounts: Optional[List[volume_mount_lib.VolumeMount]] = None,
+        volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
     ):
         """Initializes a Task.
 
@@ -367,7 +367,7 @@ class Task:
 
         # For internal use only.
         self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
-        self.volume_mounts: Optional[List[volume_mount_lib.VolumeMount]] = (
+        self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             volume_mounts)
 
         dag = sky.dag.get_current_dag()
@@ -449,12 +449,9 @@ class Task:
         if self.file_mounts is None:
             return
         for target, source in self.file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
+            location = f'file_mounts.{target}: {source}'
+            self._validate_mount_path(target, location)
+            self._validate_mount_path(source, location)
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -480,6 +477,22 @@ class Task:
                         'by the workdir. If uploading a file/folder to the '
                         'workdir is needed, please specify the full path to '
                         'the file/folder.')
+
+    def _validate_mount_path(self, path: str, location: str):
+        if path.endswith('/'):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Mount paths cannot end with a slash '
+                                 f'Found: {path} in {location}')
+        # TODO(zhwu): /home/username/sky_workdir as the target path need
+        # to be filtered out as well.
+        if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                    'destination path of a file mount, as it will be used '
+                    'by the workdir. If uploading a file/folder to the '
+                    'workdir is needed, please specify the full path to '
+                    'the file/folder.')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -756,8 +769,8 @@ class Task:
             config = {}
         return Task.from_yaml_config(config)
 
-    def resolve_volumes(self) -> None:
-        """Resolve volumes config to volume mounts.
+    def resolve_and_validate_volumes(self) -> None:
+        """Resolve volumes config to volume mounts and validate them.
 
         Raises:
             exceptions.VolumeNotFoundError: if any volume is not found.
@@ -771,22 +784,27 @@ class Task:
             return None
         if self._volumes is None:
             return None
-        volume_mounts: List[volume_mount_lib.VolumeMount] = []
+        volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             # Shortcut for `dst_path: volume_name`
             if isinstance(vol, str):
-                volume_mount = volume_mount_lib.VolumeMount(dst_path, vol)
+                volume_mount = volume_lib.VolumeMount(dst_path, vol)
             elif isinstance(vol, dict):
                 common_utils.validate_schema(vol,
                                              schemas.get_task_volume_schema(),
                                              'Invalid volume config: ')
                 assert 'name' in vol, 'Volume name is required.'
-                volume_mount = volume_mount_lib.VolumeMount(
-                    dst_path, vol['name'])
+                volume_mount = volume_lib.VolumeMount(dst_path, vol['name'])
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
-            volume_mount.resolve()
             volume_mounts.append(volume_mount)
+        # Disable certain access modes
+        disabled_modes = {}
+        if self.num_nodes > 1:
+            disabled_modes[volume_lib.VolumeAccessMode.READ_WRITE_ONCE] = (
+                'Volume access mode ReadWriteOnce is not supported for '
+                'multi-node tasks.')
+        # TODO(aylei): generalize access mode to all volume types
         # Record the required topology and the volume that requires it, e.g.
         # {'cloud': ('volume_name', 'aws')}
         topology: Dict[str, Tuple[str, Optional[str]]] = {
@@ -795,6 +813,11 @@ class Task:
             'zone': ('', None),
         }
         for vol in volume_mounts:
+            # Check access mode
+            access_mode = vol.volume_config.spec.get('access_mode', '')
+            if access_mode in disabled_modes:
+                raise ValueError(disabled_modes[access_mode])
+            # Check topology
             for key, (vol_name, previous_req) in topology.items():
                 req = getattr(vol.volume_config, key)
                 if req is not None:

@@ -65,6 +65,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+    from sky.volumes import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -540,16 +541,18 @@ def get_expirable_clouds(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources_lib.Resources',
-        num_nodes: int,
-        cluster_config_template: str,
-        cluster_name: str,
-        local_wheel_path: pathlib.Path,
-        wheel_hash: str,
-        region: clouds.Region,
-        zones: Optional[List[clouds.Zone]] = None,
-        dryrun: bool = False,
-        keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+    to_provision: 'resources_lib.Resources',
+    num_nodes: int,
+    cluster_config_template: str,
+    cluster_name: str,
+    local_wheel_path: pathlib.Path,
+    wheel_hash: str,
+    region: clouds.Region,
+    zones: Optional[List[clouds.Zone]] = None,
+    dryrun: bool = False,
+    keep_launch_fields_in_existing_config: bool = True,
+    volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns:
@@ -730,6 +733,15 @@ def write_cluster_config(
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name)
 
+    volume_mount_vars = []
+    if volume_mounts is not None:
+        for vol in volume_mounts:
+            volume_mount_vars.append({
+                'name': vol.volume_name,
+                'path': vol.path,
+                'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+            })
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -820,6 +832,9 @@ def write_cluster_config(
 
                 # High availability
                 'high_availability': high_availability_specified,
+
+                # Volume mounts
+                'volume_mounts': volume_mount_vars,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
