@@ -1,8 +1,8 @@
 resources:
   accelerators: tpu-v6e-8 # Fill in the accelerator type you want to use
 
-envs:
-  HF_TOKEN: # fill in your huggingface token
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 workdir: .
 

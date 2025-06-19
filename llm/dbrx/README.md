@@ -22,7 +22,8 @@ In this recipe, you will serve `databricks/dbrx-instruct` on your own infra  -- 
 ```yaml
 envs:
   MODEL_NAME: databricks/dbrx-instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2
@@ -92,7 +93,7 @@ You can also get the full YAML file [here](https://github.com/skypilot-org/skypi
 
 Launch a single spot instance to serve DBRX on your infra:
 ```console
-HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
+HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --secret HF_TOKEN
 ```
 
 <details>
@@ -128,7 +129,7 @@ To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the a
 <summary>Example outputs with Kubernetes / on-demand instances:</summary>
 
 ```console
-$ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN --no-use-spot
+$ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --secret HF_TOKEN --no-use-spot
 ...
 I 03-28 08:47:27 optimizer.py:690] == Optimizer ==
 I 03-28 08:47:27 optimizer.py:701] Target: minimizing cost
@@ -223,12 +224,12 @@ After playing with the model, you can deploy the model with autoscaling and load
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --env HF_TOKEN
+$ HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --secret HF_TOKEN
 ```
 
 Wait until the service is ready:
 ```console
-watch -n10 sky serve status dbrx
+$ watch -n10 sky serve status dbrx
 ```
 
 <details>
@@ -249,7 +250,7 @@ dbrx          2   1        xx.yy.zz.245  18 mins ago  1x GCP([Spot]{'A100-80GB':
 
 Get a single endpoint that load-balances across replicas:
 ```console
-ENDPOINT=$(sky serve status --endpoint dbrx)
+$ ENDPOINT=$(sky serve status --endpoint dbrx)
 ```
 
 > **Tip:** SkyServe fully manages the lifecycle of your replicas. For example, if a spot replica is preempted, the controller will automatically replace it. This significantly reduces the operational burden while saving costs.
@@ -275,7 +276,7 @@ curl $ENDPOINT/v1/chat/completions \
 
 To shut down all resources:
 ```console
-sky serve down dbrx
+$ sky serve down dbrx
 ```
 
 See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).

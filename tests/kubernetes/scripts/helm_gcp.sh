@@ -128,10 +128,21 @@ if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     exit 1
 fi
 
-# Extract version from response and verify it matches
+# Extract version from response and verify it matches (only if not using 'latest')
 RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
-if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
-    echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+
+# Verify that we got a valid version string
+if [ -z "$RETURNED_VERSION" ] || [ ${#RETURNED_VERSION} -le 1 ]; then
+    echo "Error: Invalid version returned from API. Got: '$RETURNED_VERSION'"
     exit 1
 fi
-echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
+
+if [ "$HELM_VERSION" != "latest" ]; then
+    if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
+        echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+        exit 1
+    fi
+    echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
+else
+    echo "Using latest version. Skipping version verification. Deployed version: $RETURNED_VERSION"
+fi

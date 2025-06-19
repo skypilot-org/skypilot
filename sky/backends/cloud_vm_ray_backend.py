@@ -21,6 +21,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import filelock
+import yaml
 
 import sky
 from sky import backends
@@ -141,6 +142,7 @@ _MAX_RAY_UP_RETRY = 5
 _MAX_GET_ZONE_RETRY = 3
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
+_LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 
 # Path to the monkey-patched ray up script.
 # We don't do import then __file__ because that script needs to be filled in
@@ -787,34 +789,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        del zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'SCPError:' in x.strip())
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, SCPError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in catalog.regions('scp'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _ibm_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -1113,6 +1087,21 @@ class FailoverCloudErrorHandlerV2:
         if isinstance(error, exceptions.InvalidCloudCredentials):
             _add_to_blocked_resources(
                 blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
+    def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'SCP handler error: {error}')
+        # Block SCP if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.SCP()))
         else:
             FailoverCloudErrorHandlerV2._default_handler(
                 blocked_resources, launchable_resources, region, zones, error)
@@ -2302,12 +2291,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
-            if os.path.exists(self.cluster_yaml):
-                # It is possible that the cluster yaml is not available when
-                # the handle is unpickled for service replicas from the
-                # controller with older version.
-                config = global_user_state.get_cluster_yaml_dict(
-                    self.cluster_yaml)
+            # It is possible that the cluster yaml is not available when
+            # the handle is unpickled for service replicas from the
+            # controller with older version.
+            yaml_str = global_user_state.get_cluster_yaml_str(self.cluster_yaml)
+            if yaml_str is None:
+                # If the cluster yaml is not available,
+                # we skip updating the cluster info.
+                return
+            config = yaml.safe_load(yaml_str)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
@@ -2499,6 +2491,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 raise RuntimeError(
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
+            self._update_cluster_info()
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andyl): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner. Now this
+        # is required for rsync as using deployment in rsync seems to cause
+        # some unknown issues.
+        # TODO(andyl): Should check through the real cluster info. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                controller_utils.high_availability_specified(
+                    self.cluster_name)):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
@@ -3178,7 +3185,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Capture task YAML and command
         task_config = None
         if task is not None:
-            task_config = task.to_yaml_config()
+            task_config = task.to_yaml_config(redact_secrets=True)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3302,7 +3309,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
-            setup_envs = task.envs.copy()
+            setup_envs = task.envs_and_secrets
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
@@ -3455,10 +3462,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
+        remote_log_dir: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
-        remote_log_dir = self.log_dir
+        if remote_log_dir is None:
+            remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         cd = f'cd {SKY_REMOTE_WORKDIR}'
@@ -3577,13 +3586,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str) -> int:
+                 job_name: Optional[str],
+                 resources_str: str) -> Tuple[int, str]:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
             resources_str=resources_str)
-        returncode, job_id_str, stderr = self.run_on_head(handle,
+        returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
                                                           require_outputs=True,
@@ -3597,17 +3607,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to fetch job id.', stderr)
         try:
-            job_id_match = _JOB_ID_PATTERN.search(job_id_str)
+            job_id_match = _JOB_ID_PATTERN.search(result_str)
             if job_id_match is not None:
                 job_id = int(job_id_match.group(1))
             else:
                 # For backward compatibility.
-                job_id = int(job_id_str)
+                job_id = int(result_str)
+            log_dir_match = _LOG_DIR_PATTERN.search(result_str)
+            if log_dir_match is not None:
+                log_dir = log_dir_match.group(1).strip()
+            else:
+                # For backward compatibility, use the same log dir as local.
+                log_dir = self.log_dir
         except ValueError as e:
             logger.error(stderr)
-            raise ValueError(f'Failed to parse job id: {job_id_str}; '
+            raise ValueError(f'Failed to parse job id: {result_str}; '
                              f'Returncode: {returncode}') from e
-        return job_id
+        return job_id, log_dir
 
     def _execute(
         self,
@@ -3659,15 +3675,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id = self._add_job(handle, task_copy.name, resources_str)
+        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
+            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run,
+                                       log_dir)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
+            self._execute_task_one_node(handle, task_copy, job_id, detach_run,
+                                        log_dir)
 
         return job_id
 
@@ -3830,32 +3848,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             A dictionary mapping job_id to log path.
         """
-        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
-        returncode, run_timestamps, stderr = self.run_on_head(
-            handle,
-            code,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
+        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(job_ids)
+        returncode, job_to_dir, stderr = self.run_on_head(handle,
+                                                          code,
+                                                          stream_logs=False,
+                                                          require_outputs=True,
+                                                          separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = message_utils.decode_payload(run_timestamps)
-        if not run_timestamps:
+        job_to_dir: Dict[str, str] = message_utils.decode_payload(job_to_dir)
+        if not job_to_dir:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
             return {}
 
-        job_ids = list(run_timestamps.keys())
-        run_timestamps = list(run_timestamps.values())
+        job_ids = list(job_to_dir.keys())
+        dirs = list(job_to_dir.values())
         remote_log_dirs = [
-            os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-            for run_timestamp in run_timestamps
+            # TODO(aylei): backward compatibility for legacy runtime that
+            # returns run_timestamp only, remove after 0.12.0
+            (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
+                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs
         ]
-        local_log_dirs = [
-            os.path.join(local_dir, run_timestamp)
-            for run_timestamp in run_timestamps
-        ]
+        local_log_dirs = [(dir.replace(constants.SKY_LOGS_DIRECTORY, local_dir)
+                           if constants.SKY_LOGS_DIRECTORY in dir else
+                           os.path.join(local_dir, dir)) for dir in dirs]
 
         runners = handle.get_command_runners()
 
@@ -4027,8 +4045,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # get the run_timestamp
         # the function takes in [job_id]
-        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(
-            [str(job_id)])
+        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
         returncode, run_timestamps, stderr = self.run_on_head(
             handle,
             code,
@@ -4289,29 +4306,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
-
-        elif terminate and isinstance(cloud, clouds.SCP):
-            # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.scp import node_provider
-            config['provider']['cache_stopped_nodes'] = not terminate
-            provider = node_provider.SCPNodeProvider(config['provider'],
-                                                     cluster_name_on_cloud)
-            try:
-                if not os.path.exists(provider.metadata.path):
-                    raise node_provider.SCPError(
-                        'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-                        'Metadata file does not exist.')
-
-                with open(provider.metadata.path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                    node_id = next(iter(metadata.values())).get(
-                        'creation', {}).get('virtualServerId', None)
-                    provider.terminate_node(node_id)
-                returncode = 0
-            except node_provider.SCPError as e:
-                returncode = 1
-                stdout = ''
-                stderr = str(e)
 
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
@@ -5185,7 +5179,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
-        env_vars = task.envs.copy()
+        env_vars = task.envs_and_secrets
         # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
         # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:
@@ -5199,9 +5193,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
-                               detach_run: bool) -> None:
+                               detach_run: bool, remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
-        log_dir = os.path.join(self.log_dir, 'tasks')
+        log_dir = os.path.join(remote_log_dir, 'tasks')
 
         resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
@@ -5239,17 +5233,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                remote_log_dir=remote_log_dir)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
-                              detach_run: bool) -> None:
+                              detach_run: bool, remote_log_dir: str) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
-        log_dir_base = self.log_dir
-        log_dir = os.path.join(log_dir_base, 'tasks')
+        log_dir = os.path.join(remote_log_dir, 'tasks')
         resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
@@ -5295,4 +5289,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                remote_log_dir=remote_log_dir)

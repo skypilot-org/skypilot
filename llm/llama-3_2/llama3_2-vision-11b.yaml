@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --secret HF_TOKEN
 #
 # curl /v1/chat/completions:
 #
@@ -33,7 +33,7 @@
 #   Running on public URL: https://<hash>.gradio.live
 #
 # Scale up with SkyServe:
-#  HF_TOKEN=xxx sky serve up llama3_2.yaml -n llama3_2 --env HF_TOKEN
+#  HF_TOKEN=xxx sky serve up llama3_2.yaml -n llama3_2 --secret HF_TOKEN
 #
 # curl /v1/chat/completions:
 #
@@ -58,7 +58,8 @@
 
 envs:
   MODEL_NAME: meta-llama/Llama-3.2-11B-Vision-Instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2

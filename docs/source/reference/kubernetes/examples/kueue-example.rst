@@ -66,6 +66,39 @@ This should output:
     ...
     - pod
 
+(Optional) Patch Kueue to support gang scheduling
+-----------------------------------------------------------
+
+Kueue optionally supports `all or nothing scheduling <https://kueue.sigs.k8s.io/docs/tasks/manage/setup_wait_for_pods_ready/#enabling-waitforpodsready>`_ (gang scheduling) of pods.
+The Kueue config needs to be patched to support gang scheduling. This is especially useful for multinode workloads such as distributed training. 
+
+.. code-block:: bash
+
+    # Extract and patch the config and save it to /tmp/kueueconfig.yaml
+    # This is required because SkyPilot creates and manages workloads as pods
+    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.waitForPodsReady.enable = true' | yq '.waitForPodsReady.blockAdmission = true' > /tmp/kueueconfig.yaml
+    # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
+    kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
+    # Restart the kueue-controller-manager pod with the following command
+    kubectl -n kueue-system rollout restart deployment kueue-controller-manager
+    # Wait for the restart to complete
+    kubectl -n kueue-system rollout status deployment kueue-controller-manager
+
+This change instructs Kueue to admit each workload sequentially, and wait for all pods to be ready before admitting the next workload.
+
+Check that the patch is applied by running the following command:
+
+.. code-block:: bash
+
+    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.waitForPodsReady'
+
+This should output:
+
+.. code-block:: bash
+
+    blockAdmission: true
+    enable: true
+
 
 Create a Kueue resource flavor
 ------------------------------
@@ -102,57 +135,6 @@ To create the resource flavor above, save the snippet to ``kueue-resource-flavor
 
     kubectl apply -f kueue-resource-flavor.yaml
 
-Create a Kueue admission check
-------------------------------
-
-By default, Kueue will admit all pods that fits within the cluster queue's resource quota.
-However, there may be cases where the underlying cluster does not have the necessary resources,
-regardless of the quota.
-
-To address this, an admission check is created to check if the necessary resources are available
-in the underlying cluster.
-
-``kueue-admission-check.yaml``:
-
-.. code-block:: yaml
-
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: AdmissionCheck
-    metadata:
-      name: skypilot-kueue-prov
-    spec:
-      controllerName: kueue.x-k8s.io/provisioning-request
-      parameters:
-        apiGroup: kueue.x-k8s.io
-        kind: ProvisioningRequestConfig
-        name: skypilot-kueue-config
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: ProvisioningRequestConfig
-    metadata:
-      name: skypilot-kueue-config
-    spec:
-      provisioningClassName: check-capacity.autoscaling.x-k8s.io
-      managedResources:
-      - nvidia.com/gpu
-      - cpu
-      - memory
-
-The ``ProvisioningClassConfig`` above uses ``ProvisioningClassName`` of ``check-capacity.autoscaling.x.k8s-io``,
-one of the two ``ProvisioningClassName`` s that are supported
-`out of the box <https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#supported-provisioningclasses>`_.
-
-This ProvisioningClass checks if necessary resources are available in the underlying cluster, and will attempt to
-provision them via an autoscaler if one is available.
-
-Different cloud providers may provide their own ``ProvisioningClassName`` for their own autoscalers.
-For example, GKE provides ``queued-provisioning.gke.io`` which integrates with GKE autoscaling node pools.
-
-To create the admission check and provisioning request config above, save the snippet to ``kueue-admission-check.yaml`` and run the following command:
-
-.. code-block:: bash
-
-    kubectl apply -f kueue-admission-check.yaml
 
 Create a cluster queue and a local queue
 ----------------------------------------
@@ -182,22 +164,26 @@ Here, a cluster queue and a local queue are created.
       - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
         flavors:
         - name: "default-flavor"
-          # Adjust this value based on actual resource needs instead of "Infinite"
+          # Adjust this value based on actual resource needs.
+          # The resource quote should be at most the resource
+          # capacity of the cluster.
+          # This section must include all resources defined in
+          # 'coveredResources' above.
+          # Set an "infinite" quota for resources that
+          # you don't want to limit.
           resources:
           - name: "cpu"
-            nominalQuota: 1000000000    # "Infinite" quota
+            nominalQuota: 16
           - name: "memory"
-            nominalQuota: 1000000000Gi  # "Infinite" quota
+            nominalQuota: 32Gi
           - name: "nvidia.com/gpu"
-            nominalQuota: 1000000000    # "Infinite" quota
-      admissionChecks:
-      - skypilot-kueue-prov
+            nominalQuota: 1000000 # "Infinite" quota
     ---
     apiVersion: kueue.x-k8s.io/v1beta1
     kind: LocalQueue
     metadata:
       # A local queue is in a namespace
-      namespace: "skypilot"
+      namespace: "default"
       name: "skypilot-local-queue"
     spec:
       clusterQueue: "skypilot-cluster-queue"
@@ -206,8 +192,6 @@ To create the cluster and local queues above, save the snippet to ``kueue.yaml``
 
 .. code-block:: bash
 
-    # if 'skypilot' namespace does not exist, create it
-    kubectl create namespace skypilot
     # create the cluster and local queue
     kubectl apply -f kueue.yaml
 
@@ -235,10 +219,8 @@ For the SkyPilot API server to submit jobs to a kueue, the following config shou
 .. code-block:: yaml
 
     kubernetes:
-      pod_config:
-        metadata:
-          labels:
-            kueue.x-k8s.io/queue-name: skypilot-local-queue
+      kueue:
+        local_queue_name: skypilot-local-queue
 
 The config above allows the API server to submit jobs using the local queue.
 
