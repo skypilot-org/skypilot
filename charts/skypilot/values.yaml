@@ -142,6 +142,17 @@ ingress:
     client-id: ""
     # Client Secret from OIDC provider (Okta) (required when enabled=true)
     client-secret: ""
+    # Alternative: Get both client ID and client secret from a Kubernetes secret
+    # If client-details-from-secret.enabled is true, both client-id and client-secret values above are ignored
+    client-details-from-secret:
+      # Set to true to enable getting both client credentials from a K8s secret
+      enabled: false
+      # Name of the secret containing both client ID and client secret
+      secret-name: ""
+      # Key within the secret that contains the client ID value
+      client-id-key: "client-id"
+      # Key within the secret that contains the client secret value
+      client-secret-key: "client-secret"
     # Use HTTPS (set to true for production environments)
     use-https: false
     # Email domains to allow (use "*" for all domains)
