@@ -370,15 +370,20 @@ class StorageBody(RequestBody):
     name: str
 
 
-class StorageCreateBody(RequestBody):
-    """The request body for the storage create endpoint."""
+class VolumeApplyBody(RequestBody):
+    """The request body for the volume apply endpoint."""
     name: str
     type: str
-    size: int
     cloud: str
     region: Optional[str] = None
     zone: Optional[str] = None
     spec: Optional[Dict[str, Any]] = None
+
+
+class VolumeDeleteBody(RequestBody):
+    """The request body for the volume delete endpoint."""
+    name: str
+
 
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""

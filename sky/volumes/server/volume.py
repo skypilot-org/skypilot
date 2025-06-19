@@ -1,9 +1,9 @@
-from typing import Any, Dict, Optional
 import enum
+from typing import Any, Dict, Optional
 
 
-class StorageType(enum.Enum):
-    """Storage type."""
+class VolumeType(enum.Enum):
+    """Volume type."""
     PVC='pvc'
     BLOCK_STORAGE='block_storage'
     OBJECT_STORAGE='object_storage'
@@ -11,8 +11,8 @@ class StorageType(enum.Enum):
 
 
 
-class StorageAccessMode(enum.Enum):
-    """Storage access mode."""
+class VolumeAccessMode(enum.Enum):
+    """Volume access mode."""
     READ_WRITE_ONCE = 'ReadWriteOnce'
     READ_WRITE_MANY = 'ReadWriteMany'
     READ_ONLY_MANY = 'ReadOnlyMany'

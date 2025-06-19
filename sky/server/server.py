@@ -61,6 +61,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
@@ -404,6 +405,7 @@ app.include_router(users_rest.router, prefix='/users', tags=['users'])
 app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
+app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 
 
 @app.get('/token')
