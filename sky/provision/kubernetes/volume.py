@@ -1,5 +1,5 @@
 """Kubernetes pvc provisioning."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import models
 from sky import sky_logging
@@ -9,9 +9,8 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = sky_logging.init_logger(__name__)
 
-
-def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
-    """Creates or registers a volume."""
+def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
+    """Gets the context and namespace of a volume."""
     if config.region is None:
         context = kubernetes_utils.get_current_kube_config_context_name()
         config.region = context
@@ -21,7 +20,11 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     if namespace is None:
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
         config.spec['namespace'] = namespace
+    return context, namespace
 
+def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
+    """Creates or registers a volume."""
+    context, namespace = _get_context_namespace(config)
     pvc_spec = _get_pvc_spec(namespace, config)
     create_persistent_volume_claim(namespace, context, pvc_spec)
     return config
@@ -29,16 +32,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
 
 def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Deletes a volume."""
-    if config.region is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
-        config.region = context
-    else:
-        context = config.region
-    namespace = config.spec.get('namespace')
-    if namespace is None:
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-        config.spec['namespace'] = namespace
-
+    context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
     logger.info(f'Deleting PVC: {pvc_name}')
     kubernetes_utils.delete_k8s_resource_with_retry(
@@ -54,16 +48,7 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
 
 def get_volume_usedby(config: models.VolumeConfig) -> List[str]:
     """Gets the usedby resources of a volume."""
-    if config.region is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
-        config.region = context
-    else:
-        context = config.region
-    namespace = config.spec.get('namespace')
-    if namespace is None:
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-        config.spec['namespace'] = namespace
-
+    context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
     usedby = []
     # Get all pods in the namespace
@@ -84,7 +69,7 @@ def create_persistent_volume_claim(namespace: str, context: Optional[str],
     try:
         kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
             name=pvc_name, namespace=namespace)
-        logger.info(f'PVC {pvc_name} already exists')
+        logger.debug(f'PVC {pvc_name} already exists')
         return
     except kubernetes.api_exception() as e:
         if e.status != 404:  # Not found
