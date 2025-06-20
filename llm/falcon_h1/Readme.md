@@ -14,7 +14,6 @@ In benchmarks, Falcon H1 models achieve state-of-the-art performance in most tas
 
 This guide walks through how to run and host Falcon H1 models **on any infrastructure** ranging from local GPU workstations, Kubernetes clusters, and public clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
 
-SkyPilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example.
 
 **Note**: The provided YAML configuration is set up for the Falcon H1 1.5B instruction-tuned model, but can be easily modified for other Falcon H1 variants.
 
