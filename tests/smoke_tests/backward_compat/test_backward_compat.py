@@ -145,7 +145,8 @@ class TestBackwardCompatibility:
             check=False,
             text=True,
             capture_output=True)
-        self.BASE_API_VERSION = base_sky_api_version.stdout.strip()
+        TestBackwardCompatibility.BASE_API_VERSION = base_sky_api_version.stdout.strip(
+        )
 
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
