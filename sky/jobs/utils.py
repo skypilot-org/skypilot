@@ -4,9 +4,12 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+from asyncio import events
 import collections
+import contextvars
 import datetime
 import enum
+import functools
 import os
 import pathlib
 import shlex
@@ -18,6 +21,7 @@ from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
+import requests
 from typing_extensions import Literal
 
 from sky import backends
@@ -426,6 +430,10 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Expected to find a controller pid for state '
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
+        elif pid == -1:
+            logger.debug(
+                f'Controller pid is -1 for consolidated job controller')
+            continue
         else:
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):
@@ -608,6 +616,17 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         update_managed_jobs_statuses(job_id)
+
+        if managed_job_state.get_job_controller_pid(job_id) == -1:
+            # This is a consolidated job controller, so we need to cancel the
+            # with the controller server API
+            try:
+                requests.post(f'http://localhost:8000/cancel/{job_id}')
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Failed to cancel job {job_id} "
+                             f"with controller server: {e}")
+                continue
+            continue
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
@@ -1583,3 +1602,17 @@ class ManagedJobCodeGen:
             f'export {constants.USER_ID_ENV_VAR}='
             f'"{common_utils.get_user_hash()}"; '
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
+
+
+async def to_thread(func, /, *args, **kwargs):
+    """
+    This is an identical copy of asyncio.to_thread, however, asyncio.to_thread
+    was added in python 3.9, so we use this for compatibility for 3.7 and 3.8.
+
+    For full documentation, see:
+    https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
+    """
+    loop = events.get_running_loop()
+    ctx = contextvars.copy_context()
+    func_call = functools.partial(ctx.run, func, *args, **kwargs)
+    return await loop.run_in_executor(None, func_call)

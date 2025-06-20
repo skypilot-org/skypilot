@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import asyncio
 from datetime import datetime
 import enum
 import fnmatch
@@ -16,6 +17,9 @@ import typing
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
+import aiohttp
+from aiohttp import ClientTimeout
+from aiohttp import TCPConnector
 import colorama
 import filelock
 from packaging import version
@@ -1566,6 +1570,32 @@ def check_network_connection():
             if i == len(_TEST_IP_LIST) - 1:
                 raise exceptions.NetworkError('Could not refresh the cluster. '
                                               'Network seems down.') from e
+
+
+async def async_check_network_connection():
+    """Check if the network connection is available.
+    
+    Tolerates 3 retries as it is observed that connections can fail.
+    Uses aiohttp for async HTTP requests.
+    """
+    # Create a session with retry logic
+    timeout = ClientTimeout(total=3)
+    connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
+
+    async with aiohttp.ClientSession(timeout=timeout,
+                                     connector=connector) as session:
+        for i, ip in enumerate(_TEST_IP_LIST):
+            try:
+                async with session.head(ip) as response:
+                    if response.status < 400:  # Any 2xx or 3xx status is good
+                        return
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if i == len(_TEST_IP_LIST) - 1:
+                    raise exceptions.NetworkError(
+                        'Could not refresh the cluster. '
+                        'Network seems down.') from e
+                # If not the last IP, continue to try the next one
+                continue
 
 
 @timeline.event

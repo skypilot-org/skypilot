@@ -40,15 +40,18 @@ from argparse import ArgumentParser
 import contextlib
 from functools import lru_cache
 import os
+import threading
 import time
 import typing
 
 import filelock
+import requests
 
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import controller_server
 from sky.jobs import state
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -86,28 +89,69 @@ def _get_lock_path() -> str:
 
 def _start_controller(job_id: int, dag_yaml_path: str,
                       env_file_path: str) -> None:
-    activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
-    source_environment_cmd = (f'source {env_file_path};'
-                              if env_file_path else '')
-    run_controller_cmd = ('python -u -m sky.jobs.controller '
-                          f'{dag_yaml_path} --job-id {job_id};')
+    """Start the job controller process.
 
-    # If the command line here is changed, please also update
-    # utils._controller_process_alive. The substring `--job-id X`
-    # should be in the command.
-    run_cmd = (f'{activate_python_env_cmd}'
-               f'{source_environment_cmd}'
-               f'{run_controller_cmd}')
+    If the process is already running, it will not start a new one.
+    Will also add the job_id, dag_yaml_path, and env_file_path to the
+    controllers list of processes.
+    """
+    pid_path = os.path.expanduser(f'~/.sky/job_controller_pid')
+    to_start = False
+    # TODO(luca): add an unlocked path first as a short circuit to ignore this
+    with filelock.FileLock('~/.sky/locks/job_controller_pid.lock'):
+        if os.path.exists(pid_path):
+            with open(pid_path, 'r') as f:
+                pid = int(f.read())
+            if subprocess_utils.is_process_alive(pid):
+                logger.debug(f'Job {job_id} already started with pid {pid}')
+            else:
+                to_start = True
+        else:
+            to_start = True
 
-    logs_dir = os.path.expanduser(
-        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
-    os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, f'{job_id}.log')
+    if to_start:
+        activate_python_env_cmd = (
+            f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+        source_environment_cmd = (f'source {env_file_path};'
+                                  if env_file_path else '')
+        run_controller_cmd = ('python -u -m sky.jobs.controller_server')
 
-    pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
-    state.set_job_controller_pid(job_id, pid)
+        run_cmd = (f'{activate_python_env_cmd}'
+                   f'{source_environment_cmd}'
+                   f'{run_controller_cmd}')
 
+        logs_dir = os.path.expanduser(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+        os.makedirs(logs_dir, exist_ok=True)
+        log_path = os.path.join(logs_dir, f'{job_id}.log')
+
+        pid = subprocess_utils.launch_new_process_tree(run_cmd,
+                                                       log_output=log_path)
+        with open(pid_path, 'w', encoding='utf-8') as f:
+            f.write(str(pid))
+
+    max_retries = 5
+    base_delay = 1
+    req = controller_server.JobRequest(
+        job_id=str(job_id),
+        dag_yaml_path=dag_yaml_path,
+        env_file_path=env_file_path,
+    )
+    for attempt in range(max_retries):
+        try:
+            res = requests.post(f'http://localhost:8000/create',
+                                json=req.model_dump())
+            break
+        except requests.exceptions.RequestException as e:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            logger.warning('Failed to connect to controller server (attempt '
+                           f'{attempt + 1}/{max_retries}). Retrying in '
+                           f'{delay} seconds...')
+            time.sleep(delay)
     logger.debug(f'Job {job_id} started with pid {pid}')
+    logger.debug(f'Response: {res.json()}')
 
 
 def maybe_schedule_next_jobs() -> None:
@@ -181,12 +225,15 @@ def maybe_schedule_next_jobs() -> None:
                 if current_state == state.ManagedJobScheduleState.WAITING:
                     # The job controller has not been started yet. We must start
                     # it.
-
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
                     env_file_path = maybe_next_job['env_file_path']
 
-                    _start_controller(job_id, dag_yaml_path, env_file_path)
+                    # quick hack to "instantly" launch the controller
+                    thread = threading.Thread(target=_start_controller,
+                                              args=(job_id, dag_yaml_path,
+                                                    env_file_path))
+                    thread.start()
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -205,12 +252,11 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    with filelock.FileLock(_get_lock_path()):
-        is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                                original_user_yaml_path,
-                                                env_file_path,
-                                                common_utils.get_user_hash(),
-                                                priority)
+    is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                            original_user_yaml_path,
+                                            env_file_path,
+                                            common_utils.get_user_hash(),
+                                            priority)
     if is_resume:
         _start_controller(job_id, dag_yaml_path, env_file_path)
     else:

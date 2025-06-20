@@ -1089,6 +1089,16 @@ def get_latest_task_id_status(
     return task_id, status
 
 
+def get_job_controller_pid(job_id: int) -> Optional[int]:
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        pid = cursor.execute(
+            """\
+            SELECT controller_pid FROM job_info WHERE spot_job_id=(?)""",
+            (job_id,)).fetchone()
+        return pid[0]
+
+
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     _, status = get_latest_task_id_status(job_id)
     return status
