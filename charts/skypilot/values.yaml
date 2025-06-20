@@ -51,6 +51,12 @@ apiService:
 
   # Set ~/.sky/config.yaml content on the API server from a secret
   # if configSecretName is set, config is ignored
+  #
+  # To use a secret, you need to create a secret with the following keys:
+  #
+  # kubectl create secret generic config-credentials \
+  # --namespace $NAMESPACE \
+  # --from-file=config.yaml=<path-to-config.yaml>
   configSecretName: null
 
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
