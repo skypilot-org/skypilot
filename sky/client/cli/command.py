@@ -3803,13 +3803,11 @@ def volumes():
               required=False,
               type=str,
               help='Volume name. Override the name defined in the YAML.')
-@click.option(
-    '--infra',
-    required=False,
-    type=str,
-    help=
-    'Infra. Format: k8s, k8s/context-name. Override the infra defined in the YAML.'
-)
+@click.option('--infra',
+              required=False,
+              type=str,
+              help='Infra. Format: k8s, k8s/context-name. '
+              'Override the infra defined in the YAML.')
 @click.option(
     '--type',
     required=False,
@@ -3827,9 +3825,14 @@ def volumes():
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str],
-                  infra: Optional[str], type: Optional[str],
-                  size: Optional[str], yes: bool, async_call: bool):
+def volumes_apply(
+        entrypoint: Optional[Tuple[str, ...]],
+        name: Optional[str],
+        infra: Optional[str],
+        type: Optional[str],  # pylint: disable=redefined-builtin
+        size: Optional[str],
+        yes: bool,
+        async_call: bool):
     """Apply a volume.
 
     Examples:
@@ -3848,13 +3851,12 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str],
     volume_config: Dict[str, Any] = {}
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
-        is_yaml, yaml_config, yaml_file_provided, invalid_reason = _check_yaml_only(
-            entrypoint_str)
+        is_yaml, yaml_config, yaml_file_provided, invalid_reason = (
+            _check_yaml_only(entrypoint_str))
         if not is_yaml:
             if yaml_file_provided:
-                raise click.BadParameter(
-                    f'{entrypoint_str!r} looks like a yaml path but {invalid_reason}'
-                )
+                raise click.BadParameter(f'{entrypoint_str!r} looks like a '
+                                         f'yaml path but {invalid_reason}')
             else:
                 raise click.BadParameter(
                     f'{entrypoint_str!r} needs to be a YAML file')
@@ -3916,8 +3918,9 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str],
 def volumes_ls(verbose: bool):
     """List volumes managed by SkyPilot."""
     request_id = volumes_sdk.ls()
-    volumes = sdk.stream_and_get(request_id)
-    volume_table = volumes_utils.format_volume_table(volumes, show_all=verbose)
+    all_volumes = sdk.stream_and_get(request_id)
+    volume_table = volumes_utils.format_volume_table(all_volumes,
+                                                     show_all=verbose)
     click.echo(volume_table)
 
 
@@ -3942,7 +3945,7 @@ def volumes_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):
+def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
     """Delete volumes.
 
     Examples:
@@ -3961,14 +3964,14 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        volumes = sdk.get(volumes_sdk.ls())
-        if not volumes:
+        all_volumes = sdk.get(volumes_sdk.ls())
+        if not all_volumes:
             click.echo('No volumes to delete.')
             return
-        names = [volume['name'] for volume in volumes]
+        names = [volume['name'] for volume in all_volumes]
     else:
-        volumes = sdk.get(volumes_sdk.ls())
-        existing_volume_names = [volume['name'] for volume in volumes]
+        all_volumes = sdk.get(volumes_sdk.ls())
+        existing_volume_names = [volume['name'] for volume in all_volumes]
         names = _get_glob_matches(existing_volume_names, names)
     if names:
         if not yes:
