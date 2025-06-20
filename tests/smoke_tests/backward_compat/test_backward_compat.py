@@ -376,7 +376,7 @@ class TestBackwardCompatibility:
         """Test serve deployment functionality across versions"""
         serve_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && sky check && '
             f'sky serve up --cloud {generic_cloud} -y -n {serve_name}-0 examples/serve/http_server/task.yaml',
             f'{self.ACTIVATE_BASE} && sky serve status {serve_name}-0',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky serve status {serve_name}-0',
