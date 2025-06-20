@@ -40,6 +40,13 @@ spec:
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
           value: {{ .Release.Name | quote }}
+        {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
+        - name: SKYPILOT_INITIAL_BASIC_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "skypilot.initialBasicAuthSecretName" . }}
+              key: auth
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -129,11 +136,11 @@ spec:
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start --deploy --foreground
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
           else
             # For backward compatibility, run in background if --foreground is not supported.
-            # TODO(aylei): this will bedropped in 0.11.0.
-            if sky api start --deploy; then
+            # TODO(aylei): this will be dropped in 0.11.0.
+            if sky api start {{ include "skypilot.apiArgs" . }}; then
               tail -n+0 -f /root/.sky/api_server/server.log
             else
               cat /root/.sky/api_server/server.log
@@ -188,7 +195,7 @@ spec:
           mountPath: /var/skypilot/kubeconfig
         {{- else }}
         - name: kube-config
-          mountPath: /root/.kube/config
+          mountPath: /root/.kube
         {{- end }}
         {{- end }}
         {{- if .Values.apiService.sshNodePools }}

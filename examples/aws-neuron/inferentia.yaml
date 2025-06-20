@@ -5,7 +5,9 @@ resources:
 
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-  HF_TOKEN: # fill
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 setup: |
   # Install transformers-neuronx and its dependencies

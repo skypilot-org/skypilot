@@ -1,8 +1,8 @@
 """Permission service for SkyPilot API Server."""
 import contextlib
+import hashlib
 import logging
 import os
-import threading
 from typing import Generator, List
 
 import casbin
@@ -10,9 +10,11 @@ import filelock
 import sqlalchemy_adapter
 
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
+from sky.utils import common_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -23,29 +25,46 @@ POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 
 _enforcer_instance = None
-_lock = threading.Lock()
 
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        global _enforcer_instance
-        if _enforcer_instance is None:
-            # For different threads, we share the same enforcer instance.
-            with _lock:
-                if _enforcer_instance is None:
-                    _enforcer_instance = self
-                    engine = global_user_state.initialize_and_get_db()
-                    adapter = sqlalchemy_adapter.Adapter(engine)
-                    model_path = os.path.join(os.path.dirname(__file__),
-                                              'model.conf')
-                    enforcer = casbin.Enforcer(model_path, adapter)
-                    self.enforcer = enforcer
-        else:
-            self.enforcer = _enforcer_instance.enforcer
         with _policy_lock():
-            self._maybe_initialize_policies()
+            global _enforcer_instance
+            if _enforcer_instance is None:
+                _enforcer_instance = self
+                engine = global_user_state.initialize_and_get_db()
+                adapter = sqlalchemy_adapter.Adapter(engine)
+                model_path = os.path.join(os.path.dirname(__file__),
+                                          'model.conf')
+                enforcer = casbin.Enforcer(model_path, adapter)
+                self.enforcer = enforcer
+                self._maybe_initialize_policies()
+                self._maybe_initialize_basic_auth_user()
+            else:
+                self.enforcer = _enforcer_instance.enforcer
+
+    def _maybe_initialize_basic_auth_user(self) -> None:
+        """Initialize basic auth user if it is enabled."""
+        basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
+        if not basic_auth:
+            return
+        username, password = basic_auth.split(':', 1)
+        if username and password:
+            user_hash = hashlib.md5(
+                username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+            user_info = global_user_state.get_user(user_hash)
+            if user_info:
+                logger.info(f'Basic auth user {username} already exists')
+                return
+            global_user_state.add_or_update_user(
+                models.User(id=user_hash, name=username, password=password))
+            self.enforcer.add_grouping_policy(user_hash,
+                                              rbac.RoleName.ADMIN.value)
+            self.enforcer.save_policy()
+            logger.info(f'Basic auth user {username} initialized')
 
     def _maybe_initialize_policies(self) -> None:
         """Initialize policies if they don't already exist."""
@@ -144,6 +163,19 @@ class PermissionService:
             self.enforcer.add_grouping_policy(user_id, rbac.get_default_role())
             return True
         return False
+
+    def delete_user(self, user_id: str) -> None:
+        """Delete user role relationship."""
+        with _policy_lock():
+            # Get current roles
+            self._load_policy_no_lock()
+            # Avoid calling get_user_roles, as it will require the lock.
+            current_roles = self.enforcer.get_roles_for_user(user_id)
+            if not current_roles:
+                logger.warning(f'User {user_id} has no roles')
+                return
+            self.enforcer.remove_grouping_policy(user_id, current_roles[0])
+            self.enforcer.save_policy()
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""

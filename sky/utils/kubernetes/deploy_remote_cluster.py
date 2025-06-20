@@ -146,6 +146,8 @@ def run_remote(node,
         ]
 
         if ssh_key:
+            if not os.path.isfile(ssh_key):
+                raise ValueError(f'SSH key not found: {ssh_key}')
             ssh_cmd.extend(['-i', ssh_key])
 
         ssh_cmd.append(f'{user}@{node}' if user else node)
@@ -674,10 +676,6 @@ def deploy_cluster(head_node,
 
     Returns: List of unsuccessful worker nodes.
     """
-    # Ensure SSH key is expanded for paths with ~ (home directory)
-    if ssh_key:
-        ssh_key = os.path.expanduser(ssh_key)
-
     history_yaml_file = os.path.join(NODE_POOLS_INFO_DIR,
                                      f'{context_name}-history.yaml')
     cert_file_path = os.path.join(NODE_POOLS_INFO_DIR,

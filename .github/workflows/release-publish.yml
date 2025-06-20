@@ -115,7 +115,7 @@ jobs:
     secrets: inherit
 
   create-release:
-    needs: [extract-version, publish-to-pypi]
+    needs: [extract-version, publish-and-validate-pypi]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

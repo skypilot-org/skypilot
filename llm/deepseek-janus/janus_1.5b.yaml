@@ -1,5 +1,5 @@
 envs:
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, A100:8, A100-80GB:1}

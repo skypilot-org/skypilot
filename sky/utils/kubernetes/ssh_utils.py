@@ -138,8 +138,15 @@ def prepare_hosts_info(
 
     # Get cluster-level defaults
     cluster_user = cluster_config.get('user', '')
-    cluster_identity_file = cluster_config.get('identity_file', '')
+    cluster_identity_file = os.path.expanduser(
+        cluster_config.get('identity_file', ''))
     cluster_password = cluster_config.get('password', '')
+
+    # Check if cluster identity file exists
+    if cluster_identity_file and not os.path.isfile(cluster_identity_file):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'SSH Identity File Missing: {cluster_identity_file}')
 
     use_cluster_config_msg = (f'Cluster {cluster_name} uses SSH config '
                               'for hostname {host}, which is not '
@@ -195,7 +202,13 @@ def prepare_hosts_info(
             host_identity_file = '' if is_ssh_config_host else (
                 _maybe_hardcode_identity_file(
                     i, host.get('identity_file', cluster_identity_file)))
+            host_identity_file = os.path.expanduser(host_identity_file)
             host_password = host.get('password', cluster_password)
+
+            if host_identity_file and not os.path.isfile(host_identity_file):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'SSH Identity File Missing: {host_identity_file}')
 
             hosts_info.append({
                 'ip': host['ip'],

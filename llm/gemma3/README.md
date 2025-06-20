@@ -47,7 +47,7 @@ sky launch gemma3.yaml \
   -c gemma-3 \
   --env MODEL_NAME=google/gemma-3-4b-it \
   --gpus L4:1
-  --env HF_TOKEN=xxxx
+  --secret HF_TOKEN=xxxx
 ```
 
 ## Step 2: Get Results 
