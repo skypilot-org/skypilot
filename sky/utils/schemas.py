@@ -547,10 +547,18 @@ def get_volume_mount_schema():
                         'case_insensitive_enum': list(constants.ALL_CLOUDS)
                     },
                     'region': {
-                        'type': 'string',
+                        'anyOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'null'
+                        }]
                     },
                     'zone': {
-                        'type': 'string',
+                        'anyOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'null'
+                        }]
                     },
                 },
             }
@@ -839,6 +847,10 @@ def get_task_schema():
             # volumes config is validated separately using get_volume_schema
             'volumes': {
                 'type': 'object',
+            },
+            'volume_mounts': {
+                'type': 'array',
+                'items': get_volume_mount_schema(),
             },
             **_experimental_task_schema(),
         }

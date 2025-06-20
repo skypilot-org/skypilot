@@ -810,9 +810,14 @@ class Task:
         # Disable certain access modes
         disabled_modes = {}
         if self.num_nodes > 1:
-            disabled_modes[volume_lib.VolumeAccessMode.READ_WRITE_ONCE] = (
-                'Volume access mode ReadWriteOnce is not supported for '
-                'multi-node tasks.')
+            disabled_modes[
+                volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value] = (
+                    'Volume access mode ReadWriteOnce is not supported for '
+                    'multi-node tasks.')
+            disabled_modes[
+                volume_lib.VolumeAccessMode.READ_WRITE_ONCE_POD.value] = (
+                    'Volume access mode ReadWriteOncePod is not supported for '
+                    'multi-node tasks.')
         # TODO(aylei): generalize access mode to all volume types
         # Record the required topology and the volume that requires it, e.g.
         # {'cloud': ('volume_name', 'aws')}

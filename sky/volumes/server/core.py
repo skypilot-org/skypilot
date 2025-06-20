@@ -82,12 +82,15 @@ def volume_delete(names: List[str]) -> None:
         names: List of volume names to delete.
 
     Raises:
-        ValueError: If the volume does not exist or has no handle.
+        ValueError: If the volume does not exist
+          or is in use or has no handle.
     """
     for name in names:
         volume = global_user_state.get_volume_by_name(name)
         if volume is None:
             raise ValueError(f'Volume {name} not found.')
+        if volume.get('status') == status_lib.VolumeStatus.IN_USE:
+            raise ValueError(f'Volume {name} is in use.')
         config = volume.get('handle')
         if config is None:
             raise ValueError(f'Volume {name} has no handle.')

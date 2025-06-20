@@ -1438,6 +1438,11 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
+@app.get('/api/completion/volume_name')
+async def complete_volume_name(incomplete: str,) -> List[str]:
+    return global_user_state.get_volume_names_start_with(incomplete)
+
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.

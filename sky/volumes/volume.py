@@ -22,6 +22,7 @@ class VolumeType(enum.Enum):
 class VolumeAccessMode(enum.Enum):
     """Volume access mode."""
     READ_WRITE_ONCE = 'ReadWriteOnce'
+    READ_WRITE_ONCE_POD = 'ReadWriteOncePod'
     READ_WRITE_MANY = 'ReadWriteMany'
     READ_ONLY_MANY = 'ReadOnlyMany'
 
