@@ -564,7 +564,10 @@ def _reload_config_as_server() -> None:
     _set_loaded_config_path(None)
 
     server_config_path = _resolve_server_config_path()
+    db_url_from_env = os.environ.get(constants.ENV_VAR_DB_CONNECTION_STRING)
     server_config = _get_config_from_path(server_config_path)
+    if db_url_from_env:
+        server_config.set_nested(('db',), db_url_from_env)
 
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
