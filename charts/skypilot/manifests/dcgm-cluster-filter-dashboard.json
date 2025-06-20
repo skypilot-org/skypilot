@@ -114,10 +114,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "expr": "label_replace(DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{instance}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -217,10 +217,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "DCGM_FI_DEV_FB_USED{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "expr": "label_replace(DCGM_FI_DEV_FB_USED{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{instance}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -320,10 +320,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "DCGM_FI_DEV_GPU_TEMP{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "expr": "label_replace(DCGM_FI_DEV_GPU_TEMP{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{instance}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -423,10 +423,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "DCGM_FI_DEV_POWER_USAGE{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
+            "expr": "label_replace(DCGM_FI_DEV_POWER_USAGE{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{instance}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }

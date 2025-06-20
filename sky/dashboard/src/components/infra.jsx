@@ -418,32 +418,6 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-lg font-semibold">Available GPUs</h4>
-            {/* Add Grafana link button for in-cluster contexts when Grafana is available */}
-            {isGrafanaAvailable && (
-              <button
-                // TODO(aylei): make the dashboard path stable
-                onClick={() =>
-                  openGrafana('/d/Oxed_c6Wz/nvidia-dcgm-exporter-dashboard')
-                }
-                className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue"
-              >
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                  />
-                </svg>
-                View GPU Metrics
-              </button>
-            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             {gpusInContext.map((gpu) => {
@@ -611,10 +585,10 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   {/* Show current selection info */}
                   <div className="mt-2 text-xs text-gray-500">
                     Showing:{' '}
-                    {selectedHosts === '$__all' ? 'All hosts' : selectedHosts} •
+                    {selectedHosts === '$__all' ? 'All nodes' : selectedHosts} •
                     Time: {timeRange.from} to {timeRange.to}
                     {availableHosts.length > 0 && (
-                      <span> • {availableHosts.length} hosts available</span>
+                      <span> • {availableHosts.length} nodes available</span>
                     )}
                   </div>
                 </div>

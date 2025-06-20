@@ -563,10 +563,6 @@ function ActiveTab({
                     {isLoadingClusterMatch && (
                       <span> • Finding cluster data...</span>
                     )}
-                    {matchedClusterName &&
-                      matchedClusterName !== clusterData?.cluster && (
-                        <span> • Matched: {matchedClusterName}</span>
-                      )}
                   </div>
                 </div>
 
