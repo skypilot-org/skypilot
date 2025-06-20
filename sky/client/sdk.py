@@ -1858,6 +1858,7 @@ def api_start(
     foreground: bool = False,
     metrics: bool = False,
     metrics_port: Optional[int] = None,
+    enable_basic_auth: bool = False,
 ) -> None:
     """Starts the API server.
 
@@ -1873,6 +1874,8 @@ def api_start(
             the current process).
         metrics: Whether to export metrics of the API server.
         metrics_port: The port to export metrics of the API server.
+        enable_basic_auth: Whether to enable basic authentication
+            in the API server.
     Returns:
         None
     """
@@ -1892,7 +1895,8 @@ def api_start(
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
-                                                   metrics, metrics_port)
+                                                   metrics, metrics_port,
+                                                   enable_basic_auth)
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
@@ -1995,7 +1999,8 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         raise click.BadParameter('Endpoint must be a valid URL.')
     endpoint = endpoint.rstrip('/')
 
-    server_status = server_common.check_server_healthy(endpoint)
+    server_status, api_server_info = server_common.check_server_healthy(
+        endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
@@ -2121,6 +2126,21 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         # If we have a user_hash, save it to the local file
         if user_hash is not None:
             if not common_utils.is_valid_user_hash(user_hash):
+                raise ValueError(f'Invalid user hash: {user_hash}')
+            with open(os.path.expanduser('~/.sky/user_hash'),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(user_hash)
+    else:
+        # Check if basic auth is enabled
+        if api_server_info.basic_auth_enabled:
+            if api_server_info.user is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Basic auth is enabled but no valid user is found')
+            # Set the user hash in the local file
+            user_hash = api_server_info.user.get('id')
+            if not user_hash or not common_utils.is_valid_user_hash(user_hash):
                 raise ValueError(f'Invalid user hash: {user_hash}')
             with open(os.path.expanduser('~/.sky/user_hash'),
                       'w',

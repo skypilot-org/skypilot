@@ -18,8 +18,9 @@ We define a SkyServe service spec for serving Llama-3 chatbot with vLLM and an A
   # auth.yaml
   envs:
     MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-    HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-    AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --env to pass.
+  secrets:
+    HF_TOKEN: # TODO: Fill with your own huggingface token, or use --secret to pass.
+    AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --secret to pass.
 
   service:
     readiness_probe:
@@ -48,7 +49,7 @@ To deploy the service, run the following command:
 
 .. code-block:: bash
 
-  HF_TOKEN=xxx AUTH_TOKEN=yyy sky serve up auth.yaml -n auth --env HF_TOKEN --env AUTH_TOKEN
+  HF_TOKEN=xxx AUTH_TOKEN=yyy sky serve up auth.yaml -n auth --secret HF_TOKEN --secret AUTH_TOKEN
 
 To send a request to the service endpoint, a service client need to include the static API key in a request's header:
 

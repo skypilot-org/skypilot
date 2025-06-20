@@ -955,6 +955,7 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
    :hidden:
 
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
+    Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Advanced: Use OAuth/Okta Proxy <examples/api-server-auth-proxy>
     Advanced: API server metrics monitoring <examples/api-server-metrics-setup>
     Advanced: GPU metrics monitoring <examples/api-server-gpu-metrics-setup>

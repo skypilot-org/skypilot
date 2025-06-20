@@ -29,29 +29,6 @@ setup: |
   grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
-  
-  # Create systemd service file
-  mkdir -p ~/.config/systemd/user/
-
-  # Create systemd user service file
-  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
-  [Unit]
-  Description=SkyPilot Jobs Dashboard
-  After=network.target
-
-  [Service]
-  Environment="SKYPILOT_USER_ID={{ dashboard_user_id }}"
-  Restart=always
-  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
-  StandardError=append:/home/$USER/.sky/job-dashboard.log
-  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
-
-  [Install]
-  WantedBy=default.target
-  EOF
-
-  export SKYPILOT_USER_ID="{{ dashboard_user_id }}"
-  {{ dashboard_setup_cmd }}
 
 run: |
   {{ sky_activate_python_env }}
