@@ -41,6 +41,7 @@ import contextlib
 from functools import lru_cache
 import os
 import threading
+import sys
 import time
 import typing
 
@@ -114,7 +115,8 @@ def _start_controller(job_id: int, dag_yaml_path: str,
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
         source_environment_cmd = (f'source {env_file_path};'
                                   if env_file_path else '')
-        run_controller_cmd = ('python -u -m sky.jobs.controller_server')
+        run_controller_cmd = (f'{sys.executable} -u -m'
+                              'sky.jobs.controller_server')
 
         run_cmd = (f'{activate_python_env_cmd}'
                    f'{source_environment_cmd}'
