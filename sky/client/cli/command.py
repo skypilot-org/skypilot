@@ -2643,6 +2643,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
+        except exceptions.InconsistentConsolidationModeError:
+            # If this error is raised, it means the user switched to the
+            # consolidation mode but the previous controller cluster is still
+            # running. We should allow the user to tear down the controller
+            # cluster in this case.
+            with skypilot_config.override_skypilot_config(
+                {'jobs': {
+                    'controller': {
+                        'consolidation_mode': False
+                    }
+                }}):
+                # Check again with the consolidation mode disabled. This is to
+                # make sure there is no in-progress managed jobs.
+                request_id = managed_jobs.queue(refresh=False,
+                                                skip_finished=True,
+                                                all_users=True)
+                managed_jobs_ = sdk.stream_and_get(request_id)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'

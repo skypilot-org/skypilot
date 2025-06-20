@@ -143,11 +143,12 @@ def is_consolidation_mode() -> bool:
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
         if global_user_state.get_cluster_from_name(controller_cn) is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'{colorama.Fore.RED}Consolidation mode is '
-                                 f'enabled, but the controller cluster '
-                                 f'{controller_cn} is still running. Please '
-                                 'terminate the controller cluster first.'
-                                 f'{colorama.Style.RESET_ALL}')
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'enabled, but the controller cluster '
+                    f'{controller_cn} is still running. Please '
+                    'terminate the controller cluster first.'
+                    f'{colorama.Style.RESET_ALL}')
     else:
         all_jobs = managed_job_state.get_managed_jobs()
         if all_jobs:
@@ -156,11 +157,12 @@ def is_consolidation_mode() -> bool:
                     None, all_users=True))
             if nonterminal_jobs:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'{colorama.Fore.RED}Consolidation mode '
-                                     'is disabled, but there are still '
-                                     f'{len(nonterminal_jobs)} managed jobs '
-                                     'running. Please terminate those jobs '
-                                     f'first.{colorama.Style.RESET_ALL}')
+                    raise exceptions.InconsistentConsolidationModeError(
+                        f'{colorama.Fore.RED}Consolidation mode '
+                        'is disabled, but there are still '
+                        f'{len(nonterminal_jobs)} managed jobs '
+                        'running. Please terminate those jobs '
+                        f'first.{colorama.Style.RESET_ALL}')
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
