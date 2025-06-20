@@ -163,8 +163,15 @@ spec:
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
         {{- end }}
+        # mount the config from the secret if it is set
+        {{- if .Values.apiService.configSecretName }}
+        - name: skypilot-config-secret
+          mountPath: /var/skypilot/config
+        # mount the config from the configmap if the secret is not set
+        {{- else }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
+        {{- end }}
         {{- if .Values.apiService.sshNodePools }}
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
@@ -375,6 +382,11 @@ spec:
       - name: skypilot-config
         configMap:
           name: {{ .Release.Name }}-config
+      {{- if .Values.apiService.configSecretName }}
+      - name: skypilot-config-secret
+        secret:
+          secretName: {{ .Values.apiService.configSecretName }}
+      {{- end }}
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:

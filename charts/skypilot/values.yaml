@@ -49,6 +49,10 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Set ~/.sky/config.yaml content on the API server from a secret
+  # if configSecretName is set, config is ignored
+  configSecretName: null
+
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
   # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/ssh_node_pools.yaml`

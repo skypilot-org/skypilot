@@ -43,6 +43,21 @@ WARNING: apiService.config is set during an upgrade operation, which will be IGN
 To update your SkyPilot config, follow the instructions in the upgrade guide:
 https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config
 {{- end -}}
+{{- if and .Release.IsUpgrade .Values.apiService.configSecretName -}}
+WARNING: apiService.configSecretName is set during an upgrade operation, which will be IGNORED.
+
+To update your SkyPilot config, follow the instructions in the upgrade guide:
+https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config
+{{- end -}}
+{{- end -}}
+
+{{/*
+Check if both apiService.config and apiService.configSecretName is set and display warning
+*/}}
+{{- define "skypilot.checkDuplicateConfigSource" -}}
+{{- if and .Values.apiService.config .Values.apiService.configSecretName -}}
+WARNING: both apiService.config and apiService.configSecretName are set during an upgrade operation. apiService.config will be IGNORED.
+{{- end -}}
 {{- end -}}
 
 {{/*
