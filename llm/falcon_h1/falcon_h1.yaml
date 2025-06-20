@@ -2,7 +2,7 @@
 # Supports: Falcon-H1-0.5B, 1.5B, 3B, 34B models
 
 resources:
-  accelerators: [A100:8]  # Use [A100-80GB:8] for 34B model
+  accelerators: A100:8  # Use A100-80GB:8 for 34B model
   ports: 8000
   disk_tier: best
   use_spot: true
@@ -10,7 +10,6 @@ resources:
 envs: 
   MODEL_NAME: tiiuae/Falcon-H1-34B-Instruct
   MAX_MODEL_LEN: 4096
-  HF_TOKEN: ""  # Not required for Falcon H1 models
 
 setup: |
   uv pip install vllm

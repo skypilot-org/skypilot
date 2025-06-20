@@ -134,8 +134,8 @@ sky serve up -n falcon-serve llm/falcon_h1/falcon_h1.yaml
 ```
 
 
-💬 Try it now: [Falcon H1 Chat Interface](https://chat.falconllm.tii.ae/)
-🤗 Model Collection: [HuggingFace Models](https://huggingface.co/collections/tiiuae/falcon-h1-6819f2795bc406da60fab8df)
-📰 Technical Blog: [Falcon H1 Architecture](https://falcon-lm.github.io/blog/falcon-h1/)
-🖥️ Live Demo: [HuggingFace Playground](https://huggingface.co/spaces/tiiuae/Falcon-H1-playground)
-💬 Community: [Discord Server](https://discord.gg/trwMYP9PYm)
+💬 [Try it now: Falcon H1 Chat Interface](https://chat.falconllm.tii.ae/)<br>
+🤗 [Model Collection: HuggingFace Models](https://huggingface.co/collections/tiiuae/falcon-h1-6819f2795bc406da60fab8df)<br>
+📰 [Technical Blog: Falcon H1 Architecture](https://falcon-lm.github.io/blog/falcon-h1/)<br>
+🖥️ [Live Demo: HuggingFace Playground](https://huggingface.co/spaces/tiiuae/Falcon-H1-playground)<br>
+💬 [Community: Discord Server](https://discord.gg/trwMYP9PYm)
