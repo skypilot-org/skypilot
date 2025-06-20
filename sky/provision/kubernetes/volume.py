@@ -9,6 +9,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = sky_logging.init_logger(__name__)
 
+
 def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
     """Gets the context and namespace of a volume."""
     if config.region is None:
@@ -21,6 +22,7 @@ def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
         config.spec['namespace'] = namespace
     return context, namespace
+
 
 def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a volume."""
