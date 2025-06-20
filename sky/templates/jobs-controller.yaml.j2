@@ -44,7 +44,12 @@ run: |
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
-  python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+  {%- if consolidation_mode_job_id is not none %}
+  {{sky_python_cmd}} \
+  {%- else %}
+  python \
+  {%- endif %}
+    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
     --user-yaml-path {{remote_original_user_yaml_path}} \
     {%- if consolidation_mode_job_id is not none %}
     --job-id {{consolidation_mode_job_id}} \
