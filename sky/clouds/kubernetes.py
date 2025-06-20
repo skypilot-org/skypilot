@@ -1,4 +1,5 @@
 """Kubernetes."""
+from enum import Enum
 import os
 import re
 import subprocess
@@ -15,6 +16,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision import instance_setup
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
@@ -31,6 +33,69 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
+
+
+class KubernetesHighPerformanceNetworkType(Enum):
+    """Enum for different Kubernetes cluster types with high performance
+    network configurations.
+
+    This enum defines cluster types that support optimized networking for
+    distributed ML workloads:
+    - GCP_TCPX: GKE clusters with GPUDirect-TCPX support
+      (A3 High instances: a3-highgpu-8g)
+    - GCP_TCPXO: GKE clusters with GPUDirect-TCPXO support
+      (A3 Mega instances: a3-megagpu-8g)
+    - GCP_GPUDIRECT_RDMA: GKE clusters with GPUDirect-RDMA support
+      (A4/A3 Ultra instances)
+    - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
+      low-latency networking
+    - NONE: Standard clusters without specialized networking optimizations
+
+    The network configurations align with corresponding VM-based
+    implementations:
+    - GCP settings match
+      sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+    - Nebius settings match the InfiniBand configuration used in Nebius VMs
+    """
+
+    GCP_TCPX = 'gcp_tcpx'
+    GCP_TCPXO = 'gcp_tcpxo'
+    GCP_GPUDIRECT_RDMA = 'gcp_gpudirect_rdma'
+    NEBIUS = 'nebius'
+    NONE = 'none'
+
+    def get_network_env_vars(self) -> Dict[str, str]:
+        """Get network environment variables for this cluster type."""
+        if self == KubernetesHighPerformanceNetworkType.NEBIUS:
+            # Nebius cluster with InfiniBand - use InfiniBand optimizations
+            return {
+                'NCCL_IB_HCA': 'mlx5',
+                'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
+                                    'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
+            }
+        else:
+            # GCP clusters and generic clusters - environment variables are
+            # handled directly in the template
+            return {}
+
+    def supports_high_performance_networking(self) -> bool:
+        """Check if this cluster type supports high performance networking."""
+        return self is not KubernetesHighPerformanceNetworkType.NONE
+
+    def supports_gpu_direct(self) -> bool:
+        """Check if this cluster type supports GPUDirect networking."""
+        return self in (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                        KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                        KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+
+    def requires_ipc_lock_capability(self) -> bool:
+        """Check if this cluster type requires IPC_LOCK capability."""
+        return self.supports_high_performance_networking()
+
+    def requires_tcpxo_daemon(self) -> bool:
+        """Check if this cluster type requires TCPXO daemon."""
+        return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
+
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
@@ -121,7 +186,8 @@ class Kubernetes(clouds.Cloud):
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
             # Allow custom network tier if supported by the cluster
             # (e.g., Nebius clusters with high performance networking)
-            if cls._cluster_supports_high_performance_networking(context):
+            if cls._detect_cluster_type(
+                    context).supports_high_performance_networking():
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                     None)
@@ -568,22 +634,49 @@ class Kubernetes(clouds.Cloud):
             timeout,
             override_configs=resources.cluster_config_overrides)
 
+        # Get the storage class name for high availability controller's PVC
+        k8s_ha_storage_class_name = skypilot_config.get_nested(
+            ('kubernetes', 'high_availability', 'storage_class_name'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+
+        # Configure TCPX resource allocation by extracting from k8s_resource_key
+        # This must happen before deploy_vars is created to ensure the modified
+        # k8s_resource_key is properly saved
+        cluster_type = self._detect_cluster_type(
+            region.name if region else 'default')
+        tcpx_enabled = (
+            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+        if (tcpx_enabled and k8s_resource_key is not None and
+                k8s_resource_key == kubernetes_utils.get_gpu_resource_key()):
+            # Extract nvidia GPU resources from
+            # k8s_resource_key and move to TCPX daemon
+            k8s_tcpx_resource_key = k8s_resource_key
+            k8s_tcpx_accelerator_count = str(acc_count)
+            # Remove GPU resources from ray-node by setting
+            # k8s_resource_key to None
+            k8s_resource_key = None
+        else:
+            # Normal case: no TCPX GPU extraction needed
+            k8s_tcpx_resource_key = None
+            k8s_tcpx_accelerator_count = '0'
+
         # Check if this cluster supports high performance networking and
-        # configure IPC_LOCK capability for clusters like Nebius that support it
-        k8s_ipc_lock_capability = False
+        # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
             # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
             unsupported_features = self._unsupported_features_for_resources(
                 resources)
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
-                not in unsupported_features:
-                k8s_ipc_lock_capability = True
-
-        if k8s_ipc_lock_capability:
-            k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
-            k8s_env_vars['UCX_NET_DEVICES'] = \
-                'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
+                    not in unsupported_features:
+                # Add high-performance networking environment variables for
+                # Nebius (GCP environment variables are handled directly in
+                # the template)
+                if (cluster_type == KubernetesHighPerformanceNetworkType.NEBIUS
+                   ):
+                    network_env_vars = cluster_type.get_network_env_vars()
+                    k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -657,7 +750,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
-            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -667,6 +759,21 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
         deploy_vars['k8s_namespace'] = namespace
+
+        # Add backward compatibility template variables for GPUDirect variants
+        deploy_vars['k8s_enable_gpudirect_tcpx'] = (
+            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+        deploy_vars['k8s_enable_gpudirect_tcpxo'] = (
+            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPXO)
+        deploy_vars['k8s_enable_gpudirect_rdma'] = (
+            cluster_type ==
+            KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+
+        deploy_vars['k8s_ipc_lock_capability'] = (
+            cluster_type.requires_ipc_lock_capability())
+
+        deploy_vars['k8s_tcpx_resource_key'] = k8s_tcpx_resource_key
+        deploy_vars['k8s_tcpx_accelerator_count'] = k8s_tcpx_accelerator_count
 
         return deploy_vars
 
@@ -962,28 +1069,71 @@ class Kubernetes(clouds.Cloud):
         ]
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=10)
-    def _cluster_supports_high_performance_networking(cls,
-                                                      context: str) -> bool:
-        """Check if the cluster supports high performance networking.
-
-        Currently detects Nebius clusters by checking for nebius.com/ labels
-        on cluster nodes.
+    def _detect_cluster_type(
+            cls, context: str) -> KubernetesHighPerformanceNetworkType:
+        """Detect the type of Kubernetes cluster based on node labels.
 
         Args:
             context: The Kubernetes context to check.
 
         Returns:
-            True if the cluster supports high performance networking.
+            The detected cluster type.
         """
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
             for node in nodes:
                 if node.metadata.labels:
-                    for label_key in node.metadata.labels.keys():
+                    # Check for Nebius clusters
+                    for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
-                            return True
+                            return KubernetesHighPerformanceNetworkType.NEBIUS
+
+                    # Check for GKE clusters with specific GPUDirect variants
+                    machine_family = node.metadata.labels.get(
+                        'cloud.google.com/machine-family', '')
+                    instance_type = node.metadata.labels.get(
+                        'node.kubernetes.io/instance-type', '')
+                    gke_accelerator = node.metadata.labels.get(
+                        'cloud.google.com/gke-accelerator', '')
+
+                    # Check if this is a GKE cluster with A3/A4 machine family
+                    if machine_family in ['a3', 'a4']:
+                        # Check instance type to determine specific GPUDirect
+                        # variant
+                        if 'a3-highgpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX)
+                        elif 'a3-megagpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPXO)
+                        elif ('a4-highgpu-8g' in instance_type or
+                              'a3-ultragpu-8g' in instance_type):
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA)
+                        # Generic A3/A4 detection as fallback
+                        elif machine_family == 'a4':
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA)
+                        elif machine_family == 'a3':
+                            # Default to TCPX for unknown A3
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX)
+
+                    # Fallback: Check for GPU Direct TCPX capable instance
+                    # types with high-perf GPUs
+                    is_gpu_direct_tcpx_instance = (
+                        instance_type
+                        in gcp_constants.GPU_DIRECT_TCPX_INSTANCE_TYPES)
+                    has_high_perf_gpu = ('nvidia-h100' in gke_accelerator or
+                                         'nvidia-h200' in gke_accelerator or
+                                         'nvidia-b200' in gke_accelerator)
+
+                    if is_gpu_direct_tcpx_instance and has_high_perf_gpu:
+                        # Default to TCPX if we can't determine the specific
+                        # variant
+                        return KubernetesHighPerformanceNetworkType.GCP_TCPX
+
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
-            return False
-        return False
+            pass
+        return KubernetesHighPerformanceNetworkType.NONE

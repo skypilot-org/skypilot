@@ -244,6 +244,431 @@ provider:
             selector:
                 component: {{cluster_name_on_cloud}}-head
 
+    {% if k8s_enable_gpudirect_tcpx %}
+    # DaemonSet to install NCCL TCPX plugin on H100 nodes
+    system_resources:
+      - apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: nccl-tcpx-installer
+          namespace: kube-system
+          labels:
+            k8s-app: nccl-tcpx-installer
+            parent: skypilot
+        spec:
+          selector:
+            matchLabels:
+              k8s-app: nccl-tcpx-installer
+          updateStrategy:
+            type: RollingUpdate
+          template:
+            metadata:
+              labels:
+                name: nccl-tcpx-installer
+                k8s-app: nccl-tcpx-installer
+            spec:
+              priorityClassName: system-node-critical
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: cloud.google.com/gke-accelerator
+                            operator: In
+                            values:
+                              - nvidia-h100-80gb
+              tolerations:
+                - operator: "Exists"
+              hostNetwork: true
+              hostPID: true
+              volumes:
+                - name: var-lib
+                  hostPath:
+                    path: /var/lib
+                - name: tcpx
+                  hostPath:
+                    path: /var/lib/tcpx
+                - name: library-dir-host
+                  hostPath:
+                    path: /home/kubernetes/bin
+              initContainers:
+                - image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx-dev:v3.1.9
+                  name: nccl-tcpx-installer
+                  resources:
+                    requests:
+                      cpu: 150m
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                    - name: var-lib
+                      mountPath: /var/lib
+                    - name: library-dir-host
+                      mountPath: /usr/local
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      set -ex
+                      /scripts/container_entry.sh install --install-nccl
+                      mkdir -p /usr/local/nvidia/lib64
+                      cp -r /var/lib/tcpx/lib64/. /usr/local/nvidia/lib64
+                      echo "installation finishes"
+              containers:
+                - image: "gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830"
+                  name: pause
+      # DaemonSet for NRI device injector to enable device injection for GPUDirect TCPX
+      - apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: device-injector
+          namespace: kube-system
+          labels:
+            k8s-app: device-injector
+            parent: skypilot
+        spec:
+          selector:
+            matchLabels:
+              k8s-app: device-injector
+          updateStrategy:
+            type: RollingUpdate
+          template:
+            metadata:
+              labels:
+                name: device-injector
+                k8s-app: device-injector
+            spec:
+              priorityClassName: system-node-critical
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: cloud.google.com/gke-accelerator
+                            operator: In
+                            values:
+                              - nvidia-h100-80gb
+                              - nvidia-h100-mega-80gb
+              tolerations:
+                - operator: "Exists"
+              hostNetwork: true
+              hostPID: true
+              initContainers:
+                - image: "gke.gcr.io/gke-distroless/bash:latest"
+                  name: enable-nri
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                  - name: root
+                    mountPath: /
+                  command:
+                  - '/bin/bash'
+                  - '-c'
+                  - |
+                    if ! grep -q nri /etc/containerd/config.toml; then
+                      echo "[plugins.\"io.containerd.nri.v1.nri\"]
+                       disable = false
+                       disable_connections = false
+                       plugin_config_path = \"/etc/nri/conf.d\"
+                       plugin_path = \"/home/kubernetes/nri/plugins\"
+                       plugin_registration_timeout = \"5s\"
+                       plugin_request_timeout = \"5s\"
+                       socket_path = \"/var/run/nri/nri.sock\"">> /etc/containerd/config.toml
+                      systemctl restart containerd.service
+                    fi
+              containers:
+                - image: "gcr.io/gke-release/nri-device-injector@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c"
+                  name: device-injector
+                  resources:
+                    requests:
+                      cpu: 150m
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                    - name: dev
+                      mountPath: /dev
+                    - name: nri
+                      mountPath: /var/run/nri
+              volumes:
+                - name: root
+                  hostPath:
+                    path: /
+                - name: nri
+                  hostPath:
+                    path: /var/run/nri
+                - name: dev
+                  hostPath:
+                    path: /dev
+    {% endif %}
+
+    {% if k8s_enable_gpudirect_tcpxo %}
+    # DaemonSets for GPUDirect TCPXO (A3 Mega instances)
+    system_resources:
+      - apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: nccl-tcpxo-installer
+          namespace: kube-system
+          labels:
+            k8s-app: nccl-tcpxo-installer
+            parent: skypilot
+        spec:
+          selector:
+            matchLabels:
+              k8s-app: nccl-tcpxo-installer
+          updateStrategy:
+            type: RollingUpdate
+          template:
+            metadata:
+              labels:
+                name: nccl-tcpxo-installer
+                k8s-app: nccl-tcpxo-installer
+            spec:
+              priorityClassName: system-node-critical
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: cloud.google.com/gke-accelerator
+                            operator: In
+                            values:
+                              - nvidia-h100-mega-80gb
+              tolerations:
+                - operator: "Exists"
+              hostNetwork: true
+              hostPID: true
+              volumes:
+                - name: var-lib
+                  hostPath:
+                    path: /var/lib
+                - name: tcpxo
+                  hostPath:
+                    path: /var/lib/tcpxo
+                - name: library-dir-host
+                  hostPath:
+                    path: /home/kubernetes/bin
+              initContainers:
+                - image: "ubuntu"
+                  name: pre-installation
+                  securityContext:
+                    privileged: true
+                  command:
+                    - nsenter
+                    - -at
+                    - '1'
+                    - --
+                    - sh
+                    - -c
+                    - |
+                      /sbin/iptables -I INPUT -p tcp -m tcp -j ACCEPT && modprobe import-helper
+                      sudo mkdir -p /dev/aperture_devices
+                      while IFS= read -r line; do
+                        BDF=$( echo "$line" | awk '{print $1}' );
+                        target_aperture_path="/dev/aperture_devices/$BDF"
+                        host_aperture_device=$(readlink -f "/sys/bus/pci/devices/$BDF");
+                        sudo mkdir -p $target_aperture_path;
+                        sudo umount -R $target_aperture_path;
+                        sudo mount --bind $host_aperture_device $target_aperture_path;
+                      done < <(lspci -nn -D | grep '1ae0:0084')
+                      if [ -d /dev/aperture_devices ]; then
+                          chmod -R a+r /dev/aperture_devices/
+                          chmod a+rw /dev/aperture_devices/*/resource*
+                      fi
+                - name: nccl-tcpxo-installer
+                  image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.9-1
+                  resources:
+                    requests:
+                      cpu: 150m
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                    - name: var-lib
+                      mountPath: /var/lib
+                    - name: library-dir-host
+                      mountPath: /usr/local
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      set -ex
+                      chmod 755 /scripts/container_entry.sh
+                      /scripts/container_entry.sh install --install-nccl
+                      mkdir -p /usr/local/nvidia/lib64
+                      cp -r /var/lib/tcpxo/lib64/. /usr/local/nvidia/lib64
+                      echo "installation finishes"
+              containers:
+                - image: "gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830"
+                  name: pause
+      # DaemonSet for NRI device injector for TCPXO
+      - apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: device-injector-tcpxo
+          namespace: kube-system
+          labels:
+            k8s-app: device-injector-tcpxo
+            parent: skypilot
+        spec:
+          selector:
+            matchLabels:
+              k8s-app: device-injector-tcpxo
+          updateStrategy:
+            type: RollingUpdate
+          template:
+            metadata:
+              labels:
+                name: device-injector-tcpxo
+                k8s-app: device-injector-tcpxo
+            spec:
+              priorityClassName: system-node-critical
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: cloud.google.com/gke-accelerator
+                            operator: In
+                            values:
+                              - nvidia-h100-80gb
+                              - nvidia-h100-mega-80gb
+              tolerations:
+                - operator: "Exists"
+              hostNetwork: true
+              hostPID: true
+              initContainers:
+                - image: "gke.gcr.io/gke-distroless/bash:latest"
+                  name: enable-nri
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                  - name: root
+                    mountPath: /
+                  command:
+                  - '/bin/bash'
+                  - '-c'
+                  - |
+                    if ! grep -q nri /etc/containerd/config.toml; then
+                      echo "[plugins.\"io.containerd.nri.v1.nri\"]
+                       disable = false
+                       disable_connections = false
+                       plugin_config_path = \"/etc/nri/conf.d\"
+                       plugin_path = \"/home/kubernetes/nri/plugins\"
+                       plugin_registration_timeout = \"5s\"
+                       plugin_request_timeout = \"5s\"
+                       socket_path = \"/var/run/nri/nri.sock\"">> /etc/containerd/config.toml
+                      systemctl restart containerd.service
+                    fi
+              containers:
+                - image: "gcr.io/gke-release/nri-device-injector@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c"
+                  name: device-injector
+                  resources:
+                    requests:
+                      cpu: 150m
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                    - name: dev
+                      mountPath: /dev
+                    - name: nri
+                      mountPath: /var/run/nri
+              volumes:
+                - name: root
+                  hostPath:
+                    path: /
+                - name: nri
+                  hostPath:
+                    path: /var/run/nri
+                - name: dev
+                  hostPath:
+                    path: /dev
+    {% endif %}
+
+    {% if k8s_enable_gpudirect_rdma %}
+    # DaemonSet for GPUDirect RDMA (A4/A3 Ultra instances)
+    system_resources:
+      - apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: nccl-rdma-installer
+          namespace: kube-system
+          labels:
+            k8s-app: nccl-rdma-installer
+            parent: skypilot
+        spec:
+          selector:
+            matchLabels:
+              k8s-app: nccl-rdma-installer
+          updateStrategy:
+            type: RollingUpdate
+          template:
+            metadata:
+              labels:
+                name: nccl-rdma-installer
+                k8s-app: nccl-rdma-installer
+            spec:
+              priorityClassName: system-node-critical
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: cloud.google.com/gke-accelerator
+                            operator: In
+                            values:
+                              - nvidia-h200-141gb
+                              - nvidia-b200
+              tolerations:
+                - operator: "Exists"
+              hostNetwork: true
+              hostPID: true
+              volumes:
+                - name: library-dir-host
+                  hostPath:
+                    path: /home/kubernetes/bin/nvidia/lib64
+                    type: DirectoryOrCreate
+                - name: gib
+                  hostPath:
+                    path: /home/kubernetes/bin/gib
+              initContainers:
+                - name: disable-log-martian
+                  image: alpine:latest
+                  command: ["/bin/sh"]
+                  securityContext:
+                    privileged: true
+                  args:
+                  - -c
+                  - |
+                    sysctl -w net.ipv4.conf.gpu0rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu1rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu2rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu3rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu4rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu5rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu6rdma0.log_martians=0
+                    sysctl -w net.ipv4.conf.gpu7rdma0.log_martians=0
+                - image: us-docker.pkg.dev/gce-ai-infra/gpudirect-gib/nccl-plugin-gib:v1.0.5
+                  name: nccl-rdma-installer
+                  resources:
+                    requests:
+                      cpu: 150m
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                    - name: library-dir-host
+                      mountPath: /usr/local/home/kubernetes/bin/nvidia/lib64
+                    - name: gib
+                      mountPath: /usr/local/home/kubernetes/bin/gib
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      set -ex
+                      /scripts/container_entry.sh install --install-nccl
+                      cp -r /var/lib/gib/lib64/. /usr/local/home/kubernetes/bin/nvidia/lib64
+                      cp -r /var/lib/gib/. /usr/local/home/kubernetes/bin/gib
+                      echo "installation finishes"
+              containers:
+                - image: "gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830"
+                  name: pause
+    {% endif %}
+
 # Specify the pod type for the ray head node (as configured below).
 head_node_type: ray_head_default
 # Specify the allowed pod types for this ray cluster and the resources they provide.
@@ -281,6 +706,73 @@ available_node_types:
         annotations:
             kueue.x-k8s.io/retriable-in-group: "false"
             kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
+        {% endif %}
+        {% if k8s_enable_gpudirect_tcpx %}
+        annotations:
+          devices.gke.io/container.tcpx-daemon: |+
+            - path: /dev/nvidia0
+            - path: /dev/nvidia1
+            - path: /dev/nvidia2
+            - path: /dev/nvidia3
+            - path: /dev/nvidia4
+            - path: /dev/nvidia5
+            - path: /dev/nvidia6
+            - path: /dev/nvidia7
+            - path: /dev/nvidiactl
+            - path: /dev/nvidia-uvm
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth1","network":"vpc1"},
+              {"interfaceName":"eth2","network":"vpc2"},
+              {"interfaceName":"eth3","network":"vpc3"},
+              {"interfaceName":"eth4","network":"vpc4"}
+            ]
+        {% endif %}
+        {% if k8s_enable_gpudirect_tcpxo %}
+        annotations:
+          devices.gke.io/container.tcpxo-daemon: |+
+            - path: /dev/nvidia0
+            - path: /dev/nvidia1
+            - path: /dev/nvidia2
+            - path: /dev/nvidia3
+            - path: /dev/nvidia4
+            - path: /dev/nvidia5
+            - path: /dev/nvidia6
+            - path: /dev/nvidia7
+            - path: /dev/nvidiactl
+            - path: /dev/nvidia-uvm
+            - path: /dev/dmabuf_import_helper
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth1","network":"vpc1"},
+              {"interfaceName":"eth2","network":"vpc2"},
+              {"interfaceName":"eth3","network":"vpc3"},
+              {"interfaceName":"eth4","network":"vpc4"},
+              {"interfaceName":"eth5","network":"vpc5"},
+              {"interfaceName":"eth6","network":"vpc6"},
+              {"interfaceName":"eth7","network":"vpc7"},
+              {"interfaceName":"eth8","network":"vpc8"}
+            ]
+        {% endif %}
+        {% if k8s_enable_gpudirect_rdma %}
+        annotations:
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth2","network":"rdma-0"},
+              {"interfaceName":"eth3","network":"rdma-1"},
+              {"interfaceName":"eth4","network":"rdma-2"},
+              {"interfaceName":"eth5","network":"rdma-3"},
+              {"interfaceName":"eth6","network":"rdma-4"},
+              {"interfaceName":"eth7","network":"rdma-5"},
+              {"interfaceName":"eth8","network":"rdma-6"},
+              {"interfaceName":"eth9","network":"rdma-7"}
+            ]
         {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
@@ -365,6 +857,42 @@ available_node_types:
           persistentVolumeClaim:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
+        {% if k8s_enable_gpudirect_tcpx %}
+        - name: tcpx-socket
+          hostPath:
+            path: /run/tcpx
+        - name: libraries
+          hostPath:
+            path: /home/kubernetes/bin/nvidia/lib64
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: proc-sys
+          hostPath:
+            path: /proc/sys
+        {% endif %}
+        {% if k8s_enable_gpudirect_tcpxo %}
+        - name: libraries
+          hostPath:
+            path: /home/kubernetes/bin/nvidia
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: proc-sys
+          hostPath:
+            path: /proc/sys
+        - name: aperture-devices
+          hostPath:
+            path: /dev/aperture_devices
+        {% endif %}
+        {% if k8s_enable_gpudirect_rdma %}
+        - name: library-dir-host
+          hostPath:
+            path: /home/kubernetes/bin/nvidia
+        - name: gib
+          hostPath:
+            path: /home/kubernetes/bin/gib
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -378,6 +906,90 @@ available_node_types:
             - name: {{ key }}
               value: {{ value }}
             {% endfor %}
+            # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#environment-variables-nccl
+            # Page recommends setting NCCL values for GPUDirect TCPX for best performance.
+            {% if k8s_enable_gpudirect_tcpx %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64:/usr/local/tcpx/lib64
+            - name: NCCL_GPUDIRECTTCPX_SOCKET_IFNAME
+              value: eth1,eth2,eth3,eth4
+            - name: NCCL_GPUDIRECTTCPX_CTRL_DEV
+              value: eth0
+            - name: NCCL_GPUDIRECTTCPX_TX_BINDINGS
+              value: "eth1:8-21,112-125;eth2:8-21,112-125;eth3:60-73,164-177;eth4:60-73,164-177"
+            - name: NCCL_GPUDIRECTTCPX_RX_BINDINGS
+              value: "eth1:22-35,126-139;eth2:22-35,126-139;eth3:74-87,178-191;eth4:74-87,178-191"
+            - name: NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS
+              value: "50000"
+            - name: NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX
+              value: "/run/tcpx"
+            - name: NCCL_GPUDIRECTTCPX_FORCE_ACK
+              value: "0"
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+            - name: NCCL_CROSS_NIC
+              value: "0"
+            - name: NCCL_ALGO
+              value: Ring
+            - name: NCCL_PROTO
+              value: Simple
+            - name: NCCL_NSOCKS_PERTHREAD
+              value: "4"
+            - name: NCCL_SOCKET_NTHREADS
+              value: "1"
+            - name: NCCL_NET_GDR_LEVEL
+              value: PIX
+            - name: NCCL_DYNAMIC_CHUNK_SIZE
+              value: "524288"
+            - name: NCCL_P2P_PXN_LEVEL
+              value: "0"
+            - name: NCCL_P2P_NET_CHUNKSIZE
+              value: "524288"
+            - name: NCCL_P2P_PCI_CHUNKSIZE
+              value: "524288"
+            - name: NCCL_P2P_NVL_CHUNKSIZE
+              value: "1048576"
+            - name: NCCL_BUFFSIZE
+              value: "8388608"
+            - name: NCCL_MAX_NCHANNELS
+              value: "8"
+            - name: NCCL_MIN_NCHANNELS
+              value: "8"
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0,1,2,3,4,5,6,7"
+            {% endif %}
+            {% if k8s_enable_gpudirect_tcpxo %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+            - name: NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY
+              value: /dev/aperture_devices
+            - name: NCCL_FASTRAK_CTRL_DEV
+              value: eth0
+            - name: NCCL_FASTRAK_IFNAME
+              value: eth1,eth2,eth3,eth4,eth5,eth6,eth7,eth8
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+            - name: NCCL_CROSS_NIC
+              value: "0"
+            - name: NCCL_ALGO
+              value: Ring,Tree
+            - name: NCCL_PROTO
+              value: Simple,LL128
+            - name: NCCL_MIN_NCHANNELS
+              value: "4"
+            - name: NCCL_TUNER_PLUGIN
+              value: libnccl-tuner.so
+            - name: NCCL_TUNER_CONFIG_PATH
+              value: /usr/local/nvidia/lib64
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0,1,2,3,4,5,6,7"
+            {% endif %}
+            {% if k8s_enable_gpudirect_rdma %}
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+            - name: NCCL_NET
+              value: gIB
+            {% endif %}
             {% if k8s_fuse_device_required %}
             - name: FUSERMOUNT_SHARED_DIR
               value: {{k8s_fusermount_shared_dir}}
@@ -399,6 +1011,16 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
+              {% if k8s_enable_gpudirect_rdma %}
+              # Setup GPUDirect-RDMA environment using GIB scripts
+              if [ -f /usr/local/gib/scripts/set_nccl_env.sh ]; then
+                echo "Setting up GPUDirect-RDMA environment..."
+                source /usr/local/gib/scripts/set_nccl_env.sh
+                echo "GPUDirect-RDMA environment setup completed"
+              else
+                echo "Warning: GIB scripts not found, using default RDMA configuration"
+              fi
+              {% endif %}
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
@@ -721,11 +1343,27 @@ available_node_types:
           - name: secret-volume
             readOnly: true
             mountPath: "/etc/secret-volume"
-          # This volume allocates shared memory for Ray to use for its plasma
-          # object store. If you do not provide this, Ray will fall back to
-          # /tmp which cause slowdowns if is not a shared memory volume.
           - mountPath: /dev/shm
             name: dshm
+          {% if k8s_enable_gpudirect_tcpx %}
+          - name: tcpx-socket
+            mountPath: /run/tcpx
+          - name: libraries
+            mountPath: /usr/local/nvidia/lib64
+            readOnly: true
+          {% endif %}
+          {% if k8s_enable_gpudirect_tcpxo %}
+          - name: libraries
+            mountPath: /usr/local/nvidia
+          - name: aperture-devices
+            mountPath: /dev/aperture_devices
+          {% endif %}
+          {% if k8s_enable_gpudirect_rdma %}
+          - name: library-dir-host
+            mountPath: /usr/local/nvidia
+          - name: gib
+            mountPath: /usr/local/gib
+          {% endif %}
           {% if high_availability %}
           - name: {{k8s_high_availability_deployment_volume_mount_name}}
             mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
@@ -759,7 +1397,46 @@ available_node_types:
               add:
                 - IPC_LOCK
           {% endif %}
-
+        {% if k8s_enable_gpudirect_tcpx %}
+        # GPUDirect TCPX daemon sidecar container
+        - name: tcpx-daemon
+          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd-dev:v2.0.12
+          imagePullPolicy: Always
+          command:
+            - /tcpgpudmarxd/build/app/tcpgpudmarxd
+            - --gpu_nic_preset
+            - a3vm
+            - --gpu_shmem_type
+            - fd
+            - --uds_path
+            - /run/tcpx
+            - --setup_param
+            - "--verbose 128 2 0"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - name: libraries
+              mountPath: /usr/local/nvidia/lib64
+              readOnly: true
+            - name: tcpx-socket
+              mountPath: /run/tcpx
+            - name: sys
+              mountPath: /hostsysfs
+            - name: proc-sys
+              mountPath: /hostprocsysfs
+          env:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+          {% if k8s_tcpx_resource_key is not none %}
+          resources:
+            requests:
+              {{k8s_tcpx_resource_key}}: {{k8s_tcpx_accelerator_count}}
+            limits:
+              {{k8s_tcpx_resource_key}}: {{k8s_tcpx_accelerator_count}}
+          {% endif %}
+        {% endif %}
 
       {% if high_availability %}
       pvc_spec:
