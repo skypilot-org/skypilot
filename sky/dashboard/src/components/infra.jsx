@@ -3,7 +3,7 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
@@ -334,7 +334,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   }, []);
 
   // Function to fetch available hosts from Prometheus
-  const fetchAvailableHosts = async () => {
+  const fetchAvailableHosts = useCallback(async () => {
     if (!isGrafanaAvailable) return;
 
     setIsLoadingHosts(true);
@@ -378,14 +378,14 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     } finally {
       setIsLoadingHosts(false);
     }
-  };
+  }, [isGrafanaAvailable]);
 
   // Fetch hosts when component mounts and Grafana is available
   useEffect(() => {
     if (isGrafanaAvailable && nodesInContext && nodesInContext.length > 0) {
       fetchAvailableHosts();
     }
-  }, [nodesInContext, isGrafanaAvailable]);
+  }, [nodesInContext, isGrafanaAvailable, fetchAvailableHosts]);
 
   // Function to build Grafana panel URL with filters
   const buildGrafanaUrlForContext = (panelId) => {

@@ -25,7 +25,7 @@ export function Config() {
 
   useEffect(() => {
     loadConfig();
-    
+
     // Check Grafana availability
     const checkGrafana = async () => {
       const available = await checkGrafanaAvailability();
@@ -172,7 +172,10 @@ export function Config() {
               onClick={() => {
                 const grafanaUrl = getGrafanaUrl();
                 const host = window.location.hostname;
-                window.open(`${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${host}`, '_blank');
+                window.open(
+                  `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${host}`,
+                  '_blank'
+                );
               }}
               className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
             >

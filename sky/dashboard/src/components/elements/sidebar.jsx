@@ -165,7 +165,6 @@ export function TopBar() {
     };
   }, [dropdownRef]);
 
-
   // Function to get user initial
   const getUserInitial = (email) => {
     if (!email) return '?';
@@ -300,8 +299,6 @@ export function TopBar() {
               />
             </a>
           </CustomTooltip>
-
-
 
           {/* Keep the rest of the external links as icons only */}
           <CustomTooltip

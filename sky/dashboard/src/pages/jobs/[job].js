@@ -497,6 +497,22 @@ function JobDetailsContent({
     setHasReceivedFirstChunk(false);
   }, [activeTab, jobData.id]);
 
+  // Performance-optimized log update function
+  const updateLogsWithBatching = useCallback(
+    (logType, newChunk) => {
+      const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
+
+      // Simple string append - no batching needed with backend tail
+      setLogsFunction((prevLogs) => prevLogs + newChunk);
+
+      // Auto-scroll after update
+      requestAnimationFrame(() => {
+        scrollToBottom(logType);
+      });
+    },
+    [scrollToBottom]
+  );
+
   // Define a function to handle both log types with simplified logic
   const fetchLogs = useCallback(
     (logType, jobId, setLogs, setIsLoading, isRefreshing = false) => {
@@ -666,7 +682,15 @@ function JobDetailsContent({
         active = false;
       };
     },
-    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk, safeAbort]
+    [
+      isPending,
+      isPreStart,
+      isRecovering,
+      hasReceivedFirstChunk,
+      safeAbort,
+      scrollToBottom,
+      updateLogsWithBatching,
+    ]
   );
 
   // Fetch both logs and controller logs in parallel, regardless of activeTab
@@ -810,7 +834,7 @@ function JobDetailsContent({
       setIsRefreshingLogs(false);
       setIsRefreshingControllerLogs(false);
     };
-  }, [safeAbort]); // Empty dependency array means this runs only on unmount
+  }, [safeAbort, setIsLoadingLogs, setIsLoadingControllerLogs]); // Empty dependency array means this runs only on unmount
 
   // Handle page visibility changes to pause streaming when tab is not active
   useEffect(() => {
@@ -864,22 +888,6 @@ function JobDetailsContent({
       requestAnimationFrame(performScroll); // Double RAF to ensure DOM is updated
     });
   }, [activeTab, logs, controllerLogs, scrollToBottom]);
-
-  // Performance-optimized log update function
-  const updateLogsWithBatching = useCallback(
-    (logType, newChunk) => {
-      const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
-
-      // Simple string append - no batching needed with backend tail
-      setLogsFunction((prevLogs) => prevLogs + newChunk);
-
-      // Auto-scroll after update
-      requestAnimationFrame(() => {
-        scrollToBottom(logType);
-      });
-    },
-    [scrollToBottom]
-  );
 
   if (activeTab === 'logs') {
     return (
