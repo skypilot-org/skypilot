@@ -1,6 +1,6 @@
 envs:
   MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources:
   image_id: docker:vllm/vllm-openai:latest

@@ -176,6 +176,17 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
     Note: we expect that job_id, if provided, refers to a nonterminal job or a
     job that has not completed its cleanup (schedule state not DONE).
     """
+    # This signal file suggests that the controller is recovering from a
+    # failure. See sky/templates/kubernetes-ray.yml.j2 for more details.
+    # When restarting the controller processes, we don't want this event to
+    # set the job status to FAILED_CONTROLLER.
+    # TODO(tian): Change this to restart the controller process. For now we
+    # disabled it when recovering because we want to avoid caveats of infinite
+    # restart of last controller process that fully occupied the controller VM.
+    if os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        return
 
     def _cleanup_job_clusters(job_id: int) -> Optional[str]:
         """Clean up clusters for a job. Returns error message if any.
@@ -934,7 +945,7 @@ def dump_managed_job_queue() -> str:
     # Figure out what the highest priority blocking job is. We need to know in
     # order to determine if other jobs are blocked by a higher priority job, or
     # just by the limited controller resources.
-    highest_blocking_priority = 0
+    highest_blocking_priority = constants.MIN_PRIORITY
     for job in jobs:
         if job['schedule_state'] not in (
                 # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with

@@ -16,6 +16,7 @@ from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -420,7 +421,8 @@ def get_cloud_credential_file_mounts(
         cloud_file_mounts = cloud.get_credential_file_mounts()
         for remote_path, local_path in cloud_file_mounts.items():
             if os.path.exists(os.path.expanduser(local_path)):
-                file_mounts[remote_path] = local_path
+                file_mounts[remote_path] = os.path.realpath(
+                    os.path.expanduser(local_path))
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.
@@ -560,7 +562,7 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             # TODO: This is a hack to remove the 'ssh-' prefix from the
             # context name. Once we have a separate kubeconfig for SSH,
             # this will not be required.
-            cleaned_context = context.lstrip('ssh-')
+            cleaned_context = common_utils.removeprefix(context, 'ssh-')
         else:
             cleaned_context = context
         symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(filtered_contexts) -

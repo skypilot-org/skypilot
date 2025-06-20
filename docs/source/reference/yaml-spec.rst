@@ -63,6 +63,10 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_LOCAL_PATH: tmp-workdir
     MODEL_SIZE: 13b
 
+  :ref:`secrets <yaml-spec-secrets>`:
+    MY_HF_TOKEN: my-secret-value
+    WANDB_API_KEY: my-secret-value-2
+
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
     /remote/path: /local/path
@@ -741,26 +745,6 @@ These values can be accessed in the ``file_mounts``, ``setup``, and ``run`` sect
 
 Values set here can be overridden by a CLI flag: ``sky launch/exec --env ENV=val`` (if ``ENV`` is present).
 
-For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
-
-If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
-
-.. code-block:: yaml
-
-  envs:
-    SKYPILOT_DOCKER_USERNAME: <username>
-    SKYPILOT_DOCKER_PASSWORD: <password>
-    SKYPILOT_DOCKER_SERVER: <registry server>
-
-SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
-
-You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
-
-.. code-block:: yaml
-
-  sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
-
-For more information about docker support in SkyPilot, please refer to the ``image_id`` section above.
 
 Example of using envs:
 
@@ -770,6 +754,53 @@ Example of using envs:
     MY_BUCKET: skypilot-data
     MODEL_SIZE: 13b
     MY_LOCAL_PATH: tmp-workdir
+
+.. dropdown:: Docker login authentication with environment variables
+
+  For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
+
+  If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
+
+  .. code-block:: yaml
+
+    envs:
+      SKYPILOT_DOCKER_USERNAME: <username>
+      SKYPILOT_DOCKER_PASSWORD: <password>
+      SKYPILOT_DOCKER_SERVER: <registry server>
+
+  SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
+
+  You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
+
+  .. code-block:: yaml
+
+    sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+
+  For more information about docker support in SkyPilot, please refer to :ref:`Using private docker registries <docker-containers-private-registries>`.
+
+  You can also use :ref:`secrets <yaml-spec-secrets>` to set the authentication above.
+
+.. _yaml-spec-secrets:
+
+``secrets``
+~~~~~~~~~~~
+
+Secrets (optional).
+
+Secrets are similar to :ref:`envs <yaml-spec-envs>` above but can only be used in the ``setup`` and ``run``, and will be redacted in the entrypoint/YAML in the dashboard.
+
+Values set here can be overridden by a CLI flag: ``sky launch/exec --secret SECRET=val`` (if ``SECRET`` is present).
+
+Example:
+
+.. code-block:: yaml
+
+  secrets:
+    HF_TOKEN: my-huggingface-token
+    WANDB_API_KEY: my-wandb-api-key
+
+
+
 
 .. _yaml-spec-file-mounts:
 
@@ -1277,35 +1308,3 @@ Port to run your service on each replica.
 
   resources:
     ports: 8080
-
-Managed jobs
-============
-
-When creating a managed job, you can add an optional ``job`` section to your SkyPilot YAML for additional configuration.
-
-Syntax
-
-.. parsed-literal::
-
-  job:
-    :ref:`priority <yaml-spec-job-priority>`: 200
-
-
-Fields
-----------
-
-.. _yaml-spec-job-priority:
-
-``job.priority``
-~~~~~~~~~~~~~~~~
-
-Priority of the job, between 0 and 1000 (default: 500).
-
-Set the queuing priority of the job. A higher value means that the job is higher
-priority. High priority jobs are scheduled sooner and will block lower priority
-jobs from starting until the high priority jobs have started.
-
-.. code-block:: yaml
-
-  job:
-    priority: 200

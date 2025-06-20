@@ -41,8 +41,8 @@ run: |
     --save_steps 1000
     echo Model saved to /checkpoint/bert_qa/$SKYPILOT_TASK_ID
 
-envs:
-    WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
+secrets:
+    WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY
 
 ---
 
@@ -83,5 +83,5 @@ run: |
     --save_total_limit 10 \
     --save_steps 1000
 
-envs:
+secrets:
     WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
