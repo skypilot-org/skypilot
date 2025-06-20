@@ -27,6 +27,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.server import constants as server_constants
+from sky.server import rest
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -240,9 +241,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            response = requests.get(f'{server_url}/api/health',
-                                    timeout=2.5,
-                                    cookies=get_api_cookie_jar())
+            response = rest.get(f'{server_url}/api/health',
+                                timeout=2.5,
+                                cookies=get_api_cookie_jar())
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)

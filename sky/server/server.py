@@ -43,6 +43,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import state
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -826,6 +827,10 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
+    if state.get_block_requests():
+        raise fastapi.HTTPException(
+            status_code=503,
+            detail='Server is shutting down, please try again later.')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -1489,7 +1494,7 @@ if __name__ == '__main__':
     usage_lib.maybe_show_privacy_policy()
 
     config = server_config.compute_server_config(cmd_args.deploy)
-    num_workers = config.num_server_workers
+    num_workers = 2
 
     sub_procs = []
     try:

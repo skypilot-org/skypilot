@@ -606,3 +606,8 @@ class RequestAlreadyExistsError(Exception):
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
     pass
+
+
+class ServerTemporarilyUnavailableError(Exception):
+    """Raised when the server is temporarily unavailable."""
+    pass
