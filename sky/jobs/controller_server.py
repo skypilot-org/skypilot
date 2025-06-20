@@ -6,8 +6,9 @@ import uvicorn
 import asyncio
 from typing import Dict, Optional
 import logging
+import multiprocessing
 
-from sky.jobs import controller
+from sky.jobs import controller, state
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 
@@ -27,6 +28,7 @@ async def create_job(job: JobRequest):
     logger.info(f"Creating job {job.job_id}")
     try:
         await controller.start_job(job.job_id, job.dag_yaml_path)
+        state.set_job_controller_pid(job.job_id, -1)
         return {"status": "success", "message": f"Job {job.job_id} created"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -34,17 +36,17 @@ async def create_job(job: JobRequest):
         logger.error(f"Failed to create job {job.job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/cancel")
-async def cancel_job(job: JobRequest):
+@app.post("/cancel/{job_id}")
+async def cancel_job(job_id: int):
     """Cancel an existing job."""
-    logger.info(f"Cancelling job {job.job_id}")
+    logger.info(f"Cancelling job {job_id}")
     try:
-        await controller.cancel_job(job.job_id)
-        return {"status": "success", "message": f"Job {job.job_id} cancelled"}
+        await controller.cancel_job(job_id)
+        return {"status": "success", "message": f"Job {job_id} cancelled"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to cancel job {job.job_id}: {e}")
+        logger.error(f"Failed to cancel job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/status/{job_id}")
@@ -59,8 +61,10 @@ async def get_job_status(job_id: int):
         logger.error(f"Failed to get status for job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def start_server(host: str = "0.0.0.0", port: int = 8000):
+def start_server(host: str = "localhost", port: int = 8000):
     """Start the controller server."""
+    # num_workers = multiprocessing.cpu_count()
+    # uvicorn.run("sky.jobs.controller_server:app", host=host, port=port, workers=2 * num_workers)
     uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":

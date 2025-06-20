@@ -40,6 +40,7 @@ from argparse import ArgumentParser
 import contextlib
 from functools import lru_cache
 import os
+import threading
 import time
 import typing
 import requests
@@ -95,15 +96,17 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     """
     pid_path = os.path.expanduser(f'~/job_controller_pid')
     to_start = False
-    if os.path.exists(pid_path):
-        with open(pid_path, 'r') as f:
-            pid = int(f.read())
-        if subprocess_utils.is_process_alive(pid):
-            logger.debug(f'Job {job_id} already started with pid {pid}')
+    # TODO(luca): add an unlocked path first as a short circuit to ignore this
+    with filelock.FileLock('~/.sky/locks/job_controller_pid.lock'):
+        if os.path.exists(pid_path):
+            with open(pid_path, 'r') as f:
+                pid = int(f.read())
+            if subprocess_utils.is_process_alive(pid):
+                logger.debug(f'Job {job_id} already started with pid {pid}')
+            else:
+                to_start = True
         else:
             to_start = True
-    else:
-        to_start = True
 
     if to_start:
         activate_python_env_cmd = (
@@ -126,7 +129,7 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         with open(pid_path, 'w', encoding='utf-8') as f:
             f.write(str(pid))
     
-    max_retries = 3
+    max_retries = 5
     base_delay = 1
     req = controller_server.JobRequest(
         job_id=str(job_id),
@@ -222,12 +225,14 @@ def maybe_schedule_next_jobs() -> None:
                 if current_state == state.ManagedJobScheduleState.WAITING:
                     # The job controller has not been started yet. We must start
                     # it.
-
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
                     env_file_path = maybe_next_job['env_file_path']
 
-                    _start_controller(job_id, dag_yaml_path, env_file_path)
+                    # quick hack to "instantly" launch the controller
+                    thread = threading.Thread(target=_start_controller, args=
+                                        (job_id, dag_yaml_path, env_file_path))
+                    thread.start()
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -246,12 +251,11 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    with filelock.FileLock(_get_lock_path()):
-        is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                                original_user_yaml_path,
-                                                env_file_path,
-                                                common_utils.get_user_hash(),
-                                                priority)
+    is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                            original_user_yaml_path,
+                                            env_file_path,
+                                            common_utils.get_user_hash(),
+                                            priority)
     if is_resume:
         _start_controller(job_id, dag_yaml_path, env_file_path)
     else:

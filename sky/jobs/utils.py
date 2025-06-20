@@ -17,6 +17,7 @@ from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
+import requests
 from typing_extensions import Literal
 
 from sky import backends
@@ -324,6 +325,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Expected to find a controller pid for state '
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
+        elif pid == -1:
+            logger.debug(f'Controller pid is -1 for consolidated job controller')
+            continue
         else:
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):
@@ -506,6 +510,17 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         update_managed_jobs_statuses(job_id)
+
+        if managed_job_state.get_job_controller_pid(job_id) == -1:
+            # This is a consolidated job controller, so we need to cancel the
+            # with the controller server API
+            try:
+                requests.post(f'http://localhost:8000/cancel/{job_id}')
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Failed to cancel job {job_id} "
+                             f"with controller server: {e}")
+                continue
+            continue
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
