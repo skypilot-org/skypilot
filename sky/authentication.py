@@ -20,6 +20,7 @@ provider. See the comments in setup_lambda_authentication)
 """
 import copy
 import functools
+import json
 import os
 import re
 import socket
@@ -44,6 +45,7 @@ from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
+from sky.provision.primeintellect import utils as primeintellect_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
@@ -387,7 +389,8 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                                 },
                                 type='rsa').get_result()
         vpc_key_id = res['id']
-        logger.debug(f'Created new key: {res["name"]}')
+        name = res['name']
+        logger.debug(f'Created new key: {name}')
 
     except ibm.ibm_cloud_sdk_core.ApiException as e:
         if 'Key with fingerprint already exists' in e.message:
@@ -395,7 +398,8 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 if (ssh_key_data in key['public_key'] or
                         key['public_key'] in ssh_key_data):
                     vpc_key_id = key['id']
-                    logger.debug(f'Reusing key:{key["name"]}, '
+                    key_name = key['name']
+                    logger.debug(f'Reusing key:{key_name}, '
                                  f'matching existing public key.')
                     break
         elif 'Key with name already exists' in e.message:
@@ -583,6 +587,39 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Set up auth section for Ray template
     config.setdefault('auth', {})
     config['auth']['ssh_user'] = 'ubuntu'
-    config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)
+
+
+def setup_primeintellect_authentication(
+        config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Prime Intellect.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Prime Intellect account.
+    """
+    prime_config = '~/.prime/config.json'
+    if not os.path.isfile(os.path.expanduser(prime_config)):
+        raise Exception(f'{prime_config} does not exist')
+
+    public_key_path = None
+    with open(os.path.expanduser(prime_config), encoding='UTF-8') as f:
+        data = json.load(f)
+        public_key_path = data.get('ssh_key_path') + '.pub'
+
+    client = primeintellect_utils.PrimeIntellectAPIClient()
+    public_key = None
+    with open(public_key_path, 'r', encoding='UTF-8') as f:
+        public_key = f.read().strip()
+    client.get_or_add_ssh_key(public_key)
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_private_key'] = data.get('ssh_key_path')
+    config['auth']['ssh_public_key'] = public_key
+
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    config['auth']['ssh_public_key'])
+    config = yaml.safe_load(config_str)
+
+    return config
