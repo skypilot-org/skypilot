@@ -606,3 +606,8 @@ class RequestAlreadyExistsError(Exception):
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
     pass
+
+
+class RestfulPolicyError(Exception):
+    """Raised when failed to call a RESTful policy."""
+    pass
