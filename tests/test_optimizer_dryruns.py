@@ -13,7 +13,7 @@ from sky import clouds
 from sky import exceptions
 from sky import optimizer
 from sky import skypilot_config
-from sky.client import cli
+from sky.client.cli import command
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -645,7 +645,7 @@ def test_ordered_resources(enable_all_clouds):
     dag = sky.optimize(dag)
     cli_runner = cli_testing.CliRunner()
     request_id = sky.launch(task, dryrun=True)
-    result = cli_runner.invoke(cli.api_logs, [request_id])
+    result = cli_runner.invoke(command.api_logs, [request_id])
     assert not result.exit_code
 
     # Access the captured output
@@ -720,7 +720,7 @@ def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
         # Ensure AWS is treated as an enabled cloud. The enable_all_clouds
         # fixture should typically handle this.
         result = runner.invoke(
-            cli.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
+            command.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
 
         # Check for a successful dryrun invocation
         if result.exit_code != 0:

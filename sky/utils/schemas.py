@@ -294,8 +294,8 @@ def _get_single_resources_schema():
             'autostop': _AUTOSTOP_SCHEMA,
             'priority': {
                 'type': 'integer',
-                'minimum': 0,
-                'maximum': 1000,
+                'minimum': constants.MIN_PRIORITY,
+                'maximum': constants.MAX_PRIORITY,
             },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
@@ -1206,6 +1206,16 @@ def get_config_schema():
                             'type': 'string',
                         }
                     }
+                },
+                'kueue': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'local_queue_name': {
+                            'type': 'string',
+                        },
+                    },
                 },
             }
         },

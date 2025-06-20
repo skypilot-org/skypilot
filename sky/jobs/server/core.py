@@ -149,10 +149,13 @@ def launch(
             priority = task_priority
 
     if priority is None:
-        priority = managed_job_constants.DEFAULT_PRIORITY
+        priority = skylet_constants.DEFAULT_PRIORITY
 
-    if priority < 0 or priority > 1000:
-        raise ValueError(f'Priority must be between 0 and 1000, got {priority}')
+    if (priority < skylet_constants.MIN_PRIORITY or
+            priority > skylet_constants.MAX_PRIORITY):
+        raise ValueError(
+            f'Priority must be between {skylet_constants.MIN_PRIORITY}'
+            f' and {skylet_constants.MAX_PRIORITY}, got {priority}')
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 

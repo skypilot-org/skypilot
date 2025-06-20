@@ -945,7 +945,7 @@ def dump_managed_job_queue() -> str:
     # Figure out what the highest priority blocking job is. We need to know in
     # order to determine if other jobs are blocked by a higher priority job, or
     # just by the limited controller resources.
-    highest_blocking_priority = 0
+    highest_blocking_priority = constants.MIN_PRIORITY
     for job in jobs:
         if job['schedule_state'] not in (
                 # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with

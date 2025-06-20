@@ -35,7 +35,7 @@ Run Janus (1.5B) with:
 ```
 sky launch janus_1.5b.yaml \
   -c janus \
-  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+  --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 
 or run Janus Pro (7B) with:
@@ -43,7 +43,7 @@ or run Janus Pro (7B) with:
 ```
 sky launch januspro_7b.yaml \
   -c janus \
-  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+  --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 
 It will show all the available machines that you have and pricing
