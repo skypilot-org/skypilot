@@ -69,7 +69,8 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 # parallelism control or updating the schedule_state of any job.
 # Any code that takes this lock must conclude by calling
 # maybe_schedule_next_jobs.
-_MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
+_MANAGED_JOB_SCHEDULER_LOCK = os.path.expanduser(
+    '~/.sky/locks/managed_job_scheduler.lock')
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
 # Based on testing, assume a running job uses 350MB memory.
@@ -99,7 +100,8 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     pid_path = os.path.expanduser(f'~/.sky/job_controller_pid')
     to_start = False
     # TODO(luca): add an unlocked path first as a short circuit to ignore this
-    with filelock.FileLock('~/.sky/locks/job_controller_pid.lock'):
+    with filelock.FileLock(os.path.expanduser(
+            '~/.sky/locks/job_controller_pid.lock')):
         if os.path.exists(pid_path):
             with open(pid_path, 'r') as f:
                 pid = int(f.read())
