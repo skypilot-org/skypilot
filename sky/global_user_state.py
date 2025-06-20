@@ -1424,6 +1424,16 @@ def update_volume(name: str, last_attached_at: int,
 
 
 @_init_db
+def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.status: status.value,
+        })
+        session.commit()
+
+
+@_init_db
 def delete_volume(name: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:

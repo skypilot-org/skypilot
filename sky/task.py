@@ -812,11 +812,11 @@ class Task:
         if self.num_nodes > 1:
             disabled_modes[
                 volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value] = (
-                    'Volume access mode ReadWriteOnce is not supported for '
+                    'access mode ReadWriteOnce is not supported for '
                     'multi-node tasks.')
             disabled_modes[
                 volume_lib.VolumeAccessMode.READ_WRITE_ONCE_POD.value] = (
-                    'Volume access mode ReadWriteOncePod is not supported for '
+                    'access mode ReadWriteOncePod is not supported for '
                     'multi-node tasks.')
         # TODO(aylei): generalize access mode to all volume types
         # Record the required topology and the volume that requires it, e.g.
@@ -830,7 +830,8 @@ class Task:
             # Check access mode
             access_mode = vol.volume_config.spec.get('access_mode', '')
             if access_mode in disabled_modes:
-                raise ValueError(disabled_modes[access_mode])
+                raise ValueError(f'Volume {vol.volume_name} with '
+                                 f'{disabled_modes[access_mode]}')
             # Check topology
             for key, (vol_name, previous_req) in topology.items():
                 req = getattr(vol.volume_config, key)

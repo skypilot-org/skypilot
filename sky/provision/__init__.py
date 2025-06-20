@@ -123,6 +123,13 @@ def delete_volume(provider_name: str,
 
 
 @_route_to_cloud_impl
+def get_volume_usedby(provider_name: str,
+                      config: models.VolumeConfig) -> List[str]:
+    """Get the usedby of a volume."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""

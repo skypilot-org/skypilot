@@ -4225,6 +4225,23 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
 
+def _adjust_volume_config(volume_config: Dict[str, Any]) -> None:
+    if 'spec' not in volume_config:
+        return
+    if 'size' not in volume_config['spec']:
+        return
+    try:
+        size = resources_utils.parse_memory_resource(volume_config['spec']['size'], 'size')
+        volume_config['spec']['size'] = size
+    except ValueError as e:
+        raise click.BadParameter(f'Invalid size {volume_config["spec"]["size"]}: {e}') from e
+
+def _validate_volume_config(volume_config: Dict[str, Any]) -> None:
+    if ('resource_name' not in volume_config and
+        ('spec' not in volume_config or 'size' not in volume_config['spec'])):
+        raise click.BadParameter('Size is required for new volumes. '
+                                 'Please specify the size in the YAML file or '
+                                 'use the --size flag.')
 
 @cli.group(cls=_NaturalOrderGroup)
 def volumes():
@@ -4315,17 +4332,12 @@ def volumes_apply(entrypoint: Optional[Tuple[str, ...]], name: Optional[str],
             volume_config['spec']['size'] = size
 
     _override_volume_config()
-
-    if ('resource_name' not in volume_config and
-        ('spec' not in volume_config or 'size' not in volume_config['spec'])):
-        raise click.BadParameter('Size is required for new volumes. '
-                                 'Please specify the size in the YAML file or '
-                                 'use the --size flag.')
-
-    logger.debug(f'Volume config: {volume_config}')
-
     common_utils.validate_schema(volume_config, schemas.get_volume_schema(),
                                  'Invalid volumes config: ')
+    _adjust_volume_config(volume_config)
+    _validate_volume_config(volume_config)
+
+    logger.debug(f'Volume config: {volume_config}')
 
     infra = volume_config.get('infra')
     cloud, region, zone = _handle_infra_cloud_region_zone_options(

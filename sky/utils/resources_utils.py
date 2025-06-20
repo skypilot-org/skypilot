@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
@@ -331,3 +332,68 @@ def make_launchables_for_valid_region_zones(
             # Batch the requests at the granularity of a single region.
             launchables.append(launchable_resources.copy(region=region.name))
     return launchables
+
+
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
+                          ret_type: type = int,
+                          unit: str = 'g',
+                          allow_plus: bool = False,
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+
+    error_msg = (f'"{field_name}" field should be a '
+                 f'{constants.MEMORY_SIZE_PATTERN}+?,'
+                 f' got {resource_qty_str}')
+
+    resource_str = str(resource_qty_str)
+
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(error_msg)
+
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(error_msg)
+
+    try:
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        ret_type(resource_str)
+        return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
+
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = ret_type(resource_str[:-len(mem_unit)])
+                converted = (value * multiplier /
+                             constants.MEMORY_SIZE_UNITS[unit])
+                if not allow_rounding and ret_type(converted) != converted:
+                    raise ValueError(error_msg)
+                converted = ret_type(converted)
+                return f'{converted}{plus}{x}'
+            except ValueError:
+                continue
+
+    raise ValueError(error_msg)

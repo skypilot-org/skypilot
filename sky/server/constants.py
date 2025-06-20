@@ -22,6 +22,10 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 # background.
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
+# The interval (seconds) for the volume status to be refreshed in the
+# background.
+VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS = 60
+
 # Environment variable for a file path to the API cookie file.
 # Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'

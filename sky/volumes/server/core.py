@@ -22,6 +22,32 @@ VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 
+def volume_refresh():
+    """Refreshes the volume status."""
+    volumes = global_user_state.get_volumes()
+    for volume in volumes:
+        volume_name = volume.get('name')
+        config = volume.get('handle')
+        if config is None:
+            logger.warning(f'Volume {volume_name} has no handle.'
+                           'Skipping status refresh...')
+            continue
+        cloud = config.cloud
+        with _volume_lock(volume_name):
+            usedby = provision.get_volume_usedby(cloud, config)
+            logger.info(f'Volume {volume_name} usedby: {usedby}')
+            # The IN_USE status is updated timely when launching
+            # clusters or jobs so we don't need to update it here.
+            if not usedby:
+                latest_volume = global_user_state.get_volume_by_name(
+                    volume_name)
+                if latest_volume is None:
+                    logger.warning(f'Volume {volume_name} not found.')
+                    continue
+                global_user_state.update_volume_status(
+                    volume_name, status=status_lib.VolumeStatus.READY)
+
+
 def volume_list() -> List[Dict[str, Any]]:
     """Gets the volumes.
 
@@ -120,7 +146,8 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
     assert cloud_obj is not None
     name_uuid = str(uuid.uuid4())[:6]
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name + '-' + name_uuid, max_length=cloud_obj.max_cluster_name_length())
+        name, max_length=cloud_obj.max_cluster_name_length())
+    name_on_cloud += '-' + name_uuid
     config = models.VolumeConfig(
         name=name,
         type=volume_type,

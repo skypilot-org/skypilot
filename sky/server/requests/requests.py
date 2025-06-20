@@ -327,6 +327,24 @@ def refresh_cluster_status_event():
         time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+def refresh_volume_status_event():
+    """Periodically refresh the volume status."""
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes.server import core
+
+    # Disable logging for periodic refresh to avoid the usage message being
+    # sent multiple times.
+    os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
+
+    while True:
+        logger.info('=== Refreshing volume status ===')
+        core.volume_refresh()
+        logger.info('Volume status refreshed. Sleeping '
+                    f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
+                    ' seconds for the next refresh...\n')
+        time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
+
+
 @dataclasses.dataclass
 class InternalRequestDaemon:
     id: str
@@ -341,7 +359,11 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
-                          event_fn=refresh_cluster_status_event)
+                          event_fn=refresh_cluster_status_event),
+    # Volume status refresh daemon to update the volume status periodically.
+    InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
+                          name='volume',
+                          event_fn=refresh_volume_status_event)
 ]
 
 

@@ -428,8 +428,8 @@ def get_volume_schema():
                 'required': [],
                 'properties': {
                     'size': {
-                        # TODO(hailong): add pattern for size
                         'type': 'string',
+                        'pattern': constants.MEMORY_SIZE_PATTERN,
                     },
                     'storage_class_name': {
                         'type': 'string',

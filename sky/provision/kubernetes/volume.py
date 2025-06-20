@@ -1,5 +1,5 @@
 """Kubernetes pvc provisioning."""
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sky import models
 from sky import sky_logging
@@ -52,6 +52,31 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
+def get_volume_usedby(config: models.VolumeConfig) -> List[str]:
+    """Gets the usedby resources of a volume."""
+    if config.region is None:
+        context = kubernetes_utils.get_current_kube_config_context_name()
+        config.region = context
+    else:
+        context = config.region
+    namespace = config.spec.get('namespace')
+    if namespace is None:
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+        config.spec['namespace'] = namespace
+
+    pvc_name = config.name_on_cloud
+    usedby = []
+    # Get all pods in the namespace
+    pods = kubernetes.core_api(context).list_namespaced_pod(namespace=namespace)
+    for pod in pods.items:
+        if pod.spec.volumes is not None:
+            for volume in pod.spec.volumes:
+                if volume.persistent_volume_claim is not None:
+                    if volume.persistent_volume_claim.claim_name == pvc_name:
+                        usedby.append(pod.metadata.name)
+    return usedby
+
+
 def create_persistent_volume_claim(namespace: str, context: Optional[str],
                                    pvc_spec: Dict[str, Any]) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
@@ -81,12 +106,16 @@ def _get_pvc_spec(namespace: str,
         'metadata': {
             'name': config.name_on_cloud,
             'namespace': namespace,
+            'labels': {
+                'parent': 'skypilot',
+                'skypilot-name': config.name,
+            }
         },
         'spec': {
             'accessModes': [access_mode],
             'resources': {
                 'requests': {
-                    'storage': size
+                    'storage': f'{size}Gi'
                 }
             },
         }

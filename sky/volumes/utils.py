@@ -80,13 +80,16 @@ def format_volume_table(volumes: List[Dict[str, Any]],
                 last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
         else:
             last_attached_at_str = ''
+        size = row.get('spec', {}).get('size', '')
+        if size:
+            size = f'{size}Gi'
 
         table_row = [
             row.get('name', ''),
             row.get('type', ''),
             row.get('region', ''),
             row.get('spec', {}).get('namespace', ''),
-            row.get('spec', {}).get('size', ''),
+            size,
             row.get('user_hash', ''),
             row.get('workspace', ''),
             log_utils.readable_time_duration(row.get('launched_at', 0)),
