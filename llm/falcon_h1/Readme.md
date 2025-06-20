@@ -1,6 +1,5 @@
 # Run and Serve Falcon H1 with SkyPilot and vLLM
 
-> SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
 On May 21, 2025, Technology Innovation Institute (TII) released [Falcon H1](https://falcon-lm.github.io/blog/falcon-h1/), the latest evolution in the Falcon family of large language models featuring an advanced hybrid architecture that integrates both State Space Models (SSMs) and Attention Mechanisms in every transformer block.
 
