@@ -17,7 +17,7 @@ This guide walks through how to run and host Falcon H1 models **on any infrastru
 
 **Note**: The provided YAML configuration is set up for the Falcon H1 1.5B instruction-tuned model, but can be easily modified for other Falcon H1 variants.
 
-## Step 0: Setup
+## Step 0: Install SkyPilot
 
 Install SkyPilot on your local machine:
 
