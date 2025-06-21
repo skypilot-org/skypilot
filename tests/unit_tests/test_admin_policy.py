@@ -361,8 +361,8 @@ def test_restful_policy(add_example_policy_paths, task):
             'Connection failed')
 
         with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                           match='Failed to validate request with admin '
-                           'policy URL http://localhost:8080'):
+                           match='Failed to call admin policy URL '
+                           'http://localhost:8080: Connection failed'):
             _load_task_and_apply_policy(
                 task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
 
@@ -372,8 +372,8 @@ def test_restful_policy(add_example_policy_paths, task):
             requests.exceptions.HTTPError('404 Client Error'))
 
         with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                           match='Failed to validate request with admin '
-                           'policy URL http://localhost:8080'):
+                           match='Failed to call admin policy URL '
+                           'http://localhost:8080: 404 Client Error'):
             _load_task_and_apply_policy(
                 task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
 
@@ -414,7 +414,7 @@ def _policy_server(policy: str) -> Iterator[str]:
         pypath = pypath + ':' + env['PYTHONPATH']
     env['PYTHONPATH'] = pypath
     proc = subprocess.Popen(
-        f'python {POLICY_PATH}/example_server/policy_server.py --port {port} --policy {policy}',
+        f'python {POLICY_PATH}/example_server/dynamic_policy_server.py --port {port} --policy {policy}',
         shell=True,
         env=env)
     start_time = time.time()
@@ -468,3 +468,13 @@ def test_restful_policy_server(add_example_policy_paths, task):
             assert r.autostop_config is not None
             assert r.autostop_config.enabled is True
             assert r.autostop_config.idle_minutes == 10
+
+    with _policy_server('RejectAllPolicy') as url, \
+        tempfile.NamedTemporaryFile() as temp_file:
+        temp_file.write(f'admin_policy: {url}/'.encode('utf-8'))
+        temp_file.flush()
+
+        # Verify the exception from REST policy server is exposed to user.
+        with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                           match='Reject all policy'):
+            _load_task_and_apply_policy(task, temp_file.name)
