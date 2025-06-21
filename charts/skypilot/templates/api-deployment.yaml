@@ -59,6 +59,13 @@ spec:
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
+        {{- if .Values.apiService.dbConnectionSecretName }}
+        - name: SKYPILOT_DB_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.apiService.dbConnectionSecretName }}
+              key: connection_string
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
