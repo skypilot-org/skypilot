@@ -1,0 +1,103 @@
+"""REST API client of SkyPilot API server"""
+
+import functools
+import time
+import typing
+from typing import Any, Callable, cast, TypeVar
+
+import colorama
+
+from sky import exceptions
+from sky import sky_logging
+from sky.adaptors import common as adaptors_common
+from sky.utils import common_utils
+from sky.utils import rich_utils
+from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
+
+if typing.TYPE_CHECKING:
+    import requests
+
+else:
+    requests = adaptors_common.LazyImport('requests')
+
+F = TypeVar('F', bound=Callable[..., Any])
+
+def retry_on_server_unavailable(
+    max_wait_seconds: int = 600,
+    initial_backoff: float = 1.0,
+    max_backoff_factor: int = 5
+):
+    """Decorator that retries a function when ServerTemporarilyUnavailableError 
+    is caught.
+    
+    Args:
+        max_wait_seconds: Maximum number of seconds to wait for the server to
+            be healthy
+        initial_backoff: Initial backoff time in seconds
+        max_backoff_factor: Maximum backoff factor for exponential backoff
+    """
+    def decorator(func: F) -> F:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            # Try once to see if the server is available.
+            try:
+                return func(*args, **kwargs)
+            except exceptions.ServerTemporarilyUnavailableError:
+                pass
+
+            msg = (f'{colorama.Fore.YELLOW}API server is temporarily '
+                   f'unavailable. Retrying...{colorama.Style.RESET_ALL}')
+            backoff = common_utils.Backoff(
+                initial_backoff=initial_backoff,
+                max_backoff_factor=max_backoff_factor
+            )
+            start_time = time.time()
+            attempt = 0
+            with rich_utils.client_status(msg):
+                while True:
+                    attempt += 1
+                    try:
+                        return func(*args, **kwargs)
+                    except exceptions.ServerTemporarilyUnavailableError as e:
+                        if time.time() - start_time > max_wait_seconds:
+                            raise exceptions.ServerTemporarilyUnavailableError(
+                                'Timeout waiting for the API server to be available'
+                                f' after {max_wait_seconds} seconds.') from e
+
+                        sleep_time = backoff.current_backoff()
+                        time.sleep(sleep_time)
+                        logger.debug(f'The API server is unavailable. Retrying '
+                                     f'{func.__name__} (attempt {attempt}, '
+                                     f'backoff {sleep_time}s).')
+
+        return cast(F, wrapper)
+    return decorator
+
+
+def handle_server_unavailable(response: 'requests.Response') -> None:
+    if response.status_code == 503:
+        # TODO(aylei): Hacky, depends on how nginx controller handles backends
+        # with no ready endpoints. Should use self-defined status code or header
+        # to distinguish retryable server error from general 503 errors.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ServerTemporarilyUnavailableError(
+                'SkyPilot API server is temporarily unavailable. '
+                'Please try again later.')
+
+
+@retry_on_server_unavailable()
+def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
+    """Wrapper of requests.post to interact with the API server."""
+    response = requests.post(url, data=data, json=json, **kwargs)
+    handle_server_unavailable(response)
+    return response
+
+
+@retry_on_server_unavailable()
+def get(url, params=None, **kwargs) -> 'requests.Response':
+    """Wrapper of requests.get to interact with the API server."""
+    response = requests.get(url, params=params, **kwargs)
+    handle_server_unavailable(response)
+    return response

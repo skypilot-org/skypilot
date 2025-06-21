@@ -38,6 +38,7 @@ REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
+COL_SHOULD_RETRY = 'should_retry'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 # TODO(zhwu): For scalability, there are several TODOs:
@@ -115,6 +116,7 @@ class RequestPayload:
     # Resources the request operates on.
     cluster_name: Optional[str] = None
     status_msg: Optional[str] = None
+    should_retry: bool = False
 
 
 @dataclasses.dataclass
@@ -137,6 +139,8 @@ class Request:
     cluster_name: Optional[str] = None
     # Status message of the request, indicates the reason of current status.
     status_msg: Optional[str] = None
+    # Whether the request should be retried.
+    should_retry: bool = False
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -222,6 +226,7 @@ class Request:
             user_name=user_name,
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
+            should_retry=self.should_retry,
         )
 
     def encode(self) -> RequestPayload:
@@ -243,6 +248,7 @@ class Request:
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
+                should_retry=self.should_retry,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -274,6 +280,7 @@ class Request:
                 user_id=payload.user_id,
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
+                should_retry=payload.should_retry,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -423,10 +430,14 @@ def create_table(cursor, conn):
         {COL_CLUSTER_NAME} TEXT,
         schedule_type TEXT,
         {COL_USER_ID} TEXT,
-        {COL_STATUS_MSG} TEXT)""")
+        {COL_STATUS_MSG} TEXT,
+        {COL_SHOULD_RETRY} INTEGER
+        )""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_SHOULD_RETRY,
+                                 'INTEGER')
 
 
 _DB = None

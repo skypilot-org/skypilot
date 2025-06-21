@@ -11,6 +11,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -198,6 +199,7 @@ def cancel(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_on_server_unavailable()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,
