@@ -1,0 +1,13 @@
+{{- if and .Values.grafana.enabled .Values.grafana.sidecar.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-dcgm-cluster-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-api
+    grafana_dashboard: "true"
+data:
+  dcgm-cluster-dashboard.json: |
+{{ .Files.Get "manifests/dcgm-cluster-dashboard.json" | indent 4 }}
+{{- end }}

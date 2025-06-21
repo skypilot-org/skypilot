@@ -189,13 +189,7 @@ export function Users() {
     fetchHealth();
   }, []);
 
-  useEffect(() => {
-    getUserRole().catch(() => {
-      console.error('Failed to get user role');
-    });
-  }, []);
-
-  const getUserRole = async () => {
+  const getUserRole = useCallback(async () => {
     if (userRoleCache && Date.now() - userRoleCache.timestamp < 5 * 60 * 1000) {
       return userRoleCache;
     }
@@ -221,7 +215,13 @@ export function Users() {
       setRoleLoading(false);
       throw error;
     }
-  };
+  }, [userRoleCache]);
+
+  useEffect(() => {
+    getUserRole().catch(() => {
+      console.error('Failed to get user role');
+    });
+  }, [getUserRole]);
 
   const checkPermissionAndAct = async (action, actionCallback) => {
     try {

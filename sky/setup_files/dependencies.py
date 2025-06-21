@@ -62,6 +62,8 @@ install_requires = [
     # the client-side actually not importing them.
     'casbin',
     'sqlalchemy_adapter',
+    # Required for API server metrics
+    'prometheus_client>=0.8.0',
     'passlib',
 ]
 

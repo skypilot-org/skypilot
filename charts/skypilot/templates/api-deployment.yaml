@@ -13,6 +13,13 @@ spec:
       app: {{ .Release.Name }}-api
   template:
     metadata:
+      annotations:
+        {{- if .Values.apiService.metrics.enabled }}
+        # Well-known annotations for Prometheus to scrape the metrics.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
       labels:
         app: {{ .Release.Name }}-api
         # This label indicates that the API server is ready to serve requests.
