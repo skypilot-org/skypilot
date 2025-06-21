@@ -70,8 +70,7 @@ _AUTOSTOP_SCHEMA = {
 }
 
 
-def _get_single_resources_schema():
-    """Schema for a single resource in a resources list."""
+def _get_infra_pattern():
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
     # Match any cloud name (case insensitive)
@@ -103,7 +102,11 @@ def _get_single_resources_schema():
     infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
                      f'{wildcard_cloud}{wildcard_with_region}|'
                      f'{kubernetes_pattern})$')
+    return infra_pattern
 
+
+def _get_single_resources_schema():
+    """Schema for a single resource in a resources list."""
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -133,7 +136,7 @@ def _get_single_resources_schema():
                 # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
                 #    "k8s/context-name",
                 #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
-                'pattern': infra_pattern,
+                'pattern': _get_infra_pattern(),
             },
             'cpus': {
                 'anyOf': [{
@@ -383,6 +386,69 @@ def get_resources_schema():
     }
 
 
+def get_volume_schema():
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume
+
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': ['name', 'type', 'infra'],
+        'additionalProperties': False,
+        'properties': {
+            'name': {
+                'type': 'string',
+            },
+            'type': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    type.value for type in volume.VolumeType
+                ],
+            },
+            'infra': {
+                'type': 'string',
+                'description':
+                    ('Infrastructure specification in format: '
+                     'cloud[/region[/zone]]. Use "*" as a wildcard.'),
+                # Pattern validates:
+                # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
+                #    "aws/us-east-1/us-east-1a"
+                # 2. Wildcard patterns - e.g. "*", "*/us-east-1",
+                #    "*/*/us-east-1a", "aws/*/us-east-1a"
+                # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
+                #    "k8s/context-name",
+                #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
+                'pattern': _get_infra_pattern(),
+            },
+            'resource_name': {
+                'type': 'string',
+            },
+            'spec': {
+                'type': 'object',
+                'required': [],
+                'properties': {
+                    'size': {
+                        'type': 'string',
+                        'pattern': constants.MEMORY_SIZE_PATTERN,
+                    },
+                    'storage_class_name': {
+                        'type': 'string',
+                    },
+                    'access_mode': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value for type in volume.VolumeAccessMode
+                        ],
+                    },
+                    'namespace': {
+                        'type': 'string',
+                    },
+                },
+            },
+        }
+    }
+
+
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
@@ -452,6 +518,49 @@ def get_storage_schema():
             },
             '_force_delete': {
                 'type': 'boolean',
+            }
+        }
+    }
+
+
+def get_volume_mount_schema():
+    """Schema for volume mount object in task config (internal use only)."""
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'path': {
+                'type': 'string',
+            },
+            'volume_name': {
+                'type': 'string',
+            },
+            'volume_config': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+                'properties': {
+                    'cloud': {
+                        'type': 'string',
+                        'case_insensitive_enum': list(constants.ALL_CLOUDS)
+                    },
+                    'region': {
+                        'anyOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'null'
+                        }]
+                    },
+                    'zone': {
+                        'anyOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'null'
+                        }]
+                    },
+                },
             }
         }
     }
@@ -735,6 +844,14 @@ def get_task_schema():
             'config': _filter_schema(
                 get_config_schema(),
                 constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            # volumes config is validated separately using get_volume_schema
+            'volumes': {
+                'type': 'object',
+            },
+            'volume_mounts': {
+                'type': 'array',
+                'items': get_volume_mount_schema(),
+            },
             **_experimental_task_schema(),
         }
     }

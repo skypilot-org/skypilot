@@ -606,3 +606,13 @@ class RequestAlreadyExistsError(Exception):
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
     pass
+
+
+class VolumeNotFoundError(Exception):
+    """Raised when a volume is not found."""
+    pass
+
+
+class VolumeTopologyConflictError(Exception):
+    """Raised when the there is conflict in the volumes and compute topology"""
+    pass

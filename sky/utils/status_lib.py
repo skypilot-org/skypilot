@@ -54,3 +54,13 @@ class StorageStatus(enum.Enum):
 
     # Finished uploading, in terminal state
     READY = 'READY'
+
+
+class VolumeStatus(enum.Enum):
+    """Volume status as recorded in table 'volumes'."""
+
+    # Volume is ready to be used
+    READY = 'READY'
+
+    # Volume is being used
+    IN_USE = 'IN_USE'
