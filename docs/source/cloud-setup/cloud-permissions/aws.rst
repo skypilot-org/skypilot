@@ -18,7 +18,7 @@ Using AWS SSO
     If you use AWS SSO and multiple clouds, check the :ref:`SSO multi-cloud compatibility notes <sso-feature-compat>`.
 
 
-To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the aboslute path to the CLI (by default, ``/usr/local/aws-cli/aws``) or create an alias ``alias awsv2=/usr/local/aws-cli/aws``.
+To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. To use your newly installed AWS v2 CLI, use the absolute path to the CLI (by default, ``/usr/local/aws-cli/aws``) or create an alias ``alias awsv2=/usr/local/aws-cli/aws``.
 
 You can use the following to check version:
 
