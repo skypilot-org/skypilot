@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import asyncio
 from datetime import datetime
 import enum
 import fnmatch
@@ -16,6 +17,9 @@ import typing
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
+import aiohttp
+from aiohttp import ClientTimeout
+from aiohttp import TCPConnector
 import colorama
 import filelock
 from packaging import version
@@ -33,6 +37,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -1567,6 +1572,32 @@ def check_network_connection():
                                               'Network seems down.') from e
 
 
+async def async_check_network_connection():
+    """Check if the network connection is available.
+    
+    Tolerates 3 retries as it is observed that connections can fail.
+    Uses aiohttp for async HTTP requests.
+    """
+    # Create a session with retry logic
+    timeout = ClientTimeout(total=3)
+    connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
+
+    async with aiohttp.ClientSession(timeout=timeout,
+                                     connector=connector) as session:
+        for i, ip in enumerate(_TEST_IP_LIST):
+            try:
+                async with session.head(ip) as response:
+                    if response.status < 400:  # Any 2xx or 3xx status is good
+                        return
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if i == len(_TEST_IP_LIST) - 1:
+                    raise exceptions.NetworkError(
+                        'Could not refresh the cluster. '
+                        'Network seems down.') from e
+                # If not the last IP, continue to try the next one
+                continue
+
+
 @timeline.event
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
@@ -2454,6 +2485,17 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    if (managed_job_utils.is_consolidation_mode() and
+            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+        cn = 'local-controller-consolidation'
+        return backends.LocalResourcesHandle(
+            cluster_name=cn,
+            cluster_name_on_cloud=cn,
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=sky.Resources(cloud=clouds.Cloud(),
+                                             instance_type=cn),
+        )
     if non_existent_message is None:
         non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name

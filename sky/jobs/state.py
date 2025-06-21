@@ -464,6 +464,21 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
 
 
 @_init_db
+def set_job_info_without_job_id(name: str, workspace: str,
+                                entrypoint: str) -> int:
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT INTO job_info
+            (name, schedule_state, workspace, entrypoint)
+            VALUES (?, ?, ?, ?)""",
+            (name, ManagedJobScheduleState.INACTIVE.value, workspace,
+             entrypoint))
+        return cursor.lastrowid
+
+
+@_init_db
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the task to pending state."""
     assert _DB_PATH is not None
@@ -1073,6 +1088,16 @@ def get_latest_task_id_status(
     # Unpack the tuple first, or it triggers a Pylint's bug on recognizing
     # the return type.
     return task_id, status
+
+
+def get_job_controller_pid(job_id: int) -> Optional[int]:
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        pid = cursor.execute(
+            """\
+            SELECT controller_pid FROM job_info WHERE spot_job_id=(?)""",
+            (job_id,)).fetchone()
+        return pid[0]
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:

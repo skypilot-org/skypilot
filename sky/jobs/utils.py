@@ -4,8 +4,12 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+from asyncio import events
 import collections
+import contextvars
+import datetime
 import enum
+import functools
 import os
 import pathlib
 import shlex
@@ -17,6 +21,7 @@ from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import colorama
 import filelock
+import requests
 from typing_extensions import Literal
 
 from sky import backends
@@ -33,7 +38,10 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -124,6 +132,107 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
+# Whether to use consolidation mode or not. When this is enabled, the managed
+# jobs controller will not be running on a separate cluster, but locally on the
+# API Server. Under the hood, we submit the job monitoring logic as processes
+# directly in the API Server.
+# Use LRU Cache so that the check is only done once.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+    # Check whether the consolidation mode config is changed.
+    if consolidation_mode:
+        controller_cn = (
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
+        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'enabled, but the controller cluster '
+                    f'{controller_cn} is still running. Please '
+                    'terminate the controller cluster first.'
+                    f'{colorama.Style.RESET_ALL}')
+    else:
+        all_jobs = managed_job_state.get_managed_jobs()
+        if all_jobs:
+            nonterminal_jobs = (
+                managed_job_state.get_nonterminal_job_ids_by_name(
+                    None, all_users=True))
+            if nonterminal_jobs:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.InconsistentConsolidationModeError(
+                        f'{colorama.Fore.RED}Consolidation mode '
+                        'is disabled, but there are still '
+                        f'{len(nonterminal_jobs)} managed jobs '
+                        'running. Please terminate those jobs '
+                        f'first.{colorama.Style.RESET_ALL}')
+            else:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are {len(all_jobs)} jobs from previous '
+                    'consolidation mode. Reset the `jobs.controller.'
+                    'consolidation_mode` to `true` and run `sky jobs queue` '
+                    'to see those jobs. Switching to normal mode will '
+                    f'lose the job history.{colorama.Style.RESET_ALL}')
+    return consolidation_mode
+
+
+def get_ha_dump_script_path(job_id: int) -> pathlib.Path:
+    """Get the path to the HA dump script for a job."""
+    return pathlib.Path(constants.PERSISTENT_RUN_SCRIPT_DIR).expanduser(
+    ).resolve() / f'sky_job_{job_id}'
+
+
+def ha_recovery_for_consolidation_mode():
+    """Recovery logic for HA mode."""
+    # No setup recovery is needed in consolidation mode, as the API server
+    # already has all runtime installed. Directly start jobs recovery here.
+    # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
+    runner = command_runner.LocalProcessCommandRunner()
+    with open('/tmp/ha_recovery.log', 'w', encoding='utf-8') as f:
+        start = time.time()
+        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
+        for job in managed_job_state.get_managed_jobs():
+            job_id = job['job_id']
+            controller_pid = job['controller_pid']
+
+            # In consolidation mode, it is possible that only the API server
+            # process is restarted, and the controller process is not. In such
+            # case, we don't need to do anything and the controller process will
+            # just keep running.
+            if controller_pid is not None:
+                try:
+                    if _controller_process_alive(controller_pid, job_id):
+                        f.write(f'Controller pid {controller_pid} for '
+                                f'job {job_id} is still running. '
+                                'Skipping recovery.\n')
+                        continue
+                except Exception:  # pylint: disable=broad-except
+                    # _controller_process_alive may raise if psutil fails; we
+                    # should not crash the recovery logic because of this.
+                    f.write('Error checking controller pid '
+                            f'{controller_pid} for job {job_id}\n')
+
+            if job['schedule_state'] not in [
+                    managed_job_state.ManagedJobScheduleState.DONE,
+                    managed_job_state.ManagedJobScheduleState.WAITING
+            ]:
+                dump_script_path = get_ha_dump_script_path(job_id)
+                if not dump_script_path.exists():
+                    f.write(f'Job {job_id}\'s recovery file ({dump_script_path}'
+                            ') does not exist. Skipping recovery. Job '
+                            f'schedule state: {job["schedule_state"]}\n')
+                    continue
+                with open(dump_script_path, 'r', encoding='utf-8') as script_f:
+                    script = script_f.read()
+                runner.run(script)
+                f.write(f'Job {job_id} (file: {dump_script_path}) completed '
+                        f'recovery at {datetime.datetime.now()}\n')
+        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+        f.write(f'Total recovery time: {time.time() - start} seconds\n')
+
+
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
@@ -157,9 +266,8 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
         process = psutil.Process(pid)
-        # The last two args of the command line should be --job-id <id>
-        job_args = process.cmdline()[-2:]
-        return process.is_running() and job_args == ['--job-id', str(job_id)]
+        cmd_str = ' '.join(process.cmdline())
+        return process.is_running() and f'--job-id {job_id}' in cmd_str
     except psutil.NoSuchProcess:
         return False
 
@@ -324,6 +432,10 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Expected to find a controller pid for state '
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
+        elif pid == -1:
+            logger.debug(
+                f'Controller pid is -1 for consolidated job controller')
+            continue
         else:
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):
@@ -506,6 +618,17 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         update_managed_jobs_statuses(job_id)
+
+        if managed_job_state.get_job_controller_pid(job_id) == -1:
+            # This is a consolidated job controller, so we need to cancel the
+            # with the controller server API
+            try:
+                requests.post(f'http://localhost:8000/cancel/{job_id}')
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Failed to cancel job {job_id} "
+                             f"with controller server: {e}")
+                continue
+            continue
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
@@ -1481,3 +1604,17 @@ class ManagedJobCodeGen:
             f'export {constants.USER_ID_ENV_VAR}='
             f'"{common_utils.get_user_hash()}"; '
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
+
+
+async def to_thread(func, /, *args, **kwargs):
+    """
+    This is an identical copy of asyncio.to_thread, however, asyncio.to_thread
+    was added in python 3.9, so we use this for compatibility for 3.7 and 3.8.
+
+    For full documentation, see:
+    https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
+    """
+    loop = events.get_running_loop()
+    ctx = contextvars.copy_context()
+    func_call = functools.partial(ctx.run, func, *args, **kwargs)
+    return await loop.run_in_executor(None, func_call)
