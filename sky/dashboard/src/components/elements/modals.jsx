@@ -178,6 +178,7 @@ export function ConfirmationModal({
   message,
   confirmText = 'Confirm',
   confirmVariant = 'destructive',
+  confirmClassName = null,
 }) {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -191,7 +192,8 @@ export function ConfirmationModal({
             Cancel
           </Button>
           <Button
-            variant={confirmVariant}
+            variant={confirmClassName ? undefined : confirmVariant}
+            className={confirmClassName}
             onClick={() => {
               onConfirm();
               onClose();

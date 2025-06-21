@@ -1,0 +1,45 @@
+name: Publish and Validate Package to Both Repositories
+
+on:
+  workflow_call:
+    inputs:
+      package_name:
+        description: 'Name of the package to validate (skypilot or skypilot-nightly)'
+        required: true
+        type: string
+      expected_version:
+        description: 'Expected version of the package'
+        required: true
+        type: string
+      skip_test_pypi:
+        description: 'Skip publishing to Test PyPI'
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      TEST_PYPI_API_TOKEN:
+        description: 'API token for Test PyPI'
+        required: true
+      PYPI_API_TOKEN:
+        description: 'API token for PyPI'
+        required: true
+
+jobs:
+  publish-and-validate-test-pypi:
+    if: ${{ !inputs.skip_test_pypi }}
+    uses: ./.github/workflows/publish-and-validate.yml
+    with:
+      package_name: ${{ inputs.package_name }}
+      expected_version: ${{ inputs.expected_version }}
+      repository_type: 'test-pypi'
+    secrets: inherit
+
+  publish-and-validate-pypi:
+    needs: [publish-and-validate-test-pypi]
+    if: always() && (needs.publish-and-validate-test-pypi.result == 'success' || inputs.skip_test_pypi)
+    uses: ./.github/workflows/publish-and-validate.yml
+    with:
+      package_name: ${{ inputs.package_name }}
+      expected_version: ${{ inputs.expected_version }}
+      repository_type: 'pypi'
+    secrets: inherit

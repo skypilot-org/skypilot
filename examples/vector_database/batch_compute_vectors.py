@@ -88,6 +88,8 @@ def main():
         task_copy = task.update_envs({
             'START_IDX': job_start,
             'END_IDX': job_end,
+        })
+        task_copy = task_copy.update_secrets({
             'HF_TOKEN': hf_token,
         })
 

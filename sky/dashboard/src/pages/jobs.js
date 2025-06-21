@@ -1,5 +1,11 @@
+import React from 'react';
 import Head from 'next/head';
-import { ManagedJobs } from '@/components/jobs';
+import dynamic from 'next/dynamic';
+
+const ManagedJobs = dynamic(
+  () => import('@/components/jobs').then((mod) => mod.ManagedJobs),
+  { ssr: false }
+);
 
 export default function JobsPage() {
   return (

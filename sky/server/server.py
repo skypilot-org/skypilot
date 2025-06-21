@@ -23,9 +23,11 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
+from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 
 import sky
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import core
@@ -34,7 +36,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -49,6 +50,8 @@ from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import permission
+from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -100,6 +103,99 @@ logger = sky_logging.init_logger(__name__)
 # response will block other requests from being processed.
 
 
+def _basic_auth_401_response(content: str):
+    """Return a 401 response with basic auth realm."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        content=content)
+
+
+# TODO(hailong): Remove this function and use request.state.auth_user instead.
+async def _override_user_info_in_request_body(request: fastapi.Request,
+                                              auth_user: Optional[models.User]):
+    body = await request.body()
+    if auth_user and body:
+        try:
+            original_json = await request.json()
+        except json.JSONDecodeError as e:
+            logger.error(f'Error parsing request JSON: {e}')
+        else:
+            logger.debug(f'Overriding user for {request.state.request_id}: '
+                         f'{auth_user.name}, {auth_user.id}')
+            if 'env_vars' in original_json:
+                if isinstance(original_json.get('env_vars'), dict):
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
+                else:
+                    logger.warning(
+                        f'"env_vars" in request body is not a dictionary '
+                        f'for request {request.state.request_id}. '
+                        'Skipping user info injection into body.')
+            else:
+                original_json['env_vars'] = {}
+                original_json['env_vars'][
+                    constants.USER_ID_ENV_VAR] = auth_user.id
+                original_json['env_vars'][
+                    constants.USER_ENV_VAR] = auth_user.name
+            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+
+
+def _try_set_basic_auth_user(request: fastapi.Request):
+    auth_header = request.headers.get('authorization')
+    if not auth_header or not auth_header.lower().startswith('basic '):
+        return
+
+    # Check username and password
+    encoded = auth_header.split(' ', 1)[1]
+    try:
+        decoded = base64.b64decode(encoded).decode()
+        username, password = decoded.split(':', 1)
+    except Exception:  # pylint: disable=broad-except
+        return
+
+    users = global_user_state.get_user_by_name(username)
+    if not users:
+        return
+
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        username_encoded = username.encode('utf8')
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                apr_md5_crypt.verify(password, user.password)):
+            request.state.auth_user = user
+            break
+
+
+class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle RBAC."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # TODO(hailong): should have a list of paths
+        # that are not checked for RBAC
+        if (request.url.path.startswith('/dashboard/') or
+                request.url.path.startswith('/api/')):
+            return await call_next(request)
+
+        auth_user = request.state.auth_user
+        if auth_user is None:
+            return await call_next(request)
+
+        permission_service = permission.permission_service
+        # Check the role permission
+        if permission_service.check_endpoint_permission(auth_user.id,
+                                                        request.url.path,
+                                                        request.method):
+            return fastapi.responses.JSONResponse(
+                status_code=403, content={'detail': 'Forbidden'})
+
+        return await call_next(request)
+
+
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
@@ -122,6 +218,50 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle HTTP Basic Auth."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/api/'):
+            # Try to set the auth user from the basic auth header so the
+            # following endpoint handlers can leverage the auth_user info
+            _try_set_basic_auth_user(request)
+            return await call_next(request)
+
+        auth_header = request.headers.get('authorization')
+        if not auth_header or not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid basic auth')
+
+        # Check username and password
+        encoded = auth_header.split(' ', 1)[1]
+        try:
+            decoded = base64.b64decode(encoded).decode()
+            username, password = decoded.split(':', 1)
+        except Exception:  # pylint: disable=broad-except
+            return _basic_auth_401_response('Invalid basic auth')
+
+        users = global_user_state.get_user_by_name(username)
+        if not users:
+            return _basic_auth_401_response('Invalid credentials')
+
+        valid_user = False
+        for user in users:
+            if not user.name or not user.password:
+                continue
+            username_encoded = username.encode('utf8')
+            db_username_encoded = user.name.encode('utf8')
+            if (username_encoded == db_username_encoded and
+                    apr_md5_crypt.verify(password, user.password)):
+                valid_user = True
+                request.state.auth_user = user
+                await _override_user_info_in_request_body(request, user)
+                break
+        if not valid_user:
+            return _basic_auth_401_response('Invalid credentials')
+
+        return await call_next(request)
+
+
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
@@ -130,29 +270,18 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         # Add user to database if auth_user is present
         if auth_user is not None:
-            global_user_state.add_or_update_user(auth_user)
+            newly_added = global_user_state.add_or_update_user(auth_user)
+            if newly_added:
+                permission.permission_service.add_user_if_not_exists(
+                    auth_user.id)
 
-        body = await request.body()
-        if auth_user and body:
-            try:
-                original_json = await request.json()
-            except json.JSONDecodeError as e:
-                logger.error(f'Error parsing request JSON: {e}')
-            else:
-                logger.debug(f'Overriding user for {request.state.request_id}: '
-                             f'{auth_user.name}, {auth_user.id}')
-                if 'env_vars' in original_json:
-                    if isinstance(original_json.get('env_vars'), dict):
-                        original_json['env_vars'][
-                            constants.USER_ID_ENV_VAR] = auth_user.id
-                        original_json['env_vars'][
-                            constants.USER_ENV_VAR] = auth_user.name
-                    else:
-                        logger.warning(
-                            f'"env_vars" in request body is not a dictionary '
-                            f'for request {request.state.request_id}. '
-                            'Skipping user info injection into body.')
-                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        # Store user info in request.state for access by GET endpoints
+        if auth_user is not None:
+            request.state.auth_user = auth_user
+        else:
+            request.state.auth_user = None
+
+        await _override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -244,11 +373,13 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
             if not _is_relative_to(request_path, parent):
-                raise fastapi.HTTPException(status_code=403, detail='Forbidden')
+                return fastapi.responses.JSONResponse(
+                    status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
@@ -262,10 +393,14 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
+if str(enable_basic_auth).lower() == 'true':
+    app.add_middleware(BasicAuthMiddleware)
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
+app.include_router(users_rest.router, prefix='/users', tags=['users'])
 app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
@@ -389,7 +524,7 @@ async def list_accelerators(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerators,
+        func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -404,7 +539,7 @@ async def list_accelerator_counts(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
-        func=service_catalog.list_accelerator_counts,
+        func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -648,6 +783,7 @@ async def launch(launch_body: payloads.LaunchBody,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=launch_body.cluster_name,
+        retryable=launch_body.retry_until_up,
     )
 
 
@@ -833,13 +969,6 @@ async def logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
-
-
-@app.get('/users')
-async def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
-    user_list = global_user_state.get_all_users()
-    return [user.to_dict() for user in user_list]
 
 
 @app.post('/download_logs')
@@ -1193,7 +1322,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
-    user = _get_auth_user_header(request)
+    user = request.state.auth_user
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
@@ -1201,6 +1330,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
         'user': user.to_dict() if user is not None else None,
+        'basic_auth_enabled': os.environ.get(
+            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
     }
 
 

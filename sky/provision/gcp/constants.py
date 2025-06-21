@@ -54,6 +54,10 @@ CLUSTER_PREFIX_LENGTH = 10
 
 COMPACT_GROUP_PLACEMENT_POLICY = 'compact'
 COLLOCATED_COLLOCATION = 'COLLOCATED'
+
+# From https://cloud.google.com/compute/docs/gpus/gpudirect
+# A specific image is used to ensure that the the GPU is configured with TCPX support.
+GCP_GPU_DIRECT_IMAGE_ID = 'docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx'
 GPU_DIRECT_TCPX_USER_DATA = textwrap.dedent("""
     # Install GPU Direct TCPX
     cos-extensions install gpu -- --version=latest;

@@ -20,11 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_branch: ${{ steps.create_test_branch.outputs.test_branch }}
-      smoke_tests_json: ${{ steps.trigger_smoke_tests.outputs.json }}
-      quicktest_json: ${{ steps.trigger_quicktest_core.outputs.json }}
-      release_test_json: ${{ steps.trigger_release_tests.outputs.json }}
       release_branch: ${{ steps.create_release_branch.outputs.release_branch }}
       release_version: ${{ steps.determine_version.outputs.release_version }}
+      new_commit_sha: ${{ steps.create_test_branch.outputs.new_commit_sha }}
+      previous_release_branch: ${{ steps.find_previous_release_branch.outputs.previous_release_branch }}
+
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
@@ -273,88 +273,50 @@ jobs:
           git push -f origin ${TEST_BRANCH}
           echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
 
-      # Trigger Buildkite smoke tests
-      - name: Trigger Full Smoke Tests
-        id: trigger_smoke_tests
-        uses: buildkite/trigger-pipeline-action@v2.3.0
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/full-smoke-tests-run"
-          branch: "${{ steps.create_test_branch.outputs.test_branch }}"
-          commit: "${{ steps.create_test_branch.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
-          ignore_pipeline_branch_filter: true
-
-      # Trigger Buildkite quicktest-core
-      - name: Trigger Quicktest Core
-        id: trigger_quicktest_core
-        uses: buildkite/trigger-pipeline-action@v2.3.0
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/quicktest-core"
-          branch: "${{ steps.create_test_branch.outputs.test_branch }}"
-          commit: "${{ steps.create_test_branch.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
-          ignore_pipeline_branch_filter: true
-          build_env_vars: '{"ARGS": "--base-branch ${{ steps.find_previous_release_branch.outputs.previous_release_branch }}"}'
-
-      # Trigger Buildkite release tests
-      - name: Trigger Release Tests
-        id: trigger_release_tests
-        uses: buildkite/trigger-pipeline-action@v2.3.0
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/release"
-          branch: "${{ steps.create_test_branch.outputs.test_branch }}"
-          commit: "${{ steps.create_test_branch.outputs.new_commit_sha }}"
-          message: "Release ${{ steps.determine_version.outputs.release_version }}"
-          ignore_pipeline_branch_filter: true
-
-  # Call extract-buildkite workflow for each job
-  extract-smoke-tests:
+  smoke-tests:
     needs: release-build
-    uses: ./.github/workflows/extract-buildkite.yml
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      json_data: ${{ needs.release-build.outputs.smoke_tests_json }}
-
-  extract-quicktest:
-    needs: release-build
-    uses: ./.github/workflows/extract-buildkite.yml
-    with:
-      json_data: ${{ needs.release-build.outputs.quicktest_json }}
-
-  extract-release-test:
-    needs: release-build
-    uses: ./.github/workflows/extract-buildkite.yml
-    with:
-      json_data: ${{ needs.release-build.outputs.release_test_json }}
-
-  wait-for-smoke-tests:
-    needs: [release-build, extract-smoke-tests]
-    uses: ./.github/workflows/wait-for-buildkite.yml
-    with:
-      organization: "skypilot-1"
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }}"
       pipeline: "full-smoke-tests-run"
-      build_number: ${{ needs.extract-smoke-tests.outputs.build_number }}
       timeout_minutes: 240
-      fail_on_buildkite_failure: false
+      wait: true
+      fail_on_buildkite_failure: true
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  wait-for-quicktest-core:
-    needs: [release-build, extract-quicktest]
-    uses: ./.github/workflows/wait-for-buildkite.yml
+  quicktest-core:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      organization: "skypilot-1"
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }}"
       pipeline: "quicktest-core"
-      build_number: ${{ needs.extract-quicktest.outputs.build_number }}
+      build_env_vars: '{"ARGS": "--base-branch ${{ needs.release-build.outputs.previous_release_branch }}"}'
       timeout_minutes: 180
+      wait: true
+      fail_on_buildkite_failure: true
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  release-tests:
+    needs: release-build
+    uses: ./.github/workflows/buildkite-trigger-wait.yml
+    with:
+      commit: ${{ needs.release-build.outputs.new_commit_sha }}
+      branch: ${{ needs.release-build.outputs.test_branch }}
+      message: "Release ${{ needs.release-build.outputs.release_version }}"
+      pipeline: "release"
+      wait: false
       fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   create-pr:
-    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test, extract-smoke-tests, extract-quicktest]
+    needs: [release-build, smoke-tests, quicktest-core, release-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -364,15 +326,14 @@ jobs:
 
       - name: Create release branch and PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
           RELEASE_BRANCH: ${{ needs.release-build.outputs.release_branch }}
           RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
-          SMOKE_TEST_BUILD: ${{ needs.extract-smoke-tests.outputs.build_number }}
-          QUICKTEST_BUILD: ${{ needs.extract-quicktest.outputs.build_number }}
-          RELEASE_TEST_BUILD: ${{ needs.extract-release-test.outputs.build_number }}
+          SMOKE_TEST_BUILD: ${{ needs.smoke-tests.outputs.build_number }}
+          QUICKTEST_BUILD: ${{ needs.quicktest-core.outputs.build_number }}
+          RELEASE_TEST_BUILD: ${{ needs.release-tests.outputs.build_number }}
         run: |
-
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -381,8 +342,8 @@ jobs:
           PR_BODY="Release ${RELEASE_VERSION}
 
           Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.wait-for-smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.wait-for-quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"

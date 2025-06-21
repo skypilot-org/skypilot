@@ -28,6 +28,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -51,6 +52,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import requests
@@ -125,7 +127,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
 # If a cluster is less than LAUNCH_DOUBLE_CHECK_WINDOW seconds old, and we don't
-# see any instances in the cloud, the instances might be in the proccess of
+# see any instances in the cloud, the instances might be in the process of
 # being created. We will wait LAUNCH_DOUBLE_CHECK_DELAY seconds and then double
 # check to make sure there are still no instances. LAUNCH_DOUBLE_CHECK_DELAY
 # should be set longer than the delay between (sending the create instance
@@ -340,7 +342,13 @@ def path_size_megabytes(path: str) -> int:
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:
-        rsync_output = str(subprocess.check_output(rsync_command, shell=True))
+        # rsync sometimes fails `--dry-run` for MacOS' rsync build, however this function is only used to display
+        # a warning message to the user if the size of a file/directory is too
+        # large, so we can safely ignore the error.
+        rsync_output = str(
+            subprocess.check_output(rsync_command,
+                                    shell=True,
+                                    stderr=subprocess.DEVNULL))
     except subprocess.CalledProcessError:
         logger.debug('Command failed, proceeding without estimating size: '
                      f'{rsync_command}')
@@ -653,6 +661,12 @@ def write_cluster_config(
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
+    logging_agent = logs.get_logging_agent()
+    if logging_agent:
+        for k, v in logging_agent.get_credential_file_mounts().items():
+            assert k not in credentials, f'{k} already in credentials'
+            credentials[k] = v
+
     private_key_path, _ = auth.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
     region_name = resources_vars.get('region')
@@ -815,7 +829,9 @@ def write_cluster_config(
     if isinstance(cloud, clouds.Kubernetes):
         cluster_config_overrides = to_provision.cluster_config_overrides
         kubernetes_utils.combine_pod_config_fields(
-            tmp_yaml_path, cluster_config_overrides=cluster_config_overrides)
+            tmp_yaml_path,
+            cluster_config_overrides=cluster_config_overrides,
+            cloud=cloud)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
@@ -930,6 +946,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
+    elif isinstance(cloud, clouds.Hyperbolic):
+        config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
@@ -2499,7 +2517,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -2568,18 +2586,33 @@ def get_clusters(
             public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
+        all_users: If True, return clusters from all users. If False, only
+            return clusters from the current user.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
+    current_user = common_utils.get_current_user()
+
+    # Filter by user if requested
     if not all_users:
-        current_user_hash = common_utils.get_user_hash()
         records = [
             record for record in records
-            if record['user_hash'] == current_user_hash
+            if record['user_hash'] == current_user.id
         ]
+
+    accessible_workspaces = workspaces_core.get_workspaces()
+
+    workspace_filtered_records = []
+    for record in records:
+        cluster_workspace = record.get('workspace',
+                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if cluster_workspace in accessible_workspaces:
+            workspace_filtered_records.append(record)
+
+    records = workspace_filtered_records
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -2836,6 +2869,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         if is_managed_job:
             if task.best_resources.use_spot:
                 spot_str = '[Spot]'
+            assert task.best_resources.cpus is not None
             task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'

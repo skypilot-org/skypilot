@@ -1,12 +1,14 @@
 """Nebius library wrapper for SkyPilot."""
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import uuid
 
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
+from sky.provision.nebius import constants as nebius_constants
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -156,10 +158,17 @@ def start(instance_id: str) -> None:
             f' to be ready.')
 
 
-def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
-           preset: str, region: str, image_family: str, disk_size: int,
-           user_data: str, associate_public_ip_address: bool,
-           filesystems: List[Dict[str, Any]]) -> str:
+def launch(cluster_name_on_cloud: str,
+           node_type: str,
+           platform: str,
+           preset: str,
+           region: str,
+           image_family: str,
+           disk_size: int,
+           user_data: str,
+           associate_public_ip_address: bool,
+           filesystems: List[Dict[str, Any]],
+           network_tier: Optional[resources_utils.NetworkTier] = None) -> str:
     # Each node must have a unique name to avoid conflicts between
     # multiple worker VMs. To ensure uniqueness,a UUID is appended
     # to the node name.
@@ -173,11 +182,23 @@ def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
     # 8 GPU virtual machines can be grouped into a GPU cluster.
     # The GPU clusters are built with InfiniBand secure high-speed networking.
     # https://docs.nebius.com/compute/clusters/gpu
-    if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
+    if platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS:
         if preset == '8gpu-128vcpu-1600gb':
-            #  Check is there fabric in config
             fabric = skypilot_config.get_nested(('nebius', region, 'fabric'),
                                                 None)
+
+            # Auto-select fabric if network_tier=best and no fabric configured
+            if (fabric is None and
+                    str(network_tier) == str(resources_utils.NetworkTier.BEST)):
+                try:
+                    fabric = nebius_constants.get_default_fabric(
+                        platform, region)
+                    logger.info(f'Auto-selected InfiniBand fabric {fabric} '
+                                f'for {platform} in {region}')
+                except ValueError as e:
+                    logger.warning(
+                        f'InfiniBand fabric auto-selection failed: {e}')
+
             if fabric is None:
                 logger.warning(
                     f'Set up fabric for region {region} in ~/.sky/config.yaml '

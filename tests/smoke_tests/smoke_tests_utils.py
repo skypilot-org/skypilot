@@ -57,7 +57,7 @@ LOW_RESOURCE_PARAM = {
     'memory': '4+',
 }
 LOW_CONTROLLER_RESOURCE_ENV = {
-    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
+    skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
@@ -373,11 +373,6 @@ def override_sky_config(
         env_dict = os.environ
         env_before_override = os.environ.copy()
 
-    if is_postgres_backend_test():
-        env_dict[
-            constants.
-            SKYPILOT_API_SERVER_DB_URL_ENV_VAR] = 'postgresql://postgres@localhost/skypilot'
-
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
@@ -410,10 +405,10 @@ def override_sky_config(
         return
 
     temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+    if skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_dict:
         # Read the original config
         original_config = skypilot_config.parse_and_validate_config_file(
-            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+            env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
     else:
         original_config = skypilot_config.config_utils.Config()
     overlay_config = skypilot_config.overlay_skypilot_config(
@@ -421,7 +416,7 @@ def override_sky_config(
     temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
-    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+    env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
     yield temp_config_file
     if env_before_override is not None:
         os.environ.clear()
@@ -783,3 +778,32 @@ def get_response_from_request_id(request_id: str) -> Any:
         return request_task.get_return_value()
     raise RuntimeError(f'Failed to get request {request_id}: '
                        f'{response.status_code} {response.text}')
+
+
+def with_config(cmd: str, config_path: str) -> str:
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
+            f'{cmd}')
+
+
+def _get_controller_pod_name(controller_name: str) -> str:
+    return (
+        'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
+        'APP:.metadata.labels.app --no-headers | '
+        f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
+
+
+def kill_and_wait_controller(controller_name: str) -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    assert controller_name in ['serve', 'jobs'
+                              ], (f'Invalid controller name: {controller_name}')
+    return (
+        f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
+        f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        f'until new_controller_pod=$({_get_controller_pod_name(controller_name)}) && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && '
+        'kubectl get pod $new_controller_pod | grep "1/1"; do '
+        f'  echo "Waiting for new {controller_name} controller pod..."; sleep 5; '
+        'done; '
+        f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
+    )

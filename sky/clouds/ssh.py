@@ -12,6 +12,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import registry
 
 if typing.TYPE_CHECKING:
@@ -88,8 +89,10 @@ class SSH(kubernetes.Kubernetes):
         all_contexts = self.existing_allowed_contexts()
 
         if region is not None and region not in all_contexts:
-            region_name = region.lstrip('ssh-')
-            available_contexts = [c.lstrip('ssh-') for c in all_contexts]
+            region_name = common_utils.removeprefix(region, 'ssh-')
+            available_contexts = [
+                common_utils.removeprefix(c, 'ssh-') for c in all_contexts
+            ]
             err_str = (f'SSH Node Pool {region_name!r} is not set up. '
                        'Run `sky check` for more details. ')
             if available_contexts:
@@ -155,7 +158,8 @@ class SSH(kubernetes.Kubernetes):
             if allowed_node_pools is None:
                 return ctxs
             return [
-                ctx for ctx in ctxs if ctx.lstrip('ssh-') in allowed_node_pools
+                ctx for ctx in ctxs
+                if common_utils.removeprefix(ctx, 'ssh-') in allowed_node_pools
             ]
 
         if all_node_pool_contexts:

@@ -3,6 +3,7 @@
 name: {{dag_name}}
 
 file_mounts:
+  {{remote_original_user_yaml_path}}: {{original_user_dag_path}}
   {{remote_user_yaml_path}}: {{user_yaml_path}}
   {%- if local_user_config_path is not none %}
   {{remote_user_config_path}}: {{local_user_config_path}}
@@ -29,29 +30,6 @@ setup: |
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
 
-  # Create systemd service file
-  mkdir -p ~/.config/systemd/user/
-
-  # Create systemd user service file
-  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
-  [Unit]
-  Description=SkyPilot Jobs Dashboard
-  After=network.target
-
-  [Service]
-  Environment="SKYPILOT_USER_ID={{ dashboard_user_id }}"
-  Restart=always
-  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
-  StandardError=append:/home/$USER/.sky/job-dashboard.log
-  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
-
-  [Install]
-  WantedBy=default.target
-  EOF
-
-  export SKYPILOT_USER_ID="{{ dashboard_user_id }}"
-  {{ dashboard_setup_cmd }}
-
 run: |
   {{ sky_activate_python_env }}
 
@@ -65,6 +43,7 @@ run: |
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
   python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+    --user-yaml-path {{remote_original_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
     --env-file {{remote_env_file_path}} \
     --priority {{priority}}

@@ -27,11 +27,11 @@ Before you get started, you need to have access to the Llama-2 model weights on 
 
 1. Start serving the Llama-2 model:
 ```bash
-sky launch -c vllm-llama2 serve-openai-api.yaml --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+sky launch -c vllm-llama2 serve-openai-api.yaml --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 **Optional**: Only GCP offers the specified L4 GPUs currently. To use other clouds, use the `--gpus` flag to request other GPUs. For example, to use H100 GPUs:
 ```bash
-sky launch -c vllm-llama2 serve-openai-api.yaml --gpus H100:1 --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+sky launch -c vllm-llama2 serve-openai-api.yaml --gpus H100:1 --secret HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 **Tip**: You can also use the vLLM docker container for faster setup. Refer to [serve-openai-api-docker.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/serve-openai-api-docker.yaml) for more.
 

@@ -3,6 +3,7 @@ import glob
 import os
 import pathlib
 import shlex
+import stat
 import subprocess
 from typing import Any, Dict, List, Optional, Set, TextIO, Union
 import warnings
@@ -317,7 +318,9 @@ def zip_files_and_folders(items: List[str],
                                 continue
                             if os.path.islink(file_path):
                                 _store_symlink(zipf, file_path, is_dir=False)
-                            else:
-                                zipf.write(file_path)
+                                continue
+                            if stat.S_ISSOCK(os.stat(file_path).st_mode):
+                                continue
+                            zipf.write(file_path)
                 if log_file is not None:
                     log_file.write(f'Zipped {item}\n')

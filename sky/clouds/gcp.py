@@ -10,12 +10,12 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
-from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
@@ -111,18 +111,13 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
-# For GPU-related package version, see sky/clouds/service_catalog/images/provisioners/cuda.sh
+# For GPU-related package version, see sky/clouds/catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Use COS image with GPU Direct support.
 # Need to contact GCP support to build our own image for GPUDirect-TCPX support.
 # Refer to https://github.com/GoogleCloudPlatform/cluster-toolkit/blob/main/examples/machine-learning/a3-highgpu-8g/README.md#before-starting
 _DEFAULT_GPU_DIRECT_IMAGE_ID = 'skypilot:gpu-direct-cos'
-
-# From https://cloud.google.com/compute/docs/gpus/gpudirect
-# A specific image is used to ensure that the the GPU is configured with TCPX support.
-_NETWORK_GCP_IMAGE_ID = ('docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
-                         'nccl-plugin-gpudirecttcpx')
 
 
 def _run_output(cmd):
@@ -263,20 +258,21 @@ class GCP(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         if accelerators is None:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, clouds='gcp')
+            regions = catalog.get_region_zones_for_instance_type(instance_type,
+                                                                 use_spot,
+                                                                 clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
-            acc_regions = service_catalog.get_region_zones_for_accelerators(
+            acc_regions = catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
             if instance_type is None:
                 regions = acc_regions
             elif instance_type == 'TPU-VM':
                 regions = acc_regions
             else:
-                vm_regions = service_catalog.get_region_zones_for_instance_type(
+                vm_regions = catalog.get_region_zones_for_instance_type(
                     instance_type, use_spot, clouds='gcp')
                 # Find the intersection between `acc_regions` and `vm_regions`.
                 regions = []
@@ -346,11 +342,11 @@ class GCP(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='gcp')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='gcp')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -359,12 +355,12 @@ class GCP(clouds.Cloud):
                                     zone: Optional[str] = None) -> float:
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        return service_catalog.get_accelerator_hourly_cost(acc,
-                                                           acc_count,
-                                                           use_spot=use_spot,
-                                                           region=region,
-                                                           zone=zone,
-                                                           clouds='gcp')
+        return catalog.get_accelerator_hourly_cost(acc,
+                                                   acc_count,
+                                                   use_spot=use_spot,
+                                                   region=region,
+                                                   zone=zone,
+                                                   clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
@@ -444,10 +440,10 @@ class GCP(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='gcp')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='gcp')
 
     @classmethod
     def failover_disk_tier(
@@ -547,7 +543,9 @@ class GCP(clouds.Cloud):
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
-                    image_id = _NETWORK_GCP_IMAGE_ID
+                    # The actual image id is set in resources.py (see _try_validate_image_id)
+                    # and reference GCP_GPU_DIRECT_IMAGE_ID
+                    image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
                     if acc == 'K80':
                         # Though the image is called cu113, it actually has later
@@ -566,8 +564,7 @@ class GCP(clouds.Cloud):
                 assert region_name in resources.image_id, resources.image_id
                 image_id = resources.image_id[region_name]
         if image_id.startswith('skypilot:'):
-            image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                             clouds='gcp')
+            image_id = catalog.get_image_id_from_tag(image_id, clouds='gcp')
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
@@ -692,16 +689,16 @@ class GCP(clouds.Cloud):
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            cpus=resources.cpus if not use_tpu_vm else None,
-            memory=resources.memory if not use_tpu_vm else None,
-            use_spot=resources.use_spot,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='gcp')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             cpus=resources.cpus if not use_tpu_vm else None,
+             memory=resources.memory if not use_tpu_vm else None,
+             use_spot=resources.use_spot,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='gcp')
 
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
@@ -768,16 +765,16 @@ class GCP(clouds.Cloud):
         # GCP handles accelerators separately from regular instance types.
         # This method supports automatically inferring the GPU type for
         # the instance type that come with GPUs pre-attached.
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='gcp')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='gcp')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='gcp')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='gcp')
 
     @classmethod
     def _find_application_key_path(cls) -> str:
@@ -1061,11 +1058,11 @@ class GCP(clouds.Cloud):
         return user_identity[0].replace('\n', '')
 
     def instance_type_exists(self, instance_type):
-        return service_catalog.instance_type_exists(instance_type, 'gcp')
+        return catalog.instance_type_exists(instance_type, 'gcp')
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure."""
+        """Whether a resource needs cleanup after preemption or failure."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
@@ -1096,9 +1093,9 @@ class GCP(clouds.Cloud):
     def _check_instance_type_accelerators_combination(
             resources: 'resources.Resources') -> None:
         resources = resources.assert_launchable()
-        service_catalog.check_accelerator_attachable_to_host(
-            resources.instance_type, resources.accelerators, resources.zone,
-            'gcp')
+        catalog.check_accelerator_attachable_to_host(resources.instance_type,
+                                                     resources.accelerators,
+                                                     resources.zone, 'gcp')
 
     @classmethod
     def check_disk_tier(
@@ -1325,7 +1322,7 @@ class GCP(clouds.Cloud):
         region = resources.region
 
         # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import gcp_catalog
+        from sky.catalog import gcp_catalog
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 

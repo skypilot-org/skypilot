@@ -1,6 +1,7 @@
 """Kubernetes adaptors"""
 import logging
 import os
+import platform
 from typing import Any, Callable, Optional, Set
 
 from sky import sky_logging
@@ -18,6 +19,13 @@ urllib3 = common.LazyImport('urllib3',
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
+
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+# From kubernetes package, keep a copy here to avoid actually importing
+# kubernetes package when parsing the KUBECONFIG env var to do credential
+# file mounts.
+ENV_KUBECONFIG_PATH_SEPARATOR = ';' if platform.system() == 'Windows' else ':'
 
 DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
 # The name for the environment variable that stores the in-cluster context name
@@ -85,12 +93,13 @@ def _load_config(context: Optional[str] = None):
             context_name = '(current-context)' if context is None else context
             is_ssh_node_pool = False
             if context_name.startswith('ssh-'):
-                context_name = context_name.lstrip('ssh-')
+                context_name = common_utils.removeprefix(context_name, 'ssh-')
                 is_ssh_node_pool = True
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
                 if is_ssh_node_pool:
-                    context_name = context_name.lstrip('ssh-')
+                    context_name = common_utils.removeprefix(
+                        context_name, 'ssh-')
                     err_str = ('Failed to load SSH Node Pool configuration for '
                                f'{context_name!r}.\n'
                                '    Run `sky ssh up --infra {context_name}` to '

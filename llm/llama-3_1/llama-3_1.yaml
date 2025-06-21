@@ -3,10 +3,10 @@
 # Usage:
 #
 #  # Launch Llama-3.1 8B on a single L4 GPU:
-#  HF_TOKEN=xxx sky launch llama-31.yaml -c llama31 --gpus L4:1 --env HF_TOKEN --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
+#  HF_TOKEN=xxx sky launch llama-31.yaml -c llama31 --gpus L4:1 --secret HF_TOKEN --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
 #
 #  # Launch Llama-3.1 405B-FP8 on a A100-80GB:8 GPU:
-#  HF_TOKEN=xxx sky launch llama-31.yaml -c llama31 --gpus A100-80GB:8 --env HF_TOKEN --env MODEL_NAME=meta-llama/Meta-Llama-3.1-405B-Instruct-FP8
+#  HF_TOKEN=xxx sky launch llama-31.yaml -c llama31 --gpus A100-80GB:8 --secret HF_TOKEN --env MODEL_NAME=meta-llama/Meta-Llama-3.1-405B-Instruct-FP8
 #
 # curl /v1/chat/completions:
 #
@@ -34,7 +34,7 @@
 #   Running on public URL: https://<hash>.gradio.live
 #
 # Scale up with SkyServe:
-#  HF_TOKEN=xxx sky serve up llama-31.yaml -n llama31 --env HF_TOKEN --gpus L4:1 --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
+#  HF_TOKEN=xxx sky serve up llama-31.yaml -n llama31 --secret HF_TOKEN --gpus L4:1 --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct
 #
 # curl /v1/chat/completions:
 #
@@ -59,7 +59,8 @@
 
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3.1-8B-Instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2

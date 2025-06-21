@@ -36,11 +36,11 @@ The finetuning job is packaged in a SkyPilot YAML. It can be launched on any of 
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --secret HF_TOKEN
 #
 # To finetune a 70B model:  
 #
-#  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --env HF_TOKEN --env MODEL_SIZE=70B
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --secret HF_TOKEN --env MODEL_SIZE=70B
 
 envs:
   MODEL_SIZE: 8B
@@ -106,7 +106,7 @@ export HF_TOKEN=xxxx
 # It takes about 40 mins on 8 A100 GPUs to finetune a 8B
 # Llama3.1 model with LoRA on Alpaca dataset.
 sky launch -c llama31 lora.yaml \
-  --env HF_TOKEN  --env MODEL_SIZE=8B \
+  --secret HF_TOKEN  --env MODEL_SIZE=8B \
   --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name"
 ```
 
@@ -114,7 +114,7 @@ sky launch -c llama31 lora.yaml \
 To finetune a larger model with 70B parameters, you can simply change the parameters as below:
 ```bash
 sky launch -c llama31-70 lora.yaml \
-  --env HF_TOKEN  --env MODEL_SIZE=70B \
+  --secret HF_TOKEN  --env MODEL_SIZE=70B \
   --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name"
 ```
 
@@ -128,7 +128,7 @@ You can do so by specifying the huggingface path to your own dataset as followin
 # It takes about 1 hour on 8 A100 GPUs to finetune a 8B
 # Llama3.1 model with LoRA on finance dataset.
 sky launch -c llama31 lora.yaml \
-  --env HF_TOKEN  --env MODEL_SIZE=8B \
+  --secret HF_TOKEN  --env MODEL_SIZE=8B \
   --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name" \
   --env DATASET="gbharti/finance-alpaca"
 ```
@@ -183,7 +183,7 @@ curl http://$ENDPOINT/v1/chat/completions \
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch serve.yaml -c llama31-serve --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch serve.yaml -c llama31-serve --secret HF_TOKEN
 
 envs:
   MODEL_SIZE: 8B

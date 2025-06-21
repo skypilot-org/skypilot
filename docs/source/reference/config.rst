@@ -76,9 +76,11 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
-  
-  :ref: `ssh <config-yaml-ssh>`:
-    :ref: `allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+    :ref:`kueue <config-yaml-kubernetes-kueue>`:
+      :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+
+  :ref:`ssh <config-yaml-ssh>`:
+    :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
 
@@ -145,6 +147,17 @@ Below is the configuration syntax and some example values. See detailed explanat
       fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+
+  :ref:`rbac <config-yaml-rbac>`:
+    :ref:`default_role <config-yaml-rbac-default-role>`: admin
+
+  :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
+
+  :ref:`logs <config-yaml-logs>`:
+    :ref:`store <config-yaml-logs-store>`: gcp
+    gcp:
+      project_id: my-project-id
+
 
 Fields
 ----------
@@ -1067,8 +1080,25 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+.. _config-yaml-kubernetes-kueue:
+
+``kubernetes.kueue``
+~~~~~~~~~~~~~~~~~~~~~
+
+Kueue configuration (optional).
+
+.. _config-yaml-kubernetes-kueue-local-queue-name:
+
+``kubernetes.kueue.local_queue_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
+
+
+.. _config-yaml-ssh:
+
 ``ssh``
-~~~~~~~~~~~~~~~
+~~~~~~~
 
 Advanced SSH node pool configuration (optional).
 
@@ -1222,8 +1252,79 @@ Example:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
 
+.. _config-yaml-rbac:
+
+``rbac``
+~~~~~~~~
+
+RBAC configuration (optional).
+
+.. _config-yaml-rbac-default-role:
+
+``rbac.default_role``
+~~~~~~~~~~~~~~~~~~~~~
+
+Default role for users (optional).  Either ``admin`` or ``user``.
+
+If not specified, the default role is ``admin``.
+
+Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <api-server-basic-auth>` is configured.
+
+.. _config-yaml-db:
+
+``db``
+~~~~~~
+
+API Server database configuration (optional).
+
+Specify the database connection string to use for SkyPilot. If not specified,
+SkyPilot will use a SQLite database initialized in the ``~/.sky`` directory.
+
+If a PostgreSQL database URL is specified, SkyPilot will use the database to
+persist API server state.
+
+Currently, managed job controller state is not persisted in remote databases
+even if ``db`` is specified.
+
+.. note::
+
+  If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
+
+  Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
+
+Example:
+
+.. code-block:: yaml
+
+  db: postgresql://postgres@localhost/skypilot
 
 .. toctree::
    :hidden:
 
    Configuration Sources <config-sources>
+
+.. _config-yaml-logs:
+
+``logs``
+~~~~~~~~
+
+External logging storage configuration (optional).
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp
+    gcp:
+      project_id: my-project-id
+
+.. _config-yaml-logs-store:
+
+``logs.store``
+~~~~~~~~~~~~~~
+
+The type of external logging storage to use. Each logging storage might have its own configuration options under ``logs.<store>`` structure. Refer to the :ref:`External Logging Storage <external-logging-storage>` for more details.
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp

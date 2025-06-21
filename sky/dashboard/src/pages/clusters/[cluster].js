@@ -8,7 +8,13 @@ import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { RotateCwIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  CheckIcon,
+} from 'lucide-react';
 import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
@@ -20,6 +26,7 @@ import {
 } from '@/components/elements/modals';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
+import { formatYaml } from '@/lib/yamlUtils';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -96,7 +103,7 @@ function ClusterDetails() {
       <Head>
         <title>{title}</title>
       </Head>
-      <Layout highlighted="clusters">
+      <>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
             <Link href="/clusters" className="text-sky-blue hover:underline">
@@ -174,7 +181,7 @@ function ClusterDetails() {
           onClose={() => setIsVSCodeModalOpen(false)}
           cluster={cluster}
         />
-      </Layout>
+      </>
     </>
   );
 }
@@ -186,55 +193,31 @@ function ActiveTab({
   refreshClusterJobsOnly,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isCommandCopied, setIsCommandCopied] = useState(false);
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
 
-  const formatYaml = (yamlString) => {
-    if (!yamlString) return 'No YAML available';
-
+  const copyYamlToClipboard = async () => {
     try {
-      // Parse the YAML string into an object
-      const parsed = yaml.load(yamlString);
+      const formattedYaml = formatYaml(clusterData.task_yaml);
+      await navigator.clipboard.writeText(formattedYaml);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy YAML to clipboard:', err);
+    }
+  };
 
-      // Re-serialize with pipe syntax for multiline strings
-      const formatted = yaml.dump(parsed, {
-        lineWidth: -1, // Disable line wrapping
-        styles: {
-          '!!str': 'literal', // Use pipe (|) syntax for multiline strings
-        },
-        quotingType: "'", // Use single quotes for strings that need quoting
-        forceQuotes: false, // Only quote when necessary
-        noRefs: true, // Disable YAML references
-        sortKeys: false, // Preserve original key order
-        condenseFlow: false, // Don't condense flow style
-        indent: 2, // Use 2 spaces for indentation
-      });
-
-      // Add blank lines between top-level sections for better readability
-      const lines = formatted.split('\n');
-      const result = [];
-      let prevIndent = -1;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const currentIndent = line.search(/\S/); // Find first non-whitespace
-
-        // Add blank line before new top-level sections (indent = 0)
-        if (currentIndent === 0 && prevIndent >= 0 && i > 0) {
-          result.push('');
-        }
-
-        result.push(line);
-        prevIndent = currentIndent;
-      }
-
-      return result.join('\n').trim();
-    } catch (e) {
-      console.error('YAML formatting error:', e);
-      // If parsing fails, return the original string
-      return yamlString;
+  const copyCommandToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(clusterData.command);
+      setIsCommandCopied(true);
+      setTimeout(() => setIsCommandCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy command to clipboard:', err);
     }
   };
 
@@ -331,8 +314,27 @@ function ActiveTab({
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
                 <div className="col-span-2">
-                  <div className="text-gray-600 font-medium text-base">
-                    Entrypoint
+                  <div className="flex items-center">
+                    <div className="text-gray-600 font-medium text-base">
+                      Entrypoint
+                    </div>
+                    {clusterData.command && (
+                      <Tooltip
+                        content={isCommandCopied ? 'Copied!' : 'Copy command'}
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={copyCommandToClipboard}
+                          className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                        >
+                          {isCommandCopied ? (
+                            <CheckIcon className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <CopyIcon className="w-4 h-4" />
+                          )}
+                        </button>
+                      </Tooltip>
+                    )}
                   </div>
 
                   <div className="space-y-4 mt-3">
@@ -349,13 +351,17 @@ function ActiveTab({
 
                     {/* Task YAML - Collapsible */}
                     {clusterData.task_yaml &&
-                      clusterData.task_yaml !== '{}' && (
+                      clusterData.task_yaml !== '{}' &&
+                      !clusterData.cluster.startsWith('sky-jobs-controller-') &&
+                      !clusterData.cluster.startsWith(
+                        'sky-serve-controller-'
+                      ) && (
                         <div>
-                          <button
-                            onClick={toggleYamlExpanded}
-                            className="flex items-center text-left focus:outline-none mb-2 text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                          >
-                            <div className="flex items-center">
+                          <div className="flex items-center mb-2">
+                            <button
+                              onClick={toggleYamlExpanded}
+                              className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                            >
                               {isYamlExpanded ? (
                                 <ChevronDownIcon className="w-4 h-4 mr-1" />
                               ) : (
@@ -364,8 +370,24 @@ function ActiveTab({
                               <span className="text-base">
                                 Show SkyPilot YAML
                               </span>
-                            </div>
-                          </button>
+                            </button>
+
+                            <Tooltip
+                              content={isCopied ? 'Copied!' : 'Copy YAML'}
+                              className="text-muted-foreground"
+                            >
+                              <button
+                                onClick={copyYamlToClipboard}
+                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                              >
+                                {isCopied ? (
+                                  <CheckIcon className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <CopyIcon className="w-4 h-4" />
+                                )}
+                              </button>
+                            </Tooltip>
+                          </div>
 
                           {isYamlExpanded && (
                             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">

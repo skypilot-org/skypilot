@@ -196,39 +196,6 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
 The UI shows the same information as the CLI ``sky jobs queue -au``.
 
 
-.. _job-priority:
-
-Job queueing and priority
--------------------------
-
-Job queueing and priority are supported by managed jobs.
-
-
-Specify job priority by setting the ``job.priority`` field in the job YAML.
-
-.. code-block:: yaml
-
-  job:
-    # Priority of the job, between 0 and 1000 (default: 500).
-    #
-    # A lower value means that the job is higher priority. High priority jobs
-    # are scheduled sooner and will block lower priority jobs from starting
-    # until the high priority jobs have started.
-    priority: 500
-
-
-All jobs are submitted to a queue. When the scheduler is selecting the next job
-to schedule, it will select the highest priority job.
-
-If a high priority job is still launching, lower priority jobs will not be
-scheduled (i.e., stay in pending).
-
-.. image:: https://i.imgur.com/8H8ictY.png
-  :width: 800
-  :alt: Job queueing and priority
-
-
-
 .. _spot-jobs:
 
 Running on spot instances
@@ -344,7 +311,7 @@ Jobs restarts on user code failure
 Preemptions or hardware failures will be auto-recovered, but **by default, user code failures (non-zero exit codes) are not auto-recovered**.
 
 In some cases, you may want a job to automatically restart even if it fails in application code. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To specify this, you
-can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the job YAML file.
+can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
 
 .. code-block:: yaml
 

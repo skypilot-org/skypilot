@@ -7,10 +7,10 @@ to access the SCP catalog and check credentials for the SCP access.
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky.clouds import service_catalog
 from sky.clouds.utils import scp_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -59,13 +59,14 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is currently not supported in '
              f'{_REPR}.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            (f'Opening ports is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             (f'High availability controllers are not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
+
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -84,7 +85,7 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def regions(cls) -> List['clouds.Region']:
-        return service_catalog.regions(clouds='scp')
+        return catalog.regions(clouds='scp')
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
@@ -99,7 +100,7 @@ class SCP(clouds.Cloud):
             # Fall back to default regions
             regions = cls.regions()
         else:
-            regions = service_catalog.get_region_zones_for_instance_type(
+            regions = catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'scp')
 
         if region is not None:
@@ -131,11 +132,11 @@ class SCP(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='scp')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='scp')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -156,26 +157,26 @@ class SCP(clouds.Cloud):
         memory: Optional[str] = None,
         disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='scp')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='scp')
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='scp')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='scp')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='scp')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='scp')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -223,9 +224,9 @@ class SCP(clouds.Cloud):
             assert region_name in image_id, image_id
             image_id_str = image_id[region_name]
         if image_id_str.startswith('skypilot:'):
-            image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
-                                                                 region_name,
-                                                                 clouds='scp')
+            image_id_str = catalog.get_image_id_from_tag(image_id_str,
+                                                         region_name,
+                                                         clouds='scp')
             if image_id_str is None:
                 # Raise ResourcesUnavailableError to make sure the failover
                 # in CloudVMRayBackend will be correctly triggered.
@@ -238,13 +239,14 @@ class SCP(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag('skypilot:ubuntu-2004',
-                                                         region_name,
-                                                         clouds='scp')
+        image_id = catalog.get_image_id_from_tag('skypilot:ubuntu-2004',
+                                                 region_name,
+                                                 clouds='scp')
         if acc is not None:
             assert len(acc) == 1, acc
-            image_id = service_catalog.get_image_id_from_tag(
-                'skypilot:gpu-ubuntu-1804', region_name, clouds='scp')
+            image_id = catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2204',
+                                                     region_name,
+                                                     clouds='scp')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -302,16 +304,16 @@ class SCP(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='scp')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='scp')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -324,7 +326,7 @@ class SCP(clouds.Cloud):
         """Checks if the user has access credentials to
         SCP's compute service."""
         try:
-            scp_utils.SCPClient().list_instances()
+            scp_utils.SCPClient().get_instances()
         except (AssertionError, KeyError, scp_utils.SCPClientError,
                 scp_utils.SCPCreationFailError):
             return False, (
@@ -351,10 +353,10 @@ class SCP(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'scp')
+        return catalog.instance_type_exists(instance_type, 'scp')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='scp')
+        return catalog.validate_region_zone(region, zone, clouds='scp')
 
     @staticmethod
     def _is_disk_size_allowed(resources):
@@ -373,25 +375,5 @@ class SCP(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         del tag_filters, region, zone, kwargs  # Unused.
-
-        # TODO: Multi-node is not supported yet.
-
-        status_map = {
-            'CREATING': status_lib.ClusterStatus.INIT,
-            'EDITING': status_lib.ClusterStatus.INIT,
-            'RUNNING': status_lib.ClusterStatus.UP,
-            'STARTING': status_lib.ClusterStatus.INIT,
-            'RESTARTING': status_lib.ClusterStatus.INIT,
-            'STOPPING': status_lib.ClusterStatus.STOPPED,
-            'STOPPED': status_lib.ClusterStatus.STOPPED,
-            'TERMINATING': None,
-            'TERMINATED': None,
-        }
-        status_list = []
-        vms = scp_utils.SCPClient().list_instances()
-        for node in vms:
-            if node['virtualServerName'] == name:
-                node_status = status_map[node['virtualServerState']]
-                if node_status is not None:
-                    status_list.append(node_status)
-        return status_list
+        # TODO: deprecate this method
+        assert False, 'This code path should not be used.'
