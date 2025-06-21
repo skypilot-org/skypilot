@@ -200,6 +200,8 @@ export function formatDuration(durationInSeconds) {
   durationInSeconds = Math.floor(durationInSeconds);
 
   const units = [
+    { value: 31536000, label: 'y' }, // years (365 days)
+    { value: 2592000, label: 'mo' }, // months (30 days)
     { value: 86400, label: 'd' }, // days
     { value: 3600, label: 'h' }, // hours
     { value: 60, label: 'm' }, // minutes

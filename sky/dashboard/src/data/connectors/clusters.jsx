@@ -106,6 +106,75 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getClusterHistory() {
+  try {
+    const costReportRequest = await apiClient.get('/cost_report');
+    const id =
+      costReportRequest.headers.get('X-Skypilot-Request-ID') ||
+      costReportRequest.headers.get('X-Request-ID');
+    const costReportResponse = await apiClient.get(`/api/get?request_id=${id}`);
+    const historyContent = await costReportResponse.json();
+    let history = JSON.parse(historyContent.return_value);
+
+    console.log('Raw cluster history data:', history); // Debug log
+
+    const historyData = history.map((cluster) => {
+      // Get cloud name from resources if available
+      let cloud = 'Unknown';
+      if (cluster.cloud) {
+        cloud = cluster.cloud;
+      } else if (cluster.resources && cluster.resources.cloud) {
+        cloud = cluster.resources.cloud;
+      }
+
+      // Get user name - need to look up from user_hash if needed
+      let user_name = cluster.user_name || '-';
+
+      // Extract resource info
+
+      return {
+        status: cluster.status
+          ? clusterStatusMap[cluster.status]
+          : 'TERMINATED',
+        cluster: cluster.name,
+        user: user_name,
+        user_hash: cluster.user_hash,
+        cloud: cloud,
+        region: '',
+        infra: cloud,
+        full_infra: cloud,
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
+        num_nodes: cluster.num_nodes || 1,
+        duration: cluster.duration,
+        total_cost: cluster.total_cost,
+        workspace: cluster.workspace || 'default',
+        autostop: -1,
+        to_down: false,
+        cluster_hash: cluster.cluster_hash,
+        usage_intervals: cluster.usage_intervals,
+        command: cluster.last_creation_command || '-',
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: cluster.launched_at
+              ? new Date(cluster.launched_at * 1000)
+              : new Date(),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+
+    console.log('Processed cluster history data:', historyData); // Debug log
+    return historyData;
+  } catch (error) {
+    console.error('Error fetching cluster history:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,
