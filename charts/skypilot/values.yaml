@@ -142,6 +142,12 @@ ingress:
     client-id: ""
     # Client Secret from OIDC provider (Okta) (required when enabled=true)
     client-secret: ""
+    # Alternative: Get both client ID and client secret from a Kubernetes secret
+    # If set to a secret name, both client-id and client-secret values above are ignored
+    # The secret must contain keys named "client-id" and "client-secret"
+    # If empty/null, the above client-id and client-secret values are used instead
+    # See https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#auth-proxy-client-secret
+    client-details-from-secret: ""
     # Use HTTPS (set to true for production environments)
     use-https: false
     # Email domains to allow (use "*" for all domains)
