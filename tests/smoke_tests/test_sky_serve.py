@@ -428,8 +428,15 @@ def test_skyserve_dynamic_ondemand_fallback():
             'sleep 40',
             _check_replica_in_status(name, [
                 (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
             ]),
+
+            # a) The instance may still be in READY state when we check the
+            # status, before transitioning to SHUTTING_DOWN.
+            # b) And in SHUTTING_DOWN state, it may actually SHUTDOWN and
+            # disappear. So we check 1 instance instead of 2. Because it
+            # can be 1 or 2.
+            f'count=$(sky serve status {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\|SHUTTING_DOWN\|READY" | wc -l); '
+            f'[ "$count" -eq 1 ] || [ "$count" -eq 2 ] || {{ echo "Expected 1 or 2 instances, got $count"; exit 1; }}',
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -442,9 +449,14 @@ def test_skyserve_dynamic_ondemand_fallback():
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -q "1/3"',
             _check_replica_in_status(
-                name, [(1, True, 'READY'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+                name,
+                [
+                    # The newly launched instance may transition to READY status
+                    # quickly, so when checking status it could be either READY or
+                    # LAUNCHING.
+                    (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+                ]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
