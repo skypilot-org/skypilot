@@ -198,6 +198,7 @@ SERIES_TO_DESCRIPTION = {
     'n1': 'N1 Predefined Instance',
     'n2': 'N2 Instance',
     'n2d': 'N2D AMD Instance',
+    'n4': 'N4 Instance',
     't2a': 'T2A Arm Instance',
     't2d': 'T2D AMD Instance',
 }
