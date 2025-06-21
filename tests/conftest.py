@@ -177,6 +177,13 @@ def pytest_addoption(parser):
         default='',
         help='Package name to use for Helm tests',
     )
+    parser.addoption(
+        '--jobs-consolidation',
+        action='store_true',
+        default=False,
+        help=
+        'If set, the tests will be run in jobs consolidation mode(The config change is made is buildkite so this is a flag to ensure the tests will not be skipped but no actual effect)',
+    )
 
 
 def pytest_configure(config):
