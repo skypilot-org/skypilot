@@ -3,6 +3,7 @@ name: tcpx-sglang-serving-gke2
 resources:
   infra: k8s
   gpus: H100:8
+  network_tier: best
   disk_size: 1024
   disk_tier: best
   ports: 30000
