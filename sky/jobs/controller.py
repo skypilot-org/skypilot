@@ -606,9 +606,8 @@ def _cleanup(job_id: int, dag_yaml: str):
                 # For consolidation mode, there is no two-hop file mounts
                 # and the file path here represents the real user data.
                 # We skip the cleanup for consolidation mode.
-                if not data_utils.is_cloud_store_url(
-                        file_mount
-                ) and not managed_job_utils.is_consolidation_mode():
+                if (not data_utils.is_cloud_store_url(file_mount) and
+                        not managed_job_utils.is_consolidation_mode()):
                     path = os.path.expanduser(file_mount)
                     if os.path.isdir(path):
                         shutil.rmtree(path)

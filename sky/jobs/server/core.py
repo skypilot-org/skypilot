@@ -98,11 +98,11 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
 
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
-    consolidation_mode_job_id = (managed_job_state.set_job_info_without_job_id(
+    consolidation_mode_job_id = managed_job_state.set_job_info_without_job_id(
         dag.name,
         workspace=skypilot_config.get_active_workspace(
             force_user_workspace=True),
-        entrypoint=common_utils.get_current_command()))
+        entrypoint=common_utils.get_current_command())
     for task_id, task in enumerate(dag.tasks):
         resources_str = backend_utils.get_task_resources_str(
             task, is_managed_job=True)
@@ -337,7 +337,7 @@ def launch(
                     storage_mounts=controller_task.storage_mounts)
                 run_script = controller_task.run
                 assert isinstance(run_script, str)
-                # Manually add the envs variable to the run script. Originally
+                # Manually add the env variables to the run script. Originally
                 # this is done in ray jobs submission but now we have to do it
                 # manually because there is no ray runtime on the API server.
                 env_cmds = [
@@ -345,7 +345,7 @@ def launch(
                     for k, v in controller_task.envs.items()
                 ]
                 run_script = '\n'.join(env_cmds + [run_script])
-                # High availability recovery.
+                # Dump script for high availability recovery.
                 if controller_utils.high_availability_specified(
                         controller_name):
                     dump_script_path = (
