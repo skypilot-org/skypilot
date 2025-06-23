@@ -248,6 +248,7 @@ def launch(
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         consolidation_mode_job_id = None
+        modified_catalogs = {}
         # In normal mode the managed job submission is done in the ray job
         # submission. For consolidation mode, we need to manually submit it.
         # Check the following function for the normal mode submission:
@@ -266,6 +267,11 @@ def launch(
                     task, is_managed_job=True)
                 managed_job_state.set_pending(consolidation_mode_job_id,
                                               task_id, task.name, resources_str)
+        else:
+            # This is only needed for non-consolidation mode. For consolidation
+            # mode, the controller uses the same catalog as API server.
+            modified_catalogs = (
+                service_catalog_common.get_modified_catalog_file_mounts())
 
         vars_to_fill = {
             'remote_original_user_yaml_path': remote_original_user_yaml_path,
@@ -278,8 +284,7 @@ def launch(
             'dag_name': dag.name,
             'remote_user_config_path': remote_user_config_path,
             'remote_env_file_path': remote_env_file_path,
-            'modified_catalogs':
-                service_catalog_common.get_modified_catalog_file_mounts(),
+            'modified_catalogs': modified_catalogs,
             'priority': priority,
             'consolidation_mode_job_id': consolidation_mode_job_id,
             **controller_utils.shared_controller_vars_to_fill(
