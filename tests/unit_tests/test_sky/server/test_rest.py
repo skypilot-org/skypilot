@@ -124,9 +124,10 @@ class TestRetryOnServerUnavailableDecorator:
             assert result == "success"
 
         # Check that sleep times increase (exponential backoff)
-        assert len(sleep_times) == 2
+        assert len(sleep_times) == 3
         assert sleep_times[0] >= 1.0  # Initial backoff
         assert sleep_times[1] > sleep_times[0]  # Should increase
+        assert sleep_times[2] > sleep_times[1]  # Should increase
 
     @mock.patch('sky.utils.rich_utils.client_status')
     def test_status_message_displayed_during_retry(self, mock_status):

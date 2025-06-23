@@ -53,11 +53,6 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
-            try:
-                return func(*args, **kwargs)
-            except exceptions.ServerTemporarilyUnavailableError:
-                pass
-
             msg = (f'{colorama.Fore.YELLOW}API server is temporarily '
                    f'unavailable. Retrying...{colorama.Style.RESET_ALL}')
             backoff = common_utils.Backoff(
