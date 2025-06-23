@@ -70,6 +70,35 @@ _AUTOSTOP_SCHEMA = {
 }
 
 
+# Note: This is similar to _get_infra_pattern()
+# but without the wildcard patterns.
+def _get_volume_infra_pattern():
+    # Building the regex pattern for the infra field
+    # Format: cloud[/region[/zone]] or wildcards or kubernetes context
+    # Match any cloud name (case insensitive)
+    all_clouds = list(constants.ALL_CLOUDS)
+    all_clouds.remove('kubernetes')
+    cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
+
+    # Optional /region followed by optional /zone
+    # /[^/]+ matches a slash followed by any characters except slash (region or
+    # zone name)
+    # The outer (?:...)? makes the entire region/zone part optional
+    region_zone_pattern = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Kubernetes specific pattern - matches:
+    # 1. Just the word "kubernetes" or "k8s" by itself
+    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain
+    # slashes)
+    kubernetes_pattern = '(?i:kubernetes|k8s)(?:/.+)?'
+
+    # Combine all patterns with alternation (|)
+    # ^ marks start of string, $ marks end of string
+    infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
+                     f'{kubernetes_pattern})$')
+    return infra_pattern
+
+
 def _get_infra_pattern():
     # Building the regex pattern for the infra field
     # Format: cloud[/region[/zone]] or wildcards or kubernetes context
@@ -407,18 +436,15 @@ def get_volume_schema():
             },
             'infra': {
                 'type': 'string',
-                'description':
-                    ('Infrastructure specification in format: '
-                     'cloud[/region[/zone]]. Use "*" as a wildcard.'),
+                'description': ('Infrastructure specification in format: '
+                                'cloud[/region[/zone]].'),
                 # Pattern validates:
                 # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
                 #    "aws/us-east-1/us-east-1a"
-                # 2. Wildcard patterns - e.g. "*", "*/us-east-1",
-                #    "*/*/us-east-1a", "aws/*/us-east-1a"
-                # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
+                # 2. Kubernetes patterns - e.g. "kubernetes/my-context",
                 #    "k8s/context-name",
                 #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
-                'pattern': _get_infra_pattern(),
+                'pattern': _get_volume_infra_pattern(),
             },
             'size': {
                 'type': 'string',

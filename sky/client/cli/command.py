@@ -3776,7 +3776,9 @@ def _adjust_volume_config(volume_config: Dict[str, Any]) -> None:
 
 
 def _validate_volume_config(volume_config: Dict[str, Any]) -> None:
-    if ('resource_name' not in volume_config and 'size' not in volume_config):
+    if (('resource_name' not in volume_config or
+         not volume_config['resource_name']) and
+        ('size' not in volume_config or not volume_config['size'])):
         raise click.BadParameter('Size is required for new volumes. '
                                  'Please specify the size in the YAML file or '
                                  'use the --size flag.')
@@ -3958,14 +3960,13 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
+    all_volumes = sdk.get(volumes_sdk.ls())
     if all:
-        all_volumes = sdk.get(volumes_sdk.ls())
         if not all_volumes:
             click.echo('No volumes to delete.')
             return
         names = [volume['name'] for volume in all_volumes]
     else:
-        all_volumes = sdk.get(volumes_sdk.ls())
         existing_volume_names = [volume['name'] for volume in all_volumes]
         names = _get_glob_matches(existing_volume_names, names)
     if names:
