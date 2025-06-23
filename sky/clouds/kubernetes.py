@@ -640,26 +640,8 @@ class Kubernetes(clouds.Cloud):
             None,
             override_configs=resources.cluster_config_overrides)
 
-        # Configure TCPX resource allocation by extracting from k8s_resource_key
-        # This must happen before deploy_vars is created to ensure the modified
-        # k8s_resource_key is properly saved
         cluster_type = self._detect_cluster_type(
             region.name if region else 'default')
-        tcpx_enabled = (
-            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
-        if (tcpx_enabled and k8s_resource_key is not None and
-                k8s_resource_key == kubernetes_utils.get_gpu_resource_key()):
-            # Extract nvidia GPU resources from
-            # k8s_resource_key and move to TCPX daemon
-            k8s_tcpx_resource_key = k8s_resource_key
-            k8s_tcpx_accelerator_count = str(acc_count)
-            # Remove GPU resources from ray-node by setting
-            # k8s_resource_key to None
-            k8s_resource_key = None
-        else:
-            # Normal case: no TCPX GPU extraction needed
-            k8s_tcpx_resource_key = None
-            k8s_tcpx_accelerator_count = '0'
 
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
@@ -771,9 +753,6 @@ class Kubernetes(clouds.Cloud):
 
         deploy_vars['k8s_ipc_lock_capability'] = (
             cluster_type.requires_ipc_lock_capability())
-
-        deploy_vars['k8s_tcpx_resource_key'] = k8s_tcpx_resource_key
-        deploy_vars['k8s_tcpx_accelerator_count'] = k8s_tcpx_accelerator_count
 
         return deploy_vars
 
