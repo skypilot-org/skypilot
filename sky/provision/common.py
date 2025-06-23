@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.utils import env_options
 from sky.utils import resources_utils
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
@@ -244,6 +245,15 @@ class SocketEndpoint(Endpoint):
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
+        if env_options.Options.RUNNING_IN_BUILDKITE.get(
+        ) and 'localhost' in host:
+            # In Buildkite CI, we run a kind (Kubernetes in Docker) cluster.
+            # The controller pod runs inside this kind cluster, which itself
+            # runs in a container. When the pod tries to access 'localhost',
+            # it can't reach the host machine's localhost. Using
+            # 'host.docker.internal' allows the pod to properly communicate
+            # with services running on the host machine's localhost.
+            host = 'host.docker.internal'
         return f'{host}{":" + str(self.port) if self.port else ""}'
 
 

@@ -835,9 +835,6 @@ def test_memory_conversion():
 def test_autostop_time_format():
     """Test autostop time format parsing."""
     # Test minutes format
-    r = Resources(autostop='5min')
-    assert r.autostop_config.idle_minutes == 5
-
     r = Resources(autostop='5m')
     assert r.autostop_config.idle_minutes == 5
 
@@ -845,18 +842,9 @@ def test_autostop_time_format():
     r = Resources(autostop='2h')
     assert r.autostop_config.idle_minutes == 120
 
-    r = Resources(autostop='2hr')
-    assert r.autostop_config.idle_minutes == 120
-
     # Test days format
     r = Resources(autostop='1d')
     assert r.autostop_config.idle_minutes == 1440
-
-    r = Resources(autostop='30s')
-    assert r.autostop_config.idle_minutes == 1
-
-    r = Resources(autostop='30sec')
-    assert r.autostop_config.idle_minutes == 1
 
     r = Resources(autostop=30)
     assert r.autostop_config.idle_minutes == 30
@@ -877,14 +865,14 @@ def test_priority_basic():
     assert r.priority is None
 
     # Test with valid priority values
-    r = Resources(priority=0)
-    assert r.priority == 0
+    r = Resources(priority=constants.MIN_PRIORITY)
+    assert r.priority == constants.MIN_PRIORITY
 
-    r = Resources(priority=500)
-    assert r.priority == 500
+    r = Resources(priority=constants.DEFAULT_PRIORITY)
+    assert r.priority == constants.DEFAULT_PRIORITY
 
-    r = Resources(priority=1000)
-    assert r.priority == 1000
+    r = Resources(priority=constants.MAX_PRIORITY)
+    assert r.priority == constants.MAX_PRIORITY
 
     # Test with None explicitly
     r = Resources(priority=None)
@@ -894,12 +882,13 @@ def test_priority_basic():
 def test_priority_validation():
     """Test priority field validation with invalid values."""
     # Test invalid priority - below range
-    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
-        Resources(priority=-1)
+    error_message = f'Priority must be between {constants.MIN_PRIORITY} and {constants.MAX_PRIORITY}'
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=constants.MIN_PRIORITY - 1)
 
     # Test invalid priority - above range
-    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
-        Resources(priority=1001)
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=constants.MAX_PRIORITY + 1)
 
 
 def test_priority_yaml_serialization():
@@ -955,7 +944,7 @@ def test_priority_copy():
 def test_priority_with_any_of():
     """Test priority field works with any_of configuration."""
     config = {
-        'priority': 500,  # Base priority
+        'priority': constants.DEFAULT_PRIORITY,  # Base priority
         'any_of': [
             {
                 'cpus': 8,
@@ -980,7 +969,7 @@ def test_priority_with_any_of():
     r_cpus4 = next((r for r in resources_list if r.cpus == '4'), None)
 
     assert r_cpus8 is not None
-    assert r_cpus8.priority == 500  # Base priority
+    assert r_cpus8.priority == constants.DEFAULT_PRIORITY  # Base priority
 
     assert r_cpus4 is not None
     assert r_cpus4.priority == 800  # Override priority

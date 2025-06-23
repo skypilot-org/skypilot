@@ -113,7 +113,7 @@ def create_table(cursor, conn):
 
     # `job_info` contains the mapping from job_id to the job_name, as well as
     # information used by the scheduler.
-    cursor.execute("""\
+    cursor.execute(f"""\
         CREATE TABLE IF NOT EXISTS job_info (
         spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -123,7 +123,7 @@ def create_table(cursor, conn):
         env_file_path TEXT,
         user_hash TEXT,
         workspace TEXT DEFAULT NULL,
-        priority INTEGER DEFAULT 500,
+        priority INTEGER DEFAULT {constants.DEFAULT_PRIORITY},
         entrypoint TEXT DEFAULT NULL,
         original_user_yaml_path TEXT DEFAULT NULL)""")
 
@@ -148,12 +148,13 @@ def create_table(cursor, conn):
                                  'TEXT DEFAULT NULL',
                                  value_to_replace_existing_entries='default')
 
-    db_utils.add_column_to_table(cursor,
-                                 conn,
-                                 'job_info',
-                                 'priority',
-                                 'INTEGER',
-                                 value_to_replace_existing_entries=500)
+    db_utils.add_column_to_table(
+        cursor,
+        conn,
+        'job_info',
+        'priority',
+        'INTEGER',
+        value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'entrypoint', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'job_info',
@@ -460,6 +461,21 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
             VALUES (?, ?, ?, ?, ?)""",
             (job_id, name, ManagedJobScheduleState.INACTIVE.value, workspace,
              entrypoint))
+
+
+@_init_db
+def set_job_info_without_job_id(name: str, workspace: str,
+                                entrypoint: str) -> int:
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT INTO job_info
+            (name, schedule_state, workspace, entrypoint)
+            VALUES (?, ?, ?, ?)""",
+            (name, ManagedJobScheduleState.INACTIVE.value, workspace,
+             entrypoint))
+        return cursor.lastrowid
 
 
 @_init_db

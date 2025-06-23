@@ -948,11 +948,8 @@ function JobDetailsContent({
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
-        <div className="text-base mt-1 flex items-center">
+        <div className="text-base mt-1">
           <StatusBadge status={jobData.status} />
-          {jobData.priority && (
-            <span className="ml-2"> (Priority: {jobData.priority})</span>
-          )}
         </div>
       </div>
       <div>

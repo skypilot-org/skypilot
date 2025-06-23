@@ -827,7 +827,7 @@ available_node_types:
               {% if high_availability %}
               mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
               if [ -f {{k8s_high_availability_deployment_volume_mount_path}}/k8s_container_ready ]; then
-                SKYPILOT_HA_RECOVERY_LOG="/tmp/ha_recovery.log"
+                SKYPILOT_HA_RECOVERY_LOG="{{ha_recovery_log_path}}"
                 echo "Starting HA recovery at $(date)" >> $SKYPILOT_HA_RECOVERY_LOG
                 start_time=$SECONDS
                 retry_count=0
