@@ -379,7 +379,26 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to control requests when server is shutting down."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if state.get_block_requests():
+            # Allow /api/ paths to continue, which are critical to operate
+            # on-going requests but will not submit new requests.
+            if not request.url.path.startswith('/api/'):
+                return fastapi.responses.JSONResponse(
+                    status_code=503,
+                    content={
+                        'detail': 'Server is shutting down, '
+                                  'please try again later.'
+                    })
+
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(GracefulShutdownMiddleware)  # Add the new middleware
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
@@ -1149,6 +1168,10 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         if request_task.status > requests_lib.RequestStatus.RUNNING:
+            if request_task.should_retry:
+                raise fastapi.HTTPException(
+                    status_code=503,
+                    detail=f'Request {request_id!r} should be retried')
             request_error = request_task.get_error()
             if request_error is not None:
                 raise fastapi.HTTPException(status_code=500,

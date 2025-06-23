@@ -18,6 +18,7 @@ from uvicorn.supervisors import multiprocess
 from sky import sky_logging
 from sky.server import state
 from sky.server.requests import requests as requests_lib
+from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
 
@@ -29,13 +30,16 @@ _GRACEFUL_SHUTDOWN_LOCK_PATH = '/tmp/skypilot_graceful_shutdown.lock'
 # Interval to check for on-going requests.
 _WAIT_REQUESTS_INTERVAL_SECONDS = 5
 
-# Seconds to wait for readiness probe marks us as unhealthy.
-# TODO(aylei): make this configurable.
-_WAIT_READINESS_PROBE_FAIL_SECONDS = 5
+# Timeout for waiting for on-going requests to finish.
+try:
+    _WAIT_REQUESTS_TIMEOUT_SECONDS = int(
+        os.environ.get(constants.GRACE_PERIOD_SECONDS_ENV_VAR, '60'))
+except ValueError:
+    _WAIT_REQUESTS_TIMEOUT_SECONDS = 60
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
-_LONG_RUNNING_REQUEST_NAMES = [
+_RETRIABLE_REQUEST_NAMES = [
     'sky.logs',
     'sky.jobs.logs',
     'sky.serve.logs',
@@ -76,47 +80,30 @@ class Server(uvicorn.Server):
                              daemon=True).start()
 
     def _graceful_shutdown(self) -> None:
-        """Perform graceful shutdown.
-
-        Graceful shutdown process:
-        1. All handlers EXCEPT `/api/${verb}` will return 503 with custom
-           headers for new requests;
-        2. On-going `resources/${logs}` requests will be interrupted and
-           return 503 with custom headers;
-        3. Wait until there is no on-going requests, then shutdown the
-           uvicorn server.
-        """
+        """Perform graceful shutdown."""
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
         # this stage to ensure the client can still operate the on-going
         # requests, e.g. /api/logs, /api/cancel, etc.
-        logger.info(f'Graceful shutdown: block new requests being submitted '
-                    f'in worker {os.getpid()}.')
+        logger.info('Block new requests being submitted in worker '
+                    f'{os.getpid()}.')
         state.set_block_requests(True)
-        # Ensure the block_requests are set on all workers before next step.
+        # Ensure the shutting_down are set on all workers before next step.
         # TODO(aylei): hacky, need a reliable solution.
         time.sleep(1)
 
         lock = filelock.FileLock(_GRACEFUL_SHUTDOWN_LOCK_PATH)
         # Elect a coordinator process to handle on-going requests check
         with lock.acquire():
-            logger.info(f'Graceful shutdown: worker {os.getpid()} elected as '
-                        'shutdown coordinator')
+            logger.info(f'Worker {os.getpid()} elected as shutdown coordinator')
             self._wait_requests()
-
-        # Block all API operations and wait us getting removed from the
-        # backend list. We do not close the server process here so that
-        # we can return a clear retryable error to the client.
-        state.set_block_all(True)
-        logger.info('Graceful shutdown: wait for '
-                    f'{_WAIT_READINESS_PROBE_FAIL_SECONDS} to ')
-        time.sleep(_WAIT_READINESS_PROBE_FAIL_SECONDS)
 
         self.should_exit = True
         super().handle_exit(signal.SIGINT, None)
 
     def _wait_requests(self) -> None:
         """Wait until all on-going requests are finished or cancelled."""
+        start_time = time.time()
         while True:
             statuses = [
                 requests_lib.RequestStatus.PENDING,
@@ -125,23 +112,39 @@ class Server(uvicorn.Server):
             reqs = requests_lib.get_request_tasks(status=statuses)
             if not reqs:
                 break
-            logger.info(f'Graceful shutdown: {len(reqs)} on-going requests '
+            logger.info(f'{len(reqs)} on-going requests '
                         'found, waiting for them to finish...')
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
             internal_request_ids = [
                 d.id for d in requests_lib.INTERNAL_REQUEST_DAEMONS
             ]
+            if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
+                logger.warning('Timeout waiting for on-going requests to '
+                               'finish, cancelling all on-going requests.')
+                for req in reqs:
+                    self.interrupt_request_for_retry(req.request_id)
+                break
             for req in reqs:
                 if req.request_id in internal_request_ids:
-                    requests_lib.set_request_cancelled(req.request_id)
-                    logger.info(f'Graceful shutdown: internal request ' \
-                                f'{req.request_id} cancelled')
-                elif req.name in _LONG_RUNNING_REQUEST_NAMES:
-                    requests_lib.set_request_cancelled(req.request_id)
-                    logger.info(f'Graceful shutdown: long running request ' \
-                                f'{req.request_id} cancelled')
+                    self.interrupt_request_for_retry(req.request_id)
+                elif req.name in _RETRIABLE_REQUEST_NAMES:
+                    self.interrupt_request_for_retry(req.request_id)
+                # TODO(aylei): interrupt pending requests to accelerate the
+                # shutdown.
             time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
+
+    def interrupt_request_for_retry(self, request_id: str) -> None:
+        """Interrupt a request for retry."""
+        with requests_lib.update_request(request_id) as req:
+            if req is None:
+                return
+            if req.pid is not None:
+                os.kill(req.pid, signal.SIGTERM)
+            req.status = requests_lib.RequestStatus.CANCELLED
+            req.should_retry = True
+        logger.info(
+            f'Request {request_id} interrupted and will be retried by client.')
 
     def run(self, *args, **kwargs):
         """Run the server process."""

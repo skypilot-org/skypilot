@@ -24,21 +24,33 @@ else:
 
 F = TypeVar('F', bound=Callable[..., Any])
 
-def retry_on_server_unavailable(
-    max_wait_seconds: int = 600,
-    initial_backoff: float = 1.0,
-    max_backoff_factor: int = 5
-):
-    """Decorator that retries a function when ServerTemporarilyUnavailableError 
+
+def retry_on_server_unavailable(max_wait_seconds: int = 600,
+                                initial_backoff: float = 1.0,
+                                max_backoff_factor: int = 5):
+    """Decorator that retries a function when ServerTemporarilyUnavailableError
     is caught.
-    
+
     Args:
         max_wait_seconds: Maximum number of seconds to wait for the server to
             be healthy
         initial_backoff: Initial backoff time in seconds
         max_backoff_factor: Maximum backoff factor for exponential backoff
+
+    Notes(dev):
+        This decorator is mainly used in two scenarios:
+        1. Decorate a Restful API call to make the API call wait for server
+           recovery when server is temporarily unavailable. APIs like /api/get
+           and /api/stream should not be retried since sending them to a new
+           replica of API server will not work.
+        2. Decorate a SDK function to make the entire SDK function call get
+           retried when /api/get or /logs raises a retryable error. This
+           is typically triggered by a graceful upgrade of the API server,
+           where the pending requests and logs requests will be interrupted.
     """
+
     def decorator(func: F) -> F:
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             # Try once to see if the server is available.
@@ -51,8 +63,7 @@ def retry_on_server_unavailable(
                    f'unavailable. Retrying...{colorama.Style.RESET_ALL}')
             backoff = common_utils.Backoff(
                 initial_backoff=initial_backoff,
-                max_backoff_factor=max_backoff_factor
-            )
+                max_backoff_factor=max_backoff_factor)
             start_time = time.time()
             attempt = 0
             with rich_utils.client_status(msg):
@@ -63,8 +74,9 @@ def retry_on_server_unavailable(
                     except exceptions.ServerTemporarilyUnavailableError as e:
                         if time.time() - start_time > max_wait_seconds:
                             raise exceptions.ServerTemporarilyUnavailableError(
-                                'Timeout waiting for the API server to be available'
-                                f' after {max_wait_seconds} seconds.') from e
+                                'Timeout waiting for the API server to be '
+                                f'available after {max_wait_seconds}s.') \
+                                from e
 
                         sleep_time = backoff.current_backoff()
                         time.sleep(sleep_time)
@@ -73,6 +85,7 @@ def retry_on_server_unavailable(
                                      f'backoff {sleep_time}s).')
 
         return cast(F, wrapper)
+
     return decorator
 
 
@@ -89,7 +102,8 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 
 @retry_on_server_unavailable()
 def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
-    """Wrapper of requests.post to interact with the API server."""
+    """Send a POST request to the API server, retry on server temporarily
+    unavailable."""
     response = requests.post(url, data=data, json=json, **kwargs)
     handle_server_unavailable(response)
     return response
@@ -97,7 +111,15 @@ def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
 
 @retry_on_server_unavailable()
 def get(url, params=None, **kwargs) -> 'requests.Response':
-    """Wrapper of requests.get to interact with the API server."""
+    """Send a GET request to the API server, retry on server temporarily
+    unavailable."""
+    response = requests.get(url, params=params, **kwargs)
+    handle_server_unavailable(response)
+    return response
+
+
+def get_without_retry(url, params=None, **kwargs) -> 'requests.Response':
+    """Send a GET request to the API server without retry."""
     response = requests.get(url, params=params, **kwargs)
     handle_server_unavailable(response)
     return response

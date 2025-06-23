@@ -25,6 +25,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
+      terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
@@ -59,6 +60,8 @@ spec:
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
+        - name: SKYPILOT_GRACE_PERIOD_SECONDS
+          value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:

@@ -66,7 +66,6 @@ if typing.TYPE_CHECKING:
     import sky
 else:
     psutil = adaptors_common.LazyImport('psutil')
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -1641,7 +1640,7 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = rest.get(
+    response = rest.get_without_retry(
         f'{server_common.get_server_url()}/api/get?request_id={request_id}',
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
@@ -1719,7 +1718,7 @@ def stream_and_get(
         'follow': follow,
         'format': 'console',
     }
-    response = rest.get(
+    response = rest.get_without_retry(
         f'{server_common.get_server_url()}/api/stream',
         params=params,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,

@@ -87,6 +87,7 @@ REQUEST_COLUMNS = [
     'schedule_type',
     COL_USER_ID,
     COL_STATUS_MSG,
+    COL_SHOULD_RETRY,
 ]
 
 

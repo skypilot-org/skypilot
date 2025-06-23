@@ -7,7 +7,6 @@ import webbrowser
 import click
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
@@ -23,11 +22,7 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
-    import requests
-
     import sky
-else:
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -88,7 +83,7 @@ def launch(
             task=dag_str,
             name=name,
         )
-        response = requests.post(
+        response = rest.post(
             f'{server_common.get_server_url()}/jobs/launch',
             json=json.loads(body.model_dump_json()),
             timeout=(5, None),
@@ -148,7 +143,7 @@ def queue(refresh: bool,
         all_users=all_users,
         job_ids=job_ids,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/jobs/queue',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
@@ -188,7 +183,7 @@ def cancel(
         all=all,
         all_users=all_users,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/jobs/cancel',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
@@ -239,7 +234,7 @@ def tail_logs(name: Optional[str] = None,
         refresh=refresh,
         tail=tail,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/jobs/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
@@ -284,7 +279,7 @@ def download_logs(
         controller=controller,
         local_dir=local_dir,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/jobs/download_logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
