@@ -193,8 +193,12 @@ def maybe_schedule_next_jobs() -> None:
         pass
 
 
+<<<<<<< HEAD
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                env_file_path: str) -> None:
+=======
+def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
+>>>>>>> parent of 54347b648 ([jobs] add priority to managed jobs scheduler (#5682))
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -205,6 +209,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
+<<<<<<< HEAD
         is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
                                                 original_user_yaml_path,
                                                 env_file_path,
@@ -213,6 +218,11 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
         _start_controller(job_id, dag_yaml_path, env_file_path)
     else:
         maybe_schedule_next_jobs()
+=======
+        state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path,
+                                    common_utils.get_user_hash())
+    maybe_schedule_next_jobs()
+>>>>>>> parent of 54347b648 ([jobs] add priority to managed jobs scheduler (#5682))
 
 
 @contextlib.contextmanager
@@ -322,4 +332,8 @@ if __name__ == '__main__':
                         type=str,
                         help='The path to the controller env file.')
     args = parser.parse_args()
+<<<<<<< HEAD
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file)
+=======
+    submit_job(args.job_id, args.dag_yaml, args.env_file)
+>>>>>>> parent of 54347b648 ([jobs] add priority to managed jobs scheduler (#5682))

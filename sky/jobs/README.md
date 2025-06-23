@@ -59,8 +59,12 @@ state "All States" as AllStates {
     }
 
     InnerLoop -\-> CANCELLING : user cancel request
+<<<<<<< HEAD
     InnerLoop -[dotted]> RECOVERING : HA controller recovery
     CANCELLING -> CANCELLED : cluster\ncleaned up
+=======
+    CANCELLING -> CANCELLED : cluster cleaned up
+>>>>>>> parent of 54347b648 ([jobs] add priority to managed jobs scheduler (#5682))
     CANCELLING -[dotted]-> Terminal: job could complete\nbefore we can cancel
 }
 

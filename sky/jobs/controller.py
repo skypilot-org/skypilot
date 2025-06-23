@@ -189,6 +189,7 @@ class JobsController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+<<<<<<< HEAD
             cluster_name, self._backend, task, self._job_id, task_id)
         if not is_resume:
             submitted_at = time.time()
@@ -219,6 +220,31 @@ class JobsController:
         if not is_resume:
             remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+=======
+            cluster_name, self._backend, task, self._job_id)
+        managed_job_state.set_submitted(
+            self._job_id,
+            task_id,
+            self._backend.run_timestamp,
+            submitted_at,
+            resources_str=backend_utils.get_task_resources_str(
+                task, is_managed_job=True),
+            specs={
+                'max_restarts_on_errors':
+                    self._strategy_executor.max_restarts_on_errors
+            },
+            callback_func=callback_func)
+        logger.info(
+            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
+            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+
+        logger.info('Started monitoring.')
+        managed_job_state.set_starting(job_id=self._job_id,
+                                       task_id=task_id,
+                                       callback_func=callback_func)
+        remote_job_submitted_at = self._strategy_executor.launch()
+        assert remote_job_submitted_at is not None, remote_job_submitted_at
+>>>>>>> parent of 54347b648 ([jobs] add priority to managed jobs scheduler (#5682))
 
         if not is_resume:
             managed_job_state.set_started(job_id=self._job_id,

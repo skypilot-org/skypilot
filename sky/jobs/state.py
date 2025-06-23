@@ -1330,28 +1330,19 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     """
     assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        # Get the highest-priority WAITING or ALIVE_WAITING job whose priority
-        # is greater than or equal to the highest priority LAUNCHING or
-        # ALIVE_BACKOFF job's priority.
         waiting_job_row = cursor.execute(
             'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
             'WHERE schedule_state IN (?, ?) '
-            'AND priority >= COALESCE('
-            '    (SELECT MAX(priority) '
-            '     FROM job_info '
-            '     WHERE schedule_state IN (?, ?)), '
-            '    0'
-            ')'
-            'ORDER BY priority DESC, spot_job_id ASC LIMIT 1',
+            'ORDER BY spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
              ManagedJobScheduleState.ALIVE_WAITING.value)).fetchone()
         return {
-            'job_id': row[0],
-            'schedule_state': ManagedJobScheduleState(row[1]),
-            'dag_yaml_path': row[2],
-            'env_file_path': row[3],
-        } if row is not None else None
+            'job_id': waiting_job_row[0],
+            'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
+            'dag_yaml_path': waiting_job_row[2],
+            'env_file_path': waiting_job_row[3],
+        } if waiting_job_row is not None else None
 
 
 @_init_db
