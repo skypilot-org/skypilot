@@ -201,9 +201,6 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 
     if cluster_records:
         if controller_name is not None:
-            controller = controller_utils.Controllers.from_name(controller_name)
-            if controller is None:
-                raise ValueError(f'Controller {controller_name} not found.')
             controller_handle: backends.CloudVmRayResourceHandle = (
                 cluster_records[0]['handle'])
             autostop_config = (

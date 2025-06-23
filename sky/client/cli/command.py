@@ -1829,7 +1829,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         cluster_name = cluster_record['name']
         controller = controller_utils.Controllers.from_name(cluster_name)
         if controller is not None:
-            controller_name = controller.value.cluster_name
+            controller_name = controller.value.name
             # to display most recent entry for each controller cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if controller_name not in controllers:
