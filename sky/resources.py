@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import collections
 import dataclasses
 import math
 import re
@@ -1863,7 +1864,10 @@ class Resources:
 
         Returns:
             A list of possible accelerators. Each element is a tuple of
-            (accelerator_name, was_user_specified).
+            (accelerator_name, was_user_specified). was_user_specified is True
+            if the accelerator was directly named by the user (for example
+            "H100:2" would be True, but "80GB+" would be False since it doesn't
+            mention the name of the accelerator).
         """
         # sanity check
         assert isinstance(accelerators, str), accelerators
@@ -1912,7 +1916,7 @@ class Resources:
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
-        """Creates a Resources object from a YAML config.
+        """Creates Resources objects from a YAML config.
 
         Args:
             config: A dict of resource config.
@@ -1975,38 +1979,41 @@ class Resources:
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
         # Parse resources.accelerators field.
-        accelerators_original = config.get('accelerators')
-        accelerators = accelerators_original
-        if config and accelerators_original is not None:
-            if isinstance(accelerators_original, str):
+        accelerators = config.get('accelerators')
+        if config and accelerators is not None:
+            if isinstance(accelerators, str):
                 accelerators_list = cls._parse_accelerators_from_str(
-                    accelerators_original)
-            elif isinstance(accelerators_original, dict):
+                    accelerators)
+            elif isinstance(accelerators, dict):
                 accelerator_names = [
                     f'{k}:{v}' if v is not None else f'{k}'
-                    for k, v in accelerators_original.items()
+                    for k, v in accelerators.items()
                 ]
                 accelerators_list = []
                 for accel_name in accelerator_names:
                     parsed_accels = cls._parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
-            elif isinstance(accelerators_original, list) or isinstance(
-                    accelerators_original, set):
+            elif isinstance(accelerators, list) or isinstance(
+                    accelerators, set):
                 accelerators_list = []
-                for accel_name in accelerators_original:
+                for accel_name in accelerators:
                     parsed_accels = cls._parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
             # now that accelerators is a list, we need to decide which to
             # include in the final set
-            accel_dict: Dict[str, bool] = {}
+            accel_to_user_specified: Dict[str, bool] = (
+                collections.OrderedDict())
             for accel, user_specified in accelerators_list:
                 # If this accelerator is not in dict yet, or if current one is
                 # user specified and existing one is not, update the entry
-                if accel not in accel_dict or (user_specified and
-                                               not accel_dict[accel]):
-                    accel_dict[accel] = user_specified
-            accelerators = {(accel, user_specified)
-                            for accel, user_specified in accel_dict.items()}
+                accel_to_user_specified[accel] = (user_specified or
+                                                  accel_to_user_specified.get(
+                                                      accel, True))
+
+            accelerators = type(accelerators)([
+                (accel, user_specified)
+                for accel, user_specified in accel_to_user_specified.items()
+            ])
 
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
@@ -2041,11 +2048,9 @@ class Resources:
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
-            if isinstance(accelerators_original, list):
-                return tmp_resources_list
-            else:
-                return set(tmp_resources_list)
 
+            assert isinstance(accelerators, (list, set)), accelerators
+            return type(accelerators)(tmp_resources_list)
         return {Resources._from_yaml_config_single(config)}
 
     @classmethod
@@ -2112,7 +2117,7 @@ class Resources:
             # if it has units or not, so we store it as a string
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
-            '_no_missing_accel_warnings', False)
+            '_no_missing_accel_warnings', None)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2163,9 +2168,9 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
-        if self._no_missing_accel_warnings is not None:
-            config[
-                '_no_missing_accel_warnings'] = self._no_missing_accel_warnings
+            
+        add_if_not_none('_no_missing_accel_warnings',
+                        self._no_missing_accel_warnings)
         add_if_not_none('priority', self.priority)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
@@ -2337,6 +2342,7 @@ class Resources:
 
         if version < 27:
             self._priority = None
+
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
