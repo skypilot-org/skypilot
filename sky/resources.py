@@ -2000,18 +2000,28 @@ class Resources:
                 for accel_name in accelerators:
                     parsed_accels = cls._parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
+            else:
+                assert False, ('Invalid accelerators type:'
+                               f'{type(accelerators)}')
             # now that accelerators is a list, we need to decide which to
-            # include in the final set
-            accel_to_user_specified: Dict[str, bool] = (
-                collections.OrderedDict())
+            # include in the final set, however, there may be multiple copies
+            # of the same accelerator, some given by name by the user and the
+            # other copy being given by memory size. In this case, we only care
+            # about the user specified ones (so we can give a warning if it
+            # doesn't exist).
+            accel_to_user_specified: Dict[str,
+                                          bool] = (collections.OrderedDict())
             for accel, user_specified in accelerators_list:
                 # If this accelerator is not in dict yet, or if current one is
                 # user specified and existing one is not, update the entry
                 accel_to_user_specified[accel] = (user_specified or
                                                   accel_to_user_specified.get(
-                                                      accel, True))
+                                                      accel, False))
 
-            accelerators = type(accelerators)([
+            # only time we care about ordered is when we are given a list,
+            # otherwise we default to a set
+            accelerators_type = list if isinstance(accelerators, list) else set
+            accelerators = accelerators_type([
                 (accel, user_specified)
                 for accel, user_specified in accel_to_user_specified.items()
             ])
@@ -2048,7 +2058,6 @@ class Resources:
                     tmp_resource['_no_missing_accel_warnings'] = True
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
-
 
             assert isinstance(accelerators, (list, set)), accelerators
             return type(accelerators)(tmp_resources_list)
@@ -2169,7 +2178,7 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
-            
+
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
         add_if_not_none('priority', self.priority)
