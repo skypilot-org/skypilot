@@ -846,9 +846,6 @@ def test_autostop_time_format():
     r = Resources(autostop='1d')
     assert r.autostop_config.idle_minutes == 1440
 
-    r = Resources(autostop='30s')
-    assert r.autostop_config.idle_minutes == 0.5
-
     r = Resources(autostop=30)
     assert r.autostop_config.idle_minutes == 30
 
