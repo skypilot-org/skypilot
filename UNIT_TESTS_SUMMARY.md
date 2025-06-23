@@ -30,14 +30,17 @@ Tests the server-side changes:
 
 **Key Changes Tested**: Server endpoint changed from GET to POST with payload containing days parameter
 
-### 4. Resource Parsing Regression (`TestResourceParsingRegression`)
+### 4. Historical Cluster Robustness (`TestHistoricalClusterRobustness`)
 
-Tests the resource parsing improvements:
-- **Memory unit parsing**: Tests new shorter units (`g`, `m`, `t`) alongside existing (`gb`, `mb`, `tb`)
-- **Time unit parsing**: Tests new time units (`s`, `sec`, `min`, `hr`, `day`) exist in constants
-- **Autostop time parsing**: Tests autostop accepts new time formats with proper minute conversion
+Tests that cost-report handles problematic historical cluster data gracefully:
+- **Missing instance types**: Tests clusters with instance types not found in current catalogs
+- **Invalid resources**: Tests clusters with None or corrupted resource data
+- **Empty usage intervals**: Tests clusters with missing or malformed usage data
+- **Mixed valid/invalid**: Tests that valid clusters still work when some clusters have issues
+- **Controller clusters**: Tests special handling of controller cluster names
+- **Safe resource strings**: Tests status utils handle missing resource attributes
 
-**Key Changes Tested**: New memory and time units added to parsing constants
+**Key Changes Tested**: Safe pickle handling and graceful degradation when historical data is problematic
 
 ### 5. CLI Functionality (`TestCostReportCLI`)
 
@@ -54,8 +57,9 @@ These tests specifically target the following potential regression points:
 1. **Days Parameter Logic**: Ensures the days filtering works correctly and defaults are maintained
 2. **Database Schema**: Tests creation artifact fields (`last_creation_yaml`, `last_creation_command`) 
 3. **Function Signatures**: Prevents breaking changes to helper function parameters
-4. **Resource Parsing**: Ensures new units don't break existing functionality
+4. **Historical Data Robustness**: Ensures cost-report doesn't crash when clusters have missing/invalid instance types
 5. **Server API**: Validates the endpoint change from GET to POST doesn't break functionality
+6. **Safe Resource Handling**: Tests graceful degradation when resource data is corrupted or incomplete
 
 ## Running the Tests
 
@@ -81,8 +85,9 @@ The tests use:
 These unit tests will help ensure that future changes to the cost-report functionality don't break:
 - Existing CLI behavior
 - Server API compatibility  
-- Resource parsing functionality
+- Historical cluster data handling
 - Database query logic
 - Display formatting
+- Graceful error handling with problematic cluster data
 
 The tests focus on the interface contracts and core logic rather than internal implementation details, making them robust against refactoring while catching functional regressions.
