@@ -1059,11 +1059,23 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 @_init_db
-def get_clusters_from_history() -> List[Dict[str, Any]]:
+def get_clusters_from_history(
+        days: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get cluster reports from history.
+
+    Args:
+        days: If specified, only include historical clusters (those not
+              currently active) that were last used within the past 'days'
+              days. Active clusters are always included regardless of this
+              parameter.
+
+    Returns:
+        List of cluster records with history information.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Explicitly select columns from both tables to avoid ambiguity
-        rows = session.query(
+        query = session.query(
             cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
             cluster_history_table.c.num_nodes,
             cluster_history_table.c.requested_resources,
@@ -1072,11 +1084,19 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             cluster_history_table.c.user_hash,
             cluster_history_table.c.last_creation_yaml,
             cluster_history_table.c.last_creation_command,
-            cluster_table.c.status, cluster_table.c.workspace).select_from(
+            cluster_table.c.status, cluster_table.c.workspace,
+            cluster_table.c.status_updated_at).select_from(
                 cluster_history_table.join(cluster_table,
                                            cluster_history_table.c.cluster_hash
                                            == cluster_table.c.cluster_hash,
-                                           isouter=True)).all()
+                                           isouter=True))
+
+        rows = query.all()
+
+    # Prepare filtering parameters
+    cutoff_time = None
+    if days is not None:
+        cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
     records = []
     for row in rows:
@@ -1088,6 +1108,32 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         status = None
         if row.status:
             status = status_lib.ClusterStatus[row.status]
+
+        # Apply filtering: always include active clusters, filter historical
+        # ones by time
+        if cutoff_time is not None and status is None:  # Historical cluster
+            # For historical clusters, check if they were used recently
+            # Use the most recent activity from usage_intervals to determine
+            # last use
+            usage_intervals = []
+            if row.usage_intervals:
+                try:
+                    usage_intervals = pickle.loads(row.usage_intervals)
+                except (pickle.PickleError, AttributeError):
+                    usage_intervals = []
+
+            # Find the most recent activity time from usage_intervals
+            last_activity_time = None
+            if usage_intervals:
+                # Get the end time of the last interval (or start time if
+                # still running)
+                last_interval = usage_intervals[-1]
+                last_activity_time = (last_interval[1] if last_interval[1]
+                                      is not None else last_interval[0])
+
+            # Skip historical clusters that haven't been used recently
+            if last_activity_time is None or last_activity_time < cutoff_time:
+                continue
 
         # Parse launched resources safely
         launched_resources = None

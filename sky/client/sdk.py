@@ -1338,7 +1338,7 @@ def endpoints(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-builtin
+def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 
     The estimated cost column indicates price for the cluster based on the type
@@ -1347,6 +1347,10 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
     show increasing price. The estimated cost is calculated based on the local
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
+
+    Args:
+        days: The number of days to get the cost report for. If not provided,
+            the default is 30 days.
 
     Returns:
         The request ID of the cost report request.
@@ -1369,8 +1373,10 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
               'total_cost': (float) cost given resources and usage intervals,
             }
     """
-    response = requests.get(f'{server_common.get_server_url()}/cost_report',
-                            cookies=server_common.get_api_cookie_jar())
+    body = payloads.CostReportBody(days=days)
+    response = requests.post(f'{server_common.get_server_url()}/cost_report',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 

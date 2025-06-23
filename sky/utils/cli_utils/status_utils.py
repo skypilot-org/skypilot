@@ -137,7 +137,8 @@ def get_total_cost_of_displayed_records(
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           controller_name: Optional[str] = None):
+                           controller_name: Optional[str] = None,
+                           days: Optional[int] = None):
     """Compute cluster table values and display for cost report.
 
     For each cluster, this shows: cluster name, resources, launched time,
@@ -204,6 +205,8 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             controller = controller_utils.Controllers.from_name(controller_name)
             if controller is None:
                 raise ValueError(f'Controller {controller_name} not found.')
+            if cluster_records[0].get('handle') is None:
+                return
             controller_handle: backends.CloudVmRayResourceHandle = (
                 cluster_records[0]['handle'])
             autostop_config = (
@@ -216,7 +219,9 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                        f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{autostop_str}')
         else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+            days_str = '' if days is None else f' (last {days} days)'
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Clusters{days_str}'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
 

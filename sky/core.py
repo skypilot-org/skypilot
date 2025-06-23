@@ -277,7 +277,7 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report() -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = 30) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -295,6 +295,13 @@ def cost_report() -> List[Dict[str, Any]]:
             'cluster_hash': (str) unique hash identifying cluster,
             'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
             'total_cost': (float) cost given resources and usage intervals,
+            'cloud': (str) cloud of the cluster,
+            'region': (str) region of the cluster,
+            'cpus': (str) number of vCPUs of the cluster,
+            'memory': (str) memory of the cluster,
+            'accelerators': (str) accelerators of the cluster,
+            'resources_str': (str) resources string of the cluster,
+            'resources_str_full': (str) full resources string of the cluster,
         }
 
     The estimated cost column indicates price for the cluster based on the type
@@ -304,65 +311,91 @@ def cost_report() -> List[Dict[str, Any]]:
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
 
+    Args:
+        days: Number of days to look back from now. Active clusters are always
+            included. Historical clusters are only included if they were last
+            used within the past 'days' days. Defaults to 30 days.
+
     Returns:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    cluster_reports = global_user_state.get_clusters_from_history()
+    if days is None:
+        days = 30
 
-    def get_total_cost(cluster_report: dict) -> float:
-        duration = cluster_report['duration']
-        launched_nodes = cluster_report['num_nodes']
-        launched_resources = cluster_report['resources']
+    cluster_reports = global_user_state.get_clusters_from_history(days=days)
+    logger.debug(f'{len(cluster_reports)} clusters found.')
 
-        cost = (launched_resources.get_cost(duration) * launched_nodes)
-        return cost
+    def _process_cluster_report(
+            cluster_report: Dict[str, Any]) -> Dict[str, Any]:
+        """Process cluster report by calculating cost and adding fields."""
+        # Make a copy to avoid modifying the original
+        report = cluster_report.copy()
 
-    def _update_record_with_resources(record: Dict[str, Any]) -> None:
-        """Add the individual resource fields for dashboard compatibility."""
-        if record is None:
-            return
-        resources = record.get('resources')
-        if resources is None:
-            return
-        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-        for field in fields:
-            try:
-                record[field] = getattr(resources, field)
-            except Exception as e:  # pylint: disable=broad-exception
-                # Ok to skip the fields as this is just for display purposes.
-                logger.debug(f'Failed to get resources.{field} for cluster '
-                            f'{record["name"]}: {str(e)}')
-                record[field] = None
+        def get_total_cost(cluster_report: dict) -> float:
+            duration = cluster_report['duration']
+            launched_nodes = cluster_report['num_nodes']
+            launched_resources = cluster_report['resources']
 
-        # Add resources_str and resources_str_full for dashboard compatibility
-        num_nodes = record.get('num_nodes', 1)
-        try:
-            resource_str_simple = resources_utils.format_resource(resources,
-                                                                simplify=True)
-            resource_str_full = resources_utils.format_resource(resources,
-                                                                simplify=False)
-            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-        except Exception as e:  # pylint: disable=broad-exception
-            logger.debug(f'Failed to get resources_str for cluster '
-                           f'{record["name"]}: {str(e)}')
+            cost = (launched_resources.get_cost(duration) * launched_nodes)
+            return cost
+
+        def _update_record_with_resources(record: Dict[str, Any]) -> None:
+            """Add resource fields for dashboard compatibility."""
+            if record is None:
+                return
+            resources = record.get('resources')
+            if resources is None:
+                return
+            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
             for field in fields:
-                record[field] = None
-            record['resources_str'] = '-'
-            record['resources_str_full'] = '-'
+                try:
+                    record[field] = str(getattr(resources, field))
+                except Exception as e:  # pylint: disable=broad-except
+                    # Ok to skip the fields as this is just for display
+                    # purposes.
+                    logger.debug(f'Failed to get resources.{field} for cluster '
+                                 f'{record["name"]}: {str(e)}')
+                    record[field] = None
 
-    for cluster_report in cluster_reports:
+            # Add resources_str and resources_str_full for dashboard
+            # compatibility
+            num_nodes = record.get('num_nodes', 1)
+            try:
+                resource_str_simple = resources_utils.format_resource(
+                    resources, simplify=True)
+                resource_str_full = resources_utils.format_resource(
+                    resources, simplify=False)
+                record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+                record[
+                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get resources_str for cluster '
+                             f'{record["name"]}: {str(e)}')
+                for field in fields:
+                    record[field] = None
+                record['resources_str'] = '-'
+                record['resources_str_full'] = '-'
+
         try:
-            cluster_report['total_cost'] = get_total_cost(cluster_report)
-        except Exception as e:  # pylint: disable=broad-exception
+            report['total_cost'] = get_total_cost(report)
+        except Exception as e:  # pylint: disable=broad-except
             # Ok to skip the total cost as this is just for display purposes.
             logger.warning(f'Failed to get total cost for cluster '
-                           f'{cluster_report["name"]}: {str(e)}')
-            cluster_report['total_cost'] = '-'
-        _update_record_with_resources(cluster_report)
+                           f'{report["name"]}: {str(e)}')
+            report['total_cost'] = '-'
 
-    return cluster_reports
+        _update_record_with_resources(report)
+        return report
+
+    # Process clusters in parallel
+    if not cluster_reports:
+        return []
+
+    processed_reports = subprocess_utils.run_in_parallel(
+        _process_cluster_report, cluster_reports)
+
+    return processed_reports
 
 
 def _start(

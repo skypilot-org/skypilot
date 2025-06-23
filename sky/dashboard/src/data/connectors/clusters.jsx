@@ -108,13 +108,9 @@ export async function getClusters({ clusterNames = null } = {}) {
 
 export async function getClusterHistory() {
   try {
-    const costReportRequest = await apiClient.get('/cost_report');
-    const id =
-      costReportRequest.headers.get('X-Skypilot-Request-ID') ||
-      costReportRequest.headers.get('X-Request-ID');
-    const costReportResponse = await apiClient.get(`/api/get?request_id=${id}`);
-    const historyContent = await costReportResponse.json();
-    let history = JSON.parse(historyContent.return_value);
+    const history = await apiClient.fetch('/cost_report', {
+      days: 30,
+    });
 
     console.log('Raw cluster history data:', history); // Debug log
 
