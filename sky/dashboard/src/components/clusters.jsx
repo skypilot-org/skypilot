@@ -696,7 +696,9 @@ export function ClusterTable({
                         <span>{item.resources_str}</span>
                       </NonCapitalizedTooltip>
                     </TableCell>
-                    <TableCell><TimestampWithTooltip date={item.time} /></TableCell>
+                    <TableCell>
+                      <TimestampWithTooltip date={item.time} />
+                    </TableCell>
                     <TableCell>
                       {formatAutostop(item.autostop, item.to_down)}
                     </TableCell>

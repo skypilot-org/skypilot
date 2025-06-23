@@ -439,16 +439,19 @@ export function TimestampWithTooltip({ date }) {
   const now = new Date();
   const differenceInDays = (now - date) / (1000 * 3600 * 24);
 
-    // Format the full timestamp in '2025-06-13, 03:53:33 PM PDT' format
-  const dateStr = date.getFullYear() + '-' +
-    String(date.getMonth() + 1).padStart(2, '0') + '-' +
+  // Format the full timestamp in '2025-06-13, 03:53:33 PM PDT' format
+  const dateStr =
+    date.getFullYear() +
+    '-' +
+    String(date.getMonth() + 1).padStart(2, '0') +
+    '-' +
     String(date.getDate()).padStart(2, '0');
   const timeStr = date.toLocaleString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
-    timeZoneName: 'short'
+    timeZoneName: 'short',
   });
   const fullLocalTimestamp = dateStr + ', ' + timeStr;
 
@@ -475,15 +478,18 @@ export function formatFullTimestamp(date) {
     return 'N/A';
   }
 
-  const dateStr = date.getFullYear() + '-' +
-    String(date.getMonth() + 1).padStart(2, '0') + '-' +
+  const dateStr =
+    date.getFullYear() +
+    '-' +
+    String(date.getMonth() + 1).padStart(2, '0') +
+    '-' +
     String(date.getDate()).padStart(2, '0');
   const timeStr = date.toLocaleString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
-    timeZoneName: 'short'
+    timeZoneName: 'short',
   });
   return dateStr + ', ' + timeStr;
 }

@@ -4,7 +4,10 @@ import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { CustomTooltip as Tooltip, formatFullTimestamp } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  formatFullTimestamp,
+} from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
@@ -241,7 +244,9 @@ export function JobDetailPage() {
                         Submitted
                       </div>
                       <div className="text-base mt-1">
-                        {jobData.submitted_at ? formatFullTimestamp(jobData.submitted_at) : 'N/A'}
+                        {jobData.submitted_at
+                          ? formatFullTimestamp(jobData.submitted_at)
+                          : 'N/A'}
                       </div>
                     </div>
                     {jobData.resources && (
