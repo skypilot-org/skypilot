@@ -3764,22 +3764,19 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
 
 
 def _adjust_volume_config(volume_config: Dict[str, Any]) -> None:
-    if 'spec' not in volume_config:
-        return
-    if 'size' not in volume_config['spec']:
+    if 'size' not in volume_config:
         return
     try:
-        size = resources_utils.parse_memory_resource(
-            volume_config['spec']['size'], 'size')
-        volume_config['spec']['size'] = size
+        size = resources_utils.parse_memory_resource(volume_config['size'],
+                                                     'size')
+        volume_config['size'] = size
     except ValueError as e:
         raise click.BadParameter(
-            f'Invalid size {volume_config["spec"]["size"]}: {e}') from e
+            f'Invalid size {volume_config["size"]}: {e}') from e
 
 
 def _validate_volume_config(volume_config: Dict[str, Any]) -> None:
-    if ('resource_name' not in volume_config and
-        ('spec' not in volume_config or 'size' not in volume_config['spec'])):
+    if ('resource_name' not in volume_config and 'size' not in volume_config):
         raise click.BadParameter('Size is required for new volumes. '
                                  'Please specify the size in the YAML file or '
                                  'use the --size flag.')
@@ -3871,9 +3868,7 @@ def volumes_apply(
         if type is not None:
             volume_config['type'] = type
         if size is not None:
-            if 'spec' not in volume_config:
-                volume_config['spec'] = {}
-            volume_config['spec']['size'] = size
+            volume_config['size'] = size
 
     _override_volume_config()
     common_utils.validate_schema(volume_config, schemas.get_volume_schema(),

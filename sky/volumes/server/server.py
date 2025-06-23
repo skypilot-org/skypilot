@@ -47,7 +47,7 @@ async def volume_apply(request: fastapi.Request,
     """Creates or registers a volume."""
     volume_cloud = volume_apply_body.cloud
     volume_type = volume_apply_body.volume_type
-    volume_spec = volume_apply_body.spec
+    volume_config = volume_apply_body.config
 
     supported_volume_types = [
         volume_type.value for volume_type in volume.VolumeType
@@ -67,11 +67,11 @@ async def volume_apply(request: fastapi.Request,
         supported_access_modes = [
             access_mode.value for access_mode in volume.VolumeAccessMode
         ]
-        if volume_spec is None:
-            volume_spec = {}
-        access_mode = volume_spec.get('access_mode')
+        if volume_config is None:
+            volume_config = {}
+        access_mode = volume_config.get('access_mode')
         if access_mode is None:
-            volume_spec[
+            volume_config[
                 'access_mode'] = volume.VolumeAccessMode.READ_WRITE_ONCE.value
         elif access_mode not in supported_access_modes:
             raise fastapi.HTTPException(

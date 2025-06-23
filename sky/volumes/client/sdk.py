@@ -31,7 +31,8 @@ def apply(volume_config: Dict[str, Any]) -> server_common.RequestId:
                                     cloud=volume_config['cloud'],
                                     region=volume_config['region'],
                                     zone=volume_config['zone'],
-                                    spec=volume_config['spec'])
+                                    size=volume_config.get('size'),
+                                    config=volume_config.get('config', {}))
     response = requests.post(f'{server_common.get_server_url()}/volumes/apply',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())

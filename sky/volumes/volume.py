@@ -13,10 +13,7 @@ from sky.utils import status_lib
 
 class VolumeType(enum.Enum):
     """Volume type."""
-    PVC = 'pvc'
-    BLOCK_STORAGE = 'block_storage'
-    OBJECT_STORAGE = 'object_storage'
-    FILE_SYSTEM = 'file_system'
+    PVC = 'k8s-pvc'
 
 
 class VolumeAccessMode(enum.Enum):

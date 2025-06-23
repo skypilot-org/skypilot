@@ -420,17 +420,17 @@ def get_volume_schema():
                 #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
                 'pattern': _get_infra_pattern(),
             },
+            'size': {
+                'type': 'string',
+                'pattern': constants.MEMORY_SIZE_PATTERN,
+            },
             'resource_name': {
                 'type': 'string',
             },
-            'spec': {
+            'config': {
                 'type': 'object',
                 'required': [],
                 'properties': {
-                    'size': {
-                        'type': 'string',
-                        'pattern': constants.MEMORY_SIZE_PATTERN,
-                    },
                     'storage_class_name': {
                         'type': 'string',
                     },

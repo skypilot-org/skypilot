@@ -17,10 +17,10 @@ def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
         config.region = context
     else:
         context = config.region
-    namespace = config.spec.get('namespace')
+    namespace = config.config.get('namespace')
     if namespace is None:
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-        config.spec['namespace'] = namespace
+        config.config['namespace'] = namespace
     return context, namespace
 
 
@@ -84,8 +84,8 @@ def create_persistent_volume_claim(namespace: str, context: Optional[str],
 def _get_pvc_spec(namespace: str,
                   config: models.VolumeConfig) -> Dict[str, Any]:
     """Gets the PVC spec for the given storage config."""
-    access_mode = config.spec.get('access_mode')
-    size = config.spec.get('size')
+    access_mode = config.config.get('access_mode')
+    size = config.size
     # The previous code assumes that the access_mode and size are always set.
     assert access_mode is not None
     assert size is not None
@@ -107,7 +107,7 @@ def _get_pvc_spec(namespace: str,
             },
         }
     }
-    storage_class = config.spec.get('storage_class_name')
+    storage_class = config.config.get('storage_class_name')
     if storage_class is not None:
         pvc_spec['spec']['storageClassName'] = storage_class
     return pvc_spec

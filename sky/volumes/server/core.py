@@ -60,7 +60,8 @@ def volume_list() -> List[Dict[str, Any]]:
                 'cloud': str,
                 'region': str,
                 'zone': str,
-                'spec': Dict[str, Any],
+                'size': str,
+                'config': Dict[str, Any],
                 'name_on_cloud': str,
                 'user_hash': str,
                 'workspace': str,
@@ -95,7 +96,8 @@ def volume_list() -> List[Dict[str, Any]]:
         record['cloud'] = config.cloud
         record['region'] = config.region
         record['zone'] = config.zone
-        record['spec'] = config.spec
+        record['size'] = config.size
+        record['config'] = config.config
         record['name_on_cloud'] = config.name_on_cloud
         records.append(record)
     return records
@@ -120,7 +122,7 @@ def volume_delete(names: List[str]) -> None:
         config = volume.get('handle')
         if config is None:
             raise ValueError(f'Volume {name} has no handle.')
-        logger.info(f'Deleting volume {name} with config {config}')
+        logger.debug(f'Deleting volume {name} with config {config}')
         cloud = config.cloud
         with _volume_lock(name):
             provision.delete_volume(cloud, config)
@@ -128,7 +130,8 @@ def volume_delete(names: List[str]) -> None:
 
 
 def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
-                 zone: Optional[str], spec: Dict[str, Any]) -> None:
+                 zone: Optional[str], size: Optional[str],
+                 config: Dict[str, Any]) -> None:
     """Creates or registers a volume.
 
     Args:
@@ -137,7 +140,8 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
         cloud: The cloud of the volume.
         region: The region of the volume.
         zone: The zone of the volume.
-        spec: The specification of the volume.
+        size: The size of the volume.
+        config: The configuration of the volume.
 
     """
     # Reuse the method for cluster name on cloud to
@@ -154,7 +158,8 @@ def volume_apply(name: str, volume_type: str, cloud: str, region: Optional[str],
         cloud=str(cloud_obj),
         region=region,
         zone=zone,
-        spec=spec,
+        size=size,
+        config=config,
         name_on_cloud=name_on_cloud,
     )
     logger.debug(

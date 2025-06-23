@@ -828,7 +828,7 @@ class Task:
         }
         for vol in volume_mounts:
             # Check access mode
-            access_mode = vol.volume_config.spec.get('access_mode', '')
+            access_mode = vol.volume_config.config.get('access_mode', '')
             if access_mode in disabled_modes:
                 raise ValueError(f'Volume {vol.volume_name} with '
                                  f'{disabled_modes[access_mode]}')

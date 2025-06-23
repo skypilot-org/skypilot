@@ -678,19 +678,19 @@ def make_mock_volume_config(name='vol1',
                             region='us-west1',
                             zone='a',
                             name_on_cloud=None,
-                            spec=None):
+                            size='1',
+                            config={}):
     from sky import models
     if name_on_cloud is None:
         name_on_cloud = name
-    if spec is None:
-        spec = {}
     return models.VolumeConfig(name=name,
                                type=type,
                                cloud=cloud,
                                region=region,
                                zone=zone,
                                name_on_cloud=name_on_cloud,
-                               spec=spec)
+                               size=size,
+                               config=config)
 
 
 def make_mock_resource(cloud=None, region=None, zone=None):

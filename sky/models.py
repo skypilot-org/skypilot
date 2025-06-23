@@ -88,4 +88,5 @@ class VolumeConfig(pydantic.BaseModel):
     region: Optional[str]
     zone: Optional[str]
     name_on_cloud: str
-    spec: Dict[str, Any] = {}
+    size: Optional[str]
+    config: Dict[str, Any] = {}

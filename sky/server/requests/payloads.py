@@ -377,7 +377,8 @@ class VolumeApplyBody(RequestBody):
     cloud: str
     region: Optional[str] = None
     zone: Optional[str] = None
-    spec: Optional[Dict[str, Any]] = None
+    size: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
 
 
 class VolumeDeleteBody(RequestBody):
