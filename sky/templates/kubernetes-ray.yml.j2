@@ -585,16 +585,6 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
-              {% if k8s_enable_gpudirect_rdma %}
-              # Setup GPUDirect-RDMA environment using GIB scripts
-              if [ -f /usr/local/gib/scripts/set_nccl_env.sh ]; then
-                echo "Setting up GPUDirect-RDMA environment..."
-                source /usr/local/gib/scripts/set_nccl_env.sh
-                echo "GPUDirect-RDMA environment setup completed"
-              else
-                echo "Warning: GIB scripts not found, using default RDMA configuration"
-              fi
-              {% endif %}
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
@@ -971,42 +961,6 @@ available_node_types:
               add:
                 - IPC_LOCK
           {% endif %}
-        {% if k8s_enable_gpudirect_tcpx %}
-        # GPUDirect TCPX daemon sidecar container
-        - name: tcpx-daemon
-          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd-dev:v2.0.11
-          imagePullPolicy: Always
-          command:
-            - /tcpgpudmarxd/build/app/tcpgpudmarxd
-            - --gpu_nic_preset
-            - a3vm
-            - --gpu_shmem_type
-            - fd
-            - --uds_path
-            - /run/tcpx
-            - --setup_param
-            - --verbose
-            - "128"
-            - "2"
-            - "0"
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
-          volumeMounts:
-            - name: libraries
-              mountPath: /usr/local/nvidia/lib64
-              readOnly: true
-            - name: tcpx-socket
-              mountPath: /run/tcpx
-            - name: sys
-              mountPath: /hostsysfs
-            - name: proc-sys
-              mountPath: /hostprocsysfs
-          env:
-            - name: LD_LIBRARY_PATH
-              value: /usr/local/nvidia/lib64
-        {% endif %}
 
       {% if high_availability %}
       pvc_spec:
