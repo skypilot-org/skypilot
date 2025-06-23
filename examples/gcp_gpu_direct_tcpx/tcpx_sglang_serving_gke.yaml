@@ -1,4 +1,4 @@
-name: tcpx-sglang-serving-gke2
+name: tcpx-sglang-serving-gke
 
 resources:
   infra: k8s
