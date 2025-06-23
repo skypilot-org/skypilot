@@ -128,17 +128,11 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
-# Whether to use consolidation mode or not. When this is enabled, the managed
-# jobs controller will not be running on a separate cluster, but locally on the
-# API Server. Under the hood, we submit the job monitoring logic as processes
-# directly in the API Server.
-# Use LRU Cache so that the check is only done once.
-@annotations.lru_cache(scope='request', maxsize=1)
-def is_consolidation_mode() -> bool:
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+def _check_consolidation_mode_consistency(
+        current_is_consolidation_mode: bool) -> None:
+    """Check the consistency of the consolidation mode."""
     # Check whether the consolidation mode config is changed.
-    if consolidation_mode:
+    if current_is_consolidation_mode:
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
         if global_user_state.get_cluster_from_name(controller_cn) is not None:
@@ -171,6 +165,18 @@ def is_consolidation_mode() -> bool:
                     'consolidation_mode` to `true` and run `sky jobs queue` '
                     'to see those jobs. Switching to normal mode will '
                     f'lose the job history.{colorama.Style.RESET_ALL}')
+
+
+# Whether to use consolidation mode or not. When this is enabled, the managed
+# jobs controller will not be running on a separate cluster, but locally on the
+# API Server. Under the hood, we submit the job monitoring logic as processes
+# directly in the API Server.
+# Use LRU Cache so that the check is only done once.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+    _check_consolidation_mode_consistency(consolidation_mode)
     return consolidation_mode
 
 
