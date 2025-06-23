@@ -453,9 +453,15 @@ export function TimestampWithTooltip({ date }) {
   const fullLocalTimestamp = dateStr + ', ' + timeStr;
 
   let displayText;
-  // Always show relative time with shortened format
-  const originalTimeString = formatDistance(date, now, { addSuffix: true });
-  displayText = shortenTimeString(originalTimeString);
+
+  // For timestamps >= 1 day ago, show the date in yyyy-mm-dd format
+  // For timestamps < 1 day ago, show relative time
+  if (differenceInDays >= 1) {
+    displayText = dateStr;
+  } else {
+    const originalTimeString = formatDistance(date, now, { addSuffix: true });
+    displayText = shortenTimeString(originalTimeString);
+  }
 
   return (
     <CustomTooltip
