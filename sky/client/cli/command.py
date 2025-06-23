@@ -1843,7 +1843,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     status_utils.show_cost_report_table(normal_cluster_records, all)
     for controller_name, cluster_record in controllers.items():
         status_utils.show_cost_report_table(
-            [cluster_record], all, controller_name=controller_name)
+            [cluster_record], all, controller_name=controller_name.capitalize())
         total_cost += cluster_record['total_cost']
 
     click.echo(f'\n{colorama.Style.BRIGHT}'
