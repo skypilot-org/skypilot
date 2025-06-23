@@ -460,6 +460,7 @@ def _parse_override_params(
         disk_tier: Optional[str] = None,
         network_tier: Optional[str] = None,
         ports: Optional[Tuple[str, ...]] = None,
+        priority: Optional[int] = None,
         config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
@@ -526,6 +527,8 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if priority is not None:
+        override_params['priority'] = priority
     if config_override:
         override_params['_cluster_config_overrides'] = config_override
     return override_params
@@ -669,6 +672,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_tier=disk_tier,
                                              network_tier=network_tier,
                                              ports=ports,
+                                             priority=priority,
                                              config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
@@ -714,9 +718,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    # job launch specific.
-    if priority is not None:
-        task.set_job_priority(priority)
     return task
 
 

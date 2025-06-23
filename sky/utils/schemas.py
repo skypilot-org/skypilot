@@ -672,18 +672,6 @@ def get_task_schema():
             'service': {
                 'type': 'object',
             },
-            'job': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'priority': {
-                        'type': 'integer',
-                        'minimum': 0,
-                        'maximum': 1000,
-                    },
-                },
-            },
             'setup': {
                 'type': 'string',
             },
