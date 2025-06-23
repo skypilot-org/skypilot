@@ -156,7 +156,10 @@ spec:
           httpGet:
             path: /api/health
             port: 46580
-          periodSeconds: 30
+          successThreshold: 1
+          failureThreshold: 3
+          periodSeconds: 5
+          initialDelaySeconds: 5
         volumeMounts:
         {{- if .Values.storage.enabled }}
         - name: state-volume

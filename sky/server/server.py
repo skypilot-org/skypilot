@@ -1542,5 +1542,5 @@ if __name__ == '__main__':
                                          workers,
                                          num_threads=len(workers))
         if queue_server is not None:
-            queue_server.terminate()
+            queue_server.kill()
             queue_server.join()
