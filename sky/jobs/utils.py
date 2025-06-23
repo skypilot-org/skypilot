@@ -1136,7 +1136,6 @@ def format_job_table(
         'TASK',
         *(['WORKSPACE'] if show_workspace else []),
         'NAME',
-        'PRIORITY',
         *user_cols,
         'REQUESTED',
         'SUBMITTED',
@@ -1208,7 +1207,6 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            priority = job_tasks[0].get('priority', '-')
             managed_job_status, current_task_id = _get_job_status_from_tasks(
                 job_tasks)
             for task in job_tasks:
@@ -1244,7 +1242,6 @@ def format_job_table(
                 '',
                 *([''] if show_workspace else []),
                 job_name,
-                str(priority),
                 *user_values,
                 '-',
                 submitted,
@@ -1275,13 +1272,11 @@ def format_job_table(
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
             task_workspace = '-' if len(job_tasks) > 1 else workspace
-            priority = task.get('priority', '-')
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
                 *([task_workspace] if show_workspace else []),
                 task['task_name'],
-                str(priority),
                 *user_values,
                 task['resources'],
                 # SUBMITTED
