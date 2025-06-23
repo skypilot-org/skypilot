@@ -39,6 +39,7 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
+    :ref:`network_tier <yaml-spec-resources-network-tier>`: best
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
@@ -443,6 +444,26 @@ OR
 
   resources:
     disk_tier: best
+
+
+.. _yaml-spec-resources-network-tier:
+
+``resources.network_tier``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Network tier to use (optional).
+
+Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
+
+If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
+
+- ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
+
+.. code-block:: yaml
+
+  resources:
+    network_tier: best
 
 
 .. _yaml-spec-resources-ports:
