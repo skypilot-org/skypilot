@@ -1517,7 +1517,7 @@ if __name__ == '__main__':
     usage_lib.maybe_show_privacy_policy()
 
     config = server_config.compute_server_config(cmd_args.deploy)
-    num_workers = 2
+    num_workers = config.num_server_workers
 
     sub_procs = []
     try:
