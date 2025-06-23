@@ -436,30 +436,20 @@ LOGGING_CONFIG_DIR = '~/.sky/logging'
 
 # Resources constants
 TIME_UNITS = {
-    's': 1 / 60,
-    'sec': 1 / 60,
     'm': 1,
-    'min': 1,
     'h': 60,
-    'hr': 60,
     'd': 24 * 60,
-    'day': 24 * 60,
+    'w': 7 * 24 * 60,
 }
 
 TIME_PATTERN: str = (
     f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
 
 MEMORY_SIZE_UNITS = {
-    'b': 1,
-    'k': 2**10,
     'kb': 2**10,
-    'm': 2**20,
     'mb': 2**20,
-    'g': 2**30,
     'gb': 2**30,
-    't': 2**40,
     'tb': 2**40,
-    'p': 2**50,
     'pb': 2**50,
 }
 
