@@ -26,6 +26,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -296,6 +297,13 @@ def get_current_user() -> 'models.User':
     if _current_user is not None:
         return _current_user
     return models.User.get_current_user()
+
+
+def get_current_user_name() -> str:
+    """Returns the current user name."""
+    name = common_utils.get_current_user().name
+    assert name is not None
+    return name
 
 
 def set_current_user(user: 'models.User'):
@@ -754,7 +762,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or getpass.getuser()
+    username = username or common_utils.get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

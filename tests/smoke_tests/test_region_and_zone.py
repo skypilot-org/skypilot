@@ -33,6 +33,7 @@ from smoke_tests import test_mount_and_storage
 import sky
 from sky import skypilot_config
 from sky.data import storage as storage_lib
+from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.utils import controller_utils
 
@@ -74,16 +75,13 @@ def test_aws_with_ssh_proxy_command():
                 endpoint: {smoke_tests_utils.get_api_server_url()}
             """))
         f.flush()
-        test = smoke_tests_utils.Test(
-            'aws_with_ssh_proxy_command',
-            [
-                f'sky launch -y -c jump-{name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG}',
-                # Use jump config
-                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; '
-                f'sky launch -y -c {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
-                f'sky logs {name} 1 --status',
-                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; sky exec {name} echo hi',
-                f'sky logs {name} 2 --status',
+
+        jobs_controller_proxy_test_cmds = []
+        jobs_controller_proxy_test_cmds_down = ''
+        # Disable controller related tests for consolidation mode, as there will
+        # not be any controller VM to launch.
+        if not managed_job_utils.is_consolidation_mode():
+            jobs_controller_proxy_test_cmds = [
                 # Start a small job to make sure the controller is created.
                 f'sky jobs launch -n {name}-0 --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
@@ -103,8 +101,22 @@ def test_aws_with_ssh_proxy_command():
                         sky.ManagedJobStatus.STARTING
                     ],
                     timeout=300),
+            ]
+            jobs_controller_proxy_test_cmds_down = f'sky jobs cancel -y -n {name}'
+
+        test = smoke_tests_utils.Test(
+            'aws_with_ssh_proxy_command',
+            [
+                f'sky launch -y -c jump-{name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG}',
+                # Use jump config
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; '
+                f'sky launch -y -c {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+                f'sky logs {name} 1 --status',
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; sky exec {name} echo hi',
+                f'sky logs {name} 2 --status',
+                *jobs_controller_proxy_test_cmds,
             ],
-            f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
+            f'sky down -y {name} jump-{name}; {jobs_controller_proxy_test_cmds_down}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
