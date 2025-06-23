@@ -67,6 +67,9 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_HF_TOKEN: my-secret-value
     WANDB_API_KEY: my-secret-value-2
 
+  :ref:`volumes <yaml-spec-new-volumes>`:
+    /mnt/data: volume-name
+
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
     /remote/path: /local/path
@@ -799,7 +802,19 @@ Example:
     HF_TOKEN: my-huggingface-token
     WANDB_API_KEY: my-wandb-api-key
 
+.. _yaml-spec-new-volumes:
 
+``volumes``
+~~~~~~~~~~~
+
+SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+
+Example:
+
+.. code-block:: yaml
+
+  volumes:
+    /mnt/data: volume-name
 
 
 .. _yaml-spec-file-mounts:

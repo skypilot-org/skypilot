@@ -4,7 +4,8 @@ Cloud Volumes
 =============
 
 SkyPilot supports mounting **reattachable network volumes** (e.g., GCP Persistent Disks) or
-**temporary instance volumes** (e.g., GCP Local SSDs) to a SkyPilot cluster.
+**temporary instance volumes** (e.g., GCP Local SSDs) to a non-Kubernetes SkyPilot cluster and mounting
+**PVCs** to a Kubernetes SkyPilot cluster.
 
 Currently, the following volume types are supported:
 
@@ -12,6 +13,10 @@ Currently, the following volume types are supported:
 
   - Network volumes: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_
   - Instance volumes: `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_ (temporary)
+
+- Kubernetes
+
+  - PVCs: `Persistent Volume Claims <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
 
 Use cases
 ---------
@@ -21,8 +26,88 @@ particular region and can only be attached to instances in the same region.
 
 Use :ref:`Cloud Buckets <sky-storage>` for object storage that works across zones, regions, and clouds.
 
-Usage
------
+.. _volumes-on-kubernetes:
+
+Volumes on Kubernetes
+---------------------
+
+SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters.
+
+Creating a PVC volume
+~~~~~~~~~~~~~~~~~~~~~
+
+1. Prepare a volume YAML file (e.g., ``volume.yaml``):
+
+   .. code-block:: yaml
+
+     name: new-pvc
+     type: k8s-pvc
+     infra: kubernetes  # or k8s or k8s/context
+     size: 10Gi
+     config:
+       namespace: default  # optional
+       storage_class_name: csi-mounted-fs-path-sc  # optional
+       access_mode: ReadWriteMany  # optional
+
+2. Create the volume using SkyPilot:
+
+   .. code-block:: bash
+
+     sky volumes apply volume.yaml
+
+   You'll be prompted to confirm the creation:
+
+   .. code-block:: text
+
+     Proceed to create volume 'new-pvc'? [Y/n]: Y
+     Creating PVC: new-pvc-73ec42f2-5c6c4e
+
+3. Mount the volume in your task YAML:
+
+   .. code-block:: yaml
+
+     resources:
+       cpus: 4+
+       num_nodes: 2
+
+     volumes:
+       /mnt/data: new-pvc
+
+Managing PVC volumes
+~~~~~~~~~~~~~~~~~~~~
+
+List all volumes:
+
+.. code-block:: bash
+
+  sky volumes ls
+
+Example output:
+
+.. code-block:: text
+
+  NAME     TYPE  CONTEXT          NAMESPACE  SIZE  USER_HASH  WORKSPACE  LAUNCHED     LAST_ATTACHED        STATUS   LAST_USE
+  new-pvc  pvc   nebius-mk8s-vol  default    1Gi   73ec42f2   default    56 secs ago  2025-06-23 14:42:17  IN_USE   sky volumes apply --name ...
+
+Delete a volume:
+
+.. code-block:: bash
+
+  sky volumes delete new-pvc
+
+You'll be prompted to confirm the deletion:
+
+.. code-block:: text
+
+  Deleting 1 volume: new-pvc. Proceed? [Y/n]:
+  Deleting PVC: new-pvc-73ec42f2-5c6c4e
+
+.. note::
+  - Both the SkyPilot volume resource and the underlying Kubernetes PVC will be deleted.
+  - If the volume is in use, it will be marked as ``IN_USE`` and cannot be deleted.
+
+Volumes on GCP
+--------------
 
 Volumes are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
 
