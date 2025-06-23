@@ -14,7 +14,7 @@ There are two ways to run distributed training with PyTorch:
 
 The main difference between the two for fixed-size distributed training is that `rdvz` backend automatically handles the rank for each node, while `torchrun` requires the rank to be set manually.
 
-SkyPilot offers convinient built-in environment variables to help you start distributed training easily.
+SkyPilot offers convenient built-in environment variables to help you start distributed training easily.
 
 ### Using normal `torchrun`
 
