@@ -123,7 +123,6 @@ def create_table(cursor, conn):
         env_file_path TEXT,
         user_hash TEXT,
         workspace TEXT DEFAULT NULL,
-        priority INTEGER DEFAULT {constants.DEFAULT_PRIORITY},
         entrypoint TEXT DEFAULT NULL,
         original_user_yaml_path TEXT DEFAULT NULL)""")
 
@@ -147,14 +146,6 @@ def create_table(cursor, conn):
                                  'workspace',
                                  'TEXT DEFAULT NULL',
                                  value_to_replace_existing_entries='default')
-
-    db_utils.add_column_to_table(
-        cursor,
-        conn,
-        'job_info',
-        'priority',
-        'INTEGER',
-        value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'entrypoint', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'job_info',
@@ -234,7 +225,6 @@ columns = [
     'env_file_path',
     'user_hash',
     'workspace',
-    'priority',
     'entrypoint',
     'original_user_yaml_path',
 ]
@@ -253,7 +243,7 @@ class ManagedJobStatus(enum.Enum):
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
 
     However, a managed job only has one ManagedJobStatus on the jobs controller.
-        ManagedJobStatus = [PENDING, STARTING, RUNNING, ...]
+        ManagedJobStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
     Mapping from JobStatus to ManagedJobStatus:
         INIT            ->  STARTING/RECOVERING
         SETTING_UP      ->  RUNNING
@@ -273,14 +263,10 @@ class ManagedJobStatus(enum.Enum):
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
     PENDING = 'PENDING'
-    # SUBMITTED: This state used to be briefly set before immediately changing
-    # to STARTING. Its use was removed in #5682. We keep it for backwards
-    # compatibility, so we can still parse old jobs databases that may have jobs
-    # in this state.
-    # TODO(cooperc): remove this in v0.12.0
-    DEPRECATED_SUBMITTED = 'SUBMITTED'
     # The submitted_at timestamp of the managed job in the 'spot' table will be
     # set to the time when the job controller begins running.
+    # SUBMITTED: The jobs controller starts the controller process.
+    SUBMITTED = 'SUBMITTED'
     # STARTING: The controller process is launching the cluster for the managed
     # job.
     STARTING = 'STARTING'
@@ -366,6 +352,7 @@ class ManagedJobStatus(enum.Enum):
 
 _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
+    ManagedJobStatus.SUBMITTED: colorama.Fore.BLUE,
     ManagedJobStatus.STARTING: colorama.Fore.BLUE,
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
@@ -377,8 +364,6 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.FAILED_CONTROLLER: colorama.Fore.RED,
     ManagedJobStatus.CANCELLING: colorama.Fore.YELLOW,
     ManagedJobStatus.CANCELLED: colorama.Fore.YELLOW,
-    # TODO(cooperc): backwards compatibility, remove this in v0.12.0
-    ManagedJobStatus.DEPRECATED_SUBMITTED: colorama.Fore.BLUE,
 }
 
 
@@ -395,12 +380,8 @@ class ManagedJobScheduleState(enum.Enum):
     - LAUNCHING -> ALIVE: The launch attempt was completed. It may have
       succeeded or failed. The job controller is not allowed to sky.launch again
       without transitioning to ALIVE_WAITING and then LAUNCHING.
-    - LAUNCHING -> ALIVE_BACKOFF: The launch failed to find resources, and is
-      in backoff waiting for resources.
     - ALIVE -> ALIVE_WAITING: The job controller wants to sky.launch again,
       either for recovery or to launch a subsequent task.
-    - ALIVE_BACKOFF -> ALIVE_WAITING: The backoff period has ended, and the job
-      controller wants to try to launch again.
     - ALIVE_WAITING -> LAUNCHING: The scheduler has determined that the job
       controller may launch again.
     - LAUNCHING, ALIVE, or ALIVE_WAITING -> DONE: The job controller is exiting
@@ -414,7 +395,6 @@ class ManagedJobScheduleState(enum.Enum):
     state or vice versa. (In fact, schedule state is defined on the job and
     status on the task.)
     - INACTIVE or WAITING should only be seen when a job is PENDING.
-    - ALIVE_BACKOFF should only be seen when a job is STARTING.
     - ALIVE_WAITING should only be seen when a job is RECOVERING, has multiple
       tasks, or needs to retry launching.
     - LAUNCHING and ALIVE can be seen in many different statuses.
@@ -440,9 +420,6 @@ class ManagedJobScheduleState(enum.Enum):
     # The job is running sky.launch, or soon will, using a limited number of
     # allowed launch slots.
     LAUNCHING = 'LAUNCHING'
-    # The job is alive, but is in backoff waiting for resources - a special case
-    # of ALIVE.
-    ALIVE_BACKOFF = 'ALIVE_BACKOFF'
     # The controller for the job is running, but it's not currently launching.
     ALIVE = 'ALIVE'
     # The job is in a terminal state. (Not necessarily SUCCEEDED.)
@@ -500,7 +477,6 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
     # make it easier to find them based on one of the values.
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the managed task is submitted.
-    logger.info('Launching the spot cluster...')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -514,17 +490,14 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?) AND
             status=(?) AND
             end_at IS null""",
-            (resources_str, submit_time, ManagedJobStatus.STARTING.value,
+            (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
              run_timestamp, json.dumps(specs), job_id, task_id,
              ManagedJobStatus.PENDING.value))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
-                'Failed to set the task to starting. '
+                f'Failed to set the task to submitted. '
                 f'({cursor.rowcount} rows updated)')
-    # SUBMITTED is no longer used, but we keep it for backward compatibility.
-    # TODO(cooperc): remove this in v0.12.0
     callback_func('SUBMITTED')
-    callback_func('STARTING')
 
 
 @_init_db
@@ -573,15 +546,13 @@ def set_restarting(job_id: int, task_id: int, recovering: bool):
             WHERE spot_job_id=(?) AND
             task_id=(?) AND
             status=(?) AND
-            end_at IS null""",
-            (target_status, job_id, task_id, ManagedJobStatus.PENDING.value))
-        logger.debug(f'back to {target_status}')
+            end_at IS null""", (ManagedJobStatus.STARTING.value, job_id,
+                                task_id, ManagedJobStatus.SUBMITTED.value))
         if cursor.rowcount != 1:
             raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task back to {target_status}. '
+                f'Failed to set the task to starting. '
                 f'({cursor.rowcount} rows updated)')
-    # Do not call callback_func here, as it should only be invoked for the
-    # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
+    callback_func('STARTING')
 
 
 @_init_db
@@ -1284,10 +1255,9 @@ def scheduler_set_alive_waiting(job_id: int) -> None:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
             'schedule_state = (?) '
-            'WHERE spot_job_id = (?) AND schedule_state IN (?, ?)',
+            'WHERE spot_job_id = (?) AND schedule_state = (?)',
             (ManagedJobScheduleState.ALIVE_WAITING.value, job_id,
-             ManagedJobScheduleState.ALIVE.value,
-             ManagedJobScheduleState.ALIVE_BACKOFF.value)).rowcount
+             ManagedJobScheduleState.ALIVE.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1345,20 +1315,15 @@ def get_num_alive_jobs() -> int:
         return cursor.execute(
             'SELECT COUNT(*) '
             'FROM job_info '
-            'WHERE schedule_state IN (?, ?, ?, ?)',
+            'WHERE schedule_state IN (?, ?, ?)',
             (ManagedJobScheduleState.ALIVE_WAITING.value,
              ManagedJobScheduleState.LAUNCHING.value,
-             ManagedJobScheduleState.ALIVE.value,
-             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()[0]
+             ManagedJobScheduleState.ALIVE.value)).fetchone()[0]
 
 
 @_init_db
 def get_waiting_job() -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
-
-    Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
-    priority is greater than or equal to any currently LAUNCHING or
-    ALIVE_BACKOFF job.
 
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
@@ -1380,19 +1345,13 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
             ')'
             'ORDER BY priority DESC, spot_job_id ASC LIMIT 1',
             (ManagedJobScheduleState.WAITING.value,
-             ManagedJobScheduleState.ALIVE_WAITING.value,
-             ManagedJobScheduleState.LAUNCHING.value,
-             ManagedJobScheduleState.ALIVE_BACKOFF.value)).fetchone()
-
-        if waiting_job_row is None:
-            return None
-
+             ManagedJobScheduleState.ALIVE_WAITING.value)).fetchone()
         return {
-            'job_id': waiting_job_row[0],
-            'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
-            'dag_yaml_path': waiting_job_row[2],
-            'env_file_path': waiting_job_row[3],
-        }
+            'job_id': row[0],
+            'schedule_state': ManagedJobScheduleState(row[1]),
+            'dag_yaml_path': row[2],
+            'env_file_path': row[3],
+        } if row is not None else None
 
 
 @_init_db

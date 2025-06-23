@@ -283,7 +283,6 @@ def mock_job_table_one_job(monkeypatch):
             'task_id': 0,
             'task_name': 'test_task',
             'job_duration': 20,
-            'priority': constants.DEFAULT_PRIORITY,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 

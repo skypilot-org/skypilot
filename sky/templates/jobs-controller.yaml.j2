@@ -45,8 +45,7 @@ run: |
   python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
     --user-yaml-path {{remote_original_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
-    --env-file {{remote_env_file_path}} \
-    --priority {{priority}}
+    --env-file {{remote_env_file_path}}
 
 
 envs:

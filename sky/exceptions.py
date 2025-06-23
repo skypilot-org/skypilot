@@ -222,7 +222,7 @@ class ManagedJobReachedMaxRetriesError(Exception):
 class ManagedJobStatusError(Exception):
     """Raised when a managed job task status update is invalid.
 
-    For instance, a RUNNING job cannot become PENDING.
+    For instance, a RUNNING job cannot become SUBMITTED.
     """
     pass
 

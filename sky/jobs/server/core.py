@@ -92,7 +92,6 @@ def launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
-    priority = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -102,42 +101,6 @@ def launch(
                     'name only and comment out the task names (so that they '
                     'will be auto-generated) .')
         task_names.add(task_.name)
-
-        # Check for priority in resources
-        task_priority = None
-        if task_.resources:
-            # Convert set to list to access elements by index
-            resources_list = list(task_.resources)
-            # Take first resource's priority as reference
-            task_priority = resources_list[0].priority
-
-            # Check all other resources have same priority
-            for resource in resources_list[1:]:
-                if resource.priority != task_priority:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Task {task_.name!r}: All resources must have the '
-                            'same priority. Found priority '
-                            f'{resource.priority} but expected {task_priority}.'
-                        )
-
-        if task_priority is not None:
-            if (priority is not None and priority != task_priority):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Multiple tasks in the DAG have different priorities. '
-                        'Either specify a priority in only one task, or set '
-                        'the same priority for each task.')
-            priority = task_priority
-
-    if priority is None:
-        priority = skylet_constants.DEFAULT_PRIORITY
-
-    if (priority < skylet_constants.MIN_PRIORITY or
-            priority > skylet_constants.MAX_PRIORITY):
-        raise ValueError(
-            f'Priority must be between {skylet_constants.MIN_PRIORITY}'
-            f' and {skylet_constants.MAX_PRIORITY}, got {priority}')
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
@@ -232,7 +195,6 @@ def launch(
             'remote_env_file_path': remote_env_file_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
-            'priority': priority,
             **controller_utils.shared_controller_vars_to_fill(
                 controller,
                 remote_user_config_path=remote_user_config_path,

@@ -342,7 +342,6 @@ class Task:
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
-
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 

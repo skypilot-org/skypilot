@@ -33,15 +33,12 @@ Managed job status follows the following state diagram:
 
 state "All States" as AllStates {
     state "Inner Controller Loop" as InnerLoop {
-        PENDING -> STARTING : scheduled
-        STARTING -> PENDING : backoff
-        STARTING -\-> RUNNING
-        PENDING -\-> RUNNING : empty job\nshortcut
+        PENDING -> SUBMITTED : controller\nproc. init
+        SUBMITTED -> STARTING
+        STARTING -\-> RUNNING : job started
+        PENDING -\-> RUNNING : empty job shortcut
         RUNNING -> RECOVERING : preempted
-        state "PENDING" as PENDING_RECOVERY : during recovery
-        RECOVERING -> PENDING_RECOVERY : backoff
-        PENDING_RECOVERY -left> RECOVERING : rescheduled
-        RECOVERING -> RUNNING : recovered
+        RECOVERING -left> RUNNING : recovered
     }
 
     [*] -\-> PENDING: job created
@@ -85,11 +82,8 @@ WAITING -\-> LAUNCHING : scheduled
 
 state "Controller process alive (pid set)" as ControllerProc {
     state "LAUNCHING" as LAUNCHING_PID : (pid set)
-    state ALIVE_BACKOFF : (waiting for resources)
     LAUNCHING -> LAUNCHING_PID
     LAUNCHING_PID -> ALIVE : launch\nfinished
-    LAUNCHING_PID -up-> ALIVE_BACKOFF
-    ALIVE_BACKOFF -> ALIVE_WAITING
     ALIVE -up-> ALIVE_WAITING : recover or\nnew task
     ALIVE_WAITING -down-> LAUNCHING_PID : scheduled
 }

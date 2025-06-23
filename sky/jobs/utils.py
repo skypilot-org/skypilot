@@ -1054,7 +1054,7 @@ def _get_job_status_from_tasks(
         # Use the first non-succeeded status.
         if managed_task_status != managed_job_state.ManagedJobStatus.SUCCEEDED:
             # TODO(zhwu): we should not blindly use the first non-
-            # succeeded as the status could be changed to PENDING
+            # succeeded as the status could be changed to SUBMITTED
             # when going from one task to the next one, which can be
             # confusing.
             break
@@ -1136,7 +1136,6 @@ def format_job_table(
         'TASK',
         *(['WORKSPACE'] if show_workspace else []),
         'NAME',
-        'PRIORITY',
         *user_cols,
         'REQUESTED',
         'SUBMITTED',
@@ -1166,10 +1165,7 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    def generate_details(details: Optional[str],
-                         failure_reason: Optional[str]) -> str:
-        if details is not None:
-            return details
+    def generate_details(failure_reason: Optional[str]) -> str:
         if failure_reason is not None:
             return f'Failure: {failure_reason}'
         return '-'
@@ -1208,7 +1204,6 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            priority = job_tasks[0].get('priority', '-')
             managed_job_status, current_task_id = _get_job_status_from_tasks(
                 job_tasks)
             for task in job_tasks:
@@ -1244,7 +1239,6 @@ def format_job_table(
                 '',
                 *([''] if show_workspace else []),
                 job_name,
-                str(priority),
                 *user_values,
                 '-',
                 submitted,
@@ -1254,14 +1248,13 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
-                details = job_tasks[current_task_id].get('details')
                 failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
                     job_tasks[0]['schedule_state'],
-                    generate_details(details, failure_reason),
+                    generate_details(failure_reason),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1275,13 +1268,11 @@ def format_job_table(
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
             task_workspace = '-' if len(job_tasks) > 1 else workspace
-            priority = task.get('priority', '-')
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
                 *([task_workspace] if show_workspace else []),
                 task['task_name'],
-                str(priority),
                 *user_values,
                 task['resources'],
                 # SUBMITTED
@@ -1326,8 +1317,7 @@ def format_job_table(
                     infra.formatted_str(),
                     task['cluster_resources'],
                     schedule_state,
-                    generate_details(task.get('details'),
-                                     task['failure_reason']),
+                    generate_details(task['failure_reason']),
                 ])
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
