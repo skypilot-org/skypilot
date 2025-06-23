@@ -430,7 +430,7 @@ def get_volume_schema():
             },
             'type': {
                 'type': 'string',
-                'case_insensitive_enum': [
+                'case_sensitive_enum': [
                     type.value for type in volume.VolumeType
                 ],
             },
@@ -462,7 +462,7 @@ def get_volume_schema():
                     },
                     'access_mode': {
                         'type': 'string',
-                        'case_insensitive_enum': [
+                        'case_sensitive_enum': [
                             type.value for type in volume.VolumeAccessMode
                         ],
                     },

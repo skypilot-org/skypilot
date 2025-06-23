@@ -600,7 +600,7 @@ def write_cluster_config(
         resources_utils.ClusterName(
             cluster_name,
             cluster_name_on_cloud,
-        ), region, zones, num_nodes, dryrun)
+        ), region, zones, num_nodes, dryrun, volume_mounts)
     config_dict = {}
 
     specific_reservations = set(

@@ -30,6 +30,9 @@ from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky.volumes import volume as volume_lib
+
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
@@ -1466,11 +1469,15 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
-    def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
-                              region: clouds.Region,
-                              zones: Optional[List[clouds.Zone]],
-                              num_nodes: int,
-                              dryrun: bool) -> Dict[str, Optional[str]]:
+    def make_deploy_variables(
+        self,
+        cluster_name: resources_utils.ClusterName,
+        region: clouds.Region,
+        zones: Optional[List[clouds.Zone]],
+        num_nodes: int,
+        dryrun: bool,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
         These variables are divided into two categories: cloud-specific and
@@ -1492,7 +1499,7 @@ class Resources:
         # Cloud specific variables
         assert self.cloud is not None, 'Cloud must be specified'
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, num_nodes, dryrun)
+            self, cluster_name, region, zones, num_nodes, dryrun, volume_mounts)
 
         # TODO(andyl): Should we print some warnings if users' envs share
         # same names with the cloud specific variables, but not enabled

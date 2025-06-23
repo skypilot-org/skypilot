@@ -678,6 +678,11 @@ class TestVolumeCommands:
                 'type': 'pvc',  # Should be 'k8s-pvc'
                 'infra': 'k8s'
             },
+            {
+                'name': 'test-volume',
+                'type': 'k8s-PVC',  # Should be 'k8s-pvc'
+                'infra': 'k8s'
+            },
         ]
 
         for config in invalid_configs:
@@ -767,22 +772,32 @@ class TestVolumeCommands:
         from sky.utils import common_utils
         from sky.utils import schemas
 
-        invalid_configs = [{
-            'name': 'test-volume',
-            'type': 'k8s-pvc',
-            'infra': 'k8s',
-            'config': 'not-an-object'
-        }, {
-            'name': 'test-volume',
-            'type': 'k8s-pvc',
-            'infra': 'k8s',
-            'config': {
-                'access_mode': 'InvalidMode'
-            }
-        }]
+        invalid_configs = [
+            {
+                'name': 'test-volume',
+                'type': 'k8s-pvc',
+                'infra': 'k8s',
+                'config': 'not-an-object'
+            },
+            {
+                'name': 'test-volume',
+                'type': 'k8s-pvc',
+                'infra': 'k8s',
+                'config': {
+                    'access_mode': 'InvalidMode'
+                }
+            },
+            {
+                'name': 'test-volume',
+                'type': 'k8s-pvc',
+                'infra': 'k8s',
+                'config': {
+                    'access_mode': 'ReadWriteonce'
+                }
+            },
+        ]
 
         for config in invalid_configs:
-            print(f'Testing {config}')
             with pytest.raises(
                     exceptions.InvalidSkyPilotConfigError) as exc_info:
                 common_utils.validate_schema(config,

@@ -15,6 +15,7 @@ if typing.TYPE_CHECKING:
 
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 else:
     requests = adaptors_common.LazyImport('requests')
 
@@ -159,13 +160,15 @@ class Lambda(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: 'resources_utils.ClusterName',
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: 'resources_utils.ClusterName',
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         del cluster_name, dryrun  # Unused.
         assert zones is None, 'Lambda does not support zones.'
         resources = resources.assert_launchable()
