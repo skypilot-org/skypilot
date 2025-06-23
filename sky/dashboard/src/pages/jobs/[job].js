@@ -12,7 +12,10 @@ import {
   CopyIcon,
   CheckIcon,
 } from 'lucide-react';
-import { CustomTooltip as Tooltip, formatFullTimestamp } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  formatFullTimestamp,
+} from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
@@ -886,9 +889,7 @@ function JobDetailsContent({
       <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
         {isPending ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
-            <span>
-              Waiting for the job to start; refresh in a few moments.
-            </span>
+            <span>Waiting for the job to start; refresh in a few moments.</span>
           </div>
         ) : isRecovering ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
@@ -962,7 +963,9 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Submitted</div>
         <div className="text-base mt-1">
-          {jobData.submitted_at ? formatFullTimestamp(jobData.submitted_at) : 'N/A'}
+          {jobData.submitted_at
+            ? formatFullTimestamp(jobData.submitted_at)
+            : 'N/A'}
         </div>
       </div>
       <div>
