@@ -32,8 +32,8 @@ from smoke_tests import test_mount_and_storage
 
 import sky
 from sky import skypilot_config
-from sky.jobs import utils as managed_job_utils
 from sky.data import storage as storage_lib
+from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.utils import controller_utils
 
