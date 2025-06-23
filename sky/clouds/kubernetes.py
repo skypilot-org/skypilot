@@ -1103,10 +1103,6 @@ class Kubernetes(clouds.Cloud):
                         elif machine_family == 'a4':
                             return (KubernetesHighPerformanceNetworkType.
                                     GCP_GPUDIRECT_RDMA)
-                        elif machine_family == 'a3':
-                            # Default to TCPX for unknown A3
-                            return (
-                                KubernetesHighPerformanceNetworkType.GCP_TCPX)
 
                     # Fallback: Check for GPU Direct TCPX capable instance
                     # types with high-perf GPUs
