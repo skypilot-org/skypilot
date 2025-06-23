@@ -84,6 +84,33 @@ def _maybe_upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
+def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
+    """Submit the managed job locally if in consolidation mode.
+
+    In normal mode the managed job submission is done in the ray job submission.
+    For consolidation mode, we need to manually submit it. Check the following
+    function for the normal mode submission:
+    sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend,
+    _exec_code_on_head::_maybe_add_managed_job_code
+    """
+    if not managed_job_utils.is_consolidation_mode():
+        return None
+
+    # Create local directory for the managed job.
+    pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
+    consolidation_mode_job_id = (managed_job_state.set_job_info_without_job_id(
+        dag.name,
+        workspace=skypilot_config.get_active_workspace(
+            force_user_workspace=True),
+        entrypoint=common_utils.get_current_command()))
+    for task_id, task in enumerate(dag.tasks):
+        resources_str = backend_utils.get_task_resources_str(
+            task, is_managed_job=True)
+        managed_job_state.set_pending(consolidation_mode_job_id, task_id,
+                                      task.name, resources_str)
+    return consolidation_mode_job_id
+
+
 @timeline.event
 @usage_lib.entrypoint
 def launch(
@@ -233,31 +260,12 @@ def launch(
             controller=controller,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-        consolidation_mode_job_id = None
-        modified_catalogs = {}
-        # In normal mode the managed job submission is done in the ray job
-        # submission. For consolidation mode, we need to manually submit it.
-        # Check the following function for the normal mode submission:
-        # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::_exec_code_on_head::_maybe_add_managed_job_code  # pylint: disable=line-too-long
-        if managed_job_utils.is_consolidation_mode():
-            # Create local directory for the managed job.
-            pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
-            consolidation_mode_job_id = (
-                managed_job_state.set_job_info_without_job_id(
-                    dag.name,
-                    workspace=skypilot_config.get_active_workspace(
-                        force_user_workspace=True),
-                    entrypoint=common_utils.get_current_command()))
-            for task_id, task in enumerate(dag.tasks):
-                resources_str = backend_utils.get_task_resources_str(
-                    task, is_managed_job=True)
-                managed_job_state.set_pending(consolidation_mode_job_id,
-                                              task_id, task.name, resources_str)
-        else:
-            # This is only needed for non-consolidation mode. For consolidation
-            # mode, the controller uses the same catalog as API server.
-            modified_catalogs = (
-                service_catalog_common.get_modified_catalog_file_mounts())
+        consolidation_mode_job_id = _maybe_submit_job_locally(prefix, dag)
+
+        # This is only needed for non-consolidation mode. For consolidation
+        # mode, the controller uses the same catalog as API server.
+        modified_catalogs = {} if consolidation_mode_job_id is not None else (
+            service_catalog_common.get_modified_catalog_file_mounts())
 
         vars_to_fill = {
             'remote_original_user_yaml_path': remote_original_user_yaml_path,

@@ -186,7 +186,8 @@ def ha_recovery_for_consolidation_mode():
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
-    with open('/tmp/ha_recovery.log', 'w', encoding='utf-8') as f:
+    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH, 'w',
+              encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
         for job in managed_job_state.get_managed_jobs():
