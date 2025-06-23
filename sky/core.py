@@ -324,7 +324,7 @@ def cost_report(days: Optional[int] = 30) -> List[Dict[str, Any]]:
         days = 30
 
     cluster_reports = global_user_state.get_clusters_from_history(days=days)
-    logger.debug(f'{len(cluster_reports)} clusters found.')
+    logger.debug(f'{len(cluster_reports)} clusters found from history with {days} days.')
 
     def _process_cluster_report(
             cluster_report: Dict[str, Any]) -> Dict[str, Any]:
