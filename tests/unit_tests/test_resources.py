@@ -835,9 +835,6 @@ def test_memory_conversion():
 def test_autostop_time_format():
     """Test autostop time format parsing."""
     # Test minutes format
-    r = Resources(autostop='5min')
-    assert r.autostop_config.idle_minutes == 5
-
     r = Resources(autostop='5m')
     assert r.autostop_config.idle_minutes == 5
 
@@ -845,18 +842,12 @@ def test_autostop_time_format():
     r = Resources(autostop='2h')
     assert r.autostop_config.idle_minutes == 120
 
-    r = Resources(autostop='2hr')
-    assert r.autostop_config.idle_minutes == 120
-
     # Test days format
     r = Resources(autostop='1d')
     assert r.autostop_config.idle_minutes == 1440
 
     r = Resources(autostop='30s')
-    assert r.autostop_config.idle_minutes == 1
-
-    r = Resources(autostop='30sec')
-    assert r.autostop_config.idle_minutes == 1
+    assert r.autostop_config.idle_minutes == 0.5
 
     r = Resources(autostop=30)
     assert r.autostop_config.idle_minutes == 30

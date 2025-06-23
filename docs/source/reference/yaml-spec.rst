@@ -243,9 +243,10 @@ Format:
   - ``down``: If true, tear down the cluster instead of stopping it
 
 ``<unit>`` can be one of:
-- ``m``, ``min``: minutes
-- ``h``, ``hr``: hours
-- ``d``, ``day``: days
+- ``m``: minutes (default if not specified)
+- ``h``: hours
+- ``d``: days
+- ``w``: weeks
 
 
 Example:
@@ -267,7 +268,7 @@ OR
 .. code-block:: yaml
 
   resources:
-    autostop: 10hr  # Stop after 10 hours
+    autostop: 10h  # Stop after 10 hours
 
 OR
 
@@ -407,17 +408,16 @@ Memory specification per node (optional).
 
 Format:
 
--  ``<num>``: exactly ``<num>`` GiB
--  ``<num>+``: at least ``<num>`` GiB
--  ``<num><unit>``: memory with unit (e.g., ``32GiB``, ``64GB``)
+-  ``<num>``: exactly ``<num>`` GB
+-  ``<num>+``: at least ``<num>`` GB
+-  ``<num><unit>``: memory with unit (e.g., ``1024MB``, ``64GB``)
 
 Units supported (case-insensitive):
-- B (bytes, 2^0 bytes)
-- K/KB (kilobytes, 2^10 bytes)
-- M/MB (megabytes, 2^20 bytes)
-- G/GB (gigabytes, 2^30 bytes)
-- T/TB (terabytes, 2^40 bytes)
-- P/PB (petabytes, 2^50 bytes)
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes) (default if not specified)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
@@ -474,12 +474,11 @@ Increase this if you have a large working directory or tasks that write out larg
 
 Units supported (case-insensitive):
 
-- B (bytes, 2^0 bytes)
-- K/KB (kilobytes, 2^10 bytes)
-- M/MB (megabytes, 2^20 bytes)
-- G/GB (gigabytes, 2^30 bytes)
-- T/TB (terabytes, 2^40 bytes)
-- P/PB (petabytes, 2^50 bytes)
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
 
 .. warning::
 
