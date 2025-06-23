@@ -961,7 +961,42 @@ available_node_types:
               add:
                 - IPC_LOCK
           {% endif %}
-
+        {% if k8s_enable_gpudirect_tcpx %}
+        # GPUDirect TCPX daemon sidecar container
+        - name: tcpx-daemon
+          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd-dev:v2.0.11
+          imagePullPolicy: Always
+          command:
+            - /tcpgpudmarxd/build/app/tcpgpudmarxd
+            - --gpu_nic_preset
+            - a3vm
+            - --gpu_shmem_type
+            - fd
+            - --uds_path
+            - /run/tcpx
+            - --setup_param
+            - --verbose
+            - "128"
+            - "2"
+            - "0"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - name: libraries
+              mountPath: /usr/local/nvidia/lib64
+              readOnly: true
+            - name: tcpx-socket
+              mountPath: /run/tcpx
+            - name: sys
+              mountPath: /hostsysfs
+            - name: proc-sys
+              mountPath: /hostprocsysfs
+          env:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+        {% endif %}
 
       {% if high_availability %}
       pvc_spec:
