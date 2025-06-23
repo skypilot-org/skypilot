@@ -186,8 +186,8 @@ class Kubernetes(clouds.Cloud):
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
             # Allow custom network tier if supported by the cluster
             # (e.g., Nebius clusters with high performance networking)
-            if cls._detect_cluster_type(
-                    context).supports_high_performance_networking():
+            if cls._detect_cluster_type(context, resources.network_tier
+                                       ).supports_high_performance_networking():
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                     None)
@@ -641,7 +641,7 @@ class Kubernetes(clouds.Cloud):
             override_configs=resources.cluster_config_overrides)
 
         cluster_type = self._detect_cluster_type(
-            region.name if region else 'default')
+            region.name if region else 'default', resources.network_tier)
 
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
@@ -1049,15 +1049,25 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def _detect_cluster_type(
-            cls, context: str) -> KubernetesHighPerformanceNetworkType:
+        cls,
+        context: str,
+        network_tier: Optional['resources_utils.NetworkTier'] = None
+    ) -> KubernetesHighPerformanceNetworkType:
         """Detect the type of Kubernetes cluster based on node labels.
 
         Args:
             context: The Kubernetes context to check.
+            network_tier: The network tier requested. If None or not BEST,
+                         returns NONE (no high-performance networking).
 
         Returns:
             The detected cluster type.
         """
+        # If network_tier is None or not BEST, return NONE
+        if (network_tier is None or
+                network_tier != resources_utils.NetworkTier.BEST):
+            return KubernetesHighPerformanceNetworkType.NONE
+
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
             for node in nodes:
