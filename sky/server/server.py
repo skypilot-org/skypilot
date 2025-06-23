@@ -1519,9 +1519,10 @@ if __name__ == '__main__':
     config = server_config.compute_server_config(cmd_args.deploy)
     num_workers = config.num_server_workers
 
-    sub_procs = []
+    queue_server: Optional[multiprocessing.Process] = None
+    workers: List[executor.RequestWorker] = []
     try:
-        sub_procs = executor.start(config)
+        queue_server, workers = executor.start(config)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
@@ -1537,17 +1538,9 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
 
-        def cleanup(proc: multiprocessing.Process) -> None:
-            try:
-                proc.terminate()
-                proc.join()
-            finally:
-                # The process may not be started yet, close it anyway.
-                proc.close()
-
-        # Terminate processes in reverse order in case dependency, especially
-        # queue server. Terminate queue server first does not affect the
-        # correctness of cleanup but introduce redundant error messages.
-        subprocess_utils.run_in_parallel(cleanup,
-                                         list(reversed(sub_procs)),
-                                         num_threads=len(sub_procs))
+        subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
+                                         workers,
+                                         num_threads=len(workers))
+        if queue_server is not None:
+            queue_server.terminate()
+            queue_server.join()

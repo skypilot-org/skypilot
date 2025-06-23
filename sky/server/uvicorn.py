@@ -77,9 +77,11 @@ class Server(uvicorn.Server):
             # Perform graceful shutdown in a separate thread to avoid blocking
             # the main thread.
             threading.Thread(target=self._graceful_shutdown,
+                             args=(sig, frame),
                              daemon=True).start()
 
-    def _graceful_shutdown(self) -> None:
+    def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
+                                                        None]) -> None:
         """Perform graceful shutdown."""
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
@@ -98,8 +100,9 @@ class Server(uvicorn.Server):
             logger.info(f'Worker {os.getpid()} elected as shutdown coordinator')
             self._wait_requests()
 
+        logger.info('Shutting down server...')
         self.should_exit = True
-        super().handle_exit(signal.SIGINT, None)
+        super().handle_exit(sig, frame)
 
     def _wait_requests(self) -> None:
         """Wait until all on-going requests are finished or cancelled."""
@@ -125,14 +128,21 @@ class Server(uvicorn.Server):
                 for req in reqs:
                     self.interrupt_request_for_retry(req.request_id)
                 break
+            interrupted = 0
             for req in reqs:
                 if req.request_id in internal_request_ids:
                     self.interrupt_request_for_retry(req.request_id)
+                    interrupted += 1
                 elif req.name in _RETRIABLE_REQUEST_NAMES:
                     self.interrupt_request_for_retry(req.request_id)
+                    interrupted += 1
                 # TODO(aylei): interrupt pending requests to accelerate the
                 # shutdown.
-            time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
+            # If some requests are not interrupted, wait for them to finish,
+            # otherwise we just check again immediately to accelerate the
+            # shutdown process.
+            if interrupted < len(reqs):
+                time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
 
     def interrupt_request_for_retry(self, request_id: str) -> None:
         """Interrupt a request for retry."""
