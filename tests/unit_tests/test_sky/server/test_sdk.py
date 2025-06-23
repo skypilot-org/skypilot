@@ -74,7 +74,7 @@ def test_cookie_jar_file(set_api_cookie_jar):
 
 
 def test_api_info():
-    with mock.patch('requests.get') as mock_get:
+    with mock.patch('sky.server.rest.get') as mock_get:
         mock_get.return_value.json.return_value = {
             "status": "healthy",
             "api_version": "1",
@@ -100,7 +100,7 @@ def test_api_info():
 
 
 def test_api_info_with_cookie_file(set_api_cookie_jar):
-    with mock.patch('requests.get') as mock_get:
+    with mock.patch('sky.server.rest.get') as mock_get:
         mock_get.return_value.json.return_value = {
             "status": "healthy",
             "api_version": "1",

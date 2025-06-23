@@ -1623,10 +1623,13 @@ def status_kubernetes() -> server_common.RequestId:
 
 # === API request APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def get(request_id: str) -> Any:
     """Waits for and gets the result of a request.
+
+    This function will not check the server health since /api/get is typically
+    not the first API call in an SDK session and checking the server health
+    may cause GET /api/get being sent to a restarted API server.
 
     Args:
         request_id: The request ID of the request to get.

@@ -367,6 +367,10 @@ def decode_rich_status(
                     yield line
                     continue
 
+                if control == Control.RETRY:
+                    raise exceptions.ServerTemporarilyUnavailableError(
+                        'The server is temporarily unavailable. Please try '
+                        'again.')
                 # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():
                     yield None
@@ -392,10 +396,6 @@ def decode_rich_status(
                         # Heartbeat is not displayed to the user, so we do not
                         # need to update the status.
                         pass
-                    elif control == Control.RETRY:
-                        raise exceptions.ServerTemporarilyUnavailableError(
-                            'The server is temporarily unavailable. Please try '
-                            'again.')
     finally:
         if decoding_status is not None:
             decoding_status.__exit__(None, None, None)

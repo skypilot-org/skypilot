@@ -26,7 +26,7 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 
 def retry_on_server_unavailable(max_wait_seconds: int = 600,
-                                initial_backoff: float = 1.0,
+                                initial_backoff: float = 5.0,
                                 max_backoff_factor: int = 5):
     """Decorator that retries a function when ServerTemporarilyUnavailableError
     is caught.
@@ -53,7 +53,6 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
-            # Try once to see if the server is available.
             try:
                 return func(*args, **kwargs)
             except exceptions.ServerTemporarilyUnavailableError:
@@ -66,12 +65,17 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
                 max_backoff_factor=max_backoff_factor)
             start_time = time.time()
             attempt = 0
-            with rich_utils.client_status(msg):
-                while True:
-                    attempt += 1
-                    try:
-                        return func(*args, **kwargs)
-                    except exceptions.ServerTemporarilyUnavailableError as e:
+            while True:
+                attempt += 1
+                try:
+                    return func(*args, **kwargs)
+                except exceptions.ServerTemporarilyUnavailableError as e:
+                    # This will cause the status spinner being stopped and
+                    # restarted in every retry loop. But it is necessary to
+                    # stop the status spinner before retrying func() to avoid
+                    # the status spinner get stuck if the func() runs for a
+                    # long time without update status, e.g. sky logs.
+                    with rich_utils.client_status(msg):
                         if time.time() - start_time > max_wait_seconds:
                             raise exceptions.ServerTemporarilyUnavailableError(
                                 'Timeout waiting for the API server to be '
