@@ -112,12 +112,6 @@ The NVIDIA DCGM dashboard is automatically provisioned using Grafana's dashboard
 # In values.yaml
 grafana:
   enabled: true
-  dashboards:
-    default:
-      nvidia-dcgm-exporter:
-        gnetId: 12239  # Official NVIDIA DCGM dashboard
-        revision: 2
-        datasource: prometheus
   dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1
@@ -157,10 +151,5 @@ Prometheus is configured to use Kubernetes service discovery to automatically fi
 ### 2. Dashboard Provisioning
 
 Grafana automatically:
-1. Downloads the NVIDIA DCGM dashboard (ID 12239) from grafana.com
-2. Configures it to use the Prometheus datasource
-3. Places it in the default folder for automatic loading
-
-## Future Enhancement: Multi-Cluster HTTP Service Discovery
-
-The SkyPilot API server includes a `/api/service-discovery` endpoint that could enable monitoring across multiple external Kubernetes clusters. However, this feature is not currently being used in the standard deployment.
+1. Discovers dashboards defined in charts/skypilot/manifests/
+2. Uses the Prometheus datasource

@@ -3,6 +3,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
+    # todo(rohan): add support for sso auth (use api server ingress.yaml as reference)
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     # Use the same realm as the API server

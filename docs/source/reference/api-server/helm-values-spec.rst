@@ -424,7 +424,7 @@ Default: see the yaml below.
 ``apiService.metrics.enabled``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Enable metrics collection for the API server. If this is enabled and the API server image does not support metrics, the deployment will fail.
+Enable (exposing API metrics)[Link to docs/source/reference/api-server/examples/api-server-metrics-setup.rst] from the API server. If this is enabled and the API server image does not support metrics, the deployment will fail.
 
 Default: ``false``
 
