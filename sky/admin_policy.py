@@ -10,6 +10,7 @@ import pydantic
 import sky
 from sky import exceptions
 from sky.adaptors import common as adaptors_common
+from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
 
@@ -237,7 +238,8 @@ class RestfulAdminPolicy(PolicyTemplate):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.RestfulPolicyError(
                     f'Failed to decode response from admin policy URL '
-                    f'{self.policy_url}: {common_utils.format_exception(e, use_bracket=True)}') from None
+                    f'{self.policy_url}: {common_utils.format_exception(e, use_bracket=True)}'
+                ) from None
         return mutated_user_request
 
     def __repr__(self):
