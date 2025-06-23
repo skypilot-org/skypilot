@@ -460,7 +460,6 @@ def _parse_override_params(
         disk_tier: Optional[str] = None,
         network_tier: Optional[str] = None,
         ports: Optional[Tuple[str, ...]] = None,
-        priority: Optional[int] = None,
         config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
@@ -527,8 +526,6 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
-    if priority is not None:
-        override_params['priority'] = priority
     if config_override:
         override_params['_cluster_config_overrides'] = config_override
     return override_params
@@ -635,7 +632,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
-    priority: Optional[int] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
@@ -672,7 +668,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_tier=disk_tier,
                                              network_tier=network_tier,
                                              ports=ports,
-                                             priority=priority,
                                              config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
@@ -3763,14 +3758,6 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
-@click.option('--priority',
-              type=click.IntRange(constants.MIN_PRIORITY,
-                                  constants.MAX_PRIORITY),
-              default=None,
-              show_default=True,
-              help=f'Job priority from ({constants.MIN_PRIORITY} '
-              f'to {constants.MAX_PRIORITY}). '
-              f'Default: {constants.DEFAULT_PRIORITY}.')
 @click.option(
     '--detach-run',
     '-d',
@@ -3805,7 +3792,6 @@ def jobs_launch(
     disk_tier: Optional[str],
     network_tier: Optional[str],
     ports: Tuple[str],
-    priority: Optional[int],
     detach_run: bool,
     yes: bool,
     async_call: bool,
@@ -3854,7 +3840,6 @@ def jobs_launch(
         network_tier=network_tier,
         ports=ports,
         job_recovery=job_recovery,
-        priority=priority,
         config_override=config_override,
     )
 
