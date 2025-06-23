@@ -14,7 +14,7 @@ metadata:
     kubernetes.io/ingress.class: nginx
     {{- end }}
     {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
-    # OAuth2 Proxy authentication
+    # OAuth2 Proxy authentication for browser-based access
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
     nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
     nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email
@@ -54,6 +54,47 @@ spec:
       {{- /* TODO(aylei): check whether this works for ingress-controllers other than nginx */}}
       - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
         path: {{ .Values.ingress.path }}{{ if ne .Values.ingress.path "/" }}(/|$)(.*){{ end }}
+        backend:
+          service:
+            name: {{ .Release.Name }}-api-service
+            port:
+              number: 80
+{{- end }}
+
+{{/* Separate ingress for service account access to bypass OAuth2 proxy */}}
+{{- if and (index .Values.ingress "oauth2-proxy" "enabled") .Values.enableServiceAccountTokens }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-service-account-ingress
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- if not $useNewIngressClass }}
+    kubernetes.io/ingress.class: nginx
+    {{- end }}
+    # No OAuth2 proxy annotations - this ingress bypasses OAuth2 for service account bearer tokens
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      # Only allow requests with Bearer tokens starting with 'sky_'
+      if ($http_authorization !~ "^Bearer\s+sky_") {
+        return 401 "Service account Bearer token required";
+      }
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
+    # Strip /sa prefix and forward to API server
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  {{- if $useNewIngressClass }}
+  ingressClassName: nginx
+  {{- end }}
+  rules:
+  - host: {{ .Values.ingress.host }}
+    http:
+      paths:
+      - pathType: ImplementationSpecific
+        path: /sa(/|$)(.*)
         backend:
           service:
             name: {{ .Release.Name }}-api-service

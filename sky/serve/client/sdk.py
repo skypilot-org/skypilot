@@ -78,12 +78,9 @@ def up(
             task=dag_str,
             service_name=service_name,
         )
-        response = requests.post(
-            f'{server_common.get_server_url()}/serve/up',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+        response = server_common.make_authenticated_request(
+            'POST', '/serve/up', json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -140,12 +137,9 @@ def update(
             mode=mode,
         )
 
-        response = requests.post(
-            f'{server_common.get_server_url()}/serve/update',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+        response = server_common.make_authenticated_request(
+            'POST', '/serve/update', json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -182,12 +176,9 @@ def down(
         all=all,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/down',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/serve/down', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
@@ -217,12 +208,9 @@ def terminate_replica(service_name: str, replica_id: int,
         replica_id=replica_id,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/terminate-replica',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/serve/terminate-replica', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
@@ -290,12 +278,9 @@ def status(
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
     body = payloads.ServeStatusBody(service_names=service_names,)
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/status',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/serve/status', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
@@ -376,13 +361,9 @@ def tail_logs(service_name: str,
         replica_id=replica_id,
         follow=follow,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        stream=True,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/serve/logs', json=json.loads(body.model_dump_json()),
+        timeout=(5, None), stream=True)
     request_id = server_common.get_request_id(response)
     sdk.stream_response(request_id, response, output_stream)
 
@@ -436,11 +417,9 @@ def sync_down_logs(service_name: str,
         targets=targets,
         replica_ids=replica_ids,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/sync-down-logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/serve/sync-down-logs', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
 
     # Download from API server paths to the client's local_dir

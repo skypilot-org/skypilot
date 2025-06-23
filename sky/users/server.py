@@ -330,3 +330,108 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
                            f'{USER_LOCK_PATH.format(user_id=user_id)}. '
                            'Please try again or manually remove the lock '
                            f'file if you believe it is stale.') from e
+
+
+@router.get('/service-account-tokens')
+async def get_service_account_tokens(
+        request: fastapi.Request) -> List[Dict[str, Any]]:
+    """Get all service account tokens for the current user."""
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Authentication required')
+
+    tokens = global_user_state.get_user_service_account_tokens(auth_user.id)
+    # Don't return the token hash for security
+    return [{
+        'token_id': token['token_id'],
+        'token_name': token['token_name'],
+        'created_at': token['created_at'],
+        'last_used_at': token['last_used_at'],
+        'expires_at': token['expires_at'],
+    } for token in tokens]
+
+
+@router.post('/service-account-tokens')
+async def create_service_account_token(
+        request: fastapi.Request,
+        token_body: payloads.ServiceAccountTokenCreateBody) -> Dict[str, Any]:
+    """Create a new service account token."""
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Authentication required')
+
+    if not token_body.token_name or not token_body.token_name.strip():
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Token name is required')
+
+    # Validate expiration
+    if (token_body.expires_in_days is not None and
+            token_body.expires_in_days <= 0):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Expiration days must be positive')
+
+    try:
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky.users.token_service import token_service
+
+        # Create JWT-based token
+        token_data = token_service.create_token(
+            user_id=auth_user.id,
+            user_name=auth_user.name,
+            token_name=token_body.token_name.strip(),
+            expires_in_days=token_body.expires_in_days)
+
+        # Store token metadata in database (still using hash for revocation
+        # capability)
+        global_user_state.add_service_account_token(
+            token_id=token_data['token_id'],
+            user_hash=auth_user.id,
+            token_name=token_body.token_name.strip(),
+            token_hash=token_data['token_hash'],
+            expires_at=token_data['expires_at'])
+
+        # Return the JWT token only once (never stored in plain text)
+        return {
+            'token_id': token_data['token_id'],
+            'token_name': token_body.token_name.strip(),
+            'token': token_data['token'],  # Full JWT token with sky_ prefix
+            'expires_at': token_data['expires_at'],
+            'message': 'Please save this token - it will not be shown again!'
+        }
+
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to create service account token: {e}')
+        raise fastapi.HTTPException(
+            status_code=500, detail='Failed to create service account token')
+
+
+@router.delete('/service-account-tokens')
+async def delete_service_account_token(
+        request: fastapi.Request,
+        token_body: payloads.ServiceAccountTokenDeleteBody) -> Dict[str, str]:
+    """Delete a service account token."""
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Authentication required')
+
+    # First verify the token belongs to the current user
+    token_info = global_user_state.get_service_account_token(
+        token_body.token_id)
+    if token_info is None:
+        raise fastapi.HTTPException(status_code=404, detail='Token not found')
+
+    if token_info['user_hash'] != auth_user.id:
+        raise fastapi.HTTPException(
+            status_code=403, detail='You can only delete your own tokens')
+
+    # Delete the token
+    deleted = global_user_state.delete_service_account_token(
+        token_body.token_id)
+    if not deleted:
+        raise fastapi.HTTPException(status_code=404, detail='Token not found')
+
+    return {'message': 'Token deleted successfully'}

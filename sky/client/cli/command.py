@@ -5124,10 +5124,34 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               is_flag=True,
               default=False,
               help='Force token-based login.')
+@click.option(
+    '--service-account-token',
+    '--sa-token',
+    required=False,
+    help='Service account token for authentication (starts with sky_).')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str], get_token: bool):
-    """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint, get_token)
+def api_login(endpoint: Optional[str], get_token: bool,
+              service_account_token: Optional[str]):
+    """Logs into a SkyPilot API server.
+
+    Authentication methods (in priority order):
+    1. Service account token via --service-account-token flag
+    2. Service account token via SKYPILOT_TOKEN environment variable
+    3. Service account token in ~/.sky/config.yaml
+    4. OAuth2 browser-based authentication (default)
+
+    Examples:
+        # OAuth2 browser login
+        sky api login -e https://api.example.com
+
+        # Service account token login
+        sky api login -e https://api.example.com --token sky_abc123...
+
+        # Using environment variable
+        export SKYPILOT_TOKEN=sky_abc123...
+        sky api login -e https://api.example.com
+    """
+    sdk.api_login(endpoint, get_token, service_account_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

@@ -19,6 +19,10 @@ apiService:
   # If enabled, the basic auth configuration `ingress.authCredentials`
   # and `ingress.authSecret` in the ingress will be ignored.
   enableUserManagement: false
+  # Enable service account tokens for automated API access
+  # If enabled, users can create bearer tokens to bypass SSO authentication
+  # for automated systems. Requires enableUserManagement to be true.
+  enableServiceAccountTokens: true
   # Initial basic auth credentials for the API server
   # The user in the credentials will be used to create a new admin user in the API server,
   # and the password can be updated by the user in the Dashboard.

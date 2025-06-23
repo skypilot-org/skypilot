@@ -25,6 +25,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.skylet import constants
@@ -182,6 +183,50 @@ def get_cookies_from_response(
     return cookies
 
 
+def make_authenticated_request(method: str,
+                               path: str,
+                               server_url: Optional[str] = None,
+                               **kwargs) -> 'requests.Response':
+    """Make an authenticated HTTP request to the API server.
+
+    Automatically handles service account token authentication or cookie-based
+    authentication based on what's available.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., '/api/v1/status')
+        server_url: Server URL, defaults to configured server
+        **kwargs: Additional arguments to pass to requests
+
+    Returns:
+        requests.Response object
+    """
+    if server_url is None:
+        server_url = get_server_url()
+
+    # Prepare headers and URL for service account authentication
+    headers = service_account_auth.get_service_account_headers()
+
+    # Merge with existing headers
+    if 'headers' in kwargs:
+        headers.update(kwargs['headers'])
+    kwargs['headers'] = headers
+
+    # Use service account path if using bearer token
+    if headers.get('Authorization'):
+        url = service_account_auth.get_api_url_with_service_account_path(
+            server_url, path)
+    else:
+        url = f'{server_url}{path}' if not path.startswith(
+            '/') else f'{server_url}{path}'
+        # Use cookie authentication
+        if 'cookies' not in kwargs:
+            kwargs['cookies'] = get_api_cookie_jar()
+
+    # Make the request
+    return requests.request(method, url, **kwargs)
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = DEFAULT_SERVER_URL
@@ -240,9 +285,21 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            response = requests.get(f'{server_url}/api/health',
-                                    timeout=2.5,
-                                    cookies=get_api_cookie_jar())
+            # Prepare headers and URL for service account authentication
+            headers = service_account_auth.get_service_account_headers()
+            health_url = (
+                service_account_auth.get_api_url_with_service_account_path(
+                    server_url, '/api/health'))
+
+            # Use either service account auth or cookie auth
+            if headers:
+                response = requests.get(health_url,
+                                        timeout=2.5,
+                                        headers=headers)
+            else:
+                response = requests.get(f'{server_url}/api/health',
+                                        timeout=2.5,
+                                        cookies=get_api_cookie_jar())
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)

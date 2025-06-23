@@ -171,6 +171,68 @@ def _try_set_basic_auth_user(request: fastapi.Request):
             break
 
 
+def _try_set_bearer_token_user(request: fastapi.Request):
+    """Try to authenticate user using bearer token (JWT-based)."""
+    # Check if service account tokens are enabled
+    if os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNT_TOKENS,
+                      'false').lower() != 'true':
+        return
+
+    auth_header = request.headers.get('authorization')
+    if not auth_header or not auth_header.lower().startswith('bearer '):
+        return
+
+    # Extract token
+    sa_token = auth_header.split(' ', 1)[1]
+
+    # Check if token has the expected sky_ prefix
+    if not sa_token.startswith('sky_'):
+        return
+
+    try:
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky.users.token_service import token_service
+
+        # Verify and decode JWT token
+        payload = token_service.verify_token(sa_token)
+        if payload is None:
+            return  # Invalid or expired token
+
+        # Extract user information from JWT payload
+        user_id = payload.get('sub')  # Subject = user ID
+        user_name = payload.get('name')
+        token_id = payload.get('token_id')
+
+        if not user_id or not token_id:
+            logger.warning('Invalid token payload: missing user_id or token_id')
+            return
+
+        # Verify user still exists in database
+        user_info = global_user_state.get_user(user_id)
+        if user_info is None:
+            logger.warning(f'Token user {user_id} no longer exists')
+            return
+
+        # Update last used timestamp for token tracking
+        try:
+            global_user_state.update_service_account_token_last_used(token_id)
+        except Exception as e:  # pylint: disable=broad-except
+            # Don't fail authentication if we can't update last used time
+            logger.debug(f'Failed to update token last used time: {e}')
+
+        # Set the authenticated user - this integrates with Casbin RBAC
+        request.state.auth_user = models.User(id=user_id,
+                                              name=user_name or user_info.name)
+        logger.debug(
+            f'Authenticated user {user_name} via service account token')
+
+    except Exception as e:  # pylint: disable=broad-except
+        # If there's any error, just return without authentication
+        logger.debug(f'Service account token authentication failed: {e}')
+        return
+
+
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -219,18 +281,34 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
 
 
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to handle HTTP Basic Auth."""
+    """Middleware to handle HTTP Basic Auth and Bearer Token Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/api/'):
-            # Try to set the auth user from the basic auth header so the
-            # following endpoint handlers can leverage the auth_user info
+            # Try to set the auth user from basic auth or bearer token
             _try_set_basic_auth_user(request)
+            if not hasattr(request.state,
+                           'auth_user') or request.state.auth_user is None:
+                _try_set_bearer_token_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
-        if not auth_header or not auth_header.lower().startswith('basic '):
-            return _basic_auth_401_response('Invalid basic auth')
+        if not auth_header:
+            return _basic_auth_401_response('Authentication required')
+
+        # Try bearer token authentication first
+        if auth_header.lower().startswith('bearer '):
+            _try_set_bearer_token_user(request)
+            if hasattr(request.state,
+                       'auth_user') and request.state.auth_user is not None:
+                await _override_user_info_in_request_body(
+                    request, request.state.auth_user)
+                return await call_next(request)
+            return _basic_auth_401_response('Invalid bearer token')
+
+        # Fall back to basic auth
+        if not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid authentication method')
 
         # Check username and password
         encoded = auth_header.split(' ', 1)[1]

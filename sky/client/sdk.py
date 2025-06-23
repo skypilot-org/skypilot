@@ -133,9 +133,8 @@ def check(infra_list: Optional[Tuple[str, ...]],
     body = payloads.CheckBody(clouds=clouds,
                               verbose=verbose,
                               workspace=workspace)
-    response = requests.post(f'{server_common.get_server_url()}/check',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/check', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -159,9 +158,8 @@ def enabled_clouds(workspace: Optional[str] = None,
     """
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
-    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
-                             f'workspace={workspace}&expand={expand}'),
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
     return server_common.get_request_id(response)
 
 
@@ -209,10 +207,8 @@ def list_accelerators(gpus_only: bool = True,
         require_price=require_price,
         case_sensitive=case_sensitive,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/list_accelerators',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/list_accelerators', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -250,10 +246,8 @@ def list_accelerator_counts(
         quantity_filter=quantity_filter,
         clouds=clouds,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/list_accelerator_counts',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/list_accelerator_counts', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -290,16 +284,14 @@ def optimize(
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/optimize',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/optimize', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
 def workspaces() -> server_common.RequestId:
     """Gets the workspaces."""
-    response = requests.get(f'{server_common.get_server_url()}/workspaces',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/workspaces')
     return server_common.get_request_id(response)
 
 
@@ -333,9 +325,8 @@ def validate(
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/validate',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
@@ -618,12 +609,8 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/launch',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -702,12 +689,8 @@ def exec(  # pylint: disable=redefined-builtin
         backend=backend.NAME if backend else None,
     )
 
-    response = requests.post(
-        f'{server_common.get_server_url()}/exec',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/exec', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -752,13 +735,11 @@ def tail_logs(cluster_name: str,
         follow=follow,
         tail=tail,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/logs',
-        json=json.loads(body.model_dump_json()),
+    response = server_common.make_authenticated_request(
+        'POST', '/logs', json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
-        cookies=server_common.get_api_cookie_jar())
+                 None))
     request_id = server_common.get_request_id(response)
     return stream_response(request_id, response, output_stream)
 
@@ -794,9 +775,8 @@ def download_logs(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/download_logs',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/download_logs', json=json.loads(body.model_dump_json()))
     job_id_remote_path_dict = stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(
@@ -874,12 +854,8 @@ def start(
         down=down,
         force=force,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/start',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/start', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -920,12 +896,8 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/down',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/down', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -969,12 +941,8 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/stop',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/stop', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -1039,12 +1007,8 @@ def autostop(
         idle_minutes=idle_minutes,
         down=down,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/autostop',
-        json=json.loads(body.model_dump_json()),
-        timeout=5,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -1102,9 +1066,8 @@ def queue(cluster_name: str,
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/queue',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/queue', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1144,9 +1107,8 @@ def job_status(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/job_status',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/job_status', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1198,9 +1160,8 @@ def cancel(
         job_ids=job_ids,
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )
-    response = requests.post(f'{server_common.get_server_url()}/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/cancel', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1294,9 +1255,8 @@ def status(
         refresh=refresh,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/status',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/status', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1329,9 +1289,8 @@ def endpoints(
         cluster=cluster,
         port=port,
     )
-    response = requests.post(f'{server_common.get_server_url()}/endpoints',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/endpoints', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1369,8 +1328,7 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
               'total_cost': (float) cost given resources and usage intervals,
             }
     """
-    response = requests.get(f'{server_common.get_server_url()}/cost_report',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/cost_report')
     return server_common.get_request_id(response)
 
 
@@ -1399,8 +1357,7 @@ def storage_ls() -> server_common.RequestId:
                 }
         ]
     """
-    response = requests.get(f'{server_common.get_server_url()}/storage/ls',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/storage/ls')
     return server_common.get_request_id(response)
 
 
@@ -1423,9 +1380,8 @@ def storage_delete(name: str) -> server_common.RequestId:
         ValueError: If the storage does not exist.
     """
     body = payloads.StorageBody(name=name)
-    response = requests.post(f'{server_common.get_server_url()}/storage/delete',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/storage/delete', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1462,9 +1418,8 @@ def local_up(gpus: bool,
                                 cleanup=cleanup,
                                 context_name=context_name,
                                 password=password)
-    response = requests.post(f'{server_common.get_server_url()}/local_up',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1480,8 +1435,7 @@ def local_down() -> server_common.RequestId:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('sky local down is only supported when running '
                              'SkyPilot locally.')
-    response = requests.post(f'{server_common.get_server_url()}/local_down',
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('POST', '/local_down')
     return server_common.get_request_id(response)
 
 
@@ -1502,9 +1456,8 @@ def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
         infra=infra,
         cleanup=False,
     )
-    response = requests.post(f'{server_common.get_server_url()}/ssh_up',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/ssh_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1525,9 +1478,8 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
         infra=infra,
         cleanup=True,
     )
-    response = requests.post(f'{server_common.get_server_url()}/ssh_down',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/ssh_down', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1550,11 +1502,9 @@ def realtime_kubernetes_gpu_availability(
         quantity_filter=quantity_filter,
         is_ssh=is_ssh,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/'
-        'realtime_kubernetes_gpu_availability',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/realtime_kubernetes_gpu_availability',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1583,10 +1533,8 @@ def kubernetes_node_info(
             information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
-    response = requests.post(
-        f'{server_common.get_server_url()}/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/kubernetes_node_info', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1614,9 +1562,7 @@ def status_kubernetes() -> server_common.RequestId:
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
     """
-    response = requests.get(
-        f'{server_common.get_server_url()}/status_kubernetes',
-        cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/status_kubernetes')
     return server_common.get_request_id(response)
 
 
@@ -1639,11 +1585,10 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = requests.get(
-        f'{server_common.get_server_url()}/api/get?request_id={request_id}',
+    response = server_common.make_authenticated_request(
+        'GET', f'/api/get?request_id={request_id}',
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
-        cookies=server_common.get_api_cookie_jar())
+                 None))
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
@@ -1717,13 +1662,11 @@ def stream_and_get(
         'follow': follow,
         'format': 'console',
     }
-    response = requests.get(
-        f'{server_common.get_server_url()}/api/stream',
-        params=params,
+    response = server_common.make_authenticated_request(
+        'GET', '/api/stream', params=params,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
-        stream=True,
-        cookies=server_common.get_api_cookie_jar())
+        stream=True)
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
@@ -1777,10 +1720,8 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         echo(f'Cancelling {len(request_ids)} request{plural}: '
              f'{request_id_str}...')
 
-    response = requests.post(f'{server_common.get_server_url()}/api/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request(
+        'POST', '/api/cancel', json=json.loads(body.model_dump_json()), timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -1804,12 +1745,10 @@ def api_status(
     """
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
-    response = requests.get(
-        f'{server_common.get_server_url()}/api/status',
-        params=server_common.request_body_to_params(body),
+    response = server_common.make_authenticated_request(
+        'GET', '/api/status', params=server_common.request_body_to_params(body),
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
-        cookies=server_common.get_api_cookie_jar())
+                 None))
     server_common.handle_request_error(response)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()
@@ -1843,8 +1782,7 @@ def api_info() -> Dict[str, Any]:
         Note that user may be None if we are not using an auth proxy.
 
     """
-    response = requests.get(f'{server_common.get_server_url()}/api/health',
-                            cookies=server_common.get_api_cookie_jar())
+    response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
     return response.json()
 
@@ -1964,9 +1902,52 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
 
 
+def _save_config_updates(endpoint: Optional[str] = None,
+                         service_account_token: Optional[str] = None) -> None:
+    """Save endpoint and/or service account token to config file."""
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            config_path.touch()
+            config: Dict[str, Any] = {}
+        else:
+            config = skypilot_config.get_user_config()
+            # Convert to dict if it's a Config object
+            if hasattr(config, 'to_dict'):
+                config = dict(config)
+            elif not isinstance(config, dict):
+                config = dict(config)
+
+        # Update endpoint if provided
+        if endpoint is not None:
+            if 'api_server' not in config:
+                config['api_server'] = {}
+            config['api_server']['endpoint'] = endpoint
+
+        # Update service account token if provided
+        if service_account_token is not None:
+            config['service_account_token'] = service_account_token
+
+        common_utils.dump_yaml(str(config_path), config)
+
+
+def _validate_endpoint(endpoint: Optional[str]) -> str:
+    """Validate and normalize the endpoint URL."""
+    if endpoint is None:
+        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+    # Check endpoint is a valid URL
+    if (endpoint is not None and not endpoint.startswith('http://') and
+            not endpoint.startswith('https://')):
+        raise click.BadParameter('Endpoint must be a valid URL.')
+    return endpoint.rstrip('/')
+
+
 @usage_lib.entrypoint
 @annotations.client_api
-def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
+def api_login(endpoint: Optional[str] = None,
+              get_token: bool = False,
+              service_account_token: Optional[str] = None) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -1979,20 +1960,50 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
         endpoint: The endpoint of the SkyPilot API server, e.g.,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
         get_token: Whether to force getting a new token even if not needed.
+        service_account_token: Service account token for authentication.
 
     Returns:
         None
     """
+    # Validate and normalize endpoint
+    endpoint = _validate_endpoint(endpoint)
+
+    # Handle service account token authentication
+    if service_account_token:
+        if not service_account_token.startswith('sky_'):
+            raise ValueError('Invalid service account token format. '
+                             'Token must start with "sky_"')
+
+        # Save both endpoint and token to config in a single operation
+        _save_config_updates(endpoint=endpoint,
+                             service_account_token=service_account_token)
+
+        # Test the authentication by checking server health
+        try:
+            server_status, api_server_info = server_common.check_server_healthy(
+                endpoint)
+            dashboard_url = server_common.get_dashboard_url(endpoint)
+            click.secho(
+                f'Successfully authenticated with service account token'
+                f'\nAPI server: {endpoint}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+                f'Dashboard: {dashboard_url}',
+                fg='green')
+            return
+        except exceptions.ApiServerConnectionError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to connect to API server at {endpoint}: {e}'
+                ) from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Service account token authentication failed: {e}') from e
+
+    # OAuth2/cookie-based authentication flow
     # TODO(zhwu): this SDK sets global endpoint, which may not be the best
     # design as a user may expect this is only effective for the current
     # session. We should consider using env var for specifying endpoint.
-    if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
-    # Check endpoint is a valid URL
-    if (endpoint is not None and not endpoint.startswith('http://') and
-            not endpoint.startswith('https://')):
-        raise click.BadParameter('Endpoint must be a valid URL.')
-    endpoint = endpoint.rstrip('/')
 
     server_status, api_server_info = server_common.check_server_healthy(
         endpoint)
@@ -2143,20 +2154,11 @@ def api_login(endpoint: Optional[str] = None, get_token: bool = False) -> None:
                 f.write(user_hash)
 
     # Set the endpoint in the config file
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
-    with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not config_path.exists():
-            config_path.touch()
-            config = {'api_server': {'endpoint': endpoint}}
-        else:
-            config = skypilot_config.get_user_config()
-            config.set_nested(('api_server', 'endpoint'), endpoint)
-        common_utils.dump_yaml(str(config_path), dict(config))
-        dashboard_url = server_common.get_dashboard_url(endpoint)
-        dashboard_msg = f'Dashboard: {dashboard_url}'
-        click.secho(
-            f'Logged into SkyPilot API server at: {endpoint}'
-            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
-            f'{dashboard_msg}',
-            fg='green')
+    _save_config_updates(endpoint=endpoint)
+    dashboard_url = server_common.get_dashboard_url(endpoint)
+    dashboard_msg = f'Dashboard: {dashboard_url}'
+    click.secho(
+        f'Logged into SkyPilot API server at: {endpoint}'
+        f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+        f'{dashboard_msg}',
+        fg='green')

@@ -144,6 +144,18 @@ ssh_key_table = sqlalchemy.Table(
     sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
 )
 
+service_account_token_table = sqlalchemy.Table(
+    'service_account_tokens',
+    Base.metadata,
+    sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('token_name', sqlalchemy.Text),
+    sqlalchemy.Column('token_hash', sqlalchemy.Text),
+    sqlalchemy.Column('created_at', sqlalchemy.Integer),
+    sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
+)
+
 cluster_yaml_table = sqlalchemy.Table(
     'cluster_yaml',
     Base.metadata,
@@ -1347,6 +1359,103 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
             })
         session.execute(do_update_stmt)
         session.commit()
+
+
+@_init_db
+def add_service_account_token(token_id: str,
+                              user_hash: str,
+                              token_name: str,
+                              token_hash: str,
+                              expires_at: Optional[int] = None) -> None:
+    """Add a service account token to the database."""
+    assert _SQLALCHEMY_ENGINE is not None
+    created_at = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(service_account_token_table).values(
+            token_id=token_id,
+            user_hash=user_hash,
+            token_name=token_name,
+            token_hash=token_hash,
+            created_at=created_at,
+            expires_at=expires_at)
+        session.execute(insert_stmnt)
+        session.commit()
+
+
+@_init_db
+def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
+    """Get a service account token by token_id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(service_account_token_table).filter_by(
+            token_id=token_id).first()
+    if row is None:
+        return None
+    return {
+        'token_id': row.token_id,
+        'user_hash': row.user_hash,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+    }
+
+
+@_init_db
+def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
+    """Get all service account tokens for a user."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).filter_by(
+            user_hash=user_hash).all()
+    return [{
+        'token_id': row.token_id,
+        'user_hash': row.user_hash,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+    } for row in rows]
+
+
+@_init_db
+def update_service_account_token_last_used(token_id: str) -> None:
+    """Update the last_used_at timestamp for a service account token."""
+    assert _SQLALCHEMY_ENGINE is not None
+    last_used_at = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(service_account_token_table).filter_by(
+            token_id=token_id).update(
+                {service_account_token_table.c.last_used_at: last_used_at})
+        session.commit()
+
+
+@_init_db
+def delete_service_account_token(token_id: str) -> bool:
+    """Delete a service account token.
+
+    Returns:
+        True if token was found and deleted.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.query(service_account_token_table).filter_by(
+            token_id=token_id).delete()
+        session.commit()
+    return result > 0
 
 
 @_init_db

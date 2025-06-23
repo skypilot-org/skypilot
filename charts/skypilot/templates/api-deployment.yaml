@@ -47,6 +47,10 @@ spec:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
               key: auth
         {{- end }}
+        {{- if and .Values.apiService.enableUserManagement .Values.apiService.enableServiceAccountTokens }}
+        - name: ENABLE_SERVICE_ACCOUNT_TOKENS
+          value: "true"
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json

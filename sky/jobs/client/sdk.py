@@ -87,12 +87,9 @@ def launch(
             task=dag_str,
             name=name,
         )
-        response = requests.post(
-            f'{server_common.get_server_url()}/jobs/launch',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+        response = server_common.make_authenticated_request(
+            'POST', '/jobs/launch', json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -147,12 +144,9 @@ def queue(refresh: bool,
         all_users=all_users,
         job_ids=job_ids,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/queue',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/jobs/queue', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
@@ -187,12 +181,9 @@ def cancel(
         all=all,
         all_users=all_users,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/cancel',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/jobs/cancel', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
@@ -237,13 +228,9 @@ def tail_logs(name: Optional[str] = None,
         refresh=refresh,
         tail=tail,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/logs',
-        json=json.loads(body.model_dump_json()),
-        stream=True,
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/jobs/logs', json=json.loads(body.model_dump_json()),
+        stream=True, timeout=(5, None))
     request_id = server_common.get_request_id(response)
     return sdk.stream_response(request_id, response, output_stream)
 
@@ -282,12 +269,9 @@ def download_logs(
         controller=controller,
         local_dir=local_dir,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/download_logs',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+    response = server_common.make_authenticated_request(
+        'POST', '/jobs/download_logs', json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
     job_id_remote_path_dict = sdk.stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(

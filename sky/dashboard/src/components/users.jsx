@@ -51,6 +51,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import { ServiceAccounts } from '@/components/service-accounts';
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -171,6 +172,7 @@ export function Users() {
   const [createSuccess, setCreateSuccess] = useState(null);
   const [createError, setCreateError] = useState(null);
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
+  const [activeMainTab, setActiveMainTab] = useState('users');
 
   useEffect(() => {
     async function fetchHealth() {
@@ -431,12 +433,7 @@ export function Users() {
     <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
-          <Link
-            href="/users"
-            className="text-sky-blue hover:underline leading-none"
-          >
-            Users
-          </Link>
+          <span className="leading-none">User Management</span>
         </div>
         <div className="flex items-center">
           {loading && (
@@ -445,7 +442,7 @@ export function Users() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          {basicAuthEnabled && userRoleCache?.role === 'admin' && (
+          {activeMainTab === 'users' && basicAuthEnabled && userRoleCache?.role === 'admin' && (
             <button
               onClick={async () => {
                 await checkPermissionAndAct('cannot create users', () => {
@@ -458,7 +455,7 @@ export function Users() {
               + New User
             </button>
           )}
-          {basicAuthEnabled && userRoleCache?.role === 'admin' && (
+          {activeMainTab === 'users' && basicAuthEnabled && userRoleCache?.role === 'admin' && (
             <button
               onClick={async () => {
                 await checkPermissionAndAct('cannot import users', () => {
@@ -484,6 +481,30 @@ export function Users() {
       </div>
 
       {/* Success and Error Messages */}
+      {/* Main Tabs */}
+      <div className="flex border-b border-gray-200 mb-6">
+        <button
+          className={`px-4 py-2 text-sm font-medium ${
+            activeMainTab === 'users'
+              ? 'border-b-2 border-sky-500 text-sky-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+          onClick={() => setActiveMainTab('users')}
+        >
+          Users
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium ${
+            activeMainTab === 'service-accounts'
+              ? 'border-b-2 border-sky-500 text-sky-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+          onClick={() => setActiveMainTab('service-accounts')}
+        >
+          Service Account Tokens
+        </button>
+      </div>
+
       <SuccessDisplay
         message={createSuccess}
         onDismiss={() => setCreateSuccess(null)}
@@ -494,18 +515,22 @@ export function Users() {
         onDismiss={() => setCreateError(null)}
       />
 
-      <UsersTable
-        refreshInterval={REFRESH_INTERVAL}
-        setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-        checkPermissionAndAct={checkPermissionAndAct}
-        roleLoading={roleLoading}
-        onResetPassword={handleResetPasswordClick}
-        onDeleteUser={handleDeleteUserClick}
-        basicAuthEnabled={basicAuthEnabled}
-        currentUserRole={userRoleCache?.role}
-        currentUserId={userRoleCache?.id}
-      />
+      {activeMainTab === 'users' ? (
+        <UsersTable
+          refreshInterval={REFRESH_INTERVAL}
+          setLoading={setLoading}
+          refreshDataRef={refreshDataRef}
+          checkPermissionAndAct={checkPermissionAndAct}
+          roleLoading={roleLoading}
+          onResetPassword={handleResetPasswordClick}
+          onDeleteUser={handleDeleteUserClick}
+          basicAuthEnabled={basicAuthEnabled}
+          currentUserRole={userRoleCache?.role}
+          currentUserId={userRoleCache?.id}
+        />
+      ) : (
+        <ServiceAccounts />
+      )}
 
       {/* Create User Dialog */}
       <Dialog open={showCreateUser} onOpenChange={setShowCreateUser}>
