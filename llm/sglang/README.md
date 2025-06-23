@@ -119,7 +119,7 @@ You should get a similar response as the following:
 
 2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
-sky serve up -n sglang-llama2 llama2.yaml --env HF_TOKEN=<your-huggingface-token>
+sky serve up -n sglang-llama2 llama2.yaml --secret HF_TOKEN=<your-huggingface-token>
 ```
 The entire Service YAML can be found here: [llama2.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/sglang/llama2.yaml).
 

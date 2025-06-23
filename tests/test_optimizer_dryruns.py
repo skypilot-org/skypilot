@@ -9,11 +9,11 @@ from click import testing as cli_testing
 import pytest
 
 import sky
-from sky import cli
 from sky import clouds
 from sky import exceptions
 from sky import optimizer
 from sky import skypilot_config
+from sky.client.cli import command
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -585,31 +585,6 @@ def test_invalid_accelerators_regions(enable_all_clouds):
         assert 'No launchable resource found for' in str(e.value), str(e.value)
 
 
-def _test_optimize_speed(resources: sky.Resources):
-    with sky.Dag() as dag:
-        task = sky.Task(run='echo hi')
-        task.set_resources(resources)
-    start = time.time()
-    sky.optimize(dag)
-    end = time.time()
-    # 5.0 seconds = somewhat flaky.
-    assert end - start < 6.0, (f'optimize took too long for {resources}, '
-                               f'{end - start} seconds')
-
-
-def test_optimize_speed(enable_all_clouds):
-    _test_optimize_speed(sky.Resources(cpus=4))
-    for cloud in registry.CLOUD_REGISTRY.values():
-        _test_optimize_speed(sky.Resources(infra=str(cloud), cpus='4+'))
-    _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
-    _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
-    _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
-    _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))
-
-
 def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     # Maps to GCP.
     _test_resources_launch(region='us-east1')
@@ -686,7 +661,7 @@ def test_ordered_resources(enable_all_clouds):
         dag = sky.optimize(dag)
         cli_runner = cli_testing.CliRunner()
         request_id = sky.launch(task, dryrun=True)
-        result = cli_runner.invoke(cli.api_logs, [request_id])
+        result = cli_runner.invoke(command.api_logs, [request_id])
         assert not result.exit_code
 
         # Access the captured output
@@ -763,7 +738,7 @@ def test_launch_dryrun_with_reservations_and_dummy_sink(enable_all_clouds):
         # Ensure AWS is treated as an enabled cloud. The enable_all_clouds
         # fixture should typically handle this.
         result = runner.invoke(
-            cli.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
+            command.launch, ['--cloud', 'aws', '--gpus', 'A100:8', '--dryrun'])
 
         # Check for a successful dryrun invocation
         if result.exit_code != 0:

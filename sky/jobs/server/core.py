@@ -103,7 +103,7 @@ def launch(
                     'will be auto-generated) .')
         task_names.add(task_.name)
 
-        # Check for priority in resources first, then fall back to job priority
+        # Check for priority in resources
         task_priority = None
         if task_.resources:
             # Convert set to list to access elements by index
@@ -121,20 +121,6 @@ def launch(
                             f'{resource.priority} but expected {task_priority}.'
                         )
 
-            # Check for conflict between resources priority and job
-            # priority
-            if task_.job_priority is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Task {task_.name!r}: Cannot specify both '
-                        f'resources.priority ({task_priority}) and '
-                        f'job.priority ({task_.job_priority}). Please use only '
-                        'one priority specification method.')
-
-        # Fall back to job priority if no resources priority found
-        if task_priority is None:
-            task_priority = task_.job_priority
-
         if task_priority is not None:
             if (priority is not None and priority != task_priority):
                 with ux_utils.print_exception_no_traceback():
@@ -145,10 +131,13 @@ def launch(
             priority = task_priority
 
     if priority is None:
-        priority = managed_job_constants.DEFAULT_PRIORITY
+        priority = skylet_constants.DEFAULT_PRIORITY
 
-    if priority < 0 or priority > 1000:
-        raise ValueError(f'Priority must be between 0 and 1000, got {priority}')
+    if (priority < skylet_constants.MIN_PRIORITY or
+            priority > skylet_constants.MAX_PRIORITY):
+        raise ValueError(
+            f'Priority must be between {skylet_constants.MIN_PRIORITY}'
+            f' and {skylet_constants.MAX_PRIORITY}, got {priority}')
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 

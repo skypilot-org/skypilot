@@ -58,11 +58,16 @@ install_requires = [
     'setproctitle',
     'sqlalchemy',
     'psycopg2-binary',
+    # TODO(hailong): These three dependencies should be removed after we make
+    # the client-side actually not importing them.
     'casbin',
     'sqlalchemy_adapter',
+    'passlib',
 ]
 
 server_dependencies = [
+    'casbin',
+    'sqlalchemy_adapter',
     'passlib',
 ]
 
