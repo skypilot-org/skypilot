@@ -286,9 +286,7 @@ class CommandRunner:
 
         if rsh_option is not None:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
-        maybe_dest_prefix = ''
-        if node_destination is not None:
-            maybe_dest_prefix = f'{node_destination}:'
+        maybe_dest_prefix = '' if node_destination is None else f'{node_destination}:'
 
         if up:
             resolved_target = target
