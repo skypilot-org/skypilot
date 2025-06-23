@@ -115,6 +115,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--postgres', action="store_true")
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
+    parser.add_argument('--jobs-consolidation', action="store_true")
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -152,6 +153,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-version {parsed_args.helm_version}')
     if parsed_args.helm_package:
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
+    if parsed_args.jobs_consolidation:
+        extra_args.append('--jobs-consolidation')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
