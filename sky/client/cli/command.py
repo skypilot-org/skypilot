@@ -1829,7 +1829,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         cluster_name = cluster_record['name']
         controller = controller_utils.Controllers.from_name(cluster_name)
         if controller is not None:
-            controller_name = controller.value.name
+            controller_name = controller.value.cluster_name
             # to display most recent entry for each controller cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if controller_name not in controllers:
@@ -1843,7 +1843,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     status_utils.show_cost_report_table(normal_cluster_records, all)
     for controller_name, cluster_record in controllers.items():
         status_utils.show_cost_report_table(
-            [cluster_record], all, controller_name=controller_name.capitalize())
+            [cluster_record], all, controller_name=controller_name)
         total_cost += cluster_record['total_cost']
 
     click.echo(f'\n{colorama.Style.BRIGHT}'
