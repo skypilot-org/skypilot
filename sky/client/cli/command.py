@@ -1826,7 +1826,7 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    days_to_query = days
+    days_to_query: Optional[int] = days
     if days == 0:
         days_to_query = None
     cluster_records = sdk.get(sdk.cost_report(days=days_to_query))
@@ -1854,7 +1854,9 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
     total_cost = status_utils.get_total_cost_of_displayed_records(
         normal_cluster_records, all)
 
-    status_utils.show_cost_report_table(normal_cluster_records, all, days=days_to_query)
+    status_utils.show_cost_report_table(normal_cluster_records,
+                                        all,
+                                        days=days_to_query)
     for controller_name, cluster_record in controllers.items():
         status_utils.show_cost_report_table([cluster_record],
                                             all,
