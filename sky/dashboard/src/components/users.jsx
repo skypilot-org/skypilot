@@ -172,6 +172,7 @@ export function Users() {
   const [createError, setCreateError] = useState(null);
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
   const [activeMainTab, setActiveMainTab] = useState('users');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   useEffect(() => {
     async function fetchHealth() {
@@ -430,42 +431,84 @@ export function Users() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
-          <span className="leading-none">User Management</span>
+      {/* Main Tabs with Controls */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="text-base flex items-center">
+          <button
+            className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
+              activeMainTab === 'users'
+                ? 'text-sky-blue border-sky-500'
+                : 'text-gray-500 hover:text-gray-700 border-transparent'
+            }`}
+            onClick={() => setActiveMainTab('users')}
+          >
+            Users
+          </button>
+          <button
+            className={`leading-none pb-2 px-2 border-b-2 ${
+              activeMainTab === 'service-accounts'
+                ? 'text-sky-blue border-sky-500'
+                : 'text-gray-500 hover:text-gray-700 border-transparent'
+            }`}
+            onClick={() => setActiveMainTab('service-accounts')}
+          >
+            Service Accounts
+          </button>
         </div>
+
         <div className="flex items-center">
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="ml-2 text-gray-500">Loading...</span>
             </div>
           )}
-          {activeMainTab === 'users' && basicAuthEnabled && userRoleCache?.role === 'admin' && (
+          {activeMainTab === 'users' &&
+            basicAuthEnabled &&
+            userRoleCache?.role === 'admin' && (
+              <button
+                onClick={async () => {
+                  await checkPermissionAndAct('cannot create users', () => {
+                    setShowCreateUser(true);
+                  });
+                }}
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
+                title="Create New User"
+              >
+                + New User
+              </button>
+            )}
+          {activeMainTab === 'users' &&
+            basicAuthEnabled &&
+            userRoleCache?.role === 'admin' && (
+              <button
+                onClick={async () => {
+                  await checkPermissionAndAct('cannot import users', () => {
+                    setShowImportExportDialog(true);
+                  });
+                }}
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
+                title="Import/Export Users"
+              >
+                <UploadIcon className="h-4 w-4 mr-1" />
+                Import/Export
+              </button>
+            )}
+          {activeMainTab === 'service-accounts' && (
             <button
-              onClick={async () => {
-                await checkPermissionAndAct('cannot create users', () => {
-                  setShowCreateUser(true);
-                });
+              onClick={() => {
+                checkPermissionAndAct(
+                  'cannot create service account tokens',
+                  () => {
+                    setShowCreateDialog(true);
+                  }
+                );
               }}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center border-sky-blue rounded px-2 py-1 mr-2"
-              title="Create New User"
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center mr-2"
+              title="Create Service Account Token"
             >
-              + New User
-            </button>
-          )}
-          {activeMainTab === 'users' && basicAuthEnabled && userRoleCache?.role === 'admin' && (
-            <button
-              onClick={async () => {
-                await checkPermissionAndAct('cannot import users', () => {
-                  setShowImportExportDialog(true);
-                });
-              }}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center rounded px-2 py-1 mr-2"
-              title="Import/Export Users"
-            >
-              <UploadIcon className="h-4 w-4 mr-1" />
-              Import/Export
+              <KeyRoundIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Create Token</span>}
             </button>
           )}
           <button
@@ -477,31 +520,6 @@ export function Users() {
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
-      </div>
-
-      {/* Success and Error Messages */}
-      {/* Main Tabs */}
-      <div className="flex border-b border-gray-200 mb-6">
-        <button
-          className={`px-4 py-2 text-sm font-medium ${
-            activeMainTab === 'users'
-              ? 'border-b-2 border-sky-500 text-sky-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-          onClick={() => setActiveMainTab('users')}
-        >
-          Users
-        </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium ${
-            activeMainTab === 'service-accounts'
-              ? 'border-b-2 border-sky-500 text-sky-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-          onClick={() => setActiveMainTab('service-accounts')}
-        >
-          Service Account Tokens
-        </button>
       </div>
 
       <SuccessDisplay
@@ -528,11 +546,13 @@ export function Users() {
           currentUserId={userRoleCache?.id}
         />
       ) : (
-        <ServiceAccountTokensView 
+        <ServiceAccountTokensView
           checkPermissionAndAct={checkPermissionAndAct}
           userRoleCache={userRoleCache}
           setCreateSuccess={setCreateSuccess}
           setCreateError={setCreateError}
+          showCreateDialog={showCreateDialog}
+          setShowCreateDialog={setShowCreateDialog}
         />
       )}
 
@@ -1190,7 +1210,7 @@ function UsersTable({
                           onClick={() =>
                             handleEditClick(user.userId, user.role)
                           }
-                          className="text-sky-blue hover:text-sky-blue-bright p-1"
+                          className="text-blue-600 hover:text-blue-700 p-1"
                           title="Edit role"
                         >
                           <PenIcon className="h-3 w-3" />
@@ -1211,7 +1231,7 @@ function UsersTable({
                     href={`/clusters?user=${encodeURIComponent(user.userId)}`}
                     className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                       user.clusterCount > 0
-                        ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 hover:text-blue-900'
+                        ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
                         : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                     }`}
                     title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
@@ -1231,7 +1251,7 @@ function UsersTable({
                     href={`/jobs?user=${encodeURIComponent(user.userId)}`}
                     className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                       user.jobCount > 0
-                        ? 'bg-green-100 text-green-800 hover:bg-green-200 hover:text-green-900'
+                        ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
                         : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                     }`}
                     title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
@@ -1257,7 +1277,7 @@ function UsersTable({
                       className={
                         currentUserRole === 'admin' ||
                         user.userId === currentUserId
-                          ? 'text-sky-blue hover:text-sky-blue-bright p-1'
+                          ? 'text-blue-600 hover:text-blue-700 p-1'
                           : 'text-gray-300 cursor-not-allowed p-1'
                       }
                       title={
@@ -1277,7 +1297,7 @@ function UsersTable({
                     {currentUserRole === 'admin' && (
                       <button
                         onClick={() => onDeleteUser(user)}
-                        className="text-sky-blue hover:text-red-500 p-1"
+                        className="text-red-600 hover:text-red-700 p-1"
                         title="Delete User"
                       >
                         <Trash2Icon className="h-4 w-4" />
@@ -1310,15 +1330,21 @@ UsersTable.propTypes = {
 };
 
 // Service Account Tokens Management Component
-function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCreateSuccess, setCreateError }) {
+function ServiceAccountTokensView({
+  checkPermissionAndAct,
+  userRoleCache,
+  setCreateSuccess,
+  setCreateError,
+  showCreateDialog,
+  setShowCreateDialog,
+}) {
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [tokenToDelete, setTokenToDelete] = useState(null);
   const [newToken, setNewToken] = useState({
     token_name: '',
-    expires_in_days: 30
+    expires_in_days: 30,
   });
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1386,11 +1412,14 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
     try {
       const payload = {
         token_name: newToken.token_name.trim(),
-        expires_in_days: newToken.expires_in_days || null
+        expires_in_days: newToken.expires_in_days || null,
       };
 
-      const response = await apiClient.post('/users/service-account-tokens', payload);
-      
+      const response = await apiClient.post(
+        '/users/service-account-tokens',
+        payload
+      );
+
       if (response.ok) {
         const data = await response.json();
         setCreatedToken(data.token);
@@ -1416,11 +1445,13 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
     setDeleting(true);
     try {
       const response = await apiClient.delete('/users/service-account-tokens', {
-        token_id: tokenToDelete.token_id
+        token_id: tokenToDelete.token_id,
       });
 
       if (response.ok) {
-        setCreateSuccess(`Token "${tokenToDelete.token_name}" deleted successfully!`);
+        setCreateSuccess(
+          `Token "${tokenToDelete.token_name}" deleted successfully!`
+        );
         setShowDeleteDialog(false);
         setTokenToDelete(null);
         await fetchTokens();
@@ -1446,26 +1477,6 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
 
   return (
     <>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h3 className="text-lg font-medium text-gray-900">Service Account Tokens</h3>
-          <p className="text-sm text-gray-500">
-            Manage API tokens for programmatic access to SkyPilot
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            checkPermissionAndAct('cannot create service account tokens', () => {
-              setShowCreateDialog(true);
-            });
-          }}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500"
-        >
-          <KeyRoundIcon className="h-4 w-4 mr-2" />
-          Create Token
-        </button>
-      </div>
-
       {/* Created Token Display */}
       {createdToken && (
         <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -1473,7 +1484,8 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
             ⚠️ Token Created Successfully - Save This Token Now!
           </h4>
           <p className="text-sm text-green-700 mb-3">
-            This token will not be shown again. Please copy and store it securely.
+            This token will not be shown again. Please copy and store it
+            securely.
           </p>
           <div className="flex items-center space-x-2">
             <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
@@ -1502,13 +1514,15 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
       {tokens.length === 0 ? (
         <div className="text-center py-12">
           <KeyRoundIcon className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No service account tokens</h3>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">
+            No service account tokens
+          </h3>
           <p className="mt-1 text-sm text-gray-500">
             Get started by creating your first API token.
           </p>
         </div>
       ) : (
-        <div className="bg-white shadow rounded-lg overflow-hidden">
+        <Card>
           <Table>
             <TableHeader>
               <TableRow>
@@ -1522,27 +1536,40 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
             <TableBody>
               {tokens.map((token) => (
                 <TableRow key={token.token_id}>
-                  <TableCell className="font-medium">
+                  <TableCell
+                    className="truncate font-medium"
+                    title={token.token_name}
+                  >
                     {token.token_name}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="truncate">
                     {formatDate(token.created_at)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="truncate">
                     {formatDate(token.last_used_at)}
                   </TableCell>
-                  <TableCell>
-                    <span className={token.expires_at && new Date(token.expires_at * 1000) < new Date() ? 'text-red-600' : ''}>
+                  <TableCell className="truncate">
+                    <span
+                      className={
+                        token.expires_at &&
+                        new Date(token.expires_at * 1000) < new Date()
+                          ? 'text-red-600'
+                          : ''
+                      }
+                    >
                       {formatExpiration(token.expires_at)}
                     </span>
                   </TableCell>
                   <TableCell>
                     <button
                       onClick={() => {
-                        checkPermissionAndAct('cannot delete service account tokens', () => {
-                          setTokenToDelete(token);
-                          setShowDeleteDialog(true);
-                        });
+                        checkPermissionAndAct(
+                          'cannot delete service account tokens',
+                          () => {
+                            setTokenToDelete(token);
+                            setShowDeleteDialog(true);
+                          }
+                        );
                       }}
                       className="text-red-600 hover:text-red-800"
                       title="Delete Token"
@@ -1554,7 +1581,7 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Card>
       )}
 
       {/* Create Token Dialog */}
@@ -1592,9 +1619,11 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
                 max="365"
                 value={newToken.expires_in_days || ''}
                 onChange={(e) =>
-                  setNewToken({ 
-                    ...newToken, 
-                    expires_in_days: e.target.value ? parseInt(e.target.value) : null 
+                  setNewToken({
+                    ...newToken,
+                    expires_in_days: e.target.value
+                      ? parseInt(e.target.value)
+                      : null,
                   })
                 }
               />
@@ -1628,8 +1657,10 @@ function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCre
           <DialogHeader>
             <DialogTitle>Delete Service Account Token</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete the token &quot;{tokenToDelete?.token_name}&quot;? 
-              This action cannot be undone and will immediately revoke access for any systems using this token.
+              Are you sure you want to delete the token &quot;
+              {tokenToDelete?.token_name}&quot;? This action cannot be undone
+              and will immediately revoke access for any systems using this
+              token.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

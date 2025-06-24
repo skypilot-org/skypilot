@@ -246,7 +246,9 @@ def list_accelerator_counts(
         clouds=clouds,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/list_accelerator_counts', json=json.loads(body.model_dump_json()))
+        'POST',
+        '/list_accelerator_counts',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -736,7 +738,9 @@ def tail_logs(cluster_name: str,
         tail=tail,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/logs', json=json.loads(body.model_dump_json()),
+        'POST',
+        '/logs',
+        json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
@@ -1503,7 +1507,8 @@ def realtime_kubernetes_gpu_availability(
         is_ssh=is_ssh,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/realtime_kubernetes_gpu_availability',
+        'POST',
+        '/realtime_kubernetes_gpu_availability',
         json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
@@ -1534,7 +1539,9 @@ def kubernetes_node_info(
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = server_common.make_authenticated_request(
-        'POST', '/kubernetes_node_info', json=json.loads(body.model_dump_json()))
+        'POST',
+        '/kubernetes_node_info',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
@@ -1562,7 +1569,8 @@ def status_kubernetes() -> server_common.RequestId:
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
     """
-    response = server_common.make_authenticated_request('GET', '/status_kubernetes')
+    response = server_common.make_authenticated_request('GET',
+                                                        '/status_kubernetes')
     return server_common.get_request_id(response)
 
 
@@ -1586,7 +1594,8 @@ def get(request_id: str) -> Any:
             above.
     """
     response = server_common.make_authenticated_request(
-        'GET', f'/api/get?request_id={request_id}',
+        'GET',
+        f'/api/get?request_id={request_id}',
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     request_task = None
@@ -1663,7 +1672,9 @@ def stream_and_get(
         'format': 'console',
     }
     response = server_common.make_authenticated_request(
-        'GET', '/api/stream', params=params,
+        'GET',
+        '/api/stream',
+        params=params,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
@@ -1721,7 +1732,10 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
              f'{request_id_str}...')
 
     response = server_common.make_authenticated_request(
-        'POST', '/api/cancel', json=json.loads(body.model_dump_json()), timeout=5)
+        'POST',
+        '/api/cancel',
+        json=json.loads(body.model_dump_json()),
+        timeout=5)
     return server_common.get_request_id(response)
 
 
@@ -1746,7 +1760,9 @@ def api_status(
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
     response = server_common.make_authenticated_request(
-        'GET', '/api/status', params=server_common.request_body_to_params(body),
+        'GET',
+        '/api/status',
+        params=server_common.request_body_to_params(body),
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     server_common.handle_request_error(response)
@@ -1913,11 +1929,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
             config: Dict[str, Any] = {}
         else:
             config = skypilot_config.get_user_config()
-            # Convert to dict if it's a Config object
-            if hasattr(config, 'to_dict'):
-                config = dict(config)
-            elif not isinstance(config, dict):
-                config = dict(config)
+            config = dict(config)
 
         # Update endpoint if provided
         if endpoint is not None:
@@ -1927,7 +1939,10 @@ def _save_config_updates(endpoint: Optional[str] = None,
 
         # Update service account token if provided
         if service_account_token is not None:
-            config['service_account_token'] = service_account_token
+            if 'api_server' not in config:
+                config['api_server'] = {}
+            config['api_server'][
+                'service_account_token'] = service_account_token
 
         common_utils.dump_yaml(str(config_path), config)
 

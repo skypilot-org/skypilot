@@ -14,7 +14,7 @@ logger = sky_logging.init_logger(__name__)
 
 # JWT Configuration
 JWT_ALGORITHM = 'HS256'
-JWT_ISSUER = 'skypilot-api'
+JWT_ISSUER = 'sky'  # Shortened for compact tokens
 JWT_SECRET_ENV = 'SKYPILOT_JWT_SECRET'
 
 
@@ -39,7 +39,6 @@ class TokenService:
 
     def create_token(self,
                      user_id: str,
-                     user_name: str,
                      token_name: str,
                      expires_in_days: Optional[int] = None) -> Dict[str, Any]:
         """Create a new JWT service account token.
@@ -54,24 +53,24 @@ class TokenService:
             Dict containing token info including the JWT token
         """
         now = datetime.datetime.now(datetime.timezone.utc)
-        token_id = secrets.token_urlsafe(16)  # Shorter ID for JWT
+        token_id = secrets.token_urlsafe(12)  # Shorter ID for JWT
 
-        # Build JWT payload
+        # Build minimal JWT payload with single-character field names for
+        # compactness
         payload = {
-            'iss': JWT_ISSUER,  # Issuer
-            'iat': int(now.timestamp()),  # Issued at
-            'sub': user_id,  # Subject (user ID)
-            'name': user_name,  # User name
-            'token_id': token_id,  # Unique token identifier
-            'token_name': token_name,  # Human-readable name
-            'type': 'service_account',  # Token type
+            'i': JWT_ISSUER,  # Issuer (use constant)
+            't': int(now.timestamp()),  # Issued at (shortened from 'iat')
+            'u': user_id,  # User ID (shortened from 'sub')
+            'k': token_id,  # Token ID (shortened from 'token_id')
+            'y': 'sa',  # Type: service account (shortened from 'type')
         }
 
         # Add expiration if specified
         expires_at = None
         if expires_in_days:
             exp_time = now + datetime.timedelta(days=expires_in_days)
-            payload['exp'] = int(exp_time.timestamp())
+            payload['e'] = int(
+                exp_time.timestamp())  # Expiration (shortened from 'exp')
             expires_at = int(exp_time.timestamp())
 
         # Generate JWT
@@ -112,17 +111,32 @@ class TokenService:
 
         try:
             # Decode and verify JWT
-            payload = jwt.decode(jwt_token,
-                                 self.secret_key,
-                                 algorithms=[JWT_ALGORITHM],
-                                 issuer=JWT_ISSUER)
+            payload = jwt.decode(
+                jwt_token,
+                self.secret_key,
+                algorithms=[JWT_ALGORITHM],
+                issuer=JWT_ISSUER)  # Use constant for consistency
 
             # Verify token type
-            if payload.get('type') != 'service_account':
-                logger.warning(f'Invalid token type: {payload.get("type")}')
+            if payload.get('y') != 'sa':  # Updated field name
+                logger.warning(f'Invalid token type: {payload.get("y")}')
                 return None
 
-            return payload
+            # Convert shortened field names back to standard names for
+            # compatibility
+            normalized_payload = {
+                'iss': payload.get('i'),  # issuer
+                'iat': payload.get('t'),  # issued at
+                'sub': payload.get('u'),  # subject (user ID)
+                'token_id': payload.get('k'),  # token ID
+                'type': 'service_account',  # expand shortened type
+            }
+
+            # Add expiration if present
+            if 'e' in payload:
+                normalized_payload['exp'] = payload['e']
+
+            return normalized_payload
 
         except jwt.ExpiredSignatureError:
             logger.debug('Token has expired')

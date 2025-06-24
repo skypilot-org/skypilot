@@ -380,7 +380,6 @@ async def create_service_account_token(
         # Create JWT-based token
         token_data = token_service.create_token(
             user_id=auth_user.id,
-            user_name=auth_user.name,
             token_name=token_body.token_name.strip(),
             expires_in_days=token_body.expires_in_days)
 

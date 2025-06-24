@@ -87,7 +87,9 @@ def launch(
             name=name,
         )
         response = server_common.make_authenticated_request(
-            'POST', '/jobs/launch', json=json.loads(body.model_dump_json()),
+            'POST',
+            '/jobs/launch',
+            json=json.loads(body.model_dump_json()),
             timeout=(5, None))
         return server_common.get_request_id(response)
 
@@ -144,7 +146,9 @@ def queue(refresh: bool,
         job_ids=job_ids,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/jobs/queue', json=json.loads(body.model_dump_json()),
+        'POST',
+        '/jobs/queue',
+        json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
 
@@ -181,7 +185,9 @@ def cancel(
         all_users=all_users,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/jobs/cancel', json=json.loads(body.model_dump_json()),
+        'POST',
+        '/jobs/cancel',
+        json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response=response)
 
@@ -228,8 +234,11 @@ def tail_logs(name: Optional[str] = None,
         tail=tail,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/jobs/logs', json=json.loads(body.model_dump_json()),
-        stream=True, timeout=(5, None))
+        'POST',
+        '/jobs/logs',
+        json=json.loads(body.model_dump_json()),
+        stream=True,
+        timeout=(5, None))
     request_id = server_common.get_request_id(response)
     return sdk.stream_response(request_id, response, output_stream)
 
@@ -269,7 +278,9 @@ def download_logs(
         local_dir=local_dir,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/jobs/download_logs', json=json.loads(body.model_dump_json()),
+        'POST',
+        '/jobs/download_logs',
+        json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     job_id_remote_path_dict = sdk.stream_and_get(
         server_common.get_request_id(response))
