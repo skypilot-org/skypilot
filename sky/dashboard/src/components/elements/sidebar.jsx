@@ -21,6 +21,7 @@ import {
   UserCircleIcon,
   UsersIcon,
   StarIcon,
+  StorageIcon,
 } from '@/components/elements/icons';
 import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
@@ -266,6 +267,14 @@ export function TopBar() {
           >
             <BookDocIcon className="w-4 h-4" />
             {!isMobile && <span>Workspaces</span>}
+          </Link>
+          <Link
+            href="/volumes"
+            className={getLinkClasses('/volumes')}
+            prefetch={false}
+          >
+            <StorageIcon className="w-4 h-4" />
+            {!isMobile && <span>Volumes</span>}
           </Link>
           <Link
             href="/users"
