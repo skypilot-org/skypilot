@@ -387,6 +387,7 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Allow /api/ paths to continue, which are critical to operate
             # on-going requests but will not submit new requests.
             if not request.url.path.startswith('/api/'):
+                # Client will retry on 503 error.
                 return fastapi.responses.JSONResponse(
                     status_code=503,
                     content={
@@ -398,9 +399,9 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
-app.add_middleware(GracefulShutdownMiddleware)  # Add the new middleware
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(

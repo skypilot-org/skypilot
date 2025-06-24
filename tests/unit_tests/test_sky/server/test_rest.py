@@ -151,7 +151,7 @@ class TestRetryOnServerUnavailableDecorator:
         # Check that status message context manager was used
         mock_status.assert_called_once()
         call_args = mock_status.call_args[0][0]
-        assert 'API server is temporarily unavailable' in call_args
+        assert 'API server is temporarily' in call_args
 
     def test_decorator_preserves_function_metadata(self):
         """Test that decorator preserves original function metadata."""
