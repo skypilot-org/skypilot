@@ -70,7 +70,18 @@ class TestCostReportStatusUtils(unittest.TestCase):
 
     def test_show_cost_report_table_with_days(self):
         """Test show_cost_report_table displays days information."""
-        mock_records = []
+        # Need non-empty records for show_cost_report_table to call echo
+        mock_resources = mock.Mock()
+        mock_resources.get_cost.return_value = 0.05  # Return numeric value for cost calculation
+        mock_records = [{
+            'name': 'test-cluster',
+            'status': status_lib.ClusterStatus.UP,
+            'num_nodes': 1,
+            'resources': mock_resources,
+            'total_cost': 5.50,
+            'launched_at': 1640995200,
+            'duration': 3600,
+        }]
 
         with mock.patch('click.echo') as mock_echo:
             with mock.patch(
@@ -84,7 +95,7 @@ class TestCostReportStatusUtils(unittest.TestCase):
 
                 # Should display days information in header
                 mock_echo.assert_called()
-                echo_calls = [call[0][0] for call in mock_echo.call_args_list]
+                echo_calls = [str(call[0][0]) for call in mock_echo.call_args_list]
                 header_with_days = any(
                     '(last 7 days)' in call for call in echo_calls)
                 self.assertTrue(header_with_days,
@@ -92,7 +103,18 @@ class TestCostReportStatusUtils(unittest.TestCase):
 
     def test_show_cost_report_table_without_days(self):
         """Test show_cost_report_table without days information."""
-        mock_records = []
+        # Need non-empty records for show_cost_report_table to call echo
+        mock_resources = mock.Mock()
+        mock_resources.get_cost.return_value = 0.05  # Return numeric value for cost calculation
+        mock_records = [{
+            'name': 'test-cluster',
+            'status': status_lib.ClusterStatus.UP,
+            'num_nodes': 1,
+            'resources': mock_resources,
+            'total_cost': 5.50,
+            'launched_at': 1640995200,
+            'duration': 3600,
+        }]
 
         with mock.patch('click.echo') as mock_echo:
             with mock.patch(
@@ -106,7 +128,7 @@ class TestCostReportStatusUtils(unittest.TestCase):
 
                 # Should not display days information in header
                 mock_echo.assert_called()
-                echo_calls = [call[0][0] for call in mock_echo.call_args_list]
+                echo_calls = [str(call[0][0]) for call in mock_echo.call_args_list]
                 header_with_days = any('(last' in call for call in echo_calls)
                 self.assertFalse(header_with_days,
                                  "Should not display days in header when None")
@@ -114,10 +136,12 @@ class TestCostReportStatusUtils(unittest.TestCase):
     def test_cost_report_helper_functions_signature(self):
         """Test that cost report helper functions have correct signatures."""
         # Test that helper functions accept truncate parameter (regression test)
+        mock_resources = mock.Mock()
+        mock_resources.get_cost.return_value = 0.05  # Return numeric value for cost calculation
         mock_record = {
             'status': status_lib.ClusterStatus.UP,
             'num_nodes': 1,
-            'resources': mock.Mock(),
+            'resources': mock_resources,
             'total_cost': 10.50
         }
 
@@ -431,18 +455,16 @@ class TestCostReportCLI(unittest.TestCase):
         mock_sdk_get.return_value = []
         mock_get_total.return_value = 0.0
 
-        # Test the internal logic by calling the CLI function directly
-        # Use mock context to simulate different days parameter
-        with mock.patch('sys.argv', ['sky', 'cost-report', '--days', '7']):
-            # Mock click context
-            with mock.patch('click.get_current_context') as mock_ctx:
-                mock_ctx.return_value.params = {'all': False, 'days': 7}
-
-                # Test that the function would call SDK with correct params
-                # This tests the core logic without click dependency
-                command.cost_report(all=False, days=7)
-
-                mock_sdk_cost_report.assert_called_once_with(days=7)
+        # Test the CLI command logic by calling with a test runner
+        from click.testing import CliRunner
+        runner = CliRunner()
+        result = runner.invoke(command.cost_report, ['--days', '7'])
+        
+        # Verify the command completed successfully
+        self.assertEqual(result.exit_code, 0)
+        
+        # Verify cost_report was called
+        mock_sdk_cost_report.assert_called_once_with(days=7)
 
 
 if __name__ == '__main__':
