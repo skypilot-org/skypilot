@@ -1536,7 +1536,6 @@ function ServiceAccountTokensView({
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
               <p className="text-sm text-blue-700">
                 <strong>Admin View:</strong> You can see and manage service account tokens from all users. 
-                Tokens marked with "Other" are owned by other users.
               </p>
             </div>
           )}
