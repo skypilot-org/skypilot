@@ -1,5 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
+import enum
 import functools
 import hashlib
 import json
@@ -24,6 +25,7 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
@@ -56,6 +58,69 @@ HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
 # and store all data that needs to be persisted in future.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
+
+
+class KubernetesHighPerformanceNetworkType(enum.Enum):
+    """Enum for different Kubernetes cluster types with high performance
+    network configurations.
+
+    This enum defines cluster types that support optimized networking for
+    distributed ML workloads:
+    - GCP_TCPX: GKE clusters with GPUDirect-TCPX support
+      (A3 High instances: a3-highgpu-8g)
+    - GCP_TCPXO: GKE clusters with GPUDirect-TCPXO support
+      (A3 Mega instances: a3-megagpu-8g)
+    - GCP_GPUDIRECT_RDMA: GKE clusters with GPUDirect-RDMA support
+      (A4/A3 Ultra instances)
+    - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
+      low-latency networking
+    - NONE: Standard clusters without specialized networking optimizations
+
+    The network configurations align with corresponding VM-based
+    implementations:
+    - GCP settings match
+      sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+    - Nebius settings match the InfiniBand configuration used in Nebius VMs
+    """
+
+    GCP_TCPX = 'gcp_tcpx'
+    GCP_TCPXO = 'gcp_tcpxo'
+    GCP_GPUDIRECT_RDMA = 'gcp_gpudirect_rdma'
+    NEBIUS = 'nebius'
+    NONE = 'none'
+
+    def get_network_env_vars(self) -> Dict[str, str]:
+        """Get network environment variables for this cluster type."""
+        if self == KubernetesHighPerformanceNetworkType.NEBIUS:
+            # Nebius cluster with InfiniBand - use InfiniBand optimizations
+            return {
+                'NCCL_IB_HCA': 'mlx5',
+                'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
+                                    'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
+            }
+        else:
+            # GCP clusters and generic clusters - environment variables are
+            # handled directly in the template
+            return {}
+
+    def supports_high_performance_networking(self) -> bool:
+        """Check if this cluster type supports high performance networking."""
+        return self is not KubernetesHighPerformanceNetworkType.NONE
+
+    def supports_gpu_direct(self) -> bool:
+        """Check if this cluster type supports GPUDirect networking."""
+        return self in (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                        KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                        KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+
+    def requires_ipc_lock_capability(self) -> bool:
+        """Check if this cluster type requires IPC_LOCK capability."""
+        return self.supports_high_performance_networking()
+
+    def requires_tcpxo_daemon(self) -> bool:
+        """Check if this cluster type requires TCPXO daemon."""
+        return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
+
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
