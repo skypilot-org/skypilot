@@ -25,7 +25,6 @@ from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
-from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants

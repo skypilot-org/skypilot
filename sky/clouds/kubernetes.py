@@ -19,8 +19,8 @@ from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
-from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
+from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -33,7 +33,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
