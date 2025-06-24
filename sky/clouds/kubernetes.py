@@ -543,7 +543,7 @@ class Kubernetes(clouds.Cloud):
                 context)
             if len(avoid_label_keys) == 0:
                 avoid_label_keys = None
-        port_mode = network_utils.get_port_mode(None)
+        port_mode = network_utils.get_port_mode(None, context)
 
         remote_identity = cloud_config_utils.get_cloud_config_value(
             cloud='kubernetes',
@@ -649,7 +649,8 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_port_mode': port_mode.value,
-            'k8s_networking_mode': network_utils.get_networking_mode().value,
+            'k8s_networking_mode': network_utils.get_networking_mode(
+                None, context=context).value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,

@@ -19,7 +19,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
@@ -2603,7 +2602,10 @@ def get_head_pod_name(cluster_name_on_cloud: str):
 
 def get_custom_k8s_contexts_names() -> List[str]:
     """Returns the list of context names from the config"""
-    contexts = skypilot_config.get_nested(('kubernetes', 'contexts'), {})
+    contexts = cloud_config_utils.get_cloud_config_value(cloud='kubernetes',
+                                                         region=None,
+                                                         keys=('contexts',),
+                                                         default_value={})
     return [*contexts] or []
 
 
