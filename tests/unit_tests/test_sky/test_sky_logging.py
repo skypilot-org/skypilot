@@ -1,6 +1,5 @@
 """Unit tests for sky.sky_logging module."""
 
-import asyncio
 import io
 import logging
 from unittest import mock
@@ -95,12 +94,9 @@ def test_handler_invalid_level(mock_get, handler, monkeypatch):
 
 
 @mock.patch('sky.utils.context.get', return_value=None)
-def test_handler_with_context_override(mock_get, handler, monkeypatch):
+async def test_handler_with_context_override(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
     assert handler.level == logging.INFO
-    if asyncio.get_event_loop() is None:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
     ctx = context.Context()
     ctx.override_envs({'SKYPILOT_DEBUG': '1'})
     mock_get.return_value = ctx
