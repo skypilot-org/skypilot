@@ -337,7 +337,7 @@ def make_launchables_for_valid_region_zones(
 def parse_memory_resource(resource_qty_str: Union[str, int, float],
                           field_name: str,
                           ret_type: type = int,
-                          unit: str = 'g',
+                          unit: str = 'gb',
                           allow_plus: bool = False,
                           allow_x: bool = False,
                           allow_rounding: bool = False) -> str:

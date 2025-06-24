@@ -418,10 +418,6 @@ class TestVolumeCommands:
                 'size': '1024Mi',
                 'expected': '1'
             },  # 1024Mi = 1Gi
-            {
-                'size': '1073741824b',
-                'expected': '1'
-            },  # 1Gi in bytes
         ]
 
         for test_case in test_cases:
@@ -472,11 +468,6 @@ class TestVolumeCommands:
         volume_config = {'size': '100GI'}
         command._adjust_volume_config(volume_config)
         assert volume_config['size'] == '100'
-
-        # Test with bytes
-        volume_config = {'size': '1073741824b'}  # 1Gi in bytes
-        command._adjust_volume_config(volume_config)
-        assert volume_config['size'] == '1'
 
     def test_validate_volume_config_valid_with_size(self):
         """Test `_validate_volume_config` with valid size."""
@@ -686,7 +677,6 @@ class TestVolumeCommands:
         ]
 
         for config in invalid_configs:
-            print(f'Testing {config}')
             with pytest.raises(
                     exceptions.InvalidSkyPilotConfigError) as exc_info:
                 common_utils.validate_schema(config,

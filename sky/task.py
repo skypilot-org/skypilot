@@ -731,10 +731,6 @@ class Task:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
-        job = config.pop('job', None)
-        if job is not None and 'priority' in job:
-            task.set_job_priority(job['priority'])
-
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:
             task.volume_mounts = []
