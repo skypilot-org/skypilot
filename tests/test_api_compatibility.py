@@ -324,6 +324,9 @@ class TestAPICompatibility:
 
         # Get the model classes
         current_model: Type = CURRENT_PAYLOADS_CLASSES[model_name]
+        if model_name not in MASTER_PAYLOADS_CLASSES:
+            # New models are allowed for API compatibility.
+            pytest.skip(f"Model {model_name} not found in master payloads.py")
         master_model: Type = MASTER_PAYLOADS_CLASSES[model_name]
 
         # Get field information
