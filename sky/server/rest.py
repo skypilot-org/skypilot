@@ -72,33 +72,31 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
             start_time = time.time()
             attempt = 0
 
-            def try_once():
-                nonlocal attempt
-                attempt += 1
-                try:
-                    return func(*args, **kwargs)
-                except exceptions.ServerTemporarilyUnavailableError as e:
-                    # This will cause the status spinner being stopped and
-                    # restarted in every retry loop. But it is necessary to
-                    # stop the status spinner before retrying func() to avoid
-                    # the status spinner get stuck if the func() runs for a
-                    # long time without update status, e.g. sky logs.
-                    with rich_utils.client_status(msg):
-                        if time.time() - start_time > max_wait_seconds:
-                            raise exceptions.ServerTemporarilyUnavailableError(
-                                'Timeout waiting for the API server to be '
-                                f'available after {max_wait_seconds}s.') \
-                                from e
-
-                        sleep_time = backoff.current_backoff()
-                        time.sleep(sleep_time)
-                        logger.debug(f'The API server is unavailable. Retrying '
-                                     f'{func.__name__} (attempt {attempt}, '
-                                     f'backoff {sleep_time}s).')
-
             with _retry_in_context():
                 while True:
-                    try_once()
+                    attempt += 1
+                    try:
+                        return func(*args, **kwargs)
+                    except exceptions.ServerTemporarilyUnavailableError as e:
+                        # This will cause the status spinner being stopped and
+                        # restarted in every retry loop. But it is necessary to
+                        # stop the status spinner before retrying func() to
+                        # avoid the status spinner get stuck if the func() runs
+                        # for a long time without update status, e.g. sky logs.
+                        with rich_utils.client_status(msg):
+                            if time.time() - start_time > max_wait_seconds:
+                                # pylint: disable=line-too-long
+                                raise exceptions.ServerTemporarilyUnavailableError(
+                                    'Timeout waiting for the API server to be '
+                                    f'available after {max_wait_seconds}s.') \
+                                    from e
+
+                            sleep_time = backoff.current_backoff()
+                            time.sleep(sleep_time)
+                            logger.debug('The API server is unavailable. '
+                                         f'Retrying {func.__name__} '
+                                         f'(attempt {attempt}, '
+                                         f'backoff {sleep_time}s).')
 
         return cast(F, wrapper)
 
