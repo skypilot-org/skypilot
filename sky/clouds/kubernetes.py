@@ -21,6 +21,7 @@ from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -272,8 +273,11 @@ class Kubernetes(clouds.Cloud):
                          'with context: '
                          f'{context}. Reason: {reason}')
 
-            autoscaler_type = kubernetes_utils.get_config_property_value(
-                ('autoscaler',), context=context)
+            autoscaler_type = cloud_config_utils.get_cloud_config_value(
+                cloud='kubernetes',
+                region=context,
+                keys=('autoscaler',),
+                default_value=None)
             if (autoscaler_type is not None and
                     not kubernetes_utils.get_autoscaler(
                         autoscaler_type).can_query_backend):
@@ -542,7 +546,7 @@ class Kubernetes(clouds.Cloud):
         remote_identity = skypilot_config.get_nested(
             ('kubernetes', 'remote_identity'),
             schemas.get_default_remote_identity('kubernetes'))
-            # TODO syang
+        # TODO syang
 
         if isinstance(remote_identity, dict):
             # If remote_identity is a dict, use the service account for the
@@ -590,7 +594,7 @@ class Kubernetes(clouds.Cloud):
             ('kubernetes', 'provision_timeout'),
             timeout,
             override_configs=resources.cluster_config_overrides)
-            # TODO syang
+        # TODO syang
 
         # Check if this cluster supports high performance networking and
         # configure IPC_LOCK capability for clusters like Nebius that support it
@@ -625,13 +629,13 @@ class Kubernetes(clouds.Cloud):
             ('kubernetes', 'high_availability', 'storage_class_name'),
             None,
             override_configs=resources.cluster_config_overrides)
-            # TODO syang
+        # TODO syang
 
         k8s_kueue_local_queue_name = skypilot_config.get_nested(
             ('kubernetes', 'kueue', 'local_queue_name'),
             None,
             override_configs=resources.cluster_config_overrides)
-            # TODO syang
+        # TODO syang
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,

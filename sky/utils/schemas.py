@@ -1086,8 +1086,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.utils import kubernetes_enums
-    from sky.clouds import service_catalog
 
     resources_schema = {
         k: v

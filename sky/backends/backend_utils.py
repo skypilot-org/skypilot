@@ -38,6 +38,7 @@ from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import cloud_config_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -527,13 +528,18 @@ def get_expirable_clouds(
             # add remote_identity of each context if it exists
             remote_identities = []
             for context in contexts:
-                context_remote_identity = kubernetes_utils.get_config_property_value(
-                    ('remote_identity',), context=context)
+                context_remote_identity = cloud_config_utils.get_cloud_config_value(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=None)
                 if context_remote_identity is not None:
                     remote_identities.append(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
-            global_remote_identity = kubernetes_utils.get_config_property_value(
-                ('remote_identity',),
+            global_remote_identity = cloud_config_utils.get_cloud_config_value(
+                cloud='kubernetes',
+                region=None,
+                keys=('remote_identity',),
                 default_value=schemas.get_default_remote_identity(
                     str(cloud).lower()))
             if global_remote_identity is not None:
@@ -640,14 +646,11 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    # handle k8s cloud separately
-    if isinstance(cloud, clouds.Kubernetes):
-        remote_identity_config = kubernetes_utils.get_config_property_value(
-            ('remote_identity',), context=region.name)
-    else:
-        remote_identity_config = skypilot_config.get_nested(
-            (str(cloud).lower(), 'remote_identity'), None)
-        # TODO syang
+    remote_identity_config = cloud_config_utils.get_cloud_config_value(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('remote_identity',),
+        default_value=None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
@@ -735,12 +738,10 @@ def write_cluster_config(
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
-    if isinstance(cloud, clouds.Kubernetes):
-        labels = kubernetes_utils.get_config_property_value(('labels',),
-                                                            context=region.name)
-    else:
-        labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
-        # TODO syang
+    labels = cloud_config_utils.get_cloud_config_value(cloud=str(cloud).lower(),
+                                                       region=region.name,
+                                                       keys=('labels',),
+                                                       default_value={})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels

@@ -36,7 +36,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import ibm
@@ -46,6 +45,7 @@ from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
@@ -425,8 +425,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # ClusterIP service.
     nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = kubernetes_utils.get_config_property_value(
-        ('kubernetes', 'networking'), context=context,
+    network_mode_str = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes',
+        region=context,
+        keys=('networking',),
         default_value=port_forward_mode.value)
     try:
         network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
@@ -456,8 +458,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'parent': 'skypilot'
             }
         }
-        custom_metadata = kubernetes_utils.get_config_property_value(
-            ('kubernetes', 'custom_metadata'), context=context, default_value={})
+        custom_metadata = cloud_config_utils.get_cloud_config_value(
+            cloud='kubernetes',
+            region=context,
+            keys=('custom_metadata',),
+            default_value={})
         config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
 
         secret = k8s.client.V1Secret(
