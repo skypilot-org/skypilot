@@ -609,7 +609,7 @@ class JobsController:
                 callback_func=callback_func)
 
             recovery_start = time.time()
-            recovered_time = self._strategy_executor.recover()
+            await utils.to_thread(self._strategy_executor.recover)
             recovery_time = time.time() - recovery_start
 
             logger.info(
@@ -617,7 +617,7 @@ class JobsController:
             )
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
-                                            recovered_time=recovered_time,
+                                            recovered_time=recovery_time,
                                             callback_func=callback_func)
 
     async def run(self):

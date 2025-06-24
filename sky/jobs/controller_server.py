@@ -72,9 +72,10 @@ async def get_job_status(job_id: int):
 
 def start_server(host: str = 'localhost', port: int = 8000):
     """Start the controller server."""
-    # num_workers = multiprocessing.cpu_count()
-    # uvicorn.run("sky.jobs.controller_server:app", host=host, port=port, workers=2 * num_workers)
-    uvicorn.run(app, host=host, port=port)
+    num_workers = multiprocessing.cpu_count()
+    uvicorn.run("sky.jobs.controller_server:app",
+                host=host, port=port, workers=2 * num_workers)
+    # uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
