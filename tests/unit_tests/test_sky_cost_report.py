@@ -4,9 +4,9 @@ from unittest import mock
 
 from sky import core
 from sky.server.requests import payloads
-from sky.utils.cli_utils import status_utils
-from sky.utils import status_lib
 from sky.skylet import constants
+from sky.utils import status_lib
+from sky.utils.cli_utils import status_utils
 
 
 class TestCostReportCore(unittest.TestCase):
@@ -14,33 +14,36 @@ class TestCostReportCore(unittest.TestCase):
 
     def test_cost_report_default_days(self):
         """Test cost_report with default days parameter."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history') as mock_get_history:
+        with mock.patch('sky.global_user_state.get_clusters_from_history'
+                       ) as mock_get_history:
             mock_get_history.return_value = []
-            
+
             result = core.cost_report()
-            
+
             # Should call with default 30 days
             mock_get_history.assert_called_once_with(days=30)
             self.assertEqual(result, [])
 
     def test_cost_report_custom_days(self):
         """Test cost_report with custom days parameter."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history') as mock_get_history:
+        with mock.patch('sky.global_user_state.get_clusters_from_history'
+                       ) as mock_get_history:
             mock_get_history.return_value = []
-            
+
             result = core.cost_report(days=7)
-            
+
             # Should call with custom 7 days
             mock_get_history.assert_called_once_with(days=7)
             self.assertEqual(result, [])
 
     def test_cost_report_none_days(self):
         """Test cost_report with None days parameter."""
-        with mock.patch('sky.global_user_state.get_clusters_from_history') as mock_get_history:
+        with mock.patch('sky.global_user_state.get_clusters_from_history'
+                       ) as mock_get_history:
             mock_get_history.return_value = []
-            
+
             result = core.cost_report(days=None)
-            
+
             # Should call with default 30 days when None is passed
             mock_get_history.assert_called_once_with(days=30)
             self.assertEqual(result, [])
@@ -48,15 +51,16 @@ class TestCostReportCore(unittest.TestCase):
     def test_cost_report_with_pickle_errors(self):
         """Test cost_report handles pickle errors gracefully when loading historical data."""
         import pickle
-        
+
         # Mock get_clusters_from_history to simulate pickle errors being handled internally
-        with mock.patch('sky.global_user_state.get_clusters_from_history') as mock_get_history:
+        with mock.patch('sky.global_user_state.get_clusters_from_history'
+                       ) as mock_get_history:
             # Simulate the function handling pickle errors gracefully and returning empty list
             mock_get_history.return_value = []
-            
+
             # Even if there are pickle errors internally, the function should not crash
             result = core.cost_report(days=30)
-            
+
             self.assertEqual(result, [])
             mock_get_history.assert_called_once_with(days=30)
 
@@ -67,44 +71,45 @@ class TestCostReportStatusUtils(unittest.TestCase):
     def test_show_cost_report_table_with_days(self):
         """Test show_cost_report_table displays days information."""
         mock_records = []
-        
+
         with mock.patch('click.echo') as mock_echo:
-            with mock.patch('sky.utils.log_utils.create_table') as mock_create_table:
+            with mock.patch(
+                    'sky.utils.log_utils.create_table') as mock_create_table:
                 mock_table = mock.Mock()
                 mock_create_table.return_value = mock_table
-                
-                status_utils.show_cost_report_table(
-                    mock_records, 
-                    show_all=False, 
-                    days=7
-                )
-                
+
+                status_utils.show_cost_report_table(mock_records,
+                                                    show_all=False,
+                                                    days=7)
+
                 # Should display days information in header
                 mock_echo.assert_called()
                 echo_calls = [call[0][0] for call in mock_echo.call_args_list]
-                header_with_days = any('(last 7 days)' in call for call in echo_calls)
-                self.assertTrue(header_with_days, "Should display days in header")
+                header_with_days = any(
+                    '(last 7 days)' in call for call in echo_calls)
+                self.assertTrue(header_with_days,
+                                "Should display days in header")
 
     def test_show_cost_report_table_without_days(self):
         """Test show_cost_report_table without days information."""
         mock_records = []
-        
+
         with mock.patch('click.echo') as mock_echo:
-            with mock.patch('sky.utils.log_utils.create_table') as mock_create_table:
+            with mock.patch(
+                    'sky.utils.log_utils.create_table') as mock_create_table:
                 mock_table = mock.Mock()
                 mock_create_table.return_value = mock_table
-                
-                status_utils.show_cost_report_table(
-                    mock_records, 
-                    show_all=False, 
-                    days=None
-                )
-                
+
+                status_utils.show_cost_report_table(mock_records,
+                                                    show_all=False,
+                                                    days=None)
+
                 # Should not display days information in header
                 mock_echo.assert_called()
                 echo_calls = [call[0][0] for call in mock_echo.call_args_list]
                 header_with_days = any('(last' in call for call in echo_calls)
-                self.assertFalse(header_with_days, "Should not display days in header when None")
+                self.assertFalse(header_with_days,
+                                 "Should not display days in header when None")
 
     def test_cost_report_helper_functions_signature(self):
         """Test that cost report helper functions have correct signatures."""
@@ -115,13 +120,15 @@ class TestCostReportStatusUtils(unittest.TestCase):
             'resources': mock.Mock(),
             'total_cost': 10.50
         }
-        
+
         # These should not raise TypeError
-        status_utils._get_status_value_for_cost_report(mock_record, truncate=True)
+        status_utils._get_status_value_for_cost_report(mock_record,
+                                                       truncate=True)
         status_utils._get_status_for_cost_report(mock_record, truncate=False)
         status_utils._get_resources_for_cost_report(mock_record, truncate=True)
         status_utils._get_price_for_cost_report(mock_record, truncate=False)
-        status_utils._get_estimated_cost_for_cost_report(mock_record, truncate=True)
+        status_utils._get_estimated_cost_for_cost_report(mock_record,
+                                                         truncate=True)
 
 
 class TestCostReportServer(unittest.TestCase):
@@ -132,11 +139,11 @@ class TestCostReportServer(unittest.TestCase):
         # Test default days
         body = payloads.CostReportBody()
         self.assertEqual(body.days, 30)
-        
+
         # Test custom days
         body = payloads.CostReportBody(days=7)
         self.assertEqual(body.days, 7)
-        
+
         # Test None days
         body = payloads.CostReportBody(days=None)
         self.assertIsNone(body.days)
@@ -145,25 +152,26 @@ class TestCostReportServer(unittest.TestCase):
     def test_cost_report_endpoint_calls_core(self, mock_core_cost_report):
         """Test that cost_report server endpoint calls core function with correct args."""
         mock_core_cost_report.return_value = []
-        
+
         # Create mock request and body
         mock_request = mock.Mock()
         mock_request.state.request_id = 'test_request_id'
-        
+
         cost_report_body = payloads.CostReportBody(days=15)
-        
+
         # Import and test the server function
         from sky.server import server
-        
-        with mock.patch('sky.server.server.executor.schedule_request') as mock_schedule:
+
+        with mock.patch(
+                'sky.server.server.executor.schedule_request') as mock_schedule:
             # Call the server endpoint
             import asyncio
             asyncio.run(server.cost_report(mock_request, cost_report_body))
-            
+
             # Verify executor.schedule_request was called with correct parameters
             mock_schedule.assert_called_once()
             call_args = mock_schedule.call_args
-            
+
             self.assertEqual(call_args[1]['request_id'], 'test_request_id')
             self.assertEqual(call_args[1]['request_name'], 'cost_report')
             self.assertEqual(call_args[1]['request_body'], cost_report_body)
@@ -190,20 +198,21 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
             'user_name': 'testuser',
             'workspace': 'default',
         }
-        
+
         # Mock the resources object to have an unknown instance type
-        mock_cluster_record['resources'].instance_type = 'unknown-instance-type-v1'
+        mock_cluster_record[
+            'resources'].instance_type = 'unknown-instance-type-v1'
         mock_cluster_record['resources'].cloud = mock.Mock()
         mock_cluster_record['resources'].cloud.__str__ = lambda: 'aws'
-        
+
         # Mock catalog functions to return None for unknown instance type
         with mock.patch('sky.catalog.get_hourly_cost', return_value=None):
-            with mock.patch('sky.global_user_state.get_clusters_from_history', 
-                          return_value=[mock_cluster_record]):
-                
+            with mock.patch('sky.global_user_state.get_clusters_from_history',
+                            return_value=[mock_cluster_record]):
+
                 # This should not raise an exception
                 result = core.cost_report(days=30)
-                
+
                 # Should return the cluster even if cost calculation fails
                 self.assertEqual(len(result), 1)
                 self.assertEqual(result[0]['name'], 'old-cluster')
@@ -217,12 +226,14 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
             'resources': None,  # Problematic: None resources
             'total_cost': 0.0
         }
-        
+
         # These should not crash even with None resources
         try:
-            status_utils._get_resources_for_cost_report(mock_record, truncate=True)
+            status_utils._get_resources_for_cost_report(mock_record,
+                                                        truncate=True)
             status_utils._get_price_for_cost_report(mock_record, truncate=True)
-            status_utils._get_estimated_cost_for_cost_report(mock_record, truncate=True)
+            status_utils._get_estimated_cost_for_cost_report(mock_record,
+                                                             truncate=True)
         except (AttributeError, TypeError):
             # Expected - the functions might fail gracefully, but shouldn't crash the whole system
             pass
@@ -243,14 +254,14 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
             'user_name': 'testuser2',
             'workspace': 'default',
         }
-        
+
         # Mock resources with missing/invalid attributes
         mock_cluster_record['resources'].instance_type = None
         mock_cluster_record['resources'].cloud = None
-        
-        with mock.patch('sky.global_user_state.get_clusters_from_history', 
-                      return_value=[mock_cluster_record]):
-            
+
+        with mock.patch('sky.global_user_state.get_clusters_from_history',
+                        return_value=[mock_cluster_record]):
+
             # Should handle gracefully and not crash
             result = core.cost_report(days=30)
             self.assertIsInstance(result, list)
@@ -271,14 +282,14 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
             'user_name': 'testuser3',
             'workspace': 'default',
         }
-        
+
         mock_cluster_record['resources'].instance_type = 'valid-type'
         mock_cluster_record['resources'].cloud = mock.Mock()
         mock_cluster_record['resources'].cloud.__str__ = lambda: 'gcp'
-        
-        with mock.patch('sky.global_user_state.get_clusters_from_history', 
-                      return_value=[mock_cluster_record]):
-            
+
+        with mock.patch('sky.global_user_state.get_clusters_from_history',
+                        return_value=[mock_cluster_record]):
+
             # Should handle gracefully
             result = core.cost_report(days=30)
             self.assertEqual(len(result), 1)
@@ -303,7 +314,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         valid_cluster['resources'].instance_type = 'standard-instance'
         valid_cluster['resources'].cloud = mock.Mock()
         valid_cluster['resources'].cloud.__str__ = lambda: 'aws'
-        
+
         invalid_cluster = {
             'name': 'invalid-cluster',
             'status': None,
@@ -318,20 +329,21 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
             'user_name': 'invaliduser',
             'workspace': 'default',
         }
-        invalid_cluster['resources'].instance_type = 'discontinued-instance-type'
+        invalid_cluster[
+            'resources'].instance_type = 'discontinued-instance-type'
         invalid_cluster['resources'].cloud = mock.Mock()
         invalid_cluster['resources'].cloud.__str__ = lambda: 'nonexistent-cloud'
-        
-        with mock.patch('sky.global_user_state.get_clusters_from_history', 
-                      return_value=[valid_cluster, invalid_cluster]):
-            
-                         # Should return both clusters, even if one has issues
-             result = core.cost_report(days=30)
-             self.assertEqual(len(result), 2)
-             
-             cluster_names = [r['name'] for r in result]
-             self.assertIn('valid-cluster', cluster_names)
-             self.assertIn('invalid-cluster', cluster_names)
+
+        with mock.patch('sky.global_user_state.get_clusters_from_history',
+                        return_value=[valid_cluster, invalid_cluster]):
+
+            # Should return both clusters, even if one has issues
+            result = core.cost_report(days=30)
+            self.assertEqual(len(result), 2)
+
+            cluster_names = [r['name'] for r in result]
+            self.assertIn('valid-cluster', cluster_names)
+            self.assertIn('invalid-cluster', cluster_names)
 
     def test_cost_report_with_controller_clusters(self):
         """Test cost report handles controller clusters without errors."""
@@ -352,10 +364,10 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         controller_cluster['resources'].instance_type = 'controller-instance'
         controller_cluster['resources'].cloud = mock.Mock()
         controller_cluster['resources'].cloud.__str__ = lambda: 'aws'
-        
-        with mock.patch('sky.global_user_state.get_clusters_from_history', 
-                      return_value=[controller_cluster]):
-            
+
+        with mock.patch('sky.global_user_state.get_clusters_from_history',
+                        return_value=[controller_cluster]):
+
             # Should handle controller clusters without issues
             result = core.cost_report(days=30)
             self.assertEqual(len(result), 1)
@@ -369,7 +381,7 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
             'resources': None,
             'total_cost': 0.0
         }
-        
+
         mock_record_with_missing_attrs = {
             'status': None,
             'num_nodes': 2,
@@ -378,22 +390,25 @@ class TestHistoricalClusterRobustness(unittest.TestCase):
         }
         # Mock resources object missing expected attributes
         mock_record_with_missing_attrs['resources'].instance_type = None
-        del mock_record_with_missing_attrs['resources'].cloud  # Simulate missing attribute
-        
+        del mock_record_with_missing_attrs[
+            'resources'].cloud  # Simulate missing attribute
+
         # Test that these don't crash the status utility functions
         for record in [mock_record_with_none, mock_record_with_missing_attrs]:
             try:
-                status_utils._get_resources_for_cost_report(record, truncate=True)
+                status_utils._get_resources_for_cost_report(record,
+                                                            truncate=True)
             except:
                 pass  # May fail, but shouldn't crash the whole system
-            
+
             try:
                 status_utils._get_price_for_cost_report(record, truncate=True)
             except:
                 pass
-                
+
             try:
-                status_utils._get_estimated_cost_for_cost_report(record, truncate=True)
+                status_utils._get_estimated_cost_for_cost_report(record,
+                                                                 truncate=True)
             except:
                 pass
 
@@ -404,27 +419,29 @@ class TestCostReportCLI(unittest.TestCase):
     @mock.patch('sky.client.sdk.get')
     @mock.patch('sky.client.sdk.cost_report')
     @mock.patch('sky.utils.cli_utils.status_utils.show_cost_report_table')
-    @mock.patch('sky.utils.cli_utils.status_utils.get_total_cost_of_displayed_records')
-    def test_cost_report_cli_function_calls(self, mock_get_total, mock_show_table,
-                                          mock_sdk_cost_report, mock_sdk_get):
+    @mock.patch(
+        'sky.utils.cli_utils.status_utils.get_total_cost_of_displayed_records')
+    def test_cost_report_cli_function_calls(self, mock_get_total,
+                                            mock_show_table,
+                                            mock_sdk_cost_report, mock_sdk_get):
         """Test cost-report CLI function calls with mocking."""
         from sky.client.cli import command
-        
+
         mock_sdk_cost_report.return_value = 'request_id'
         mock_sdk_get.return_value = []
         mock_get_total.return_value = 0.0
-        
+
         # Test the internal logic by calling the CLI function directly
         # Use mock context to simulate different days parameter
         with mock.patch('sys.argv', ['sky', 'cost-report', '--days', '7']):
             # Mock click context
             with mock.patch('click.get_current_context') as mock_ctx:
                 mock_ctx.return_value.params = {'all': False, 'days': 7}
-                
+
                 # Test that the function would call SDK with correct params
                 # This tests the core logic without click dependency
                 command.cost_report(all=False, days=7)
-                
+
                 mock_sdk_cost_report.assert_called_once_with(days=7)
 
 

@@ -319,7 +319,12 @@ function ActiveTab({
     if (cost === null || cost === undefined || cost === 0) {
       return '-';
     }
-    return `$${cost.toFixed(2)}`;
+    // Convert to number and check if it's valid
+    const numericCost = Number(cost);
+    if (isNaN(numericCost)) {
+      return '-';
+    }
+    return `$${numericCost.toFixed(2)}`;
   };
 
   return (
@@ -444,28 +449,31 @@ function ActiveTab({
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
                 <div className="col-span-2">
-                  <div className="flex items-center">
-                    <div className="text-gray-600 font-medium text-base">
-                      Entrypoint
-                    </div>
-                    {clusterData.command && (
-                      <Tooltip
-                        content={isCommandCopied ? 'Copied!' : 'Copy command'}
-                        className="text-muted-foreground"
-                      >
-                        <button
-                          onClick={copyCommandToClipboard}
-                          className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                  {(clusterData.command ||
+                    clusterData.last_creation_command) && (
+                    <div className="flex items-center">
+                      <div className="text-gray-600 font-medium text-base">
+                        Entrypoint
+                      </div>
+                      {clusterData.command && (
+                        <Tooltip
+                          content={isCommandCopied ? 'Copied!' : 'Copy command'}
+                          className="text-muted-foreground"
                         >
-                          {isCommandCopied ? (
-                            <CheckIcon className="w-4 h-4 text-green-600" />
-                          ) : (
-                            <CopyIcon className="w-4 h-4" />
-                          )}
-                        </button>
-                      </Tooltip>
-                    )}
-                  </div>
+                          <button
+                            onClick={copyCommandToClipboard}
+                            className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                          >
+                            {isCommandCopied ? (
+                              <CheckIcon className="w-4 h-4 text-green-600" />
+                            ) : (
+                              <CopyIcon className="w-4 h-4" />
+                            )}
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
+                  )}
 
                   <div className="space-y-4 mt-3">
                     {/* Creation Command */}

@@ -150,7 +150,7 @@ export async function getClusterHistory() {
         to_down: false,
         cluster_hash: cluster.cluster_hash,
         usage_intervals: cluster.usage_intervals,
-        command: cluster.last_creation_command || '-',
+        command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
         events: [
           {
