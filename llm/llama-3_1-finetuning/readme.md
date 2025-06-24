@@ -99,7 +99,7 @@ Run the following on your local machine:
 ```bash
 # Download the files for Llama 3.1 finetuning
 git clone https://github.com/skypilot-org/skypilot
-cd skypilot/llm/llama-3.1
+cd skypilot/llm/llama-3_1-finetuning
 
 export HF_TOKEN=xxxx
 
@@ -217,7 +217,7 @@ run: |
 </details>
 
 ## Appendix: Preparation
-1. Request the access to [Llama 3.1 weights on huggingface](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) (Click on the blue box and follow the steps):
+1. Request the access to [Llama 3.1 weights on huggingface](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct) (Click on the blue box and follow the steps):
 ![](https://i.imgur.com/snIQhr9.png)
 
 2. Get your [huggingface access token](https://huggingface.co/settings/tokens):
