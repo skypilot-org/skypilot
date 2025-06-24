@@ -40,6 +40,7 @@ from argparse import ArgumentParser
 import contextlib
 from functools import lru_cache
 import os
+import sys
 import time
 import typing
 
@@ -89,12 +90,12 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     source_environment_cmd = (f'source {env_file_path};'
                               if env_file_path else '')
-    run_controller_cmd = ('python -u -m sky.jobs.controller '
+    run_controller_cmd = (f'{sys.executable} -u -m sky.jobs.controller '
                           f'{dag_yaml_path} --job-id {job_id};')
 
     # If the command line here is changed, please also update
-    # utils._controller_process_alive. `--job-id X` should be at
-    # the end.
+    # utils._controller_process_alive. The substring `--job-id X`
+    # should be in the command.
     run_cmd = (f'{activate_python_env_cmd}'
                f'{source_environment_cmd}'
                f'{run_controller_cmd}')

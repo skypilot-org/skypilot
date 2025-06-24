@@ -11,6 +11,7 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky.backends import backend_utils
+from sky.server import constants
 
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
@@ -22,6 +23,8 @@ class TestBackwardCompatibility:
     MANAGED_JOB_PREFIX = 'test-back-compat'
     SERVE_PREFIX = 'test-back-compat'
     TEST_TIMEOUT = 1800  # 30 minutes
+    BASE_API_VERSION = constants.API_VERSION
+    CURRENT_API_VERSION = constants.API_VERSION
 
     # Environment paths
     BASE_ENV_DIR = pathlib.Path(
@@ -136,6 +139,15 @@ class TestBackwardCompatibility:
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
 
+        base_sky_api_version = subprocess.run(
+            f'{self.ACTIVATE_BASE} && python -c "from sky.server import constants; print(constants.API_VERSION)"',
+            shell=True,
+            check=False,
+            text=True,
+            capture_output=True)
+        TestBackwardCompatibility.BASE_API_VERSION = base_sky_api_version.stdout.strip(
+        )
+
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
 
@@ -222,7 +234,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             # Set intiial autostop in base
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} {yaml_path}',
-            f'sky status | grep {cluster_name} | grep "5m"',
+            f'{self.ACTIVATE_BASE} && sky status {cluster_name} | grep "5m"',
             # Change the autostop time in current
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             f"""
@@ -364,7 +376,7 @@ class TestBackwardCompatibility:
         """Test serve deployment functionality across versions"""
         serve_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && sky check && '
             f'sky serve up --cloud {generic_cloud} -y -n {serve_name}-0 examples/serve/http_server/task.yaml',
             f'{self.ACTIVATE_BASE} && sky serve status {serve_name}-0',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky serve status {serve_name}-0',
@@ -384,6 +396,11 @@ class TestBackwardCompatibility:
 
     def test_client_server_compatibility(self, generic_cloud: str):
         """Test client server compatibility across versions"""
+        if self.BASE_API_VERSION != self.CURRENT_API_VERSION:
+            pytest.skip(
+                f'Base API version: {self.BASE_API_VERSION} and current API '
+                f'version: {self.CURRENT_API_VERSION} are different, '
+                'skipping test')
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
         commands = [
@@ -430,6 +447,11 @@ class TestBackwardCompatibility:
 
     def test_sdk_compatibility(self, generic_cloud: str):
         """Test SDK compatibility across versions"""
+        if self.BASE_API_VERSION != self.CURRENT_API_VERSION:
+            pytest.skip(
+                f'Base API version: {self.BASE_API_VERSION} and current API '
+                f'version: {self.CURRENT_API_VERSION} are different, '
+                'skipping test')
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
         sdk_utils_file = os.path.join(os.path.dirname(__file__),

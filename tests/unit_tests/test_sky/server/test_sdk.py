@@ -1,6 +1,7 @@
 # Tests for the sky/client/sdk.py file
 from http.cookiejar import Cookie
 from http.cookiejar import MozillaCookieJar
+import io
 import os
 from pathlib import Path
 import time
@@ -9,7 +10,6 @@ from unittest import mock
 import click
 import pytest
 import requests
-import io
 
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
@@ -243,7 +243,7 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 class MockRetryContext:
     """Mock retry context for testing resumable functionality."""
-    
+
     def __init__(self, line_processed: int = 0):
         self.line_processed = line_processed
 
@@ -253,18 +253,16 @@ def test_stream_response_non_resumable():
     test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
     mock_response = mock.MagicMock()
     output_stream = io.StringIO()
-   
+
     with mock.patch('sky.utils.rich_utils.decode_rich_status') as mock_decode:
         mock_decode.return_value = test_lines
         with mock.patch('sky.client.sdk.get') as mock_get:
             mock_get.return_value = "test_result"
-            
-            result = client_sdk.stream_response(
-                request_id="test_request_id",
-                response=mock_response,
-                output_stream=output_stream,
-                resumable=False
-            )
+
+            result = client_sdk.stream_response(request_id="test_request_id",
+                                                response=mock_response,
+                                                output_stream=output_stream,
+                                                resumable=False)
 
             # Verify all lines were written to output stream
             assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
@@ -293,8 +291,7 @@ def test_stream_response_resumable_no_previous_lines():
                     request_id="test_request_id",
                     response=mock_response,
                     output_stream=output_stream,
-                    resumable=True
-                )
+                    resumable=True)
 
                 # Verify all lines were written to output stream
                 assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
@@ -326,8 +323,7 @@ def test_stream_response_resumable_with_previous_lines():
                     request_id="test_request_id",
                     response=mock_response,
                     output_stream=output_stream,
-                    resumable=True
-                )
+                    resumable=True)
 
                 # Verify only new lines (3, 4, 5) were written to output
                 assert output_stream.getvalue() == "Line 3\nLine 4\nLine 5\n"
@@ -359,8 +355,7 @@ def test_stream_response_resumable_all_lines_processed():
                     request_id="test_request_id",
                     response=mock_response,
                     output_stream=output_stream,
-                    resumable=True
-                )
+                    resumable=True)
 
                 # Verify no lines were written to output (all already processed)
                 assert output_stream.getvalue() == ""
@@ -377,18 +372,16 @@ def test_stream_response_with_none_lines():
     test_lines = ['Line 1\n', None, 'Line 2\n', None, 'Line 3\n']
     mock_response = mock.MagicMock()
     output_stream = io.StringIO()
-    
+
     with mock.patch('sky.utils.rich_utils.decode_rich_status') as mock_decode:
         mock_decode.return_value = test_lines
         with mock.patch('sky.client.sdk.get') as mock_get:
             mock_get.return_value = "test_result"
-            
-            result = client_sdk.stream_response(
-                request_id="test_request_id",
-                response=mock_response,
-                output_stream=output_stream,
-                resumable=False
-            )
+
+            result = client_sdk.stream_response(request_id="test_request_id",
+                                                response=mock_response,
+                                                output_stream=output_stream,
+                                                resumable=False)
 
             # Verify only non-None lines were written to output stream
             assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
@@ -412,13 +405,12 @@ def test_stream_response_resumable_with_none_lines():
             mock_get_ctx.return_value = retry_context
             with mock.patch('sky.client.sdk.get') as mock_get:
                 mock_get.return_value = "test_result"
-                
+
                 result = client_sdk.stream_response(
                     request_id="test_request_id",
                     response=mock_response,
                     output_stream=output_stream,
-                    resumable=True
-                )
+                    resumable=True)
 
                 # Verify only new non-None lines (3, 4) were written to output
                 assert output_stream.getvalue() == "Line 3\nLine 4\n"
@@ -440,12 +432,10 @@ def test_stream_response_no_request_id():
         mock_decode.return_value = test_lines
         with mock.patch('sky.client.sdk.get') as mock_get:
 
-            result = client_sdk.stream_response(
-                request_id=None,
-                response=mock_response,
-                output_stream=output_stream,
-                resumable=False
-            )
+            result = client_sdk.stream_response(request_id=None,
+                                                response=mock_response,
+                                                output_stream=output_stream,
+                                                resumable=False)
 
             # Verify lines were written to output stream
             assert output_stream.getvalue() == "Line 1\nLine 2\n"

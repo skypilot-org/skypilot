@@ -632,7 +632,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
-    priority: Optional[int] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
@@ -714,9 +713,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    # job launch specific.
-    if priority is not None:
-        task.set_job_priority(priority)
     return task
 
 
@@ -1243,7 +1239,7 @@ def _handle_jobs_queue_request(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.get(request_id)
+        managed_jobs_ = sdk.stream_and_get(request_id)
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1800,8 +1796,13 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 @cli.command()
 @flags.config_option(expose_value=False)
 @flags.all_option('Show all cluster information.')
+@click.option('--days',
+              default=30,
+              type=int,
+              help='Show clusters from the last N days. Default is 30 days. '
+              'If set to 0, show all clusters.')
 @usage_lib.entrypoint
-def cost_report(all: bool):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -1820,13 +1821,22 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = sdk.get(sdk.cost_report())
+    days_to_query: Optional[int] = days
+    if days == 0:
+        days_to_query = None
+    cluster_records = sdk.get(sdk.cost_report(days=days_to_query))
 
     normal_cluster_records = []
     controllers = dict()
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
-        controller = controller_utils.Controllers.from_name(cluster_name)
+        try:
+            controller = controller_utils.Controllers.from_name(cluster_name)
+        except AssertionError:
+            # There could be some old controller clusters from previous
+            # versions that we should not show in the cost report.
+            logger.debug(f'Cluster {cluster_name} is not a controller cluster.')
+            continue
         if controller is not None:
             controller_name = controller.value.name
             # to display most recent entry for each controller cluster
@@ -1839,10 +1849,14 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     total_cost = status_utils.get_total_cost_of_displayed_records(
         normal_cluster_records, all)
 
-    status_utils.show_cost_report_table(normal_cluster_records, all)
+    status_utils.show_cost_report_table(normal_cluster_records,
+                                        all,
+                                        days=days_to_query)
     for controller_name, cluster_record in controllers.items():
-        status_utils.show_cost_report_table(
-            [cluster_record], all, controller_name=controller_name.capitalize())
+        status_utils.show_cost_report_table([cluster_record],
+                                            all,
+                                            controller_name=controller_name,
+                                            days=days_to_query)
         total_cost += cluster_record['total_cost']
 
     click.echo(f'\n{colorama.Style.BRIGHT}'
@@ -2643,6 +2657,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
+        except exceptions.InconsistentConsolidationModeError:
+            # If this error is raised, it means the user switched to the
+            # consolidation mode but the previous controller cluster is still
+            # running. We should allow the user to tear down the controller
+            # cluster in this case.
+            with skypilot_config.override_skypilot_config(
+                {'jobs': {
+                    'controller': {
+                        'consolidation_mode': False
+                    }
+                }}):
+                # Check again with the consolidation mode disabled. This is to
+                # make sure there is no in-progress managed jobs.
+                request_id = managed_jobs.queue(refresh=False,
+                                                skip_finished=True,
+                                                all_users=True)
+                managed_jobs_ = sdk.stream_and_get(request_id)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3762,14 +3793,6 @@ def jobs():
               default=None,
               type=str,
               help='Recovery strategy to use for managed jobs.')
-@click.option('--priority',
-              type=click.IntRange(constants.MIN_PRIORITY,
-                                  constants.MAX_PRIORITY),
-              default=None,
-              show_default=True,
-              help=f'Job priority from ({constants.MIN_PRIORITY} '
-              f'to {constants.MAX_PRIORITY}). '
-              f'Default: {constants.DEFAULT_PRIORITY}.')
 @click.option(
     '--detach-run',
     '-d',
@@ -3804,7 +3827,6 @@ def jobs_launch(
     disk_tier: Optional[str],
     network_tier: Optional[str],
     ports: Tuple[str],
-    priority: Optional[int],
     detach_run: bool,
     yes: bool,
     async_call: bool,
@@ -3853,7 +3875,6 @@ def jobs_launch(
         network_tier=network_tier,
         ports=ports,
         job_recovery=job_recovery,
-        priority=priority,
         config_override=config_override,
     )
 

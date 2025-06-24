@@ -16,12 +16,12 @@ import colorama
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
-import yaml
 
 import sky
 from sky import serve
 from sky import skypilot_config
 from sky.clouds import AWS
+from sky.clouds import gcp
 from sky.clouds import GCP
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -87,6 +87,14 @@ JOB_WAIT_NOT_RUNNING = (
     'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
     'sleep 10; s=$(sky jobs queue);'
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
+
+ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
+    'GOOGLE_APPLICATION_CREDENTIALS='
+    f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+    'gcloud auth activate-service-account '
+    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+    '2> /dev/null || true; '
+    'gsutil')
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])

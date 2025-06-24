@@ -5,7 +5,7 @@ import contextvars
 import functools
 import time
 import typing
-from typing import Any, Callable, cast, Dict, Optional, TypeVar
+from typing import Any, Callable, cast, Optional, TypeVar
 
 import colorama
 
@@ -73,6 +73,7 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
             attempt = 0
 
             def try_once():
+                nonlocal attempt
                 attempt += 1
                 try:
                     return func(*args, **kwargs)
