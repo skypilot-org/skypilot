@@ -71,6 +71,8 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 # maybe_schedule_next_jobs.
 _MANAGED_JOB_SCHEDULER_LOCK = os.path.expanduser(
     '~/.sky/locks/managed_job_scheduler.lock')
+_JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
+    '~/.sky/locks/job_controller_pid.lock')
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
 # Based on testing, assume a running job uses 350MB memory.
@@ -100,17 +102,31 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     pid_path = os.path.expanduser(f'~/.sky/job_controller_pid')
     to_start = False
     # TODO(luca): add an unlocked path first as a short circuit to ignore this
-    with filelock.FileLock(os.path.expanduser(
-            '~/.sky/locks/job_controller_pid.lock')):
-        if os.path.exists(pid_path):
-            with open(pid_path, 'r') as f:
-                pid = int(f.read())
-            if subprocess_utils.is_process_alive(pid):
-                logger.debug(f'Job {job_id} already started with pid {pid}')
-            else:
+    try:
+        with filelock.FileLock(
+            _JOB_CONTROLLER_PID_LOCK, blocking=False, timeout=1):
+            try:
+                if os.path.exists(pid_path):
+                    with open(pid_path, 'r') as f:
+                        pid = int(f.read())
+                        if subprocess_utils.is_process_alive(pid):
+                            logger.debug(
+                                f'Job {job_id} already started with pid {pid}')
+                        else:
+                            to_start = True
+                else:
+                    to_start = True
+            except Exception as e:
+                logger.error(f'Error checking if job {job_id} is already started: {e}')
                 to_start = True
-        else:
-            to_start = True
+                # Starting the server might error in case its already running.
+                # But that should be fine since at least we will have one
+                # running already.
+    except filelock.Timeout:
+        # If we can't get the lock, just exit. The process holding the lock
+        # should launch any pending jobs.
+        pass
+
 
     if to_start:
         activate_python_env_cmd = (
@@ -127,7 +143,7 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         logs_dir = os.path.expanduser(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
         os.makedirs(logs_dir, exist_ok=True)
-        log_path = os.path.join(logs_dir, f'{job_id}.log')
+        log_path = os.path.join(logs_dir, 'controller.log')
 
         pid = subprocess_utils.launch_new_process_tree(run_cmd,
                                                        log_output=log_path)
@@ -256,12 +272,14 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
+    is_resume = False
     with filelock.FileLock(_get_lock_path()):
         is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
                                                 original_user_yaml_path,
                                                 env_file_path,
                                                 common_utils.get_user_hash(),
                                                 priority)
+
     if is_resume:
         _start_controller(job_id, dag_yaml_path, env_file_path)
     else:

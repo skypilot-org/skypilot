@@ -11,10 +11,11 @@ import shutil
 import time
 import traceback
 import typing
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Tuple
 
 from sky import exceptions
-from sky.backends import backend_utils
+from sky.backends import backend_utils, cloud_vm_ray_backend
+from sky.data import data_utils
 from sky.jobs import recovery_strategy
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils
@@ -28,6 +29,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.jobs import scheduler
 
 if typing.TYPE_CHECKING:
     import sky
@@ -40,11 +42,9 @@ logger = logging.getLogger(__name__)
 
 # to inherit the setup from the `sky` logger.
 # Global state for active jobs
-active_jobs: Set[int] = set()
 job_tasks: Dict[int, asyncio.Task] = {}
 
-# Locks for synchronizing access to global state dictionaries
-_active_jobs_lock = asyncio.Lock()
+# Lock for synchronizing access to global state dictionary
 _job_tasks_lock = asyncio.Lock()
 
 
@@ -74,6 +74,7 @@ class JobsController:
         start_time = time.time()
 
         self._job_id = job_id
+        self._dag_yaml = dag_yaml
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(f'Loaded DAG: {self._dag}')
         logger.debug(f'DAG details: name={self._dag_name}, '
@@ -624,6 +625,7 @@ class JobsController:
         logger.info(f"Starting JobsController run for job {self._job_id}")
         run_start_time = time.time()
         task_id = 0
+        cancelling = False
 
         try:
             succeeded = True
@@ -675,25 +677,55 @@ class JobsController:
             self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
-        finally:
-            # This will set all unfinished tasks to CANCELLING, and will not
-            # affect the jobs in terminal states.
-            # We need to call set_cancelling before set_cancelled to make sure
-            # the table entries are correctly set.
-            logger.debug(f"Cleaning up job {self._job_id} in finally block")
-            callback_func = managed_job_utils.event_callback_func(
-                job_id=self._job_id,
-                task_id=task_id,
-                task=self._dag.tasks[task_id])
-            managed_job_state.set_cancelling(job_id=self._job_id,
-                                             callback_func=callback_func)
-            managed_job_state.set_cancelled(job_id=self._job_id,
-                                            callback_func=callback_func)
-
-            run_total_time = time.time() - run_start_time
+        except asyncio.CancelledError:
+            logger.info(f'Job {self._job_id} was cancelled')
+            dag, _ = _get_dag_and_name(self._dag_yaml)
+            task_id, _ = managed_job_state.get_latest_task_id_status(self._job_id)
+            assert task_id is not None, self._job_id
             logger.info(
-                f'JobsController run completed for job {self._job_id} in '
-                f'{run_total_time:.2f}s')
+                f'Cancelling managed job, job_id: {self._job_id}, task_id: {task_id}')
+            managed_job_state.set_cancelling(
+                job_id=self._job_id,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id]))
+            cancelling = True
+            raise
+        finally:
+            logger.info(f'Cleaning up any cluster for job {self._job_id}.')
+            # NOTE: Originally, we send an interruption signal to the controller
+            # process and the controller process handles cleanup. However, we
+            # figure out the behavior differs from cloud to cloud
+            # (e.g., GCP ignores 'SIGINT'). A possible explanation is
+            # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
+            # But anyway, a clean solution is killing the controller process
+            # directly, and then cleanup the cluster job_state.
+            await _cleanup(self._job_id, dag_yaml=self._dag_yaml)
+            logger.info(f'Cluster of managed job {self._job_id} has been cleaned up.')
+
+            if cancelling:
+                assert task_id is not None, self._job_id  # Since it's set with cancelling
+                managed_job_state.set_cancelled(
+                    job_id=self._job_id,
+                    callback_func=managed_job_utils.event_callback_func(
+                        job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id]))
+
+            # We should check job status after 'set_cancelled', otherwise
+            # the job status is not terminal.
+            job_status = managed_job_state.get_status(self._job_id)
+            assert job_status is not None
+            # The job can be non-terminal if the controller exited abnormally,
+            # e.g. failed to launch cluster after reaching the MAX_RETRY.
+            if not job_status.is_terminal():
+                logger.info(f'Previous job status: {job_status.value}')
+                managed_job_state.set_failed(
+                    self._job_id,
+                    task_id=None,
+                    failure_type=managed_job_state.ManagedJobStatus.
+                    FAILED_CONTROLLER,
+                    failure_reason=('Unexpected error occurred. For details, '
+                                    f'run: sky jobs logs --controller {self._job_id}'))
+
+            scheduler.job_done(self._job_id)
 
     def _update_failed_task_state(
             self, task_id: int,
@@ -711,6 +743,54 @@ class JobsController:
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id]))
+
+
+async def _cleanup(job_id: int, dag_yaml: str):
+    """Clean up the cluster(s) and storages.
+
+    (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
+        to be cleaned up after the whole job is finished, as the tasks
+        may share the same storage.
+    (2) Clean up the cluster(s) that are not cleaned up yet, which can happen
+        when the task failed or cancelled. At most one cluster should be left
+        when reaching here, as we currently only support chain DAGs, and only
+        task is executed at a time.
+    """
+    dag, _ = _get_dag_and_name(dag_yaml)
+    for task in dag.tasks:
+        assert task.name is not None, task
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, job_id)
+        await utils.to_thread(managed_job_utils.terminate_cluster, cluster_name)
+
+        # Clean up Storages with persistent=False.
+        # TODO(zhwu): this assumes the specific backend.
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        # Need to re-construct storage object in the controller process
+        # because when SkyPilot API server machine sends the yaml config to the
+        # controller machine, only storage metadata is sent, not the storage
+        # object itself.
+        for storage in task.storage_mounts.values():
+            await utils.to_thread(storage.construct)
+        await utils.to_thread(backend.teardown_ephemeral_storage, task)
+
+        # Clean up any files mounted from the local disk, such as two-hop file
+        # mounts.
+        for file_mount in (task.file_mounts or {}).values():
+            try:
+                # For consolidation mode, there is no two-hop file mounts
+                # and the file path here represents the real user data.
+                # We skip the cleanup for consolidation mode.
+                if (not data_utils.is_cloud_store_url(file_mount) and
+                        not managed_job_utils.is_consolidation_mode()):
+                    path = os.path.expanduser(file_mount)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to clean up file mount {file_mount}: {e}')
 
 
 async def run_job_loop(job_id: int, dag_yaml: str):
@@ -733,11 +813,6 @@ async def run_job_loop(job_id: int, dag_yaml: str):
         loop_total_time = time.time() - loop_start_time
         logger.info(f'Job loop ended for {job_id} after {loop_total_time:.2f}s')
 
-        async with _active_jobs_lock:
-            if job_id in active_jobs:
-                active_jobs.remove(job_id)
-                logger.debug(f'Removed job {job_id} from active_jobs')
-
         async with _job_tasks_lock:
             if job_id in job_tasks:
                 del job_tasks[job_id]
@@ -748,55 +823,46 @@ async def start_job(job_id: int, dag_yaml: str):
     """Start a new job."""
     logger.info(f"Starting job {job_id} with dag_yaml={dag_yaml}")
 
-    async with _active_jobs_lock:
-        if job_id in active_jobs:
-            logger.error(f'Job {job_id} already exists in active_jobs')
+    async with _job_tasks_lock:
+        if job_id in job_tasks:
+            logger.error(f'Job {job_id} already exists in job_tasks')
             raise ValueError(f'Job {job_id} already exists')
 
-        active_jobs.add(job_id)
-        logger.debug(f'Added job {job_id} to active_jobs')
+        # Create the task and store it
+        # This function should return instantly and run the job loop in the
+        # background.
+        task = asyncio.create_task(run_job_loop(job_id, dag_yaml))
 
-    # Create the task and store it
-    # This function should return instantly and run the job loop in the
-    # background.
-    task = asyncio.create_task(run_job_loop(job_id, dag_yaml))
-
-    async with _job_tasks_lock:
         job_tasks[job_id] = task
         logger.debug(f'Created and stored task for job {job_id}')
 
     logger.info(f'Job {job_id} started successfully')
-    return task
 
 
 async def cancel_job(job_id: int):
     """Cancel an existing job."""
     logger.info(f'Cancelling job {job_id}')
 
-    async with _active_jobs_lock:
-        if job_id not in active_jobs:
-            logger.error(f'Job {job_id} not found in active_jobs')
+    async with _job_tasks_lock:
+        if job_id not in job_tasks:
+            logger.error(f'Job {job_id} not found in job_tasks')
             raise ValueError(f'Job {job_id} not found')
 
-        active_jobs.remove(job_id)
-        logger.debug(f'Marked job {job_id} as inactive')
+        task = job_tasks[job_id]
 
-    # Cancel the task if it exists
+    logger.debug(f'Cancelling task for job {job_id}')
+    task.cancel()
+    try:
+        await task  # Wait for the task to be cancelled
+    except asyncio.CancelledError:
+        logger.debug(
+            f'Task for job {job_id} was successfully cancelled')
+        pass  # Expected when task is cancelled
+
     async with _job_tasks_lock:
         if job_id in job_tasks:
-            task = job_tasks[job_id]
-            logger.debug(f'Cancelling task for job {job_id}')
-            task.cancel()
-            try:
-                await task  # Wait for the task to be cancelled
-            except asyncio.CancelledError:
-                logger.debug(
-                    f'Task for job {job_id} was successfully cancelled')
-                pass  # Expected when task is cancelled
             del job_tasks[job_id]
             logger.debug(f'Removed task for job {job_id} from job_tasks')
-        else:
-            logger.warning(f'No task found for job {job_id} in job_tasks')
 
     logger.info(f'Job {job_id} cancelled successfully')
 
