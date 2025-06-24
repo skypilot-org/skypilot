@@ -107,8 +107,7 @@ class PVCVolumeTable(VolumeTable):
                 size,
                 row.get('user_name', ''),
                 row.get('workspace', ''),
-                log_utils.readable_time_duration(row.get('launched_at', 0),
-                                                 absolute=True),
+                log_utils.readable_time_duration(row.get('launched_at', 0)),
                 row.get('status', ''),
                 last_attached_at_str,
             ]
