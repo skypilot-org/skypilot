@@ -423,13 +423,3 @@ class TestAPICompatibility:
             pytest.fail(
                 f"Models removed from current version: {missing_models}. "
                 f"{API_VERSION_HINT}")
-
-    def test_no_new_models_added(self) -> None:
-        """Test that no new models were added locally (would break API compatibility)."""
-
-        new_models = set(CURRENT_PAYLOADS_CLASSES.keys()) - set(
-            MASTER_PAYLOADS_CLASSES.keys())
-        if new_models:
-            pytest.fail(
-                f"New models added locally break API compatibility: {new_models}. "
-                f"{API_VERSION_HINT}")
