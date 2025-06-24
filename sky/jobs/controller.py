@@ -865,7 +865,7 @@ async def cancel_job(job_id: int):
                 del job_tasks[job_id]
                 logger.debug(f'Removed task for job {job_id} from job_tasks')
     # Run the cancellation in the background, so we can return immediately.
-    asyncio.create_task(_cancel_task(task))
+    await asyncio.create_task(_cancel_task(task))
     logger.info(f'Job {job_id} cancelled successfully')
 
 

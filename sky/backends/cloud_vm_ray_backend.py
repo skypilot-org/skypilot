@@ -4059,11 +4059,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_id = job_ids[0]
 
         if isinstance(handle, LocalResourcesHandle):
-<<<<<<< HEAD
-            # In consolidation mode, we dont submit a ray job, therefore no
-=======
             # In consolidation mode, we don't submit a ray job, therefore no
->>>>>>> master
             # run_timestamp is available. We use a dummy run_timestamp here.
             run_timestamps = {
                 job_id: f'managed-jobs-consolidation-mode-{job_id}'
