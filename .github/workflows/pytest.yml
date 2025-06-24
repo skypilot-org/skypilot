@@ -27,6 +27,8 @@ jobs:
           - tests/test_no_parellel.py
           - tests/test_optimizer_random_dag.py
         include:
+          # We separate out the random DAG tests because its flaky due to catalog updates.
+          # TODO(zeping): Move back to the main test group once we fixed the flakiness.
           - test-path: tests/unit_tests
             test-name: "Unit Tests"
           - test-path: tests/test_cli.py
@@ -39,8 +41,6 @@ jobs:
             test-name: "Jobs, Serve, Wheels, API, Config, Optimizer & Storage Tests"
           - test-path: tests/test_no_parellel.py
             test-name: "No Parallel Tests"
-          # We separate out the random DAG tests because its flaky due to catalog updates.
-          # TODO(zeping): Move back to the main test group once we fixed the flakiness.
           - test-path: tests/test_optimizer_random_dag.py
             test-name: "Optimizer Random DAG Tests"
     runs-on: ubuntu-latest
