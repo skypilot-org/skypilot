@@ -4,11 +4,13 @@ import dataclasses
 import typing
 from typing import Any, Dict, Optional
 
+import colorama
 import pydantic
 
 import sky
 from sky import exceptions
 from sky.adaptors import common as adaptors_common
+from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
 
@@ -218,18 +220,27 @@ class RestfulAdminPolicy(PolicyTemplate):
                 headers={'Content-Type': 'application/json'},
                 # TODO(aylei): make this configurable
                 timeout=30)
+            if response.status_code == 400:
+                raise exceptions.UserRequestRejectedByPolicy(
+                    f'{colorama.Fore.RED}User request is rejected by admin '
+                    f'policy {self.policy_url}{colorama.Fore.RESET}: '
+                    f'{response.text}')
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.UserRequestRejectedByPolicy(
-                    f'Failed to validate request with admin policy URL '
-                    f'{self.policy_url}: {e}') from e
+                raise exceptions.RestfulPolicyError(
+                    f'Failed to call admin policy URL '
+                    f'{self.policy_url}: {e}') from None
 
         try:
             mutated_user_request = MutatedUserRequest.decode(response.json())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.UserRequestRejectedByPolicy(
+                raise exceptions.RestfulPolicyError(
                     f'Failed to decode response from admin policy URL '
-                    f'{self.policy_url}: {e}') from e
+                    f'{self.policy_url}: {common_utils.format_exception(e, use_bracket=True)}'
+                ) from None
         return mutated_user_request
+
+    def __repr__(self):
+        return f'RestfulAdminPolicy(policy_url={self.policy_url})'
