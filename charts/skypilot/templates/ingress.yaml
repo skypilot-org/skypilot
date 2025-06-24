@@ -46,7 +46,7 @@ metadata:
 
 spec:
   {{- if $useNewIngressClass }}
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
   rules:
   - host: {{ .Values.ingress.host }}
