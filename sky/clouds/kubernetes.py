@@ -169,9 +169,11 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_workspace_cloud(
             'kubernetes').get('allowed_contexts', None)
         if allowed_contexts is None:
-            allowed_contexts = skypilot_config.get_nested(
-                ('kubernetes', 'allowed_contexts'), None)
-            # TODO syang
+            allowed_contexts = cloud_config_utils.get_cloud_config_value(
+                cloud='kubernetes',
+                region=None,
+                keys=('allowed_contexts',),
+                default_value=None)
 
         # Exclude contexts starting with `ssh-`
         # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
@@ -543,10 +545,11 @@ class Kubernetes(clouds.Cloud):
                 avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None)
 
-        remote_identity = skypilot_config.get_nested(
-            ('kubernetes', 'remote_identity'),
-            schemas.get_default_remote_identity('kubernetes'))
-        # TODO syang
+        remote_identity = cloud_config_utils.get_cloud_config_value(
+            cloud='kubernetes',
+            region=context,
+            keys=('remote_identity',),
+            default_value=schemas.get_default_remote_identity('kubernetes'))
 
         if isinstance(remote_identity, dict):
             # If remote_identity is a dict, use the service account for the
@@ -590,11 +593,12 @@ class Kubernetes(clouds.Cloud):
         # number of nodes.
 
         timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
-        timeout = skypilot_config.get_nested(
-            ('kubernetes', 'provision_timeout'),
-            timeout,
+        timeout = cloud_config_utils.get_cloud_config_value(
+            cloud='kubernetes',
+            region=context,
+            keys=('provision_timeout',),
+            default_value=timeout,
             override_configs=resources.cluster_config_overrides)
-        # TODO syang
 
         # Check if this cluster supports high performance networking and
         # configure IPC_LOCK capability for clusters like Nebius that support it
@@ -625,17 +629,18 @@ class Kubernetes(clouds.Cloud):
         }
 
         # Get the storage class name for high availability controller's PVC
-        k8s_ha_storage_class_name = skypilot_config.get_nested(
-            ('kubernetes', 'high_availability', 'storage_class_name'),
-            None,
-            override_configs=resources.cluster_config_overrides)
-        # TODO syang
+        k8s_ha_storage_class_name = cloud_config_utils.get_cloud_config_value(
+            cloud='kubernetes',
+            region=context,
+            keys=('high_availability', 'storage_class_name'),
+            default_value=None)
 
-        k8s_kueue_local_queue_name = skypilot_config.get_nested(
-            ('kubernetes', 'kueue', 'local_queue_name'),
-            None,
-            override_configs=resources.cluster_config_overrides)
-        # TODO syang
+        k8s_kueue_local_queue_name = cloud_config_utils.get_cloud_config_value(
+            cloud='kubernetes',
+            region=context,
+            keys=('kueue', 'local_queue_name'),
+            default_value=None)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,

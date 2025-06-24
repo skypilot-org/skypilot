@@ -18,7 +18,7 @@ from typing_extensions import assert_never
 
 from sky import catalog
 from sky import exceptions
-from sky import skypilot_config
+from sky.utils import cloud_config_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import timeline
@@ -668,10 +668,16 @@ class Cloud:
         unsupported_features2reason = cls._unsupported_features_for_resources(
             resources)
 
+        region_name = None
+        if resources.region is not None:
+            region_name = resources.region.lower()
+
         # Docker image is not compatible with ssh proxy command.
-        if skypilot_config.get_nested(
-            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
-            # TODO syang
+        if cloud_config_utils.get_cloud_config_value(
+                cloud=str(cls).lower(),
+                region=region_name,
+                keys=('ssh_proxy_command',),
+                default_value=None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
                     f'Docker image is currently not supported on {cls._REPR} '

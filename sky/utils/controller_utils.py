@@ -28,6 +28,7 @@ from sky.serve import constants as serve_constants
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import cloud_config_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -733,8 +734,11 @@ def _setup_proxy_command_on_controller(
     config = config_utils.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
-    ssh_proxy_command = config.get_nested(proxy_command_key, None)
-    # TODO syang
+    ssh_proxy_command = cloud_config_utils.get_cloud_config_value(
+        cloud=str(controller_launched_cloud).lower(),
+        region=None,
+        keys=('ssh_proxy_command',),
+        default_value=None)
     if isinstance(ssh_proxy_command, str):
         config.set_nested(proxy_command_key, None)
     elif isinstance(ssh_proxy_command, dict):

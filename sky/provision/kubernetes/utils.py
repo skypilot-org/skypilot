@@ -1600,10 +1600,11 @@ def is_kubeconfig_exec_auth(
     user_details = next(
         user for user in user_details if user['name'] == target_username)
 
-    remote_identity = skypilot_config.get_nested(
-        ('kubernetes', 'remote_identity'),
-        schemas.get_default_remote_identity('kubernetes'))
-    # TODO syang
+    remote_identity = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes',
+        region=context,
+        keys=('remote_identity',),
+        default_value=schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = context_obj['name']
@@ -2084,7 +2085,7 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
     content = fill_ssh_jump_template('', '', ssh_jump_name, service_type.value)
 
     # Add custom metadata from config
-    merge_custom_metadata(content['service_spec']['metadata'])
+    merge_custom_metadata(content['service_spec']['metadata'], context)
 
     # Create service
     try:
@@ -2164,7 +2165,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
 
     # Add custom metadata to all objects
     for object_type in content.keys():
-        merge_custom_metadata(content[object_type]['metadata'])
+        merge_custom_metadata(content[object_type]['metadata'], context)
 
     # ServiceAccount
     try:
@@ -2376,7 +2377,7 @@ def check_port_forward_mode_dependencies(
     return None
 
 
-def get_endpoint_debug_message() -> str:
+def get_endpoint_debug_message(context: Optional[str] = None) -> str:
     """ Returns a string message for user to debug Kubernetes port opening
 
     Polls the configured ports mode on Kubernetes to produce an
@@ -2384,7 +2385,7 @@ def get_endpoint_debug_message() -> str:
 
     Also checks if the
     """
-    port_mode = network_utils.get_port_mode()
+    port_mode = network_utils.get_port_mode(None, context)
     if port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         endpoint_type = 'Ingress'
         debug_cmd = 'kubectl describe ingress && kubectl describe ingressclass'
@@ -2402,6 +2403,7 @@ def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
     cloud: Optional[clouds.Cloud] = None,
+    context: Optional[str] = None,
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
@@ -2444,21 +2446,22 @@ def combine_pod_config_fields(
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    # We don't use override_configs in `skypilot_config.get_nested`, as merging
+    # We don't use override_configs in `get_cloud_config_value`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
-        kubernetes_config = skypilot_config.get_nested(('ssh', 'pod_config'),
-                                                       default_value={},
-                                                       override_configs={})
+        kubernetes_config = cloud_config_utils.get_cloud_config_value(
+            cloud='ssh', region=None, keys=('pod_config',), default_value={})
         override_pod_config = (cluster_config_overrides.get('ssh', {}).get(
             'pod_config', {}))
+        # TODO (syang): use cloud_config_utils.get_cloud_config_value instead
     else:
-        kubernetes_config = skypilot_config.get_nested(
-            ('kubernetes', 'pod_config'), default_value={}, override_configs={})
-        # TODO syang
+        kubernetes_config = cloud_config_utils.get_cloud_config_value(
+            cloud='kubernetes',
+            region=context,
+            keys=('pod_config',),
+            default_value={})
         override_pod_config = (cluster_config_overrides.get(
             'kubernetes', {}).get('pod_config', {}))
-    # TODO syang
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2470,7 +2473,8 @@ def combine_pod_config_fields(
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def combine_metadata_fields(cluster_yaml_path: str) -> None:
+def combine_metadata_fields(cluster_yaml_path: str,
+                            context: Optional[str] = None) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
@@ -2480,9 +2484,11 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    custom_metadata = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata'), {})
-    # TODO syang
+    custom_metadata = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -2505,14 +2511,17 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
+def merge_custom_metadata(original_metadata: Dict[str, Any],
+                          context: Optional[str] = None) -> None:
     """Merges original metadata with custom_metadata from config
 
     Merge is done in-place, so return is not required
     """
-    custom_metadata = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata'), {})
-    # TODO syang
+    custom_metadata = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
@@ -2566,7 +2575,7 @@ def create_namespace(namespace: str, context: Optional[str]) -> None:
         return
 
     ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
-    merge_custom_metadata(ns_metadata)
+    merge_custom_metadata(ns_metadata, context)
     namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
     try:
         kubernetes.core_api(context).create_namespace(namespace_obj)

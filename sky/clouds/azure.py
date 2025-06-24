@@ -13,10 +13,10 @@ from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds.utils import azure_utils
 from sky.utils import annotations
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -380,8 +380,11 @@ class Azure(clouds.Cloud):
             }
 
         # Determine resource group for deploying the instance.
-        resource_group_name = skypilot_config.get_nested(
-            ('azure', 'resource_group_vm'), None)
+        resource_group_name = cloud_config_utils.get_cloud_config_value(
+            cloud='azure',
+            region=region_name,
+            keys=('resource_group_vm',),
+            default_value=None)
         use_external_resource_group = resource_group_name is not None
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'

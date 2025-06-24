@@ -22,8 +22,9 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
+    context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
-        provider_config.get('port_mode', None))
+        provider_config.get('port_mode', None), context)
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
@@ -135,8 +136,9 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
+    context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
-        provider_config.get('port_mode', None))
+        provider_config.get('port_mode', None), context)
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
@@ -202,8 +204,9 @@ def query_ports(
     """See sky/provision/__init__.py"""
     del head_ip  # unused
     assert provider_config is not None, 'provider_config is required'
+    context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
-        provider_config.get('port_mode', None))
+        provider_config.get('port_mode', None), context)
     ports = list(port_ranges_to_set(ports))
 
     try:

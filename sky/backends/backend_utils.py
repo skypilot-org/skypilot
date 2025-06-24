@@ -545,9 +545,11 @@ def get_expirable_clouds(
             if global_remote_identity is not None:
                 remote_identities.append(global_remote_identity)
         else:
-            remote_identities = skypilot_config.get_nested(
-                (str(cloud).lower(), 'remote_identity'), None)
-            # TODO syang
+            remote_identities = cloud_config_utils.get_cloud_config_value(
+                cloud=str(cloud).lower(),
+                region=None,
+                keys=('remote_identity',),
+                default_value=None)
             if remote_identities is None:
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
@@ -631,9 +633,11 @@ def write_cluster_config(
     config_dict = {}
 
     specific_reservations = set(
-        skypilot_config.get_nested(
-            (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
-    # TODO syang
+        cloud_config_utils.get_cloud_config_value(
+            cloud=str(to_provision.cloud).lower(),
+            region=region.name,
+            keys=('specific_reservations',),
+            default_value=set()))
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
@@ -679,17 +683,21 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if skypilot_config.get_nested(
-                ('kubernetes', 'allowed_contexts'), None) is None:
-                # TODO syang
+            if cloud_config_utils.get_cloud_config_value(
+                    cloud='kubernetes',
+                    region=None,
+                    keys=('allowed_contexts',),
+                    default_value=None) is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_nested(
-            (cloud_str.lower(), 'remote_identity'), None)
-        # TODO syang
+        remote_identity_config = cloud_config_utils.get_cloud_config_value(
+            cloud=cloud_str.lower(),
+            region=region.name,
+            keys=('remote_identity',),
+            default_value=None)
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
@@ -710,9 +718,11 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Retrieve the ssh_proxy_command for the given cloud / region.
-    ssh_proxy_command_config = skypilot_config.get_nested(
-        (str(cloud).lower(), 'ssh_proxy_command'), None)
-    # TODO syang
+    ssh_proxy_command_config = cloud_config_utils.get_cloud_config_value(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('ssh_proxy_command',),
+        default_value=None)
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
@@ -798,14 +808,17 @@ def write_cluster_config(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # Networking configs
-                'use_internal_ips': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'use_internal_ips'), False),
-                # TODO syang
+                'use_internal_ips': cloud_config_utils.get_cloud_config_value(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('use_internal_ips',),
+                    default_value=False),
                 'ssh_proxy_command': ssh_proxy_command,
-                'vpc_name': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'vpc_name'), None),
-                # TODO syang
-
+                'vpc_name': cloud_config_utils.get_cloud_config_value(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('vpc_name',),
+                    default_value=None),
                 # User-supplied labels.
                 'labels': labels,
                 # User-supplied remote_identity
@@ -885,8 +898,9 @@ def write_cluster_config(
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path,
             cluster_config_overrides=cluster_config_overrides,
-            cloud=cloud)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+            cloud=cloud,
+            context=region.name)
+        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
@@ -3133,7 +3147,8 @@ def get_endpoints(cluster: str,
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
             if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
-                error_msg += (kubernetes_utils.get_endpoint_debug_message())
+                error_msg += kubernetes_utils.get_endpoint_debug_message(
+                    launched_resources.region)
             logger.warning(error_msg)
             return {}
         return {port: port_details[port][0].url()}
@@ -3151,8 +3166,8 @@ def get_endpoints(cluster: str,
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
                 if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                     # Add Kubernetes specific debugging info
-                    error_msg += \
-                        kubernetes_utils.get_endpoint_debug_message()
+                    error_msg += kubernetes_utils.get_endpoint_debug_message(
+                        launched_resources.region)
                 logger.warning(error_msg)
                 return {}
         return {

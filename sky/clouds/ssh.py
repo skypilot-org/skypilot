@@ -12,6 +12,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 
@@ -143,8 +144,11 @@ class SSH(kubernetes.Kubernetes):
         allowed_node_pools = skypilot_config.get_workspace_cloud('ssh').get(
             'allowed_node_pools', None)
         if allowed_node_pools is None:
-            allowed_node_pools = skypilot_config.get_nested(
-                ('ssh', 'allowed_node_pools'), None)
+            allowed_node_pools = cloud_config_utils.get_cloud_config_value(
+                cloud='ssh',
+                region=None,
+                keys=('allowed_node_pools',),
+                default_value=None)
 
         # Filter for SSH contexts (those starting with 'ssh-')
         ssh_contexts = [

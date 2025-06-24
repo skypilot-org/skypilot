@@ -652,7 +652,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         try:
             # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {})
+            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
 
             # Verify the YAML was loaded and written
             mock_safe_load.assert_called_once()
@@ -736,7 +736,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         try:
             # Call the combine_pod_config_fields function
-            kubernetes_utils.combine_pod_config_fields(tmp_path, {})
+            kubernetes_utils.combine_pod_config_fields(tmp_path, {}, None)
 
             # Get the modified YAML
             modified_yaml = mock_dump_yaml.call_args[0][1]

@@ -21,6 +21,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import infra_utils
@@ -1064,9 +1065,11 @@ class Resources:
             regions = [r for r in regions if r.name in self._image_id]
 
         # Filter the regions by the skypilot_config
-        ssh_proxy_command_config = skypilot_config.get_nested(
-            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
-        # TODO syang
+        ssh_proxy_command_config = cloud_config_utils.get_cloud_config_value(
+            cloud=str(self._cloud).lower(),
+            region=None,
+            keys=('ssh_proxy_command',),
+            default_value=None)
         if (isinstance(ssh_proxy_command_config, str) or
                 ssh_proxy_command_config is None):
             # All regions are valid as the regions are not specified for the
@@ -1551,9 +1554,11 @@ class Resources:
             # to each cloud if any cloud supports reservations for spot.
             return {}
         specific_reservations = set(
-            skypilot_config.get_nested(
-                (str(self.cloud).lower(), 'specific_reservations'), set()))
-        # TODO syang
+            cloud_config_utils.get_cloud_config_value(
+                cloud=str(self.cloud).lower(),
+                region=self.region,
+                keys=('specific_reservations',),
+                default_value=set()))
 
         if isinstance(self.cloud, clouds.DummyCloud):
             return self.cloud.get_reservations_available_resources(

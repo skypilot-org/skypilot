@@ -7,8 +7,8 @@ import math
 import typing
 from typing import Dict, List, Optional, Set, Union
 
-from sky import skypilot_config
 from sky.skylet import constants
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
@@ -273,12 +273,17 @@ def need_to_query_reservations() -> bool:
     clouds that do not use reservations.
     """
     for cloud_str in registry.CLOUD_REGISTRY.keys():
-        cloud_specific_reservations = skypilot_config.get_nested(
-            (cloud_str, 'specific_reservations'), None)
-        # TODO syang
-        cloud_prioritize_reservations = skypilot_config.get_nested(
-            (cloud_str, 'prioritize_reservations'), False)
-        # TODO syang
+        cloud_specific_reservations = cloud_config_utils.get_cloud_config_value(
+            cloud=cloud_str,
+            region=None,
+            keys=('specific_reservations',),
+            default_value=None)
+        cloud_prioritize_reservations = (
+            cloud_config_utils.get_cloud_config_value(
+                cloud=cloud_str,
+                region=None,
+                keys=('prioritize_reservations',),
+                default_value=False))
         if (cloud_specific_reservations is not None or
                 cloud_prioritize_reservations):
             return True

@@ -15,12 +15,12 @@ from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import aws
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -458,10 +458,16 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
-        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
-                                                    False)
-        user_security_group_config = skypilot_config.get_nested(
-            ('aws', 'security_group_name'), None)
+        disk_encrypted = cloud_config_utils.get_cloud_config_value(
+            cloud='aws',
+            region=region_name,
+            keys=('disk_encrypted',),
+            default_value=False)
+        user_security_group_config = cloud_config_utils.get_cloud_config_value(
+            cloud='aws',
+            region=region_name,
+            keys=('security_group_name',),
+            default_value=None)
         user_security_group = None
         if isinstance(user_security_group_config, str):
             user_security_group = user_security_group_config
