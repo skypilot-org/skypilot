@@ -48,7 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { FilterBar, ALL_WORKSPACES_VALUE, ALL_USERS_VALUE } from '@/components/elements/FilterBar';
+import { SearchColumnFilter, DropdownColumnFilter, ALL_VALUES } from '@/components/elements/ColumnFilter';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 
@@ -73,7 +73,8 @@ export const statusGroups = {
   ],
 };
 
-// Constants now imported from FilterBar component
+const ALL_WORKSPACES_VALUE = ALL_VALUES;
+const ALL_USERS_VALUE = ALL_VALUES;
 
 // Helper function to filter jobs by name
 export function filterJobsByName(jobs, nameFilter) {
@@ -434,19 +435,6 @@ export function ManagedJobs() {
           >
             Managed Jobs
           </Link>
-          <div className="ml-6">
-            <FilterBar
-              searchPlaceholder="Filter by job name"
-              searchValue={nameFilter}
-              onSearchChange={handleNameFilterChange}
-              workspaces={workspaces}
-              workspaceValue={workspaceFilter}
-              onWorkspaceChange={handleWorkspaceFilterChange}
-              users={users}
-              userValue={userFilter}
-              onUserChange={handleUserFilterChange}
-            />
-          </div>
         </div>
         <div className="flex items-center space-x-2">
           {loading && (
@@ -878,19 +866,43 @@ export function ManagedJobsTable({
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('name')}
               >
-                Name{getSortDirection('name')}
+                <div className="flex items-center">
+                  Name{getSortDirection('name')}
+                  <SearchColumnFilter
+                    value={nameFilter}
+                    onChange={handleNameFilterChange}
+                    placeholder="Filter jobs..."
+                  />
+                </div>
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('user')}
               >
-                User{getSortDirection('user')}
+                <div className="flex items-center">
+                  User{getSortDirection('user')}
+                  <DropdownColumnFilter
+                    value={userFilter}
+                    onChange={handleUserFilterChange}
+                    options={users}
+                    allLabel="All Users"
+                    getDisplayValue={(user) => user.display || user.value || user}
+                  />
+                </div>
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('workspace')}
               >
-                Workspace{getSortDirection('workspace')}
+                <div className="flex items-center">
+                  Workspace{getSortDirection('workspace')}
+                  <DropdownColumnFilter
+                    value={workspaceFilter}
+                    onChange={handleWorkspaceFilterChange}
+                    options={workspaces.map(ws => ({ value: ws, display: ws }))}
+                    allLabel="All Workspaces"
+                  />
+                </div>
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"

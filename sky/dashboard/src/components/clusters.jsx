@@ -51,7 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { FilterBar, ALL_WORKSPACES_VALUE, ALL_USERS_VALUE } from '@/components/elements/FilterBar';
+import { SearchColumnFilter, DropdownColumnFilter, ALL_VALUES } from '@/components/elements/ColumnFilter';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
@@ -66,7 +66,8 @@ import yaml from 'js-yaml';
 //   return cost.toFixed(2);
 // };
 
-// Constants now imported from FilterBar component
+const ALL_WORKSPACES_VALUE = ALL_VALUES; 
+const ALL_USERS_VALUE = ALL_VALUES;
 
 // Helper function to filter clusters by name
 export function filterClustersByName(clusters, nameFilter) {
@@ -365,43 +366,29 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
-          <div className="ml-6">
-            <FilterBar
-              searchPlaceholder="Filter by cluster name"
-              searchValue={nameFilter}
-              onSearchChange={handleNameFilterChange}
-              workspaces={workspaces}
-              workspaceValue={workspaceFilter}
-              onWorkspaceChange={handleWorkspaceFilterChange}
-              users={users}
-              userValue={userFilter}
-              onUserChange={handleUserFilterChange}
-            >
-              <div className="flex items-center space-x-3">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showHistory}
-                    onChange={(e) => setShowHistory(e.target.checked)}
-                    className="sr-only"
-                  />
-                  <div
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                      showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                        showHistory ? 'translate-x-5' : 'translate-x-1'
-                      }`}
-                    />
-                  </div>
-                  <span className="ml-2 text-sm text-gray-700">
-                    Show History (last 30 days)
-                  </span>
-                </label>
+          <div className="flex items-center ml-6 space-x-3">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showHistory}
+                onChange={(e) => setShowHistory(e.target.checked)}
+                className="sr-only"
+              />
+              <div
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                    showHistory ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
               </div>
-            </FilterBar>
+              <span className="ml-2 text-sm text-gray-700">
+                Show History (last 30 days)
+              </span>
+            </label>
           </div>
         </div>
         <div className="flex items-center">
@@ -632,19 +619,43 @@ export function ClusterTable({
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('cluster')}
                 >
-                  Cluster{getSortDirection('cluster')}
+                  <div className="flex items-center">
+                    Cluster{getSortDirection('cluster')}
+                    <SearchColumnFilter
+                      value={nameFilter}
+                      onChange={handleNameFilterChange}
+                      placeholder="Filter clusters..."
+                    />
+                  </div>
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap hidden sm:table-cell"
                   onClick={() => requestSort('user')}
                 >
-                  User{getSortDirection('user')}
+                  <div className="flex items-center">
+                    User{getSortDirection('user')}
+                    <DropdownColumnFilter
+                      value={userFilter}
+                      onChange={handleUserFilterChange}
+                      options={users}
+                      allLabel="All Users"
+                      getDisplayValue={(user) => user.display || user.value || user}
+                    />
+                  </div>
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap hidden md:table-cell"
                   onClick={() => requestSort('workspace')}
                 >
-                  Workspace{getSortDirection('workspace')}
+                  <div className="flex items-center">
+                    Workspace{getSortDirection('workspace')}
+                    <DropdownColumnFilter
+                      value={workspaceFilter}
+                      onChange={handleWorkspaceFilterChange}
+                      options={workspaces.map(ws => ({ value: ws, display: ws }))}
+                      allLabel="All Workspaces"
+                    />
+                  </div>
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap hidden lg:table-cell"
