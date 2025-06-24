@@ -94,7 +94,7 @@ class PVCVolumeTable(VolumeTable):
                 last_attached_at_str = datetime.fromtimestamp(
                     last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
             else:
-                last_attached_at_str = ''
+                last_attached_at_str = '-'
             size = row.get('size', '')
             if size:
                 size = f'{size}Gi'
@@ -107,7 +107,8 @@ class PVCVolumeTable(VolumeTable):
                 size,
                 row.get('user_name', ''),
                 row.get('workspace', ''),
-                log_utils.readable_time_duration(row.get('launched_at', 0)),
+                log_utils.readable_time_duration(row.get('launched_at', 0),
+                                                 absolute=True),
                 row.get('status', ''),
                 last_attached_at_str,
             ]
