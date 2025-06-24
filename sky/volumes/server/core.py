@@ -33,9 +33,9 @@ def volume_refresh():
                            'Skipping status refresh...')
             continue
         cloud = config.cloud
+        usedby = provision.get_volume_usedby(cloud, config)
+        logger.info(f'Volume {volume_name} usedby: {usedby}')
         with _volume_lock(volume_name):
-            usedby = provision.get_volume_usedby(cloud, config)
-            logger.info(f'Volume {volume_name} usedby: {usedby}')
             # The IN_USE status is updated timely when launching
             # clusters or jobs so we don't need to update it here.
             if not usedby:
