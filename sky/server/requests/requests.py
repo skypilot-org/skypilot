@@ -345,6 +345,26 @@ def refresh_volume_status_event():
         time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+def managed_job_status_refresh_event():
+    """Refresh the managed job status for controller consolidation mode."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    # We run the recovery logic before starting the event loop as those two are
+    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
+    from sky.utils import controller_utils
+    if controller_utils.high_availability_specified(
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
+        managed_job_utils.ha_recovery_for_consolidation_mode()
+    # After recovery, we start the event loop.
+    from sky.skylet import events
+    event = events.ManagedJobEvent()
+    while True:
+        time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+        event.run()
+
+
 @dataclasses.dataclass
 class InternalRequestDaemon:
     id: str
@@ -363,7 +383,10 @@ INTERNAL_REQUEST_DAEMONS = [
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
                           name='volume',
-                          event_fn=refresh_volume_status_event)
+                          event_fn=refresh_volume_status_event),
+    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
+                          name='managed-job-status',
+                          event_fn=managed_job_status_refresh_event),
 ]
 
 

@@ -2702,6 +2702,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 pass
 
 
+class LocalResourcesHandle(CloudVmRayResourceHandle):
+    """A handle for local resources."""
+
+    @context_utils.cancellation_guard
+    @annotations.lru_cache(scope='global')
+    @timeline.event
+    def get_command_runners(self,
+                            force_cached: bool = False,
+                            avoid_ssh_control: bool = False
+                           ) -> List[command_runner.CommandRunner]:
+        """Returns a list of local command runners."""
+        del force_cached, avoid_ssh_control  # Unused.
+        return [command_runner.LocalProcessCommandRunner()]
+
+
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     """Backend: runs on cloud virtual machines, managed by Ray.
@@ -4049,19 +4064,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        # get the run_timestamp
-        # the function takes in [job_id]
-        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
-        returncode, run_timestamps, stderr = self.run_on_head(
-            handle,
-            code,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to sync logs.', stderr)
-        # returns with a dict of {job_id: run_timestamp}
-        run_timestamps = message_utils.decode_payload(run_timestamps)
+        if isinstance(handle, LocalResourcesHandle):
+            # In consolidation mode, we don't submit a ray job, therefore no
+            # run_timestamp is available. We use a dummy run_timestamp here.
+            run_timestamps = {
+                job_id: f'managed-jobs-consolidation-mode-{job_id}'
+            }
+        else:
+            # get the run_timestamp
+            # the function takes in [job_id]
+            code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
+            returncode, run_timestamps_payload, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync logs.', stderr)
+            # returns with a dict of {job_id: run_timestamp}
+            run_timestamps = message_utils.decode_payload(
+                run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'

@@ -346,8 +346,7 @@ class Task:
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
-        # The priority of the managed job running this task.
-        self._job_priority: Optional[int] = None
+
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -1100,23 +1099,6 @@ class Task:
         self._service = service
         return self
 
-    @property
-    def job_priority(self) -> Optional[int]:
-        """The priority of the managed job running this task."""
-        return self._job_priority
-
-    def set_job_priority(self, priority: int) -> 'Task':
-        """Sets the job priority for this task.
-
-        Args:
-          priority: an integer between 0 and 1000.
-
-        Returns:
-          self: The current task, with job priority set.
-        """
-        self._job_priority = priority
-        return self
-
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
         """Sets a func mapping resources to estimated time (secs).
@@ -1559,9 +1541,6 @@ class Task:
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
-
-        if self.job_priority is not None:
-            add_if_not_none('job', {'priority': self.job_priority})
 
         add_if_not_none('num_nodes', self.num_nodes)
 
