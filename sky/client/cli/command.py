@@ -1843,7 +1843,7 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
             logger.debug(f'Cluster {cluster_name} is not a controller cluster.')
             continue
         if controller is not None:
-            controller_name = controller.value.cluster_name
+            controller_name = controller.value.name
             # to display most recent entry for each controller cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if controller_name not in controllers:

@@ -384,7 +384,7 @@ def cost_report(days: Optional[int] = 30) -> List[Dict[str, Any]]:
             # Ok to skip the total cost as this is just for display purposes.
             logger.warning(f'Failed to get total cost for cluster '
                            f'{report["name"]}: {str(e)}')
-            report['total_cost'] = '-'
+            report['total_cost'] = 0.0
 
         _update_record_with_resources(report)
         return report

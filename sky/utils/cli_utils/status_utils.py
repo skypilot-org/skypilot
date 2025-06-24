@@ -201,19 +201,13 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
+        controller_record = cluster_records[0]
         if controller_name is not None:
-            controller = controller_utils.Controllers.from_name(controller_name)
-            if controller is None:
-                raise ValueError(f'Controller {controller_name} not found.')
-            if cluster_records[0].get('handle') is None:
-                return
-            controller_handle: backends.CloudVmRayResourceHandle = (
-                cluster_records[0]['handle'])
-            autostop_config = (
-                controller_handle.launched_resources.autostop_config)
-            if autostop_config is not None:
+            autostop = controller_record.get('autostop', None)
+            autostop_str = ''
+            if autostop is not None:
                 autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
-                                f'idle for {autostop_config.idle_minutes}min)'
+                                f'idle for {autostop}min)'
                                 f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
