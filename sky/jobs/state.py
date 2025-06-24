@@ -103,6 +103,13 @@ job_info_table = sqlalchemy.Table(
                       server_default=None),
 )
 
+ha_recovery_script_table = sqlalchemy.Table(
+    'ha_recovery_script',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('script', sqlalchemy.Text),
+)
+
 
 def create_table():
     # Enable WAL mode to avoid locking issues.
@@ -1414,6 +1421,7 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
         updated_count = result.rowcount
         if not idempotent:
             assert updated_count == 1, (job_id, updated_count)
+    remove_ha_recovery_script(job_id)
 
 
 @_init_db
@@ -1532,3 +1540,50 @@ def get_workspace(job_id: int) -> str:
         if job_workspace is None:
             return constants.SKYPILOT_DEFAULT_WORKSPACE
         return job_workspace
+
+
+# === HA Recovery Script functions ===
+
+
+@_init_db
+def get_ha_recovery_script(job_id: int) -> Optional[str]:
+    """Get the HA recovery script for a job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(ha_recovery_script_table).filter_by(
+            job_id=job_id).first()
+    if row is None:
+        return None
+    return row.script
+
+
+@_init_db
+def set_ha_recovery_script(job_id: int, script: str) -> None:
+    """Set the HA recovery script for a job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmt = insert_func(ha_recovery_script_table).values(
+            job_id=job_id, script=script)
+        do_update_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[ha_recovery_script_table.c.job_id],
+            set_={ha_recovery_script_table.c.script: script})
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+@_init_db
+def remove_ha_recovery_script(job_id: int) -> None:
+    """Remove the HA recovery script for a job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(ha_recovery_script_table).filter_by(
+            job_id=job_id).delete()
+        session.commit()
