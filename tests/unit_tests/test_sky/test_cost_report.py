@@ -95,7 +95,9 @@ class TestCostReportStatusUtils(unittest.TestCase):
 
                 # Should display days information in header
                 mock_echo.assert_called()
-                echo_calls = [str(call[0][0]) for call in mock_echo.call_args_list]
+                echo_calls = [
+                    str(call[0][0]) for call in mock_echo.call_args_list
+                ]
                 header_with_days = any(
                     '(last 7 days)' in call for call in echo_calls)
                 self.assertTrue(header_with_days,
@@ -128,7 +130,9 @@ class TestCostReportStatusUtils(unittest.TestCase):
 
                 # Should not display days information in header
                 mock_echo.assert_called()
-                echo_calls = [str(call[0][0]) for call in mock_echo.call_args_list]
+                echo_calls = [
+                    str(call[0][0]) for call in mock_echo.call_args_list
+                ]
                 header_with_days = any('(last' in call for call in echo_calls)
                 self.assertFalse(header_with_days,
                                  "Should not display days in header when None")
@@ -459,10 +463,10 @@ class TestCostReportCLI(unittest.TestCase):
         from click.testing import CliRunner
         runner = CliRunner()
         result = runner.invoke(command.cost_report, ['--days', '7'])
-        
+
         # Verify the command completed successfully
         self.assertEqual(result.exit_code, 0)
-        
+
         # Verify cost_report was called
         mock_sdk_cost_report.assert_called_once_with(days=7)
 

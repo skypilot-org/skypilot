@@ -266,7 +266,7 @@ def endpoints(cluster: str,
         the dictionary will contain all ports:endpoints exposed on the cluster.
 
     Raises:
-        ValueError: if the cluster is not UP or the endpoint is not exposed.
+    ValueError: if the cluster is not UP or the endpoint is not exposed.
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
@@ -277,7 +277,7 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(days: Optional[int] = 30) -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -321,7 +321,7 @@ def cost_report(days: Optional[int] = 30) -> List[Dict[str, Any]]:
         cluster.
     """
     if days is None:
-        days = 30
+        days = constants.COST_REPORT_DEFAULT_DAYS
 
     cluster_reports = global_user_state.get_clusters_from_history(days=days)
     logger.debug(

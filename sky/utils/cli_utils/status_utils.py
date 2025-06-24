@@ -7,7 +7,6 @@ import colorama
 
 from sky import backends
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
