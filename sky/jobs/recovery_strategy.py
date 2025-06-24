@@ -13,7 +13,6 @@ from typing import Optional
 import sky
 from sky import backends
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -299,8 +298,7 @@ class StrategyExecutor:
                             cluster_name=self.cluster_name,
                             idle_minutes_to_autostop=_AUTODOWN_MINUTES,
                             down=True,
-                            _is_launched_by_jobs_controller=True
-                        )
+                            _is_launched_by_jobs_controller=True)
                         # would be nice to have the async version of this,
                         # however, scheduled_launch uses scheduler functions
                         # that acquire filelocks, no async file lock exists

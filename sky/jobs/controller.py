@@ -621,7 +621,6 @@ class JobsController:
         """Run controller logic and handle exceptions."""
         logger.info(f'Starting JobsController run for job {self._job_id}')
         task_id = 0
-        cancelling = False
 
         try:
             succeeded = True
@@ -662,7 +661,9 @@ class JobsController:
             self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError:  # pylint: disable=try-except-raise
+            # have this here to avoid getting caught by the general except block
+            # below.
             raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(
@@ -684,7 +685,6 @@ class JobsController:
                                              callback_func=callback_func)
             managed_job_state.set_cancelled(job_id=self._job_id,
                                             callback_func=callback_func)
-
 
     def _update_failed_task_state(
             self, task_id: int,
@@ -757,6 +757,7 @@ async def _cleanup(job_id: int, dag_yaml: str):
 async def run_job_loop(job_id: int, dag_yaml: str):
     """Background task that runs the job loop."""
     logger.info(f'Starting job loop for {job_id}')
+    cancelling = False
 
     try:
         controller = JobsController(job_id, dag_yaml)
@@ -771,9 +772,7 @@ async def run_job_loop(job_id: int, dag_yaml: str):
         managed_job_state.set_cancelling(
             job_id=job_id,
             callback_func=managed_job_utils.event_callback_func(
-                job_id=job_id,
-                task_id=task_id,
-                task=dag.tasks[task_id]))
+                job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
         cancelling = True
         raise
     except Exception as e:
