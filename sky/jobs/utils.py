@@ -976,7 +976,7 @@ def stream_logs(job_id: Optional[int],
 
         controller_log_path = os.path.join(
             os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            f'{job_id}.log')
+            'controller.log')
         job_status = None
 
         # Wait for the log file to be written
