@@ -379,7 +379,6 @@ class TestVolumeCommands:
         mock_async_call.assert_called_once_with('delete-request-id', False,
                                                 'sky.volumes.delete')
 
-
     def test_volume_schema_validation_valid_configs(self, monkeypatch):
         """Test volume schema validation with valid configurations."""
         from sky.utils import common_utils

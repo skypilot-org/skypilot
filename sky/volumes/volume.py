@@ -181,7 +181,9 @@ class Volume:
         if self.size is None:
             return
         try:
-            size = resources_utils.parse_memory_resource(self.size, 'size',allow_rounding=True)
+            size = resources_utils.parse_memory_resource(self.size,
+                                                         'size',
+                                                         allow_rounding=True)
             if size == '0':
                 raise ValueError('Size must be no less than 1Gi')
             self.size = size

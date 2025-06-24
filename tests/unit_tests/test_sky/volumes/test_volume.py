@@ -1,7 +1,9 @@
 """Tests for volume class."""
 
+from unittest.mock import MagicMock
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from sky import exceptions
 from sky.utils import common_utils
@@ -14,18 +16,28 @@ class TestVolume:
     def test_volume_adjust_config_valid_sizes(self):
         """Test Volume._adjust_config with valid sizes."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
-        
+
         # Test various valid size formats
         test_cases = [
-            {'input': '100Gi', 'expected': '100'},
-            {'input': '1Ti', 'expected': '1024'},
-            {'input': '100', 'expected': '100'}, 
+            {
+                'input': '100Gi',
+                'expected': '100'
+            },
+            {
+                'input': '1Ti',
+                'expected': '1024'
+            },
+            {
+                'input': '100',
+                'expected': '100'
+            },
         ]
-        
+
         for input_size in test_cases:
             volume.size = input_size['input']
             volume._adjust_config()  # Should not raise
-            assert volume.size == input_size['expected']  # Size should remain unchanged
+            assert volume.size == input_size[
+                'expected']  # Size should remain unchanged
 
     def test_volume_adjust_config_no_size(self):
         """Test Volume._adjust_config with no size."""
@@ -37,9 +49,9 @@ class TestVolume:
         """Test Volume._adjust_config with invalid size."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
 
-         # Test various valid size formats
-        test_cases = ['50Mi', 'invalid','0']
-        
+        # Test various valid size formats
+        test_cases = ['50Mi', 'invalid', '0']
+
         for input_size in test_cases:
             volume.size = input_size
             with pytest.raises(ValueError) as exc_info:
@@ -49,17 +61,16 @@ class TestVolume:
     def test_volume_adjust_config_edge_cases(self):
         """Test Volume._adjust_config with edge cases."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
-        
+
         # Test with None size
         volume.size = None
         volume._adjust_config()
         assert volume.size is None
-        
+
         # Test with empty string
         volume.size = ''
         with pytest.raises(ValueError):
             volume._adjust_config()
-
 
     def test_volume_validate_config_valid_with_size(self):
         """Test Volume._validate_config with valid size."""
@@ -68,18 +79,23 @@ class TestVolume:
 
     def test_volume_validate_config_valid_with_resource_name(self):
         """Test Volume._validate_config with valid resource_name."""
-        volume = volume_lib.Volume(name='test', type='k8s-pvc', resource_name='existing-pvc')
+        volume = volume_lib.Volume(name='test',
+                                   type='k8s-pvc',
+                                   resource_name='existing-pvc')
         volume._validate_config()  # Should not raise
 
     def test_volume_validate_config_valid_with_both(self):
         """Test Volume._validate_config with both size and resource_name."""
-        volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi', resource_name='existing-pvc')
+        volume = volume_lib.Volume(name='test',
+                                   type='k8s-pvc',
+                                   size='100Gi',
+                                   resource_name='existing-pvc')
         volume._validate_config()  # Should not raise
 
     def test_volume_validate_config_missing_size_and_resource_name(self):
         """Test Volume._validate_config with missing size and resource_name."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
-        
+
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Size is required for new volumes' in str(exc_info.value)
@@ -87,7 +103,7 @@ class TestVolume:
     def test_volume_validate_config_empty_config(self):
         """Test Volume._validate_config with empty config."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc', config={})
-        
+
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Size is required for new volumes' in str(exc_info.value)
@@ -97,7 +113,7 @@ class TestVolume:
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
         volume.size = None
         volume.resource_name = None
-        
+
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Size is required for new volumes' in str(exc_info.value)
@@ -107,7 +123,7 @@ class TestVolume:
         volume = volume_lib.Volume(name='test', type='k8s-pvc')
         volume.size = ''
         volume.resource_name = ''
-        
+
         with pytest.raises(ValueError) as exc_info:
             volume._validate_config()
         assert 'Size is required for new volumes' in str(exc_info.value)
@@ -115,11 +131,11 @@ class TestVolume:
     def test_volume_adjust_and_validate_config_integration(self):
         """Test integration of adjust and validate config."""
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
-        
+
         # Should work together
         volume._adjust_config()
         volume._validate_config()
-        
+
         assert volume.size == '100'  # Size should remain unchanged
 
     def test_volume_normalize_config(self, monkeypatch):
@@ -130,13 +146,16 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
-        
+
         # Test normalize_config with CLI overrides
-        volume.normalize_config(name='new-name', infra='k8s', type='k8s-pvc', size='200Gi')
-        
+        volume.normalize_config(name='new-name',
+                                infra='k8s',
+                                type='k8s-pvc',
+                                size='200Gi')
+
         assert volume.name == 'new-name'
         assert volume.infra == 'k8s'
         assert volume.type == 'k8s-pvc'
@@ -153,11 +172,13 @@ class TestVolume:
             'infra': 'k8s',
             'size': '100Gi',
             'resource_name': 'existing-pvc',
-            'config': {'access_mode': 'ReadWriteMany'}
+            'config': {
+                'access_mode': 'ReadWriteMany'
+            }
         }
-        
+
         volume = volume_lib.Volume.from_dict(config_dict)
-        
+
         assert volume.name == 'test-volume'
         assert volume.type == 'k8s-pvc'
         assert volume.infra == 'k8s'
@@ -167,34 +188,34 @@ class TestVolume:
 
     def test_volume_to_dict(self):
         """Test Volume.to_dict method."""
-        volume = volume_lib.Volume(
-            name='test-volume',
-            type='k8s-pvc',
-            infra='k8s',
-            size='100Gi',
-            resource_name='existing-pvc',
-            config={'access_mode': 'ReadWriteMany'}
-        )
-        
+        volume = volume_lib.Volume(name='test-volume',
+                                   type='k8s-pvc',
+                                   infra='k8s',
+                                   size='100Gi',
+                                   resource_name='existing-pvc',
+                                   config={'access_mode': 'ReadWriteMany'})
+
         # Set cloud, region, zone
         volume.cloud = 'kubernetes'
         volume.region = 'us-west1'
         volume.zone = 'us-west1-a'
-        
+
         result = volume.to_dict()
-        
+
         expected = {
             'name': 'test-volume',
             'type': 'k8s-pvc',
             'infra': 'k8s',
             'size': '100Gi',
             'resource_name': 'existing-pvc',
-            'config': {'access_mode': 'ReadWriteMany'},
+            'config': {
+                'access_mode': 'ReadWriteMany'
+            },
             'cloud': 'kubernetes',
             'region': 'us-west1',
             'zone': 'us-west1-a'
         }
-        
+
         assert result == expected
 
     def test_volume_schema_validation_valid_configs(self, monkeypatch):
@@ -209,7 +230,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         valid_configs = [
             {
@@ -239,7 +260,8 @@ class TestVolume:
             volume = volume_lib.Volume.from_dict(config)
             volume.normalize_config()  # Should not raise
 
-    def test_volume_schema_validation_missing_required_fields(self, monkeypatch):
+    def test_volume_schema_validation_missing_required_fields(
+            self, monkeypatch):
         """Test volume schema validation with missing required fields."""
         from sky import exceptions
         from sky.utils import common_utils
@@ -251,7 +273,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -291,7 +313,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -325,7 +347,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -353,7 +375,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -391,7 +413,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         config_with_extra = {
             'name': 'test-volume',
@@ -403,8 +425,8 @@ class TestVolume:
 
         with pytest.raises(exceptions.InvalidSkyPilotConfigError):
             common_utils.validate_schema(config_with_extra,
-                                     schemas.get_volume_schema(),
-                                     'Invalid volumes config: ')
+                                         schemas.get_volume_schema(),
+                                         'Invalid volumes config: ')
 
     def test_volume_schema_validation_case_insensitive_enums(self, monkeypatch):
         """Test volume schema validation with case insensitive enums."""
@@ -418,7 +440,7 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         invalid_configs = [
             {
@@ -455,13 +477,10 @@ class TestVolume:
         mock_infra_info.region = None
         mock_infra_info.zone = None
         monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
-                           lambda x: mock_infra_info)
+                            lambda x: mock_infra_info)
 
         valid_access_modes = [
-            'ReadWriteOnce',
-            'ReadWriteOncePod',
-            'ReadWriteMany',
-            'ReadOnlyMany'
+            'ReadWriteOnce', 'ReadWriteOncePod', 'ReadWriteMany', 'ReadOnlyMany'
         ]
 
         for access_mode in valid_access_modes:
@@ -475,4 +494,4 @@ class TestVolume:
                 }
             }
             volume = volume_lib.Volume.from_dict(config)
-            volume.normalize_config()  # Should not raise 
+            volume.normalize_config()  # Should not raise

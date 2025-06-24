@@ -11,9 +11,11 @@ from sky.volumes import volume
 
 logger = sky_logging.init_logger(__name__)
 
-def _get_infra_str(cloud:Optional[str], region:Optional[str], zone:Optional[str]) -> str:
+
+def _get_infra_str(cloud: Optional[str], region: Optional[str],
+                   zone: Optional[str]) -> str:
     """Get the infrastructure string for the volume."""
-    infra=''
+    infra = ''
     if cloud:
         infra += cloud
     if region:
@@ -21,6 +23,7 @@ def _get_infra_str(cloud:Optional[str], region:Optional[str], zone:Optional[str]
     if zone:
         infra += f'/{zone}'
     return infra
+
 
 class VolumeTable(abc.ABC):
     """The volume table."""
@@ -95,9 +98,8 @@ class PVCVolumeTable(VolumeTable):
             size = row.get('size', '')
             if size:
                 size = f'{size}Gi'
-            infra=_get_infra_str(row.get('cloud'),
-                                 row.get('region'),
-                                 row.get('zone'))
+            infra = _get_infra_str(row.get('cloud'), row.get('region'),
+                                   row.get('zone'))
             table_row = [
                 row.get('name', ''),
                 row.get('type', ''),
