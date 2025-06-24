@@ -1419,7 +1419,6 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
         updated_count = result.rowcount
         if not idempotent:
             assert updated_count == 1, (job_id, updated_count)
-    remove_ha_recovery_script(job_id)
 
 
 @_init_db

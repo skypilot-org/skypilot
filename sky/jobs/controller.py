@@ -616,6 +616,7 @@ def _cleanup(job_id: int, dag_yaml: str):
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to clean up file mount {file_mount}: {e}')
+    managed_job_state.remove_ha_recovery_script(job_id)
 
 
 def start(job_id, dag_yaml):
