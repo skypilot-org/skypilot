@@ -84,6 +84,3 @@ def get_api_url_with_service_account_path(base_url: str, path: str) -> str:
         # Regular path for OAuth2 proxy flow
         return f'{base_url}/{path}' if not path.startswith(
             '/') else f'{base_url}{path}'
-
-
-

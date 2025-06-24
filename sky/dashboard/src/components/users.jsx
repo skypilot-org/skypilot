@@ -26,7 +26,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { relativeTime } from '@/components/utils';
+import { TimestampWithTooltip } from '@/components/utils';
 import {
   RotateCwIcon,
   PenIcon,
@@ -1376,22 +1376,6 @@ function ServiceAccountTokensView({
     fetchTokens();
   }, []);
 
-  // Format date using relative time (same as clusters.jsx)
-  const formatDate = (timestamp) => {
-    if (!timestamp) return 'Never';
-    // Convert seconds to milliseconds for Date constructor
-    return relativeTime(new Date(timestamp * 1000).toISOString());
-  };
-
-  // Format expiration using relative time
-  const formatExpiration = (timestamp) => {
-    if (!timestamp) return 'Never';
-    const date = new Date(timestamp * 1000);
-    const now = new Date();
-    if (date < now) return 'Expired';
-    return relativeTime(date.toISOString());
-  };
-
   // Copy to clipboard
   const copyToClipboard = async (text) => {
     try {
@@ -1446,9 +1430,12 @@ function ServiceAccountTokensView({
 
     setDeleting(true);
     try {
-      const response = await apiClient.delete('/users/service-account-tokens', {
-        token_id: tokenToDelete.token_id,
-      });
+      const response = await apiClient.post(
+        '/users/service-account-tokens/delete',
+        {
+          token_id: tokenToDelete.token_id,
+        }
+      );
 
       if (response.ok) {
         setCreateSuccess(
@@ -1520,25 +1507,11 @@ function ServiceAccountTokensView({
             No service account tokens
           </h3>
           <p className="mt-1 text-sm text-gray-500">
-            {userRoleCache?.role === 'admin' 
-              ? 'No service account tokens have been created by any users yet.'
-              : 'Get started by creating your first API token.'}
+            No service account tokens have been created yet.
           </p>
-          {userRoleCache?.role === 'admin' && (
-            <p className="mt-2 text-xs text-gray-400">
-              As an admin, you can view and manage tokens created by all users.
-            </p>
-          )}
         </div>
       ) : (
         <>
-          {userRoleCache?.role === 'admin' && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
-              <p className="text-sm text-blue-700">
-                <strong>Admin View:</strong> You can see and manage service account tokens from all users. 
-              </p>
-            </div>
-          )}
           <Card>
             <Table>
               <TableHeader>
@@ -1554,44 +1527,51 @@ function ServiceAccountTokensView({
               <TableBody>
                 {tokens.map((token) => (
                   <TableRow key={token.token_id}>
-                    <TableCell
-                      className="truncate"
-                      title={token.token_name}
-                    >
+                    <TableCell className="truncate" title={token.token_name}>
                       {token.token_name}
                     </TableCell>
                     <TableCell className="truncate">
                       <div className="flex items-center">
                         <span>{token.owner_name || 'You'}</span>
-                        {userRoleCache?.role === 'admin' && 
-                         token.user_hash !== userRoleCache?.id && (
-                          <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-600 rounded">
+                        {token.user_hash !== userRoleCache?.id && (
+                          <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
                             Other
                           </span>
                         )}
                       </div>
                     </TableCell>
                     <TableCell className="truncate">
-                      {formatDate(token.created_at)}
+                      {token.created_at ? (
+                        <TimestampWithTooltip
+                          date={new Date(token.created_at * 1000)}
+                        />
+                      ) : (
+                        'Never'
+                      )}
                     </TableCell>
                     <TableCell className="truncate">
-                      {formatDate(token.last_used_at)}
+                      {token.last_used_at ? (
+                        <TimestampWithTooltip
+                          date={new Date(token.last_used_at * 1000)}
+                        />
+                      ) : (
+                        'Never'
+                      )}
                     </TableCell>
                     <TableCell className="truncate">
-                      <span
-                        className={
-                          token.expires_at &&
-                          new Date(token.expires_at * 1000) < new Date()
-                            ? 'text-red-600'
-                            : ''
-                        }
-                      >
-                        {formatExpiration(token.expires_at)}
-                      </span>
+                      {!token.expires_at ? (
+                        'Never'
+                      ) : new Date(token.expires_at * 1000) < new Date() ? (
+                        <span className="text-red-600">Expired</span>
+                      ) : (
+                        <TimestampWithTooltip
+                          date={new Date(token.expires_at * 1000)}
+                        />
+                      )}
                     </TableCell>
                     <TableCell>
                       {/* Show delete button only if user owns the token or is admin */}
-                      {(userRoleCache?.role === 'admin' || 
+                      {(userRoleCache?.role === 'admin' ||
                         token.user_hash === userRoleCache?.id) && (
                         <button
                           onClick={() => {
@@ -1693,11 +1673,12 @@ function ServiceAccountTokensView({
             <DialogDescription>
               Are you sure you want to delete the token &quot;
               {tokenToDelete?.token_name}&quot;
-              {tokenToDelete?.user_hash !== userRoleCache?.id && userRoleCache?.role === 'admin' 
-                ? ` owned by ${tokenToDelete?.owner_name}` 
-                : ''}? This action cannot be undone
-              and will immediately revoke access for any systems using this
-              token.
+              {tokenToDelete?.user_hash !== userRoleCache?.id &&
+              userRoleCache?.role === 'admin'
+                ? ` owned by ${tokenToDelete?.owner_name}`
+                : ''}
+              ? This action cannot be undone and will immediately revoke access
+              for any systems using this token.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

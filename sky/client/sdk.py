@@ -1337,8 +1337,8 @@ def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylin
             }
     """
     body = payloads.CostReportBody(days=days)
-    response = server_common.make_authenticated_request('POST', '/cost_report',
-                             json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST', '/cost_report', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
