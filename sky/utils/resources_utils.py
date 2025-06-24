@@ -275,8 +275,10 @@ def need_to_query_reservations() -> bool:
     for cloud_str in registry.CLOUD_REGISTRY.keys():
         cloud_specific_reservations = skypilot_config.get_nested(
             (cloud_str, 'specific_reservations'), None)
+        # TODO syang
         cloud_prioritize_reservations = skypilot_config.get_nested(
             (cloud_str, 'prioritize_reservations'), False)
+        # TODO syang
         if (cloud_specific_reservations is not None or
                 cloud_prioritize_reservations):
             return True

@@ -1599,6 +1599,7 @@ def is_kubeconfig_exec_auth(
     remote_identity = skypilot_config.get_nested(
         ('kubernetes', 'remote_identity'),
         schemas.get_default_remote_identity('kubernetes'))
+    # TODO syang
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = context_obj['name']
@@ -2450,8 +2451,10 @@ def combine_pod_config_fields(
     else:
         kubernetes_config = skypilot_config.get_nested(
             ('kubernetes', 'pod_config'), default_value={}, override_configs={})
+        # TODO syang
         override_pod_config = (cluster_config_overrides.get(
             'kubernetes', {}).get('pod_config', {}))
+    # TODO syang
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2475,6 +2478,7 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     yaml_obj = yaml.safe_load(yaml_content)
     custom_metadata = skypilot_config.get_nested(
         ('kubernetes', 'custom_metadata'), {})
+    # TODO syang
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -2504,6 +2508,7 @@ def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
     """
     custom_metadata = skypilot_config.get_nested(
         ('kubernetes', 'custom_metadata'), {})
+    # TODO syang
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 

@@ -419,12 +419,15 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    context = kubernetes_utils.get_context_from_config(config['provider'])
+
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service.
     nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                  port_forward_mode.value)
+    network_mode_str = kubernetes_utils.get_config_property_value(
+        ('kubernetes', 'networking'), context=context,
+        default_value=port_forward_mode.value)
     try:
         network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
             network_mode_str)
@@ -439,7 +442,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add the user's public key to the SkyPilot cluster.
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    context = kubernetes_utils.get_context_from_config(config['provider'])
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
@@ -454,8 +456,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'parent': 'skypilot'
             }
         }
-        custom_metadata = skypilot_config.get_nested(
-            ('kubernetes', 'custom_metadata'), {})
+        custom_metadata = kubernetes_utils.get_config_property_value(
+            ('kubernetes', 'custom_metadata'), context=context, default_value={})
         config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
 
         secret = k8s.client.V1Secret(

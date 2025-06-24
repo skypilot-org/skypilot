@@ -1066,6 +1066,7 @@ class Resources:
         # Filter the regions by the skypilot_config
         ssh_proxy_command_config = skypilot_config.get_nested(
             (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+        # TODO syang
         if (isinstance(ssh_proxy_command_config, str) or
                 ssh_proxy_command_config is None):
             # All regions are valid as the regions are not specified for the
@@ -1552,6 +1553,7 @@ class Resources:
         specific_reservations = set(
             skypilot_config.get_nested(
                 (str(self.cloud).lower(), 'specific_reservations'), set()))
+        # TODO syang
 
         if isinstance(self.cloud, clouds.DummyCloud):
             return self.cloud.get_reservations_available_resources(

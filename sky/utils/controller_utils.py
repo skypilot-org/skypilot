@@ -734,6 +734,7 @@ def _setup_proxy_command_on_controller(
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
     ssh_proxy_command = config.get_nested(proxy_command_key, None)
+    # TODO syang
     if isinstance(ssh_proxy_command, str):
         config.set_nested(proxy_command_key, None)
     elif isinstance(ssh_proxy_command, dict):

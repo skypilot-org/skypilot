@@ -541,6 +541,7 @@ def get_expirable_clouds(
         else:
             remote_identities = skypilot_config.get_nested(
                 (str(cloud).lower(), 'remote_identity'), None)
+            # TODO syang
             if remote_identities is None:
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
@@ -626,6 +627,7 @@ def write_cluster_config(
     specific_reservations = set(
         skypilot_config.get_nested(
             (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
+    # TODO syang
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
@@ -645,6 +647,7 @@ def write_cluster_config(
     else:
         remote_identity_config = skypilot_config.get_nested(
             (str(cloud).lower(), 'remote_identity'), None)
+        # TODO syang
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
@@ -675,6 +678,7 @@ def write_cluster_config(
         if isinstance(cloud, clouds.Kubernetes):
             if skypilot_config.get_nested(
                 ('kubernetes', 'allowed_contexts'), None) is None:
+                # TODO syang
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
@@ -682,6 +686,7 @@ def write_cluster_config(
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
         remote_identity_config = skypilot_config.get_nested(
             (cloud_str.lower(), 'remote_identity'), None)
+        # TODO syang
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
@@ -704,6 +709,7 @@ def write_cluster_config(
     # Retrieve the ssh_proxy_command for the given cloud / region.
     ssh_proxy_command_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'ssh_proxy_command'), None)
+    # TODO syang
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
@@ -734,6 +740,7 @@ def write_cluster_config(
                                                             context=region.name)
     else:
         labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
+        # TODO syang
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
@@ -792,9 +799,11 @@ def write_cluster_config(
                 # Networking configs
                 'use_internal_ips': skypilot_config.get_nested(
                     (str(cloud).lower(), 'use_internal_ips'), False),
+                # TODO syang
                 'ssh_proxy_command': ssh_proxy_command,
                 'vpc_name': skypilot_config.get_nested(
                     (str(cloud).lower(), 'vpc_name'), None),
+                # TODO syang
 
                 # User-supplied labels.
                 'labels': labels,
