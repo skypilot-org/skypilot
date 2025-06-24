@@ -850,20 +850,22 @@ async def cancel_job(job_id: int):
 
         task = job_tasks[job_id]
 
-    logger.debug(f'Cancelling task for job {job_id}')
-    task.cancel()
-    try:
-        await task  # Wait for the task to be cancelled
-    except asyncio.CancelledError:
-        logger.debug(
-            f'Task for job {job_id} was successfully cancelled')
-        pass  # Expected when task is cancelled
+    async def _cancel_task(task: asyncio.Task):
+        logger.debug(f'Cancelling task for job {job_id}')
+        task.cancel()
+        try:
+            await task  # Wait for the task to be cancelled
+        except asyncio.CancelledError:
+            logger.debug(
+                f'Task for job {job_id} was successfully cancelled')
+            pass  # Expected when task is cancelled
 
-    async with _job_tasks_lock:
-        if job_id in job_tasks:
-            del job_tasks[job_id]
-            logger.debug(f'Removed task for job {job_id} from job_tasks')
-
+        async with _job_tasks_lock:
+            if job_id in job_tasks:
+                del job_tasks[job_id]
+                logger.debug(f'Removed task for job {job_id} from job_tasks')
+    # Run the cancellation in the background, so we can return immediately.
+    asyncio.create_task(_cancel_task(task))
     logger.info(f'Job {job_id} cancelled successfully')
 
 
