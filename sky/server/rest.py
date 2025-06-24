@@ -1,9 +1,11 @@
 """REST API client of SkyPilot API server"""
 
+import contextlib
+import contextvars
 import functools
 import time
 import typing
-from typing import Any, Callable, cast, TypeVar
+from typing import Any, Callable, cast, Dict, Optional, TypeVar
 
 import colorama
 
@@ -23,6 +25,14 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 F = TypeVar('F', bound=Callable[..., Any])
+
+_RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+
+class RetryContext:
+
+    def __init__(self):
+        self.line_processed = 0
 
 
 def retry_on_server_unavailable(max_wait_seconds: int = 600,
@@ -61,7 +71,8 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
                 max_backoff_factor=max_backoff_factor)
             start_time = time.time()
             attempt = 0
-            while True:
+
+            def try_once():
                 attempt += 1
                 try:
                     return func(*args, **kwargs)
@@ -84,9 +95,26 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
                                      f'{func.__name__} (attempt {attempt}, '
                                      f'backoff {sleep_time}s).')
 
+            with _retry_in_context():
+                while True:
+                    try_once()
+
         return cast(F, wrapper)
 
     return decorator
+
+
+@contextlib.contextmanager
+def _retry_in_context():
+    token = _RETRY_CONTEXT.set(RetryContext())
+    try:
+        yield
+    finally:
+        _RETRY_CONTEXT.reset(token)
+
+
+def get_retry_context() -> Optional[RetryContext]:
+    return _RETRY_CONTEXT.get()
 
 
 def handle_server_unavailable(response: 'requests.Response') -> None:

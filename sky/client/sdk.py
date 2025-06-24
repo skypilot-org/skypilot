@@ -70,10 +70,13 @@ else:
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
+_LINE_PROCESSED_KEY = 'line_processed'
+
 
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
-                    output_stream: Optional['io.TextIOBase'] = None) -> Any:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> Any:
     """Streams the response to the console.
 
     Args:
@@ -81,12 +84,23 @@ def stream_response(request_id: Optional[str],
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
+        resumable: Whether the response is resumable on retry. If True, the
+            streaming will start from the previous failure point on retry.
     """
 
+    retry_context: Optional[rest.RetryContext] = None
+    if resumable:
+        retry_context = rest.get_retry_context()
     try:
+        line_count = 0
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
-                print(line, flush=True, end='', file=output_stream)
+                line_count += 1
+                if retry_context is None:
+                    print(line, flush=True, end='', file=output_stream)
+                elif line_count > retry_context.line_processed:
+                    print(line, flush=True, end='', file=output_stream)
+                    retry_context.line_processed = line_count
         if request_id is not None:
             return get(request_id)
     except Exception:  # pylint: disable=broad-except
@@ -762,7 +776,12 @@ def tail_logs(cluster_name: str,
                  None),
         cookies=server_common.get_api_cookie_jar())
     request_id = server_common.get_request_id(response)
-    return stream_response(request_id, response, output_stream)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return stream_response(request_id=request_id,
+                           response=response,
+                           output_stream=output_stream,
+                           resumable=(tail == 0))
 
 
 @usage_lib.entrypoint

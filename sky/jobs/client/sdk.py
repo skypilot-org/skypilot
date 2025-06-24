@@ -242,7 +242,12 @@ def tail_logs(name: Optional[str] = None,
         cookies=server_common.get_api_cookie_jar(),
     )
     request_id = server_common.get_request_id(response)
-    return sdk.stream_response(request_id, response, output_stream)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=(tail == 0))
 
 
 @usage_lib.entrypoint

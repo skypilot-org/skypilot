@@ -381,7 +381,10 @@ def tail_logs(service_name: str,
         cookies=server_common.get_api_cookie_jar(),
     )
     request_id = server_common.get_request_id(response)
-    sdk.stream_response(request_id, response, output_stream)
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=True)
 
 
 @usage_lib.entrypoint
