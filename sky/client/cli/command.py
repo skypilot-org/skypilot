@@ -3776,27 +3776,6 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                          f'{colorama.Style.RESET_ALL}')
 
 
-def _adjust_volume_config(volume_config: Dict[str, Any]) -> None:
-    if 'size' not in volume_config:
-        return
-    try:
-        size = resources_utils.parse_memory_resource(volume_config['size'],
-                                                     'size')
-        volume_config['size'] = size
-    except ValueError as e:
-        raise click.BadParameter(
-            f'Invalid size {volume_config["size"]}: {e}') from e
-
-
-def _validate_volume_config(volume_config: Dict[str, Any]) -> None:
-    if (('resource_name' not in volume_config or
-         not volume_config['resource_name']) and
-        ('size' not in volume_config or not volume_config['size'])):
-        raise click.BadParameter('Size is required for new volumes. '
-                                 'Please specify the size in the YAML file or '
-                                 'use the --size flag.')
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def volumes():
     """SkyPilot Volumes CLI."""
@@ -3858,9 +3837,9 @@ def volumes_apply(
         sky volumes apply --name pvc1 --infra k8s --type pvc --size 100Gi
     """
     # pylint: disable=import-outside-toplevel
-    from sky.utils import schemas
+    from sky.volumes import volume as volume_lib
 
-    volume_config: Dict[str, Any] = {}
+    volume_config_dict: Dict[str, Any] = {}
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
         is_yaml, yaml_config, yaml_file_provided, invalid_reason = (
@@ -3873,42 +3852,25 @@ def volumes_apply(
                 raise click.BadParameter(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
-            volume_config = yaml_config.copy()
-    # Override the volume config with CLI options
-    def _override_volume_config():
-        if name is not None:
-            volume_config['name'] = name
-        if infra is not None:
-            volume_config['infra'] = infra
-        if type is not None:
-            volume_config['type'] = type
-        if size is not None:
-            volume_config['size'] = size
+            volume_config_dict = yaml_config.copy()
 
-    _override_volume_config()
-    common_utils.validate_schema(volume_config, schemas.get_volume_schema(),
-                                 'Invalid volumes config: ')
-    _adjust_volume_config(volume_config)
-    _validate_volume_config(volume_config)
+    # Create Volume instance
+    volume = volume_lib.Volume.from_dict(volume_config_dict)
 
-    logger.debug(f'Volume config: {volume_config}')
+    # Normalize the volume config with CLI options
+    volume.normalize_config(name=name, infra=infra, type=type, size=size)
 
-    infra = volume_config.get('infra')
-    cloud, region, zone = _handle_infra_cloud_region_zone_options(
-        infra, None, None, None)
-    volume_config['cloud'] = cloud
-    volume_config['region'] = region
-    volume_config['zone'] = zone
+    logger.debug(f'Volume config: {volume.to_dict()}')
+
     if not yes:
-        click.confirm(
-            f'Proceed to create volume {volume_config.get("name")!r}?',
-            default=True,
-            abort=True,
-            show_default=True)
+        click.confirm(f'Proceed to create volume {volume.name!r}?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
 
     # Call SDK to create volume
     try:
-        request_id = volumes_sdk.apply(volume_config)
+        request_id = volumes_sdk.apply(volume)
         _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
     except RuntimeError as e:
         logger.error(f'{colorama.Fore.RED}Error applying volume: '

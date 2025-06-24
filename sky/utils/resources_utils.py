@@ -390,6 +390,7 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
                 converted = (value * multiplier /
                              constants.MEMORY_SIZE_UNITS[unit])
                 if not allow_rounding and ret_type(converted) != converted:
+                    print(f'allow_rounding is False, {converted}: {ret_type(converted)}')
                     raise ValueError(error_msg)
                 converted = ret_type(converted)
                 return f'{converted}{plus}{x}'

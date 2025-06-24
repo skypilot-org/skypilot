@@ -241,7 +241,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                                        extra_msg,
                                                        details=event_message))
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
-                                             f'Pod status: {pod_status}'
+                                             f'Pod status: {pod_status} '
                                              f'Details: \'{event_message}\' ')
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 

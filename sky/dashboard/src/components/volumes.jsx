@@ -296,15 +296,9 @@ function VolumesTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('region')}
+                onClick={() => requestSort('infra')}
               >
-                Context{getSortDirection('region')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('namespace')}
-              >
-                Namespace{getSortDirection('namespace')}
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
@@ -368,8 +362,7 @@ function VolumesTable({
               paginatedData.map((volume) => (
                 <TableRow key={volume.name}>
                   <TableCell className="font-medium">{volume.name}</TableCell>
-                  <TableCell>{volume.region || 'N/A'}</TableCell>
-                  <TableCell>{volume.namespace || 'N/A'}</TableCell>
+                  <TableCell>{volume.infra || 'N/A'}</TableCell>
                   <TableCell>
                     <span
                       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${

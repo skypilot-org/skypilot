@@ -87,8 +87,8 @@ Example output:
 
 .. code-block:: text
 
-  NAME     TYPE     CONTEXT          NAMESPACE  SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE
-  new-pvc  k8s-pvc  nebius-mk8s-vol  default    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32
+  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE
+  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32
 
 .. code-block:: bash
 
@@ -98,8 +98,8 @@ Example output:
 
 .. code-block:: text
 
-  NAME     TYPE     CONTEXT          NAMESPACE  SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE             NAME_ON_CLOUD            STORAGE_CLASS           ACCESS_MODE
-  new-pvc  k8s-pvc  nebius-mk8s-vol  default    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32  new-pvc-73ec42f2-5c6c4e  csi-mounted-fs-path-sc  ReadWriteMany
+  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE             NAME_ON_CLOUD            STORAGE_CLASS           ACCESS_MODE
+  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32  new-pvc-73ec42f2-5c6c4e  csi-mounted-fs-path-sc  ReadWriteMany
 
 Delete a volume:
 

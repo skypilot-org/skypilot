@@ -5,25 +5,37 @@ export async function getVolumes() {
     const data = await apiClient.fetch('/volumes', {}, 'GET');
     // Transform the data to match the expected format
     const transformedData =
-      data.map((volume) => ({
-        name: volume.name,
-        launched_at: volume.launched_at,
-        user_hash: volume.user_hash,
-        user_name: volume.user_name,
-        workspace: volume.workspace,
-        last_attached_at: volume.last_attached_at,
-        status: volume.status,
-        type: volume.type,
-        cloud: volume.cloud,
-        region: volume.region,
-        zone: volume.zone,
-        size: `${volume.size}Gi`,
-        config: volume.config,
-        storage_class: volume.config?.storage_class_name || '',
-        access_mode: volume.config?.access_mode || '',
-        namespace: volume.config?.namespace || '',
-        name_on_cloud: volume.name_on_cloud,
-      })) || [];
+      data.map((volume) => {
+        // Build infra field from cloud, region, zone
+        let infra = volume.cloud || '';
+        if (volume.region) {
+          infra += `/${volume.region}`;
+        }
+        if (volume.zone) {
+          infra += `/${volume.zone}`;
+        }
+
+        return {
+          name: volume.name,
+          launched_at: volume.launched_at,
+          user_hash: volume.user_hash,
+          user_name: volume.user_name,
+          workspace: volume.workspace,
+          last_attached_at: volume.last_attached_at,
+          status: volume.status,
+          type: volume.type,
+          cloud: volume.cloud,
+          region: volume.region,
+          zone: volume.zone,
+          infra: infra,
+          size: `${volume.size}Gi`,
+          config: volume.config,
+          storage_class: volume.config?.storage_class_name || '',
+          access_mode: volume.config?.access_mode || '',
+          namespace: volume.config?.namespace || '',
+          name_on_cloud: volume.name_on_cloud,
+        };
+      }) || [];
 
     return transformedData;
   } catch (error) {

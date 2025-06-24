@@ -1,7 +1,7 @@
 """Volume utils."""
 import abc
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import prettytable
 
@@ -11,6 +11,16 @@ from sky.volumes import volume
 
 logger = sky_logging.init_logger(__name__)
 
+def _get_infra_str(cloud:Optional[str], region:Optional[str], zone:Optional[str]) -> str:
+    """Get the infrastructure string for the volume."""
+    infra=''
+    if cloud:
+        infra += cloud
+    if region:
+        infra += f'/{region}'
+    if zone:
+        infra += f'/{zone}'
+    return infra
 
 class VolumeTable(abc.ABC):
     """The volume table."""
@@ -32,10 +42,10 @@ class PVCVolumeTable(VolumeTable):
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
         #  If show_all is True, show the table with the columns:
-        #   NAME, TYPE, CONTEXT, NAMESPACE, SIZE, USER, WORKSPACE,
+        #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, LAST_USE, STATUS
         #  If show_all is False, show the table with the columns:
-        #   NAME, TYPE, CONTEXT, NAMESPACE, SIZE, USER, WORKSPACE,
+        #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, LAST_USE, STATUS, NAME_ON_CLOUD,
         #   STORAGE_CLASS, ACCESS_MODE
 
@@ -43,8 +53,7 @@ class PVCVolumeTable(VolumeTable):
             columns = [
                 'NAME',
                 'TYPE',
-                'CONTEXT',
-                'NAMESPACE',
+                'INFRA',
                 'SIZE',
                 'USER',
                 'WORKSPACE',
@@ -59,8 +68,7 @@ class PVCVolumeTable(VolumeTable):
             columns = [
                 'NAME',
                 'TYPE',
-                'CONTEXT',
-                'NAMESPACE',
+                'INFRA',
                 'SIZE',
                 'USER',
                 'WORKSPACE',
@@ -87,12 +95,13 @@ class PVCVolumeTable(VolumeTable):
             size = row.get('size', '')
             if size:
                 size = f'{size}Gi'
-
+            infra=_get_infra_str(row.get('cloud'),
+                                 row.get('region'),
+                                 row.get('zone'))
             table_row = [
                 row.get('name', ''),
                 row.get('type', ''),
-                row.get('region', ''),
-                row.get('config', {}).get('namespace', ''),
+                infra,
                 size,
                 row.get('user_name', ''),
                 row.get('workspace', ''),

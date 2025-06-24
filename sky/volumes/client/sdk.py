@@ -1,7 +1,7 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Any, Dict, List
+from typing import List
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -10,6 +10,7 @@ from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import context
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import requests
@@ -23,16 +24,16 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def apply(volume_config: Dict[str, Any]) -> server_common.RequestId:
+def apply(volume: volume_lib.Volume) -> server_common.RequestId:
     """Creates or registers a volume.
     """
-    body = payloads.VolumeApplyBody(name=volume_config['name'],
-                                    volume_type=volume_config['type'],
-                                    cloud=volume_config['cloud'],
-                                    region=volume_config['region'],
-                                    zone=volume_config['zone'],
-                                    size=volume_config.get('size'),
-                                    config=volume_config.get('config', {}))
+    body = payloads.VolumeApplyBody(name=volume.name,
+                                    volume_type=volume.type,
+                                    cloud=volume.cloud,
+                                    region=volume.region,
+                                    zone=volume.zone,
+                                    size=volume.size,
+                                    config=volume.config)
     response = requests.post(f'{server_common.get_server_url()}/volumes/apply',
                              json=json.loads(body.model_dump_json()),
                              cookies=server_common.get_api_cookie_jar())
