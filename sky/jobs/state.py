@@ -1256,13 +1256,11 @@ def get_latest_job_id() -> Optional[int]:
     """Get the latest job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.execute(
+        job_id = session.execute(
             sqlalchemy.select(spot_table.c.spot_job_id).where(
                 spot_table.c.task_id == 0).order_by(
                     spot_table.c.submitted_at.desc()).limit(1)).fetchone()
-        for (job_id,) in rows:
-            return job_id
-        return None
+        return job_id[0] if job_id else None
 
 
 @_init_db
