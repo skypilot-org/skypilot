@@ -17,6 +17,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import cloud_config_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -905,19 +906,19 @@ def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
     skypilot_config._reload_config()
 
     # test autoscaler property
-    context_a_autoscaler = kubernetes_utils.get_config_property_value(
-        ('autoscaler',), context='contextA')
+    context_a_autoscaler = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes', region='contextA', keys=('autoscaler',))
     assert context_a_autoscaler == 'gke'
-    context_b_autoscaler = kubernetes_utils.get_config_property_value(
-        ('autoscaler',), context='contextB')
+    context_b_autoscaler = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes', region='contextB', keys=('autoscaler',))
     assert context_b_autoscaler == 'generic'
 
     # test provision_timeout property
-    context_a_provision_timeout = kubernetes_utils.get_config_property_value(
-        ('provision_timeout',), context='contextA', default_value=10)
+    context_a_provision_timeout = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes', region='contextA', keys=('provision_timeout',), default_value=10)
     assert context_a_provision_timeout == 10
-    context_b_provision_timeout = kubernetes_utils.get_config_property_value(
-        ('provision_timeout',), context='contextB')
+    context_b_provision_timeout = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes', region='contextB', keys=('provision_timeout',))
     assert context_b_provision_timeout == 60
 
     contexts = kubernetes_utils.get_custom_k8s_contexts_names()
