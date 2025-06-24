@@ -11,7 +11,7 @@ export default function ConfigPage() {
   return (
     <>
       <Head>
-        <title>Edit SkyPilot Configuration | SkyPilot Dashboard</title>
+        <title>SkyPilot API Server | SkyPilot Dashboard</title>
       </Head>
       <Config />
     </>

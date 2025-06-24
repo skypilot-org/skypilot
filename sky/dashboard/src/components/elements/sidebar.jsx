@@ -148,6 +148,7 @@ export function TopBar() {
   const isMobile = useMobile();
   const { userEmail, userRole } = useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   const dropdownRef = useRef(null);
 
   useEffect(() => {

@@ -1338,7 +1338,7 @@ def endpoints(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-builtin
+def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 
     The estimated cost column indicates price for the cluster based on the type
@@ -1347,6 +1347,10 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
     show increasing price. The estimated cost is calculated based on the local
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
+
+    Args:
+        days: The number of days to get the cost report for. If not provided,
+            the default is 30 days.
 
     Returns:
         The request ID of the cost report request.
@@ -1369,8 +1373,10 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
               'total_cost': (float) cost given resources and usage intervals,
             }
     """
-    response = requests.get(f'{server_common.get_server_url()}/cost_report',
-                            cookies=server_common.get_api_cookie_jar())
+    body = payloads.CostReportBody(days=days)
+    response = requests.post(f'{server_common.get_server_url()}/cost_report',
+                             json=json.loads(body.model_dump_json()),
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1856,6 +1862,8 @@ def api_start(
     deploy: bool = False,
     host: str = '127.0.0.1',
     foreground: bool = False,
+    metrics: bool = False,
+    metrics_port: Optional[int] = None,
     enable_basic_auth: bool = False,
 ) -> None:
     """Starts the API server.
@@ -1870,6 +1878,8 @@ def api_start(
             if deploy is True, to allow remote access.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
+        metrics: Whether to export metrics of the API server.
+        metrics_port: The port to export metrics of the API server.
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
     Returns:
@@ -1891,6 +1901,7 @@ def api_start(
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
+                                                   metrics, metrics_port,
                                                    enable_basic_auth)
     if foreground:
         # Explain why current process exited

@@ -611,3 +611,8 @@ class UpdateConfigBody(RequestBody):
 class GetConfigBody(RequestBody):
     """The request body for getting the entire SkyPilot configuration."""
     pass
+
+
+class CostReportBody(RequestBody):
+    """The request body for the cost report endpoint."""
+    days: Optional[int] = 30
