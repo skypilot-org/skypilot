@@ -155,4 +155,4 @@ def format_volume_table(volumes: List[Dict[str, Any]],
     if table_str:
         return table_str
     else:
-        return 'No volumes.'
+        return 'No existing volumes.'
