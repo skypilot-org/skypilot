@@ -62,7 +62,7 @@ spec:
 {{- end }}
 
 {{/* Separate ingress for service account access to bypass OAuth2 proxy */}}
-{{- if and (index .Values.ingress "oauth2-proxy" "enabled") .Values.enableServiceAccountTokens }}
+{{- if .Values.apiService.enableServiceAccountTokens }}
 {{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
 {{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
 {{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
@@ -77,10 +77,20 @@ metadata:
     kubernetes.io/ingress.class: nginx
     {{- end }}
     # No OAuth2 proxy annotations - this ingress bypasses OAuth2 for service account bearer tokens
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      # Only allow requests with Bearer tokens starting with 'sky_'
-      if ($http_authorization !~ "^Bearer\s+sky_") {
-        return 401 "Service account Bearer token required";
+    nginx.ingress.kubernetes.io/server-snippets: |
+      # Only allow requests with Bearer tokens starting with 'sky_' for /sa paths
+      location ~* ^/sa/ {
+        if ($http_authorization !~ "^Bearer\s+sky_") {
+          return 401 "Service account Bearer token required";
+        }
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "upgrade";
+        proxy_cache_bypass $http_upgrade;
       }
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
