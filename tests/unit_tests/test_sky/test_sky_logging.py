@@ -94,7 +94,7 @@ def test_handler_invalid_level(mock_get, handler, monkeypatch):
 
 
 @mock.patch('sky.utils.context.get', return_value=None)
-def test_handler_with_context_override(mock_get, handler, monkeypatch):
+async def test_handler_with_context_override(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
     assert handler.level == logging.INFO
     ctx = context.Context()
