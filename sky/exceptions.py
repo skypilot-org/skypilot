@@ -622,3 +622,8 @@ class VolumeNotFoundError(Exception):
 class VolumeTopologyConflictError(Exception):
     """Raised when the there is conflict in the volumes and compute topology"""
     pass
+
+
+class RestfulPolicyError(Exception):
+    """Raised when failed to call a RESTful policy."""
+    pass
