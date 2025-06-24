@@ -97,6 +97,7 @@ def test_handler_invalid_level(mock_get, handler, monkeypatch):
 def test_handler_with_context_override(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
     assert handler.level == logging.INFO
+    # Just trigger a PR
     ctx = context.Context()
     ctx.override_envs({'SKYPILOT_DEBUG': '1'})
     mock_get.return_value = ctx
