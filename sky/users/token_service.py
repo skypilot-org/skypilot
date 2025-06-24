@@ -38,14 +38,15 @@ class TokenService:
         return secret
 
     def create_token(self,
-                     user_id: str,
+                     creator_user_id: str,
+                     service_account_user_id: str,
                      token_name: str,
                      expires_in_days: Optional[int] = None) -> Dict[str, Any]:
         """Create a new JWT service account token.
 
         Args:
-            user_id: The user hash
-            user_name: The user's display name
+            creator_user_id: The creator's user hash
+            service_account_user_id: The service account's own user ID
             token_name: Descriptive name for the token
             expires_in_days: Optional expiration in days
 
@@ -60,7 +61,8 @@ class TokenService:
         payload = {
             'i': JWT_ISSUER,  # Issuer (use constant)
             't': int(now.timestamp()),  # Issued at (shortened from 'iat')
-            'u': user_id,  # User ID (shortened from 'sub')
+            # Service account user ID (shortened from 'sub')
+            'u': service_account_user_id,
             'k': token_id,  # Token ID (shortened from 'token_id')
             'y': 'sa',  # Type: service account (shortened from 'type')
         }
@@ -88,7 +90,8 @@ class TokenService:
             'token_id': token_id,
             'token': full_token,
             'token_hash': token_hash,
-            'user_id': user_id,
+            'creator_user_id': creator_user_id,
+            'service_account_user_id': service_account_user_id,
             'token_name': token_name,
             'created_at': int(now.timestamp()),
             'expires_at': expires_at,
@@ -118,8 +121,9 @@ class TokenService:
                 issuer=JWT_ISSUER)  # Use constant for consistency
 
             # Verify token type
-            if payload.get('y') != 'sa':  # Updated field name
-                logger.warning(f'Invalid token type: {payload.get("y")}')
+            token_type = payload.get('y')
+            if token_type != 'sa':
+                logger.warning(f'Invalid token type: {token_type}')
                 return None
 
             # Convert shortened field names back to standard names for
@@ -127,7 +131,7 @@ class TokenService:
             normalized_payload = {
                 'iss': payload.get('i'),  # issuer
                 'iat': payload.get('t'),  # issued at
-                'sub': payload.get('u'),  # subject (user ID)
+                'sub': payload.get('u'),  # subject (service account user ID)
                 'token_id': payload.get('k'),  # token ID
                 'type': 'service_account',  # expand shortened type
             }

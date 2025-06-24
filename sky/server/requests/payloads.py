@@ -369,6 +369,28 @@ class ServiceAccountTokenDeleteBody(RequestBody):
     token_id: str
 
 
+class UpdateRoleBody(RequestBody):
+    """The request body for updating a user role."""
+    role: str
+
+
+class ServiceAccountTokenRoleBody(RequestBody):
+    """The request body for getting a service account token role."""
+    token_id: str
+
+
+class ServiceAccountTokenUpdateRoleBody(RequestBody):
+    """The request body for updating a service account token role."""
+    token_id: str
+    role: str
+
+
+class ServiceAccountTokenRotateBody(RequestBody):
+    """The request body for rotating a service account token."""
+    token_id: str
+    expires_in_days: Optional[int] = None
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]

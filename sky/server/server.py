@@ -200,7 +200,7 @@ def _try_set_bearer_token_user(request: fastapi.Request):
             return  # Invalid or expired token
 
         # Extract user information from JWT payload
-        user_id = payload.get('sub')  # Subject = user ID
+        user_id = payload.get('sub')  # Subject = service account user ID
         user_name = payload.get('name')
         token_id = payload.get('token_id')
 
@@ -222,10 +222,13 @@ def _try_set_bearer_token_user(request: fastapi.Request):
             logger.debug(f'Failed to update token last used time: {e}')
 
         # Set the authenticated user - this integrates with Casbin RBAC
+        # user_id is the service account user ID
         request.state.auth_user = models.User(id=user_id,
                                               name=user_name or user_info.name)
+
         logger.debug(
-            f'Authenticated user {user_name} via service account token')
+            f'Authenticated service account {user_info.name} via service '
+            'account token')
 
     except Exception as e:  # pylint: disable=broad-except
         # If there's any error, just return without authentication
@@ -344,6 +347,11 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        # If auth_user is already set, skip this middleware, as it has been
+        # authenticated by a previous middleware.
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         auth_user = _get_auth_user_header(request)
 
         # Add user to database if auth_user is present

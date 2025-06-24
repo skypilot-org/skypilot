@@ -22,7 +22,7 @@ apiService:
   # Enable service account tokens for automated API access
   # If enabled, users can create bearer tokens to bypass SSO authentication
   # for automated systems. Requires enableUserManagement to be true.
-  enableServiceAccountTokens: true
+  enableServiceAccounts: true
   # Initial basic auth credentials for the API server
   # The user in the credentials will be used to create a new admin user in the API server,
   # and the password can be updated by the user in the Dashboard.

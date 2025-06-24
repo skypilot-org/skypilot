@@ -65,6 +65,72 @@ SkyPilot will use the user info passed by the auth proxy in your SkyPilot API se
     :align: center
     :width: 70%
 
+.. _service-accounts:
+
+Service Accounts
+----------------
+
+Service accounts provide secure programmatic access to the SkyPilot API server without browser authentication. Perfect for CI/CD pipelines and automation.
+
+.. note::
+
+    Service accounts is enabled by default in the SkyPilot API server helm chart. To disable it, set ``apiService.enableServiceAccounts`` to ``false`` in the helm values.
+
+Architecture
+~~~~~~~~~~~~
+
+.. image:: ../../../images/client-server/service-account-architecture.svg
+    :alt: Service Account Architecture with Auth Proxy
+    :align: center
+    :width: 90%
+
+**Key Points:**
+
+* Service accounts bypass the auth proxy and authenticate directly with Bearer tokens
+* Each service account has its own unique user ID and owns its resources  
+* Can be assigned admin or user roles with appropriate permissions
+
+Creating Service Accounts
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Navigate to **Users > Service Accounts** in the SkyPilot dashboard
+2. Click **Create Service Account** and provide:
+   
+   * **Token Name**: Descriptive name (e.g., "ci-pipeline")
+   * **Expiration**: Optional (defaults to 30 days)
+
+3. **Save the token immediately** - it won't be shown again
+4. Assign appropriate role (admin/user)
+
+Usage
+~~~~~
+
+Authenticate with the service account token:
+
+.. code-block:: console
+
+    $ sky api login -e <ENDPOINT> --token <SERVICE_ACCOUNT_TOKEN>
+
+**Security Best Practices:**
+
+* Rotate tokens regularly
+* Use least privilege (assign minimal necessary permissions)
+* Store tokens securely (Kubernetes secrets, etc.)
+* Use separate accounts for different purposes
+
+Example: GitHub Actions
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: yaml
+
+    # .github/workflows/deploy.yml
+    - name: Configure SkyPilot
+      run: |
+        sky api login -e ${{ vars.SKYPILOT_API_ENDPOINT }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
+        
+    - name: Launch training job
+      run: sky launch training.yaml
+
 .. _oauth2-proxy-okta:
 
 Setting up OAuth2 Proxy with Okta

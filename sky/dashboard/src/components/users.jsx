@@ -26,7 +26,11 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
-import { TimestampWithTooltip } from '@/components/utils';
+import {
+  CustomTooltip,
+  TimestampWithTooltip,
+  CustomTooltip as Tooltip,
+} from '@/components/utils';
 import {
   RotateCwIcon,
   PenIcon,
@@ -38,6 +42,7 @@ import {
   EyeOffIcon,
   UploadIcon,
   DownloadIcon,
+  PlusIcon,
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
@@ -174,6 +179,13 @@ export function Users() {
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showRotateDialog, setShowRotateDialog] = useState(false);
+  const [tokenToRotate, setTokenToRotate] = useState(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotatedToken, setRotatedToken] = useState(null);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
+    useState('');
 
   useEffect(() => {
     async function fetchHealth() {
@@ -433,7 +445,7 @@ export function Users() {
   return (
     <>
       {/* Main Tabs with Controls */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <div className="text-base flex items-center">
           <button
             className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
@@ -495,23 +507,7 @@ export function Users() {
                 Import/Export
               </button>
             )}
-          {activeMainTab === 'service-accounts' && (
-            <button
-              onClick={() => {
-                checkPermissionAndAct(
-                  'cannot create service account tokens',
-                  () => {
-                    setShowCreateDialog(true);
-                  }
-                );
-              }}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center mr-2"
-              title="Create Service Account Token"
-            >
-              <KeyRoundIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && <span>Create Token</span>}
-            </button>
-          )}
+
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -521,6 +517,81 @@ export function Users() {
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
+      </div>
+
+      {/* Search and Create Service Account Row */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="relative flex-1 max-w-md">
+          <input
+            type="text"
+            placeholder={
+              activeMainTab === 'users'
+                ? 'Search users by name, email, or role...'
+                : 'Search by token name, owner, or service account...'
+            }
+            value={
+              activeMainTab === 'users'
+                ? userSearchQuery
+                : serviceAccountSearchQuery
+            }
+            onChange={(e) => {
+              if (activeMainTab === 'users') {
+                setUserSearchQuery(e.target.value);
+              } else {
+                setServiceAccountSearchQuery(e.target.value);
+              }
+            }}
+            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+          />
+          {((activeMainTab === 'users' && userSearchQuery) ||
+            (activeMainTab === 'service-accounts' &&
+              serviceAccountSearchQuery)) && (
+            <button
+              onClick={() => {
+                if (activeMainTab === 'users') {
+                  setUserSearchQuery('');
+                } else {
+                  setServiceAccountSearchQuery('');
+                }
+              }}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              title="Clear search"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Create Service Account Button for Service Accounts Tab */}
+        {activeMainTab === 'service-accounts' && (
+          <button
+            onClick={() => {
+              checkPermissionAndAct(
+                'cannot create service account tokens',
+                () => {
+                  setShowCreateDialog(true);
+                }
+              );
+            }}
+            className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+            title="Create Service Account"
+          >
+            <PlusIcon className="h-4 w-4 mr-2" />
+            Create Service Account
+          </button>
+        )}
       </div>
 
       <SuccessDisplay
@@ -545,6 +616,8 @@ export function Users() {
           basicAuthEnabled={basicAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
+          searchQuery={userSearchQuery}
+          setSearchQuery={setUserSearchQuery}
         />
       ) : (
         <ServiceAccountTokensView
@@ -554,6 +627,16 @@ export function Users() {
           setCreateError={setCreateError}
           showCreateDialog={showCreateDialog}
           setShowCreateDialog={setShowCreateDialog}
+          showRotateDialog={showRotateDialog}
+          setShowRotateDialog={setShowRotateDialog}
+          tokenToRotate={tokenToRotate}
+          setTokenToRotate={setTokenToRotate}
+          rotating={rotating}
+          setRotating={setRotating}
+          rotatedToken={rotatedToken}
+          setRotatedToken={setRotatedToken}
+          searchQuery={serviceAccountSearchQuery}
+          setSearchQuery={setServiceAccountSearchQuery}
         />
       )}
 
@@ -940,6 +1023,8 @@ function UsersTable({
   basicAuthEnabled,
   currentUserRole,
   currentUserId,
+  searchQuery,
+  setSearchQuery,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1038,9 +1123,21 @@ function UsersTable({
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
 
-  const sortedUsers = useMemo(() => {
-    return sortData(usersWithCounts, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig]);
+  const filteredAndSortedUsers = useMemo(() => {
+    let filtered = usersWithCounts;
+
+    if (searchQuery?.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = usersWithCounts.filter(
+        (user) =>
+          user.usernameDisplay?.toLowerCase().includes(query) ||
+          user.fullEmailID?.toLowerCase().includes(query) ||
+          user.role?.toLowerCase().includes(query)
+      );
+    }
+
+    return sortData(filtered, sortConfig.key, sortConfig.direction);
+  }, [usersWithCounts, sortConfig, searchQuery]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1114,12 +1211,18 @@ function UsersTable({
     );
   }
 
-  if (!sortedUsers || sortedUsers.length === 0) {
+  if (!filteredAndSortedUsers || filteredAndSortedUsers.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-lg font-semibold text-gray-500">No users found.</p>
+        <p className="text-lg font-semibold text-gray-500">
+          {searchQuery?.trim()
+            ? 'No users match your search.'
+            : 'No users found.'}
+        </p>
         <p className="text-sm text-gray-400 mt-1">
-          There are currently no users to display.
+          {searchQuery?.trim()
+            ? 'Try adjusting your search terms.'
+            : 'There are currently no users to display.'}
         </p>
       </div>
     );
@@ -1167,7 +1270,7 @@ function UsersTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sortedUsers.map((user) => (
+          {filteredAndSortedUsers.map((user) => (
             <TableRow key={user.userId}>
               <TableCell className="truncate" title={user.username}>
                 {user.usernameDisplay}
@@ -1338,6 +1441,16 @@ function ServiceAccountTokensView({
   setCreateError,
   showCreateDialog,
   setShowCreateDialog,
+  showRotateDialog,
+  setShowRotateDialog,
+  tokenToRotate,
+  setTokenToRotate,
+  rotating,
+  setRotating,
+  rotatedToken,
+  setRotatedToken,
+  searchQuery,
+  setSearchQuery,
 }) {
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1347,34 +1460,127 @@ function ServiceAccountTokensView({
     token_name: '',
     expires_in_days: 30,
   });
+  const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [createdToken, setCreatedToken] = useState(null);
   const [copySuccess, setCopySuccess] = useState('');
+  
+  // Role editing state
+  const [editingTokenId, setEditingTokenId] = useState(null);
+  const [currentEditingRole, setCurrentEditingRole] = useState('');
+  
+  // Enhanced tokens with cluster/job counts
+  const [tokensWithCounts, setTokensWithCounts] = useState([]);
 
-  // Fetch tokens
-  const fetchTokens = async () => {
+  // Fetch tokens and related data
+  const fetchTokensAndCounts = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get('/users/service-account-tokens');
-      if (response.ok) {
-        const data = await response.json();
-        setTokens(data || []);
-      } else {
+      
+      // Step 1: Fetch service account tokens
+      const tokensResponse = await apiClient.get('/users/service-account-tokens');
+      if (!tokensResponse.ok) {
         console.error('Failed to fetch tokens');
         setTokens([]);
+        setTokensWithCounts([]);
+        return;
       }
+      
+      const tokensData = await tokensResponse.json();
+      setTokens(tokensData || []);
+      
+      // Step 2: Fetch clusters and jobs data in parallel
+      const [clustersResponse, jobsResponse] = await Promise.all([
+        dashboardCache.get(getClusters),
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+      ]);
+      
+      const clustersData = clustersResponse || [];
+      const jobsData = jobsResponse?.jobs || [];
+      
+      // Step 3: Calculate counts for each service account
+      const enhancedTokens = (tokensData || []).map((token) => {
+        const serviceAccountId = token.service_account_user_id;
+        
+        // Count clusters owned by this service account
+        const serviceAccountClusters = clustersData.filter(
+          (cluster) => cluster.user_hash === serviceAccountId
+        );
+        
+        // Count jobs owned by this service account
+        const serviceAccountJobs = jobsData.filter(
+          (job) => job.user_hash === serviceAccountId
+        );
+        
+        return {
+          ...token,
+          clusterCount: serviceAccountClusters.length,
+          jobCount: serviceAccountJobs.length,
+          // Extract primary role
+          primaryRole: token.service_account_roles && token.service_account_roles.length > 0
+            ? token.service_account_roles[0]
+            : 'user'
+        };
+      });
+      
+      setTokensWithCounts(enhancedTokens);
+      
     } catch (error) {
-      console.error('Error fetching tokens:', error);
+      console.error('Error fetching tokens and counts:', error);
       setTokens([]);
+      setTokensWithCounts([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTokens();
+    fetchTokensAndCounts();
   }, []);
+
+  // Role editing functions
+  const handleEditClick = async (tokenId, currentRole) => {
+    await checkPermissionAndAct('cannot edit service account role', () => {
+      setEditingTokenId(tokenId);
+      setCurrentEditingRole(currentRole);
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTokenId(null);
+    setCurrentEditingRole('');
+  };
+
+  const handleSaveEdit = async (tokenId) => {
+    if (!tokenId || !currentEditingRole) {
+      console.error('Token ID or role is missing.');
+      setCreateError(new Error('Token ID or role is missing.'));
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const response = await apiClient.post('/users/service-account-tokens/update-role', {
+        token_id: tokenId,
+        role: currentEditingRole,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to update role');
+      }
+      
+      setCreateSuccess('Service account role updated successfully!');
+      await fetchTokensAndCounts(); // Refresh data
+      handleCancelEdit(); // Exit edit mode
+    } catch (error) {
+      console.error('Failed to update service account role:', error);
+      setCreateError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Copy to clipboard
   const copyToClipboard = async (text) => {
@@ -1398,7 +1604,8 @@ function ServiceAccountTokensView({
     try {
       const payload = {
         token_name: newToken.token_name.trim(),
-        expires_in_days: newToken.expires_in_days || null,
+        expires_in_days:
+          newToken.expires_in_days === '' ? null : newToken.expires_in_days,
       };
 
       const response = await apiClient.post(
@@ -1412,7 +1619,7 @@ function ServiceAccountTokensView({
         setCreateSuccess('Service account token created successfully!');
         setShowCreateDialog(false);
         setNewToken({ token_name: '', expires_in_days: 30 });
-        await fetchTokens();
+        await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create token');
@@ -1443,7 +1650,7 @@ function ServiceAccountTokensView({
         );
         setShowDeleteDialog(false);
         setTokenToDelete(null);
-        await fetchTokens();
+        await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to delete token');
@@ -1455,7 +1662,58 @@ function ServiceAccountTokensView({
     }
   };
 
-  if (loading) {
+  // Handle rotate token
+  const handleRotateToken = async () => {
+    if (!tokenToRotate) return;
+
+    setRotating(true);
+    try {
+      const payload = {
+        token_id: tokenToRotate.token_id,
+        expires_in_days:
+          rotateExpiration === '' ? null : parseInt(rotateExpiration),
+      };
+
+      const response = await apiClient.post(
+        '/users/service-account-tokens/rotate',
+        payload
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setRotatedToken(data.token);
+        setCreateSuccess(
+          `Token "${tokenToRotate.token_name}" rotated successfully!`
+        );
+        setShowRotateDialog(false);
+        setTokenToRotate(null);
+        setRotateExpiration('');
+        await fetchTokensAndCounts();
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to rotate token');
+      }
+    } catch (error) {
+      setCreateError(error);
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  // Filter tokens based on search query
+  const filteredTokens = tokensWithCounts.filter((token) => {
+    if (!searchQuery?.trim()) return true;
+    
+    const query = searchQuery.toLowerCase();
+    return (
+      token.token_name?.toLowerCase().includes(query) ||
+      token.creator_name?.toLowerCase().includes(query) ||
+      token.service_account_name?.toLowerCase().includes(query) ||
+      token.primaryRole?.toLowerCase().includes(query)
+    );
+  });
+
+  if (loading && tokensWithCounts.length === 0) {
     return (
       <div className="flex items-center justify-center py-8">
         <CircularProgress size={32} />
@@ -1499,15 +1757,52 @@ function ServiceAccountTokensView({
         </div>
       )}
 
+      {/* Rotated Token Display */}
+      {rotatedToken && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <h4 className="text-sm font-medium text-blue-900 mb-2">
+            🔄 Token Rotated Successfully - Save This New Token Now!
+          </h4>
+          <p className="text-sm text-blue-700 mb-3">
+            This new token replaces the old one. Please copy and store it
+            securely. The old token is now invalid.
+          </p>
+          <div className="flex items-center space-x-2">
+            <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
+              {rotatedToken}
+            </code>
+            <button
+              onClick={() => copyToClipboard(rotatedToken)}
+              className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Copy
+            </button>
+          </div>
+          {copySuccess && (
+            <p className="text-sm text-blue-600 mt-1">{copySuccess}</p>
+          )}
+          <button
+            onClick={() => setRotatedToken(null)}
+            className="mt-3 text-sm text-blue-600 hover:text-blue-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Tokens Table */}
-      {tokens.length === 0 ? (
+      {filteredTokens.length === 0 ? (
         <div className="text-center py-12">
           <KeyRoundIcon className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-2 text-sm font-medium text-gray-900">
-            No service account tokens
+            {searchQuery?.trim()
+              ? 'No tokens match your search'
+              : 'No service accounts'}
           </h3>
           <p className="mt-1 text-sm text-gray-500">
-            No service account tokens have been created yet.
+            {searchQuery?.trim()
+              ? 'Try adjusting your search terms.'
+              : 'No service accounts have been created yet.'}
           </p>
         </div>
       ) : (
@@ -1516,8 +1811,11 @@ function ServiceAccountTokensView({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Token Name</TableHead>
+                  <TableHead>Name</TableHead>
                   <TableHead>Owner</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Clusters</TableHead>
+                  <TableHead>Jobs</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Last Used</TableHead>
                   <TableHead>Expires</TableHead>
@@ -1525,20 +1823,93 @@ function ServiceAccountTokensView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tokens.map((token) => (
+                {filteredTokens.map((token) => (
                   <TableRow key={token.token_id}>
                     <TableCell className="truncate" title={token.token_name}>
                       {token.token_name}
                     </TableCell>
                     <TableCell className="truncate">
                       <div className="flex items-center">
-                        <span>{token.owner_name || 'You'}</span>
-                        {token.user_hash !== userRoleCache?.id && (
+                        <span>{token.creator_name || 'Unknown'}</span>
+                        {token.creator_user_hash !== userRoleCache?.id && (
                           <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
                             Other
                           </span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell className="truncate">
+                      <div className="flex items-center gap-2">
+                        {editingTokenId === token.token_id ? (
+                          <>
+                            <select
+                              value={currentEditingRole}
+                              onChange={(e) => setCurrentEditingRole(e.target.value)}
+                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="user">User</option>
+                            </select>
+                            <button
+                              onClick={() => handleSaveEdit(token.token_id)}
+                              className="text-green-600 hover:text-green-800 p-1"
+                              title="Save"
+                            >
+                              <CheckIcon className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="text-gray-500 hover:text-gray-700 p-1"
+                              title="Cancel"
+                            >
+                              <XIcon className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="capitalize">{token.primaryRole}</span>
+                            {/* Only show edit role button if admin or owner */}
+                            {(userRoleCache?.role === 'admin' ||
+                              token.creator_user_hash === userRoleCache?.id) && (
+                              <button
+                                onClick={() =>
+                                  handleEditClick(token.token_id, token.primaryRole)
+                                }
+                                className="text-blue-600 hover:text-blue-700 p-1"
+                                title="Edit role"
+                              >
+                                <PenIcon className="h-3 w-3" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/clusters?user=${encodeURIComponent(token.service_account_user_id)}`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                          token.clusterCount > 0
+                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={`View ${token.clusterCount} cluster${token.clusterCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                      >
+                        {token.clusterCount}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/jobs?user=${encodeURIComponent(token.service_account_user_id)}`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                          token.jobCount > 0
+                            ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={`View ${token.jobCount} job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                      >
+                        {token.jobCount}
+                      </Link>
                     </TableCell>
                     <TableCell className="truncate">
                       {token.created_at ? (
@@ -1570,25 +1941,54 @@ function ServiceAccountTokensView({
                       )}
                     </TableCell>
                     <TableCell>
-                      {/* Show delete button only if user owns the token or is admin */}
-                      {(userRoleCache?.role === 'admin' ||
-                        token.user_hash === userRoleCache?.id) && (
-                        <button
-                          onClick={() => {
-                            checkPermissionAndAct(
-                              'cannot delete service account tokens',
-                              () => {
-                                setTokenToDelete(token);
-                                setShowDeleteDialog(true);
-                              }
-                            );
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                          title={`Delete ${token.token_name}`}
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </button>
-                      )}
+                      <div className="flex items-center space-x-2">
+                        {/* Show rotate button only if user owns the token or is admin */}
+                        {(userRoleCache?.role === 'admin' ||
+                          token.creator_user_hash === userRoleCache?.id) && (
+                          <CustomTooltip
+                            content={`Rotate token`}
+                            className="capitalize text-sm text-muted-foreground"
+                          >
+                            <button
+                              onClick={() => {
+                                checkPermissionAndAct(
+                                  'cannot rotate service account tokens',
+                                  () => {
+                                    setTokenToRotate(token);
+                                    setShowRotateDialog(true);
+                                  }
+                                );
+                              }}
+                              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+                            >
+                              <RotateCwIcon className="h-4 w-4" />
+                            </button>
+                          </CustomTooltip>
+                        )}
+                        {/* Show delete button only if user owns the token or is admin */}
+                        {(userRoleCache?.role === 'admin' ||
+                          token.creator_user_hash === userRoleCache?.id) && (
+                          <Tooltip
+                            content={`Delete ${token.token_name}`}
+                            className="capitalize text-sm text-muted-foreground"
+                          >
+                            <button
+                              onClick={() => {
+                                checkPermissionAndAct(
+                                  'cannot delete service account tokens',
+                                  () => {
+                                    setTokenToDelete(token);
+                                    setShowDeleteDialog(true);
+                                  }
+                                );
+                              }}
+                              className="text-red-600 hover:text-red-800 font-medium inline-flex items-center"
+                            >
+                              <Trash2Icon className="h-4 w-4" />
+                            </button>
+                          </Tooltip>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1598,13 +1998,14 @@ function ServiceAccountTokensView({
         </>
       )}
 
-      {/* Create Token Dialog */}
+      {/* Create Service Account Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create Service Account Token</DialogTitle>
+            <DialogTitle>Create Service Account</DialogTitle>
             <DialogDescription>
-              Create a new API token for programmatic access to SkyPilot.
+              Create a new service account with an API token for programmatic
+              access to SkyPilot.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
@@ -1629,7 +2030,7 @@ function ServiceAccountTokensView({
                 type="number"
                 className="border rounded px-3 py-2 w-full"
                 placeholder="30"
-                min="1"
+                min="0"
                 max="365"
                 value={newToken.expires_in_days || ''}
                 onChange={(e) =>
@@ -1642,7 +2043,7 @@ function ServiceAccountTokensView({
                 }
               />
               <p className="text-xs text-gray-500">
-                Leave empty for no expiration. Maximum 365 days.
+                Leave empty or enter 0 to never expire. Maximum 365 days.
               </p>
             </div>
           </div>
@@ -1673,9 +2074,9 @@ function ServiceAccountTokensView({
             <DialogDescription>
               Are you sure you want to delete the token &quot;
               {tokenToDelete?.token_name}&quot;
-              {tokenToDelete?.user_hash !== userRoleCache?.id &&
+              {tokenToDelete?.creator_user_hash !== userRoleCache?.id &&
               userRoleCache?.role === 'admin'
-                ? ` owned by ${tokenToDelete?.owner_name}`
+                ? ` owned by ${tokenToDelete?.creator_name}`
                 : ''}
               ? This action cannot be undone and will immediately revoke access
               for any systems using this token.
@@ -1698,6 +2099,71 @@ function ServiceAccountTokensView({
               disabled={deleting}
             >
               {deleting ? 'Deleting...' : 'Delete Token'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rotate Token Dialog */}
+      <Dialog open={showRotateDialog} onOpenChange={setShowRotateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rotate Service Account Token</DialogTitle>
+            <DialogDescription>
+              Rotate the token &quot;{tokenToRotate?.token_name}&quot;
+              {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
+              userRoleCache?.role === 'admin'
+                ? ` owned by ${tokenToRotate?.creator_name}`
+                : ''}
+              . This will generate a new token value and invalidate the current
+              one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">
+                New Expiration (days)
+              </label>
+              <input
+                type="number"
+                className="border rounded px-3 py-2 w-full"
+                placeholder="Leave empty to preserve current expiration"
+                min="0"
+                max="365"
+                value={rotateExpiration}
+                onChange={(e) => setRotateExpiration(e.target.value)}
+              />
+              <p className="text-xs text-gray-500">
+                Leave empty to preserve current expiration. Enter number of days
+                for new expiration, or enter 0 to set to never expire. Maximum
+                365 days.
+              </p>
+            </div>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded">
+              <p className="text-sm text-amber-700">
+                ⚠️ Any systems using the current token will need to be updated
+                with the new token.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => {
+                setShowRotateDialog(false);
+                setTokenToRotate(null);
+                setRotateExpiration('');
+              }}
+              disabled={rotating}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2"
+              onClick={handleRotateToken}
+              disabled={rotating}
+            >
+              {rotating ? 'Rotating...' : 'Rotate Token'}
             </button>
           </DialogFooter>
         </DialogContent>

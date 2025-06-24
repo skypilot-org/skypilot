@@ -154,12 +154,15 @@ service_account_token_table = sqlalchemy.Table(
     'service_account_tokens',
     Base.metadata,
     sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('user_hash', sqlalchemy.Text),
     sqlalchemy.Column('token_name', sqlalchemy.Text),
     sqlalchemy.Column('token_hash', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
     sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('creator_user_hash',
+                      sqlalchemy.Text),  # Who created this token
+    sqlalchemy.Column('service_account_user_id',
+                      sqlalchemy.Text),  # Service account's own user ID
 )
 
 cluster_yaml_table = sqlalchemy.Table(
@@ -1477,9 +1480,10 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
 
 @_init_db
 def add_service_account_token(token_id: str,
-                              user_hash: str,
                               token_name: str,
                               token_hash: str,
+                              creator_user_hash: str,
+                              service_account_user_id: str,
                               expires_at: Optional[int] = None) -> None:
     """Add a service account token to the database."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1497,11 +1501,12 @@ def add_service_account_token(token_id: str,
 
         insert_stmnt = insert_func(service_account_token_table).values(
             token_id=token_id,
-            user_hash=user_hash,
             token_name=token_name,
             token_hash=token_hash,
             created_at=created_at,
-            expires_at=expires_at)
+            expires_at=expires_at,
+            creator_user_hash=creator_user_hash,
+            service_account_user_id=service_account_user_id)
         session.execute(insert_stmnt)
         session.commit()
 
@@ -1517,30 +1522,32 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
         return None
     return {
         'token_id': row.token_id,
-        'user_hash': row.user_hash,
         'token_name': row.token_name,
         'token_hash': row.token_hash,
         'created_at': row.created_at,
         'last_used_at': row.last_used_at,
         'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
     }
 
 
 @_init_db
 def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
-    """Get all service account tokens for a user."""
+    """Get all service account tokens for a user (as creator)."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(service_account_token_table).filter_by(
-            user_hash=user_hash).all()
+            creator_user_hash=user_hash).all()
     return [{
         'token_id': row.token_id,
-        'user_hash': row.user_hash,
         'token_name': row.token_name,
         'token_hash': row.token_hash,
         'created_at': row.created_at,
         'last_used_at': row.last_used_at,
         'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
     } for row in rows]
 
 
@@ -1570,6 +1577,36 @@ def delete_service_account_token(token_id: str) -> bool:
             token_id=token_id).delete()
         session.commit()
     return result > 0
+
+
+@_init_db
+def rotate_service_account_token(token_id: str,
+                                 new_token_hash: str,
+                                 new_expires_at: Optional[int] = None) -> None:
+    """Rotate a service account token by updating its hash and expiration.
+
+    Args:
+        token_id: The token ID to rotate.
+        new_token_hash: The new hashed token value.
+        new_expires_at: New expiration timestamp, or None for no expiration.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(service_account_token_table).filter_by(
+            token_id=token_id
+        ).update({
+            service_account_token_table.c.token_hash: new_token_hash,
+            service_account_token_table.c.expires_at: new_expires_at,
+            service_account_token_table.c.last_used_at: None,  # Reset last used
+            # Update creation time
+            service_account_token_table.c.created_at: current_time,
+        })
+        session.commit()
+
+    if count == 0:
+        raise ValueError(f'Service account token {token_id} not found.')
 
 
 @_init_db
@@ -1652,10 +1689,11 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
         rows = session.query(service_account_token_table).all()
     return [{
         'token_id': row.token_id,
-        'user_hash': row.user_hash,
         'token_name': row.token_name,
         'token_hash': row.token_hash,
         'created_at': row.created_at,
         'last_used_at': row.last_used_at,
         'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
     } for row in rows]
