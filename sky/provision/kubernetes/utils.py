@@ -3209,7 +3209,7 @@ def format_kubeconfig_exec_auth(config: Any,
         output_path (str): Path where the potentially modified kubeconfig file
           will be saved
         inject_wrapper (bool): Whether to inject the wrapper script
-    Returns: whether config was updated, for logging purposes.
+    Returns: whether config was updated, for logging purposes
     """
     updated = False
     for user in config.get('users', []):
@@ -3248,8 +3248,7 @@ def format_kubeconfig_exec_auth(config: Any,
                     except ValueError:
                         pass
 
-    os.makedirs(os.path.dirname(os.path.expanduser(output_path)),
-                exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.expanduser(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as file:
         yaml.safe_dump(config, file)
 
