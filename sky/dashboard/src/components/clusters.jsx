@@ -18,6 +18,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   REFRESH_INTERVAL,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -695,7 +696,9 @@ export function ClusterTable({
                         <span>{item.resources_str}</span>
                       </NonCapitalizedTooltip>
                     </TableCell>
-                    <TableCell>{relativeTime(item.time)}</TableCell>
+                    <TableCell>
+                      <TimestampWithTooltip date={item.time} />
+                    </TableCell>
                     <TableCell>
                       {formatAutostop(item.autostop, item.to_down)}
                     </TableCell>
