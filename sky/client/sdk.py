@@ -12,7 +12,6 @@ Usage example:
 """
 import base64
 import binascii
-import getpass
 from http import cookiejar
 import json
 import logging
@@ -551,7 +550,8 @@ def _launch(
         clusters = get(request_id)
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''
-        cluster_user_name = getpass.getuser()
+        current_user = common_utils.get_current_user_name()
+        cluster_user_name = current_user
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
             # exist.
@@ -563,7 +563,7 @@ def _launch(
             cluster_status = cluster_record['status']
             cluster_user_hash = cluster_record['user_hash']
             cluster_user_name = cluster_record['user_name']
-            if cluster_user_name == getpass.getuser():
+            if cluster_user_name == current_user:
                 # Only show the hash if the username is the same as the local
                 # username, to avoid confusion.
                 cluster_user_hash_str = f' (hash: {cluster_user_hash})'

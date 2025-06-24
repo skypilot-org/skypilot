@@ -23,6 +23,7 @@ import yaml from 'js-yaml';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
+  formatFullTimestamp,
 } from '@/components/utils';
 import {
   SSHInstructionsModal,
@@ -410,7 +411,7 @@ function ActiveTab({
                 </div>
                 <div className="text-base mt-1">
                   {clusterData.time
-                    ? new Date(clusterData.time).toLocaleString()
+                    ? formatFullTimestamp(new Date(clusterData.time))
                     : 'N/A'}
                 </div>
               </div>

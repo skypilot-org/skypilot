@@ -28,6 +28,7 @@ import {
   NonCapitalizedTooltip,
   relativeTime,
   formatDateTime,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import {
   FileSearchIcon,
@@ -141,7 +142,7 @@ const formatUserDisplay = (username, userId) => {
   return usernameBase;
 };
 
-// Helper function to format submitted time with abbreviated units
+// Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
 
@@ -149,59 +150,7 @@ const formatSubmittedTime = (timestamp) => {
   const date =
     timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
 
-  // Get the original timeString from relativeTime
-  let timeString = relativeTime(date);
-
-  // If relativeTime returns a React element, extract the string from its props
-  if (
-    React.isValidElement(timeString) &&
-    timeString.props &&
-    timeString.props.children
-  ) {
-    // The actual string is nested within the Tooltip
-    if (
-      React.isValidElement(timeString.props.children) &&
-      timeString.props.children.props &&
-      timeString.props.children.props.children
-    ) {
-      timeString = timeString.props.children.props.children;
-    } else {
-      timeString = timeString.props.children;
-    }
-  }
-
-  // Ensure we have a string before proceeding
-  if (typeof timeString !== 'string') {
-    return timeString; // Return as is if not a string after extraction
-  }
-
-  // Apply the same shortening logic
-  const shortenedTime = shortenTimeForJobs(timeString);
-
-  // Return with tooltip functionality like relativeTime does
-  const now = new Date();
-  const differenceInDays =
-    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
-
-  if (Math.abs(differenceInDays) < 7) {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="capitalize text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  } else {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  }
+  return <TimestampWithTooltip date={date} />;
 };
 
 // Helper function to shorten time strings for jobs
@@ -217,7 +166,7 @@ function shortenTimeForJobs(timeString) {
 
   // Handle "less than a minute ago" case
   if (timeString.toLowerCase() === 'less than a minute ago') {
-    return 'Less than a minute ago';
+    return 'Less than 1m ago';
   }
 
   // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
@@ -1023,12 +972,6 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('priority')}
-              >
-                Priority{getSortDirection('priority')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources_str')}
               >
                 Requested{getSortDirection('resources_str')}
@@ -1059,7 +1002,7 @@ export function ManagedJobsTable({
             {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={13}
+                  colSpan={12}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -1105,7 +1048,6 @@ export function ManagedJobsTable({
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell>{item.priority}</TableCell>
                       <TableCell>{item.requested_resources}</TableCell>
                       <TableCell>
                         {item.infra && item.infra !== '-' ? (
@@ -1168,7 +1110,7 @@ export function ManagedJobsTable({
                     {expandedRowId === item.id && (
                       <ExpandedDetailsRow
                         text={item.details}
-                        colSpan={13}
+                        colSpan={12}
                         innerRef={expandedRowRef}
                       />
                     )}
@@ -1177,7 +1119,7 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell colSpan={13} className="text-center py-6">
+                <TableCell colSpan={12} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
