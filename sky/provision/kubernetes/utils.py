@@ -3278,7 +3278,7 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     # If we have already converted the same kubeconfig before, just return.
     if os.path.isfile(path):
         return path
-    
+
     try:
         format_kubeconfig_exec_auth(config, path)
         return path
