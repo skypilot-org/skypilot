@@ -93,6 +93,7 @@ def test_handler_invalid_level(mock_get, handler, monkeypatch):
     assert handler._level == logging.WARNING
 
 
+@pytest.mark.asyncio
 @mock.patch('sky.utils.context.get', return_value=None)
 async def test_handler_with_context_override(mock_get, handler, monkeypatch):
     """Test setting invalid log levels."""
