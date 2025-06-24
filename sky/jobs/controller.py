@@ -662,6 +662,8 @@ class JobsController:
             self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
+        except asyncio.CancelledError:
+            raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(
                 f'Unexpected error in JobsController run for task {task_id}')
@@ -673,62 +675,16 @@ class JobsController:
             self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
-        except asyncio.CancelledError:
-            logger.info(f'Job {self._job_id} was cancelled')
-            task_id, _ = managed_job_state.get_latest_task_id_status(
-                self._job_id)
-            assert task_id is not None, self._job_id
-            logger.info(f'Cancelling managed job, job_id: {self._job_id}, '
-                        f'task_id: {task_id}')
-            managed_job_state.set_cancelling(
-                job_id=self._job_id,
-                callback_func=managed_job_utils.event_callback_func(
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    task=self._dag.tasks[task_id]))
-            cancelling = True
-            raise
         finally:
-            logger.info(f'Cleaning up any cluster for job {self._job_id}.')
-            # NOTE: Originally, we send an interruption signal to the controller
-            # process and the controller process handles cleanup. However, we
-            # figure out the behavior differs from cloud to cloud
-            # (e.g., GCP ignores 'SIGINT'). A possible explanation is
-            # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
-            # But anyway, a clean solution is killing the controller process
-            # directly, and then cleanup the cluster job_state.
-            await _cleanup(self._job_id, dag_yaml=self._dag_yaml)
-            logger.info(
-                f'Cluster of managed job {self._job_id} has been cleaned up.')
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id,
+                task_id=task_id,
+                task=self._dag.tasks[task_id])
+            managed_job_state.set_cancelling(job_id=self._job_id,
+                                             callback_func=callback_func)
+            managed_job_state.set_cancelled(job_id=self._job_id,
+                                            callback_func=callback_func)
 
-            if cancelling:
-                # Since it's set with cancelling
-                assert task_id is not None, self._job_id
-                managed_job_state.set_cancelled(
-                    job_id=self._job_id,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=self._job_id,
-                        task_id=task_id,
-                        task=self._dag.tasks[task_id]))
-
-            # We should check job status after 'set_cancelled', otherwise
-            # the job status is not terminal.
-            job_status = managed_job_state.get_status(self._job_id)
-            assert job_status is not None
-            # The job can be non-terminal if the controller exited abnormally,
-            # e.g. failed to launch cluster after reaching the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous job status: {job_status.value}')
-                managed_job_state.set_failed(
-                    self._job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {self._job_id}'))
-
-            scheduler.job_done(self._job_id)
 
     def _update_failed_task_state(
             self, task_id: int,
@@ -801,13 +757,24 @@ async def _cleanup(job_id: int, dag_yaml: str):
 async def run_job_loop(job_id: int, dag_yaml: str):
     """Background task that runs the job loop."""
     logger.info(f'Starting job loop for {job_id}')
-    loop_start_time = time.time()
 
     try:
         controller = JobsController(job_id, dag_yaml)
         await controller.run()
     except asyncio.CancelledError:
         logger.info(f'Job {job_id} was cancelled')
+        dag, _ = _get_dag_and_name(dag_yaml)
+        task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
+        assert task_id is not None, job_id
+        logger.info(f'Cancelling managed job, job_id: {job_id}, '
+                    f'task_id: {task_id}')
+        managed_job_state.set_cancelling(
+            job_id=job_id,
+            callback_func=managed_job_utils.event_callback_func(
+                job_id=job_id,
+                task_id=task_id,
+                task=dag.tasks[task_id]))
+        cancelling = True
         raise
     except Exception as e:
         logger.error(f'Unexpected error in job loop for {job_id}: '
@@ -815,9 +782,36 @@ async def run_job_loop(job_id: int, dag_yaml: str):
         logger.debug(f'Job loop exception traceback: {traceback.format_exc()}')
         raise
     finally:
-        loop_total_time = time.time() - loop_start_time
-        logger.info(f'Job loop ended for {job_id} after {loop_total_time:.2f}s')
+        await _cleanup(job_id, dag_yaml=dag_yaml)
+        logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
+        if cancelling:
+            # Since it's set with cancelling
+            assert task_id is not None, job_id
+            managed_job_state.set_cancelled(
+                job_id=job_id,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
+
+        # We should check job status after 'set_cancelled', otherwise
+        # the job status is not terminal.
+        job_status = managed_job_state.get_status(job_id)
+        assert job_status is not None
+        # The job can be non-terminal if the controller exited abnormally,
+        # e.g. failed to launch cluster after reaching the MAX_RETRY.
+        if not job_status.is_terminal():
+            logger.info(f'Previous job status: {job_status.value}')
+            managed_job_state.set_failed(
+                job_id,
+                task_id=None,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
+                failure_reason=('Unexpected error occurred. For details, '
+                                f'run: sky jobs logs --controller {job_id}'))
+
+        scheduler.job_done(job_id)
+
+        # Remove the job from the job_tasks dictionary.
         async with _job_tasks_lock:
             if job_id in job_tasks:
                 del job_tasks[job_id]
@@ -870,7 +864,7 @@ async def cancel_job(job_id: int):
                 logger.debug(f'Removed task for job {job_id} from job_tasks')
 
     # Run the cancellation in the background, so we can return immediately.
-    await asyncio.create_task(_cancel_task(task))
+    asyncio.create_task(_cancel_task(task))
     logger.info(f'Job {job_id} cancelled successfully')
 
 

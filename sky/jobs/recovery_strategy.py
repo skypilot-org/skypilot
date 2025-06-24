@@ -17,6 +17,7 @@ from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.client import sdk
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -293,16 +294,18 @@ class StrategyExecutor:
                         # Detach setup, so that the setup failure can be
                         # detected by the controller process (job_status ->
                         # FAILED_SETUP).
-                        execution.launch(
+                        request_id = sdk.launch(
                             self.dag,
                             cluster_name=self.cluster_name,
-                            # We expect to tear down the cluster as soon as the
-                            # job is finished. However, in case the controller
-                            # dies, set autodown to try and avoid a resource
-                            # leak.
                             idle_minutes_to_autostop=_AUTODOWN_MINUTES,
                             down=True,
-                            _is_launched_by_jobs_controller=True)
+                            _is_launched_by_jobs_controller=True
+                        )
+                        # would be nice to have the async version of this,
+                        # however, scheduled_launch uses scheduler functions
+                        # that acquire filelocks, no async file lock exists
+                        # so it would have to be run in a coroutine anyway.
+                        sdk.get(request_id)
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
