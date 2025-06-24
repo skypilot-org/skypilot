@@ -26,6 +26,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
+import { relativeTime } from '@/components/utils';
 import {
   RotateCwIcon,
   PenIcon,
@@ -1375,19 +1376,20 @@ function ServiceAccountTokensView({
     fetchTokens();
   }, []);
 
-  // Format date
+  // Format date using relative time (same as clusters.jsx)
   const formatDate = (timestamp) => {
     if (!timestamp) return 'Never';
-    return new Date(timestamp * 1000).toLocaleString();
+    // Convert seconds to milliseconds for Date constructor
+    return relativeTime(new Date(timestamp * 1000).toISOString());
   };
 
-  // Format expiration
+  // Format expiration using relative time
   const formatExpiration = (timestamp) => {
     if (!timestamp) return 'Never';
     const date = new Date(timestamp * 1000);
     const now = new Date();
     if (date < now) return 'Expired';
-    return date.toLocaleString();
+    return relativeTime(date.toISOString());
   };
 
   // Copy to clipboard
@@ -1518,70 +1520,103 @@ function ServiceAccountTokensView({
             No service account tokens
           </h3>
           <p className="mt-1 text-sm text-gray-500">
-            Get started by creating your first API token.
+            {userRoleCache?.role === 'admin' 
+              ? 'No service account tokens have been created by any users yet.'
+              : 'Get started by creating your first API token.'}
           </p>
+          {userRoleCache?.role === 'admin' && (
+            <p className="mt-2 text-xs text-gray-400">
+              As an admin, you can view and manage tokens created by all users.
+            </p>
+          )}
         </div>
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Token Name</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Last Used</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tokens.map((token) => (
-                <TableRow key={token.token_id}>
-                  <TableCell
-                    className="truncate font-medium"
-                    title={token.token_name}
-                  >
-                    {token.token_name}
-                  </TableCell>
-                  <TableCell className="truncate">
-                    {formatDate(token.created_at)}
-                  </TableCell>
-                  <TableCell className="truncate">
-                    {formatDate(token.last_used_at)}
-                  </TableCell>
-                  <TableCell className="truncate">
-                    <span
-                      className={
-                        token.expires_at &&
-                        new Date(token.expires_at * 1000) < new Date()
-                          ? 'text-red-600'
-                          : ''
-                      }
-                    >
-                      {formatExpiration(token.expires_at)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      onClick={() => {
-                        checkPermissionAndAct(
-                          'cannot delete service account tokens',
-                          () => {
-                            setTokenToDelete(token);
-                            setShowDeleteDialog(true);
-                          }
-                        );
-                      }}
-                      className="text-red-600 hover:text-red-800"
-                      title="Delete Token"
-                    >
-                      <Trash2Icon className="h-4 w-4" />
-                    </button>
-                  </TableCell>
+        <>
+          {userRoleCache?.role === 'admin' && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+              <p className="text-sm text-blue-700">
+                <strong>Admin View:</strong> You can see and manage service account tokens from all users. 
+                Tokens marked with "Other" are owned by other users.
+              </p>
+            </div>
+          )}
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Token Name</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Last Used</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+              </TableHeader>
+              <TableBody>
+                {tokens.map((token) => (
+                  <TableRow key={token.token_id}>
+                    <TableCell
+                      className="truncate"
+                      title={token.token_name}
+                    >
+                      {token.token_name}
+                    </TableCell>
+                    <TableCell className="truncate">
+                      <div className="flex items-center">
+                        <span>{token.owner_name || 'You'}</span>
+                        {userRoleCache?.role === 'admin' && 
+                         token.user_hash !== userRoleCache?.id && (
+                          <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-600 rounded">
+                            Other
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="truncate">
+                      {formatDate(token.created_at)}
+                    </TableCell>
+                    <TableCell className="truncate">
+                      {formatDate(token.last_used_at)}
+                    </TableCell>
+                    <TableCell className="truncate">
+                      <span
+                        className={
+                          token.expires_at &&
+                          new Date(token.expires_at * 1000) < new Date()
+                            ? 'text-red-600'
+                            : ''
+                        }
+                      >
+                        {formatExpiration(token.expires_at)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {/* Show delete button only if user owns the token or is admin */}
+                      {(userRoleCache?.role === 'admin' || 
+                        token.user_hash === userRoleCache?.id) && (
+                        <button
+                          onClick={() => {
+                            checkPermissionAndAct(
+                              'cannot delete service account tokens',
+                              () => {
+                                setTokenToDelete(token);
+                                setShowDeleteDialog(true);
+                              }
+                            );
+                          }}
+                          className="text-red-600 hover:text-red-800"
+                          title={`Delete ${token.token_name}`}
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
       )}
 
       {/* Create Token Dialog */}
@@ -1658,7 +1693,10 @@ function ServiceAccountTokensView({
             <DialogTitle>Delete Service Account Token</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete the token &quot;
-              {tokenToDelete?.token_name}&quot;? This action cannot be undone
+              {tokenToDelete?.token_name}&quot;
+              {tokenToDelete?.user_hash !== userRoleCache?.id && userRoleCache?.role === 'admin' 
+                ? ` owned by ${tokenToDelete?.owner_name}` 
+                : ''}? This action cannot be undone
               and will immediately revoke access for any systems using this
               token.
             </DialogDescription>

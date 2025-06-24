@@ -1528,3 +1528,20 @@ def remove_cluster_yaml(cluster_name: str):
         session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).delete()
         session.commit()
+
+
+@_init_db
+def get_all_service_account_tokens() -> List[Dict[str, Any]]:
+    """Get all service account tokens across all users (for admin access)."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).all()
+    return [{
+        'token_id': row.token_id,
+        'user_hash': row.user_hash,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+    } for row in rows]

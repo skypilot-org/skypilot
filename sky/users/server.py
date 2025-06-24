@@ -335,21 +335,45 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
 @router.get('/service-account-tokens')
 async def get_service_account_tokens(
         request: fastapi.Request) -> List[Dict[str, Any]]:
-    """Get all service account tokens for the current user."""
+    """Get service account tokens. Admins see all tokens, users see only their own."""
     auth_user = request.state.auth_user
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Authentication required')
 
-    tokens = global_user_state.get_user_service_account_tokens(auth_user.id)
-    # Don't return the token hash for security
-    return [{
-        'token_id': token['token_id'],
-        'token_name': token['token_name'],
-        'created_at': token['created_at'],
-        'last_used_at': token['last_used_at'],
-        'expires_at': token['expires_at'],
-    } for token in tokens]
+    # Check if user is admin
+    user_roles = permission.permission_service.get_user_roles(auth_user.id)
+    is_admin = user_roles and user_roles[0] == rbac.RoleName.ADMIN.value
+
+    if is_admin:
+        # Admin can see all tokens
+        tokens = global_user_state.get_all_service_account_tokens()
+    else:
+        # Regular users can only see their own tokens
+        tokens = global_user_state.get_user_service_account_tokens(auth_user.id)
+
+    # Add owner information and don't return the token hash for security
+    result = []
+    for token in tokens:
+        token_info = {
+            'token_id': token['token_id'],
+            'token_name': token['token_name'],
+            'created_at': token['created_at'],
+            'last_used_at': token['last_used_at'],
+            'expires_at': token['expires_at'],
+            'user_hash': token['user_hash'],  # Owner's user hash
+        }
+        
+        # Add owner display name if available
+        if is_admin or token['user_hash'] != auth_user.id:
+            owner_user = global_user_state.get_user(token['user_hash'])
+            token_info['owner_name'] = owner_user.name if owner_user else 'Unknown'
+        else:
+            token_info['owner_name'] = 'You'
+            
+        result.append(token_info)
+    
+    return result
 
 
 @router.post('/service-account-tokens')
@@ -411,21 +435,27 @@ async def create_service_account_token(
 async def delete_service_account_token(
         request: fastapi.Request,
         token_body: payloads.ServiceAccountTokenDeleteBody) -> Dict[str, str]:
-    """Delete a service account token."""
+    """Delete a service account token. Admins can delete any token, users can only delete their own."""
     auth_user = request.state.auth_user
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Authentication required')
 
-    # First verify the token belongs to the current user
+    # Get token info first
     token_info = global_user_state.get_service_account_token(
         token_body.token_id)
     if token_info is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
-    if token_info['user_hash'] != auth_user.id:
+    # Check if user is admin
+    user_roles = permission.permission_service.get_user_roles(auth_user.id)
+    is_admin = user_roles and user_roles[0] == rbac.RoleName.ADMIN.value
+
+    # Check permissions: admin can delete any token, users can only delete their own
+    if not is_admin and token_info['user_hash'] != auth_user.id:
         raise fastapi.HTTPException(
-            status_code=403, detail='You can only delete your own tokens')
+            status_code=403, 
+            detail='You can only delete your own tokens. Only admins can delete tokens owned by other users.')
 
     # Delete the token
     deleted = global_user_state.delete_service_account_token(
