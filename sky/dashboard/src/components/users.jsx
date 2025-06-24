@@ -51,7 +51,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
-import { ServiceAccounts } from '@/components/service-accounts';
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -529,7 +528,12 @@ export function Users() {
           currentUserId={userRoleCache?.id}
         />
       ) : (
-        <ServiceAccounts />
+        <ServiceAccountTokensView 
+          checkPermissionAndAct={checkPermissionAndAct}
+          userRoleCache={userRoleCache}
+          setCreateSuccess={setCreateSuccess}
+          setCreateError={setCreateError}
+        />
       )}
 
       {/* Create User Dialog */}
@@ -1304,3 +1308,351 @@ UsersTable.propTypes = {
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
 };
+
+// Service Account Tokens Management Component
+function ServiceAccountTokensView({ checkPermissionAndAct, userRoleCache, setCreateSuccess, setCreateError }) {
+  const [tokens, setTokens] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [tokenToDelete, setTokenToDelete] = useState(null);
+  const [newToken, setNewToken] = useState({
+    token_name: '',
+    expires_in_days: 30
+  });
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [createdToken, setCreatedToken] = useState(null);
+  const [copySuccess, setCopySuccess] = useState('');
+
+  // Fetch tokens
+  const fetchTokens = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.get('/users/service-account-tokens');
+      if (response.ok) {
+        const data = await response.json();
+        setTokens(data || []);
+      } else {
+        console.error('Failed to fetch tokens');
+        setTokens([]);
+      }
+    } catch (error) {
+      console.error('Error fetching tokens:', error);
+      setTokens([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTokens();
+  }, []);
+
+  // Format date
+  const formatDate = (timestamp) => {
+    if (!timestamp) return 'Never';
+    return new Date(timestamp * 1000).toLocaleString();
+  };
+
+  // Format expiration
+  const formatExpiration = (timestamp) => {
+    if (!timestamp) return 'Never';
+    const date = new Date(timestamp * 1000);
+    const now = new Date();
+    if (date < now) return 'Expired';
+    return date.toLocaleString();
+  };
+
+  // Copy to clipboard
+  const copyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess('Copied!');
+      setTimeout(() => setCopySuccess(''), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  // Handle create token
+  const handleCreateToken = async () => {
+    if (!newToken.token_name.trim()) {
+      setCreateError(new Error('Token name is required'));
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const payload = {
+        token_name: newToken.token_name.trim(),
+        expires_in_days: newToken.expires_in_days || null
+      };
+
+      const response = await apiClient.post('/users/service-account-tokens', payload);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setCreatedToken(data.token);
+        setCreateSuccess('Service account token created successfully!');
+        setShowCreateDialog(false);
+        setNewToken({ token_name: '', expires_in_days: 30 });
+        await fetchTokens();
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to create token');
+      }
+    } catch (error) {
+      setCreateError(error);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Handle delete token
+  const handleDeleteToken = async () => {
+    if (!tokenToDelete) return;
+
+    setDeleting(true);
+    try {
+      const response = await apiClient.delete('/users/service-account-tokens', {
+        token_id: tokenToDelete.token_id
+      });
+
+      if (response.ok) {
+        setCreateSuccess(`Token "${tokenToDelete.token_name}" deleted successfully!`);
+        setShowDeleteDialog(false);
+        setTokenToDelete(null);
+        await fetchTokens();
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete token');
+      }
+    } catch (error) {
+      setCreateError(error);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <CircularProgress size={32} />
+        <span className="ml-3">Loading tokens...</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-lg font-medium text-gray-900">Service Account Tokens</h3>
+          <p className="text-sm text-gray-500">
+            Manage API tokens for programmatic access to SkyPilot
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            checkPermissionAndAct('cannot create service account tokens', () => {
+              setShowCreateDialog(true);
+            });
+          }}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500"
+        >
+          <KeyRoundIcon className="h-4 w-4 mr-2" />
+          Create Token
+        </button>
+      </div>
+
+      {/* Created Token Display */}
+      {createdToken && (
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <h4 className="text-sm font-medium text-green-900 mb-2">
+            ⚠️ Token Created Successfully - Save This Token Now!
+          </h4>
+          <p className="text-sm text-green-700 mb-3">
+            This token will not be shown again. Please copy and store it securely.
+          </p>
+          <div className="flex items-center space-x-2">
+            <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
+              {createdToken}
+            </code>
+            <button
+              onClick={() => copyToClipboard(createdToken)}
+              className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              Copy
+            </button>
+          </div>
+          {copySuccess && (
+            <p className="text-sm text-green-600 mt-1">{copySuccess}</p>
+          )}
+          <button
+            onClick={() => setCreatedToken(null)}
+            className="mt-3 text-sm text-green-600 hover:text-green-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Tokens Table */}
+      {tokens.length === 0 ? (
+        <div className="text-center py-12">
+          <KeyRoundIcon className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No service account tokens</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Get started by creating your first API token.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white shadow rounded-lg overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Token Name</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Last Used</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tokens.map((token) => (
+                <TableRow key={token.token_id}>
+                  <TableCell className="font-medium">
+                    {token.token_name}
+                  </TableCell>
+                  <TableCell>
+                    {formatDate(token.created_at)}
+                  </TableCell>
+                  <TableCell>
+                    {formatDate(token.last_used_at)}
+                  </TableCell>
+                  <TableCell>
+                    <span className={token.expires_at && new Date(token.expires_at * 1000) < new Date() ? 'text-red-600' : ''}>
+                      {formatExpiration(token.expires_at)}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <button
+                      onClick={() => {
+                        checkPermissionAndAct('cannot delete service account tokens', () => {
+                          setTokenToDelete(token);
+                          setShowDeleteDialog(true);
+                        });
+                      }}
+                      className="text-red-600 hover:text-red-800"
+                      title="Delete Token"
+                    >
+                      <Trash2Icon className="h-4 w-4" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* Create Token Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Service Account Token</DialogTitle>
+            <DialogDescription>
+              Create a new API token for programmatic access to SkyPilot.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">
+                Token Name
+              </label>
+              <input
+                className="border rounded px-3 py-2 w-full"
+                placeholder="e.g., ci-pipeline, monitoring-system"
+                value={newToken.token_name}
+                onChange={(e) =>
+                  setNewToken({ ...newToken, token_name: e.target.value })
+                }
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-gray-700">
+                Expiration (days)
+              </label>
+              <input
+                type="number"
+                className="border rounded px-3 py-2 w-full"
+                placeholder="30"
+                min="1"
+                max="365"
+                value={newToken.expires_in_days || ''}
+                onChange={(e) =>
+                  setNewToken({ 
+                    ...newToken, 
+                    expires_in_days: e.target.value ? parseInt(e.target.value) : null 
+                  })
+                }
+              />
+              <p className="text-xs text-gray-500">
+                Leave empty for no expiration. Maximum 365 days.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => setShowCreateDialog(false)}
+              disabled={creating}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+              onClick={handleCreateToken}
+              disabled={creating || !newToken.token_name.trim()}
+            >
+              {creating ? 'Creating...' : 'Create Token'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Token Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Service Account Token</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the token &quot;{tokenToDelete?.token_name}&quot;? 
+              This action cannot be undone and will immediately revoke access for any systems using this token.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              onClick={() => {
+                setShowDeleteDialog(false);
+                setTokenToDelete(null);
+              }}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-red-600 text-white hover:bg-red-700 h-10 px-4 py-2"
+              onClick={handleDeleteToken}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Token'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

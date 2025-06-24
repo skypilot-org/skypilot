@@ -63,6 +63,9 @@ spec:
 
 {{/* Separate ingress for service account access to bypass OAuth2 proxy */}}
 {{- if and (index .Values.ingress "oauth2-proxy" "enabled") .Values.enableServiceAccountTokens }}
+{{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
+{{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
+{{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
