@@ -1631,13 +1631,15 @@ export function GPUs() {
         contextStats={contextStats}
         isSSH={true}
         actionButton={
-          <button
-            className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
-            onClick={handleAddSSHPool}
-          >
-            <PlusIcon className="w-4 h-4 mr-2" />
-            Add SSH Node Pool
-          </button>
+          // TODO: Add back when SSH Node Pool add operation is more robust
+          // <button
+          //   className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+          //   onClick={handleAddSSHPool}
+          // >
+          //   <PlusIcon className="w-4 h-4 mr-2" />
+          //   Add SSH Node Pool
+          // </button>
+          null
         }
       />
     );
