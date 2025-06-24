@@ -1574,7 +1574,7 @@ def check_network_connection():
 
 async def async_check_network_connection():
     """Check if the network connection is available.
-    
+
     Tolerates 3 retries as it is observed that connections can fail.
     Uses aiohttp for async HTTP requests.
     """

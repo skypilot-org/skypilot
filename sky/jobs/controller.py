@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import logging
 import os
-import pathlib
 import shutil
 import time
 import traceback
@@ -14,11 +13,12 @@ import typing
 from typing import Dict, Optional, Tuple
 
 from sky import exceptions
-from sky.backends import backend_utils, cloud_vm_ray_backend
+from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
 from sky.jobs import recovery_strategy
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
-from sky.jobs import utils
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -29,7 +29,6 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
-from sky.jobs import scheduler
 
 if typing.TYPE_CHECKING:
     import sky
@@ -67,8 +66,6 @@ class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
     def __init__(self, job_id: int, dag_yaml: str) -> None:
-        from sky.backends import cloud_vm_ray_backend
-
         logger.info(f'Initializing JobsController for job_id={job_id}, '
                     f'dag_yaml={dag_yaml}')
         start_time = time.time()
@@ -156,8 +153,8 @@ class JobsController:
 
             if log_file is not None:
                 logger.debug(f'Log file downloaded: {log_file}')
-                # Set the path of the log file for the current task, so it can be
-                # accessed even after the job is finished
+                # Set the path of the log file for the current task, so it can
+                # be accessed even after the job is finished
                 managed_job_state.set_local_log_file(self._job_id, task_id,
                                                      log_file)
                 logger.debug(
@@ -168,11 +165,11 @@ class JobsController:
                     f'No log file was downloaded for job {self._job_id}, '
                     f'task {task_id}')
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error during log download and stream: '
                          f'{common_utils.format_exception(e)}')
             logger.debug(
-                f"Log download exception traceback: {traceback.format_exc()}")
+                f'Log download exception traceback: {traceback.format_exc()}')
 
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
@@ -306,9 +303,10 @@ class JobsController:
                 f'Launching cluster for task {task_id} in separate thread')
             launch_start = time.time()
 
-            # Run the launch in a separate thread to avoid blocking the event loop
-            # The scheduler functions used internally already have their own file locks
-            remote_job_submitted_at = await utils.to_thread(
+            # Run the launch in a separate thread to avoid blocking the event
+            # loop. The scheduler functions used internally already have their
+            # own file locks.
+            remote_job_submitted_at = await managed_job_utils.to_thread(
                 self._strategy_executor.launch)
 
             launch_time = time.time() - launch_start
@@ -384,7 +382,7 @@ class JobsController:
             job_status = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await utils.to_thread(
+                    job_status = await managed_job_utils.to_thread(
                         managed_job_utils.get_job_status, self._backend,
                         cluster_name)
                     logger.debug(f'Job status for task {task_id}: {job_status}')
@@ -395,10 +393,9 @@ class JobsController:
                         f'Traceback: {traceback.format_exc()}')
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                logger.info(
-                    f'Task {task_id} succeeded! Getting end time and cleaning up'
-                )
-                success_end_time = await utils.to_thread(
+                logger.info(f'Task {task_id} succeeded!'
+                            'Getting end time and cleaning up')
+                success_end_time = await managed_job_utils.to_thread(
                     managed_job_utils.try_to_get_job_end_time, self._backend,
                     cluster_name)
                 # The job is done. Set the job to SUCCEEDED first before start
@@ -419,8 +416,8 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await utils.to_thread(self._download_log_and_stream,
-                                              task_id, handle)
+                        await managed_job_utils.to_thread(
+                            self._download_log_and_stream, task_id, handle)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -430,8 +427,8 @@ class JobsController:
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 logger.debug(f'Terminating cluster {cluster_name}')
-                await utils.to_thread(managed_job_utils.terminate_cluster,
-                                      cluster_name)
+                await managed_job_utils.to_thread(
+                    managed_job_utils.terminate_cluster, cluster_name)
 
                 task_total_time = time.time() - task_start_time
                 monitoring_time = time.time() - monitoring_start_time
@@ -495,7 +492,7 @@ class JobsController:
                     # The user code has probably crashed, fail immediately.
                     logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await utils.to_thread(
+                    end_time = await managed_job_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name)
                     logger.info(
@@ -503,8 +500,8 @@ class JobsController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await utils.to_thread(self._download_log_and_stream,
-                                          task_id, handle)
+                    await managed_job_utils.to_thread(
+                        self._download_log_and_stream, task_id, handle)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -515,7 +512,7 @@ class JobsController:
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         managed_job_status = (
                             managed_job_state.ManagedJobStatus.FAILED_SETUP)
-                        logger.debug(f"Task {task_id} failed during setup")
+                        logger.debug(f'Task {task_id} failed during setup')
                     elif job_status == job_lib.JobStatus.FAILED_DRIVER:
                         # FAILED_DRIVER is kind of an internal error, so we mark
                         # this as FAILED_CONTROLLER, even though the failure is
@@ -524,7 +521,7 @@ class JobsController:
                             managed_job_state.ManagedJobStatus.FAILED_CONTROLLER
                         )
                         logger.debug(
-                            f"Task {task_id} failed due to driver error")
+                            f'Task {task_id} failed due to driver error')
                         failure_reason = (
                             'The job driver on the remote cluster failed. This '
                             'can be caused by the job taking too much memory '
@@ -596,12 +593,12 @@ class JobsController:
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    await utils.to_thread(managed_job_utils.terminate_cluster,
-                                          cluster_name)
+                    await managed_job_utils.to_thread(
+                        managed_job_utils.terminate_cluster, cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
-            logger.info(f"Starting recovery for task {task_id}")
+            logger.info(f'Starting recovery for task {task_id}')
             managed_job_state.set_recovering(
                 job_id=self._job_id,
                 task_id=task_id,
@@ -609,11 +606,11 @@ class JobsController:
                 callback_func=callback_func)
 
             recovery_start = time.time()
-            await utils.to_thread(self._strategy_executor.recover)
+            await managed_job_utils.to_thread(self._strategy_executor.recover)
             recovery_time = time.time() - recovery_start
 
             logger.info(
-                f"Recovery completed for task {task_id} in {recovery_time:.2f}s"
+                f'Recovery completed for task {task_id} in {recovery_time:.2f}s'
             )
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
@@ -622,8 +619,7 @@ class JobsController:
 
     async def run(self):
         """Run controller logic and handle exceptions."""
-        logger.info(f"Starting JobsController run for job {self._job_id}")
-        run_start_time = time.time()
+        logger.info(f'Starting JobsController run for job {self._job_id}')
         task_id = 0
         cancelling = False
 
@@ -641,13 +637,13 @@ class JobsController:
                             f'with success={succeeded}')
 
                 if not succeeded:
-                    logger.info(f"Task {task_id} failed, stopping execution")
+                    logger.info(f'Task {task_id} failed, stopping execution')
                     break
 
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            logger.error(f"Provision prechecks failed for task {task_id}")
+            logger.error(f'Provision prechecks failed for task {task_id}')
             failure_reason = ('; '.join(
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
@@ -658,7 +654,7 @@ class JobsController:
         except exceptions.ManagedJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            logger.error(f"Managed job reached max retries for task {task_id}")
+            logger.error(f'Managed job reached max retries for task {task_id}')
             failure_reason = common_utils.format_exception(e)
             logger.error(failure_reason)
             # The managed job should be marked as FAILED_NO_RESOURCE, as the
@@ -668,7 +664,7 @@ class JobsController:
                 failure_reason)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(
-                f"Unexpected error in JobsController run for task {task_id}")
+                f'Unexpected error in JobsController run for task {task_id}')
             with ux_utils.enable_traceback():
                 logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: ' +
@@ -679,15 +675,17 @@ class JobsController:
                 msg)
         except asyncio.CancelledError:
             logger.info(f'Job {self._job_id} was cancelled')
-            dag, _ = _get_dag_and_name(self._dag_yaml)
-            task_id, _ = managed_job_state.get_latest_task_id_status(self._job_id)
+            task_id, _ = managed_job_state.get_latest_task_id_status(
+                self._job_id)
             assert task_id is not None, self._job_id
-            logger.info(
-                f'Cancelling managed job, job_id: {self._job_id}, task_id: {task_id}')
+            logger.info(f'Cancelling managed job, job_id: {self._job_id}, '
+                        f'task_id: {task_id}')
             managed_job_state.set_cancelling(
                 job_id=self._job_id,
                 callback_func=managed_job_utils.event_callback_func(
-                    job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id]))
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=self._dag.tasks[task_id]))
             cancelling = True
             raise
         finally:
@@ -700,14 +698,18 @@ class JobsController:
             # But anyway, a clean solution is killing the controller process
             # directly, and then cleanup the cluster job_state.
             await _cleanup(self._job_id, dag_yaml=self._dag_yaml)
-            logger.info(f'Cluster of managed job {self._job_id} has been cleaned up.')
+            logger.info(
+                f'Cluster of managed job {self._job_id} has been cleaned up.')
 
             if cancelling:
-                assert task_id is not None, self._job_id  # Since it's set with cancelling
+                # Since it's set with cancelling
+                assert task_id is not None, self._job_id
                 managed_job_state.set_cancelled(
                     job_id=self._job_id,
                     callback_func=managed_job_utils.event_callback_func(
-                        job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id]))
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        task=self._dag.tasks[task_id]))
 
             # We should check job status after 'set_cancelled', otherwise
             # the job status is not terminal.
@@ -722,8 +724,9 @@ class JobsController:
                     task_id=None,
                     failure_type=managed_job_state.ManagedJobStatus.
                     FAILED_CONTROLLER,
-                    failure_reason=('Unexpected error occurred. For details, '
-                                    f'run: sky jobs logs --controller {self._job_id}'))
+                    failure_reason=(
+                        'Unexpected error occurred. For details, '
+                        f'run: sky jobs logs --controller {self._job_id}'))
 
             scheduler.job_done(self._job_id)
 
@@ -761,7 +764,8 @@ async def _cleanup(job_id: int, dag_yaml: str):
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
-        await utils.to_thread(managed_job_utils.terminate_cluster, cluster_name)
+        await managed_job_utils.to_thread(managed_job_utils.terminate_cluster,
+                                          cluster_name)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -771,8 +775,9 @@ async def _cleanup(job_id: int, dag_yaml: str):
         # controller machine, only storage metadata is sent, not the storage
         # object itself.
         for storage in task.storage_mounts.values():
-            await utils.to_thread(storage.construct)
-        await utils.to_thread(backend.teardown_ephemeral_storage, task)
+            await managed_job_utils.to_thread(storage.construct)
+        await managed_job_utils.to_thread(backend.teardown_ephemeral_storage,
+                                          task)
 
         # Clean up any files mounted from the local disk, such as two-hop file
         # mounts.
@@ -795,7 +800,7 @@ async def _cleanup(job_id: int, dag_yaml: str):
 
 async def run_job_loop(job_id: int, dag_yaml: str):
     """Background task that runs the job loop."""
-    logger.info(f"Starting job loop for {job_id}")
+    logger.info(f'Starting job loop for {job_id}')
     loop_start_time = time.time()
 
     try:
@@ -821,7 +826,7 @@ async def run_job_loop(job_id: int, dag_yaml: str):
 
 async def start_job(job_id: int, dag_yaml: str):
     """Start a new job."""
-    logger.info(f"Starting job {job_id} with dag_yaml={dag_yaml}")
+    logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}')
 
     async with _job_tasks_lock:
         if job_id in job_tasks:
@@ -856,14 +861,14 @@ async def cancel_job(job_id: int):
         try:
             await task  # Wait for the task to be cancelled
         except asyncio.CancelledError:
-            logger.debug(
-                f'Task for job {job_id} was successfully cancelled')
+            logger.debug(f'Task for job {job_id} was successfully cancelled')
             pass  # Expected when task is cancelled
 
         async with _job_tasks_lock:
             if job_id in job_tasks:
                 del job_tasks[job_id]
                 logger.debug(f'Removed task for job {job_id} from job_tasks')
+
     # Run the cancellation in the background, so we can return immediately.
     await asyncio.create_task(_cancel_task(task))
     logger.info(f'Job {job_id} cancelled successfully')

@@ -440,8 +440,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
         elif pid == -1:
-            logger.debug(
-                f'Controller pid is -1 for consolidated job controller')
+            logger.debug('Controller pid is -1 for consolidated job controller')
             continue
         else:
             logger.debug(f'Checking controller pid {pid}')
@@ -632,8 +631,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             try:
                 requests.post(f'http://localhost:8000/cancel/{job_id}')
             except requests.exceptions.RequestException as e:
-                logger.error(f"Failed to cancel job {job_id} "
-                             f"with controller server: {e}")
+                logger.error(f'Failed to cancel job {job_id} '
+                             f'with controller server: {e}')
                 continue
             continue
 
@@ -1609,9 +1608,9 @@ class ManagedJobCodeGen:
 
 
 async def to_thread(func, /, *args, **kwargs):
-    """
-    This is an identical copy of asyncio.to_thread, however, asyncio.to_thread
-    was added in python 3.9, so we use this for compatibility for 3.7 and 3.8.
+    """This is an identical copy of asyncio.to_thread, however,
+    asyncio.to_thread was added in python 3.9, so we use this for compatibility
+    for 3.7 and 3.8.
 
     For full documentation, see:
     https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread

@@ -40,8 +40,8 @@ from argparse import ArgumentParser
 import contextlib
 from functools import lru_cache
 import os
-import threading
 import sys
+import threading
 import time
 import typing
 
@@ -99,15 +99,16 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
-    pid_path = os.path.expanduser(f'~/.sky/job_controller_pid')
+    pid_path = os.path.expanduser('~/.sky/job_controller_pid')
     to_start = False
     # TODO(luca): add an unlocked path first as a short circuit to ignore this
     try:
-        with filelock.FileLock(
-            _JOB_CONTROLLER_PID_LOCK, blocking=False, timeout=1):
+        with filelock.FileLock(_JOB_CONTROLLER_PID_LOCK,
+                               blocking=False,
+                               timeout=1):
             try:
                 if os.path.exists(pid_path):
-                    with open(pid_path, 'r') as f:
+                    with open(pid_path, 'r', encoding='utf-8') as f:
                         pid = int(f.read())
                         if subprocess_utils.is_process_alive(pid):
                             logger.debug(
@@ -116,8 +117,9 @@ def _start_controller(job_id: int, dag_yaml_path: str,
                             to_start = True
                 else:
                     to_start = True
-            except Exception as e:
-                logger.error(f'Error checking if job {job_id} is already started: {e}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(
+                    f'Error checking if job {job_id} is already started: {e}')
                 to_start = True
                 # Starting the server might error in case its already running.
                 # But that should be fine since at least we will have one
@@ -126,7 +128,6 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         # If we can't get the lock, just exit. The process holding the lock
         # should launch any pending jobs.
         pass
-
 
     if to_start:
         activate_python_env_cmd = (
@@ -159,10 +160,10 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     )
     for attempt in range(max_retries):
         try:
-            res = requests.post(f'http://localhost:8000/create',
+            res = requests.post('http://localhost:8000/create',
                                 json=req.model_dump())
             break
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             if attempt == max_retries - 1:
                 raise
             delay = base_delay * (2**attempt)
@@ -361,12 +362,8 @@ def _set_alive_waiting(job_id: int) -> None:
 
 
 def _get_job_parallelism() -> int:
-    job_memory = JOB_MEMORY_MB * 1024 * 1024
-
-    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
-
+    # TODO(luca): Tune this value.
     return 1000
-    # return max(job_limit, 1)
 
 
 def _get_launch_parallelism() -> int:
