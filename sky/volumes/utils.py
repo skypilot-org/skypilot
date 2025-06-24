@@ -6,8 +6,6 @@ from typing import Any, Dict, List
 import prettytable
 
 from sky import sky_logging
-from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.volumes import volume
 
@@ -34,11 +32,11 @@ class PVCVolumeTable(VolumeTable):
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
         #  If show_all is True, show the table with the columns:
-        #   NAME, TYPE, CONTEXT, NAMESPACE, SIZE, USER_HASH, WORKSPACE,
-        #   LAUNCHED, LAST_ATTACHED, LAST_USE(Truncated), STATUS
+        #   NAME, TYPE, CONTEXT, NAMESPACE, SIZE, USER, WORKSPACE,
+        #   AGE, LAST_USE, STATUS
         #  If show_all is False, show the table with the columns:
-        #   NAME, TYPE, CONTEXT, NAMESPACE, SIZE, USER_HASH, WORKSPACE,
-        #   LAUNCHED, LAST_ATTACHED, LAST_USE, STATUS, NAME_ON_CLOUD,
+        #   NAME, TYPE, CONTEXT, NAMESPACE, SIZE, USER, WORKSPACE,
+        #   AGE, LAST_USE, STATUS, NAME_ON_CLOUD,
         #   STORAGE_CLASS, ACCESS_MODE
 
         if show_all:
@@ -48,10 +46,9 @@ class PVCVolumeTable(VolumeTable):
                 'CONTEXT',
                 'NAMESPACE',
                 'SIZE',
-                'USER_HASH',
+                'USER',
                 'WORKSPACE',
-                'LAUNCHED',
-                'LAST_ATTACHED',
+                'AGE',
                 'STATUS',
                 'LAST_USE',
                 'NAME_ON_CLOUD',
@@ -65,10 +62,9 @@ class PVCVolumeTable(VolumeTable):
                 'CONTEXT',
                 'NAMESPACE',
                 'SIZE',
-                'USER_HASH',
+                'USER',
                 'WORKSPACE',
-                'LAUNCHED',
-                'LAST_ATTACHED',
+                'AGE',
                 'STATUS',
                 'LAST_USE',
             ]
@@ -98,23 +94,18 @@ class PVCVolumeTable(VolumeTable):
                 row.get('region', ''),
                 row.get('config', {}).get('namespace', ''),
                 size,
-                row.get('user_hash', ''),
+                row.get('user_name', ''),
                 row.get('workspace', ''),
                 log_utils.readable_time_duration(row.get('launched_at', 0)),
-                last_attached_at_str,
                 row.get('status', ''),
+                last_attached_at_str,
             ]
             if show_all:
-                table_row.append(row.get('last_use', ''))
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', ''))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
-            else:
-                table_row.append(
-                    common_utils.truncate_long_string(
-                        row.get('last_use', ''),
-                        constants.LAST_USE_TRUNC_LENGTH))
+
             self.table.add_row(table_row)
 
     def format(self) -> str:

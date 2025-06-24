@@ -86,7 +86,6 @@ class TestPVCVolumeTable:
 
         assert isinstance(result, str)
         assert 'test-volume-1' in result
-        assert 'sky volumes apply' in result
         assert 'test-volume-1-abc123' in result
         assert 'gp2' in result
         assert 'ReadWriteOnce' in result
@@ -239,7 +238,6 @@ class TestFormatVolumeTable:
 
         assert isinstance(result, str)
         assert 'test-volume-1' in result
-        assert 'sky volumes apply' in result
         assert 'test-volume-1-abc123' in result
         assert 'gp2' in result
         assert 'ReadWriteOnce' in result

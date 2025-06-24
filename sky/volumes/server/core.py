@@ -72,6 +72,8 @@ def volume_list() -> List[Dict[str, Any]]:
         ]
     """
     volumes = global_user_state.get_volumes()
+    all_users = global_user_state.get_all_users()
+    user_map = {user.id: user.name for user in all_users}
     records = []
     for volume in volumes:
         volume_name = volume.get('name')
@@ -79,6 +81,7 @@ def volume_list() -> List[Dict[str, Any]]:
             'name': volume_name,
             'launched_at': volume.get('launched_at'),
             'user_hash': volume.get('user_hash'),
+            'user_name': user_map.get(volume.get('user_hash'), ''),
             'workspace': volume.get('workspace'),
             'last_attached_at': volume.get('last_attached_at'),
             'last_use': volume.get('last_use'),

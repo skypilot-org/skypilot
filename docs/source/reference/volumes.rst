@@ -68,7 +68,8 @@ Creating a PVC volume
 
      resources:
        cpus: 4+
-       num_nodes: 2
+
+     num_nodes: 2
 
      volumes:
        /mnt/data: new-pvc
@@ -86,8 +87,19 @@ Example output:
 
 .. code-block:: text
 
-  NAME     TYPE  CONTEXT          NAMESPACE  SIZE  USER_HASH  WORKSPACE  LAUNCHED     LAST_ATTACHED        STATUS   LAST_USE
-  new-pvc  pvc   nebius-mk8s-vol  default    1Gi   73ec42f2   default    56 secs ago  2025-06-23 14:42:17  IN_USE   sky volumes apply --name ...
+  NAME     TYPE     CONTEXT          NAMESPACE  SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE
+  new-pvc  k8s-pvc  nebius-mk8s-vol  default    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32
+
+.. code-block:: bash
+
+  sky volumes ls -v
+
+Example output:
+
+.. code-block:: text
+
+  NAME     TYPE     CONTEXT          NAMESPACE  SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE             NAME_ON_CLOUD            STORAGE_CLASS           ACCESS_MODE
+  new-pvc  k8s-pvc  nebius-mk8s-vol  default    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32  new-pvc-73ec42f2-5c6c4e  csi-mounted-fs-path-sc  ReadWriteMany
 
 Delete a volume:
 
@@ -109,7 +121,7 @@ You'll be prompted to confirm the deletion:
 Volumes on GCP
 --------------
 
-Volumes are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
+Volumes on GCP are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
 
 There are three ways to mount volumes:
 
