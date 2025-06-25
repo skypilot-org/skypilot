@@ -114,8 +114,7 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
             return original_func(url, *args, **kwargs)
 
     # Use monkeypatch to replace `requests.post` and `requests.get`
-    monkeypatch.setattr(requests, 
-                        'request', mock_http_request)
+    monkeypatch.setattr(requests, 'request', mock_http_request)
 
 
 # Define helper functions at module level for pickleability
