@@ -159,8 +159,7 @@ class Server(uvicorn.Server):
     def run(self, *args, **kwargs):
         """Run the server process."""
         context_utils.hijack_sys_attrs()
-        with self.capture_signals():
-            asyncio.run(self.serve(*args, **kwargs))
+        super().run(*args, **kwargs)
 
 
 def run(config: uvicorn.Config):
