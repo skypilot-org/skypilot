@@ -64,8 +64,9 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             msg = (
-                f'{colorama.Fore.YELLOW}API server is temporarily: upgrade in '
-                f'progress. Waiting to resume...{colorama.Style.RESET_ALL}')
+                f'{colorama.Fore.YELLOW}API server is temporarily unavailable: '
+                'upgrade in progress. Waiting to resume...'
+                f'{colorama.Style.RESET_ALL}')
             backoff = common_utils.Backoff(
                 initial_backoff=initial_backoff,
                 max_backoff_factor=max_backoff_factor)
