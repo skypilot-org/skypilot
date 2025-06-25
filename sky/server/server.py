@@ -52,6 +52,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
 from sky.users import server as users_rest
@@ -547,6 +548,9 @@ app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
 app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
+app.include_router(ssh_node_pools_rest.router,
+                   prefix='/ssh_node_pools',
+                   tags=['ssh_node_pools'])
 
 
 @app.get('/token')
@@ -1252,33 +1256,6 @@ async def local_down(request: fastapi.Request) -> None:
         request_name='local_down',
         request_body=payloads.RequestBody(),
         func=core.local_down,
-        schedule_type=requests_lib.ScheduleType.LONG,
-    )
-
-
-@app.post('/ssh_up')
-async def ssh_up(request: fastapi.Request,
-                 ssh_up_body: payloads.SSHUpBody) -> None:
-    """Deploys a Kubernetes cluster on SSH targets."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='ssh_up',
-        request_body=ssh_up_body,
-        func=core.ssh_up,
-        schedule_type=requests_lib.ScheduleType.LONG,
-    )
-
-
-@app.post('/ssh_down')
-async def ssh_down(request: fastapi.Request,
-                   ssh_up_body: payloads.SSHUpBody) -> None:
-    """Tears down a Kubernetes cluster on SSH targets."""
-    # We still call ssh_up but with cleanup=True
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='ssh_down',
-        request_body=ssh_up_body,
-        func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
         schedule_type=requests_lib.ScheduleType.LONG,
     )
 
