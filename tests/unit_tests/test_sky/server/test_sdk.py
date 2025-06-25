@@ -75,15 +75,18 @@ def test_cookie_jar_file(set_api_cookie_jar):
 
 
 def test_api_info():
-    with mock.patch('sky.server.rest.get') as mock_get:
-        mock_get.return_value.json.return_value = {
+    with mock.patch('sky.server.common.make_authenticated_request') as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {
             "status": "healthy",
             "api_version": "1",
             "commit": "abc1234567890",
             "version": "1.0.0",
         }
-        mock_get.return_value.raise_for_status.return_value = None
-        mock_get.return_value.cookies = requests.cookies.RequestsCookieJar()
+        mock_response.raise_for_status.return_value = None
+        mock_response.cookies = requests.cookies.RequestsCookieJar()
+        mock_make_request.return_value = mock_response
+        
         with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
                        ) as mock_server_healthy:
             mock_server_healthy.return_value = None
@@ -93,23 +96,23 @@ def test_api_info():
             assert response["api_version"] == "1"
             assert response["commit"] is not None
             assert response["version"] is not None
-            assert mock_get.call_count == 1
-            assert mock_get.call_args[0][0].endswith("/api/health")
-            assert mock_get.call_args[1]["cookies"] is not None
-            assert isinstance(mock_get.call_args[1]["cookies"],
-                              requests.cookies.RequestsCookieJar)
+            assert mock_make_request.call_count == 1
+            assert mock_make_request.call_args[0] == ('GET', '/api/health')
 
 
 def test_api_info_with_cookie_file(set_api_cookie_jar):
-    with mock.patch('sky.server.rest.get') as mock_get:
-        mock_get.return_value.json.return_value = {
+    with mock.patch('sky.server.common.make_authenticated_request') as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {
             "status": "healthy",
             "api_version": "1",
             "commit": "abc1234567890",
             "version": "1.0.0",
         }
-        mock_get.return_value.raise_for_status.return_value = None
-        mock_get.return_value.cookies = requests.cookies.RequestsCookieJar()
+        mock_response.raise_for_status.return_value = None
+        mock_response.cookies = requests.cookies.RequestsCookieJar()
+        mock_make_request.return_value = mock_response
+        
         with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
                        ) as mock_server_healthy:
             mock_server_healthy.return_value = None
@@ -119,13 +122,8 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
             assert response["api_version"] == "1"
             assert response["commit"] is not None
             assert response["version"] is not None
-            assert mock_get.call_count == 1
-            assert mock_get.call_args[0][0].endswith("/api/health")
-            assert mock_get.call_args[1]["cookies"] is not None
-            assert isinstance(mock_get.call_args[1]["cookies"],
-                              requests.cookies.RequestsCookieJar)
-            assert mock_get.call_args[1]["cookies"].get(
-                "user_name", domain="api.skypilot.co") == "sky-user"
+            assert mock_make_request.call_count == 1
+            assert mock_make_request.call_args[0] == ('GET', '/api/health')
 
 
 def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
