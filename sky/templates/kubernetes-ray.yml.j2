@@ -282,6 +282,8 @@ available_node_types:
             kueue.x-k8s.io/retriable-in-group: "false"
             kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
         {% endif %}
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx 
+        # Values from google cloud guide
         {% if k8s_enable_gpudirect_tcpx %}
         annotations:
           devices.gke.io/container.tcpx-daemon: |+
