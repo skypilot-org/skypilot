@@ -25,6 +25,7 @@ A collection of examples demonstrating the use cases of SkyPilot.
    Other Frameworks <frameworks/index>
    AI Applications <applications/index>
    AI Performance <performance/index>
+   Trigger based Tasks <periodic-and-trigger/index>
 
 .. _examples-contribute:
 
@@ -51,4 +52,3 @@ We welcome contributions from the community. Instructions below:
       - ``git add index.rst my-llm.md``
 
    5. Build the docs as usual.
-

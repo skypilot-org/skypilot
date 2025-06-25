@@ -10,6 +10,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 
 @registry.CLOUD_REGISTRY.register
@@ -155,13 +156,15 @@ class Vast(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name, num_nodes  # unused
 
         resources = resources.assert_launchable()
