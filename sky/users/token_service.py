@@ -191,10 +191,5 @@ class TokenService:
             logger.warning(f'Invalid token: {e}')
             return None
 
-    def get_token_hash(self, token: str) -> str:
-        """Get hash of a token for database lookup."""
-        return hashlib.sha256(token.encode()).hexdigest()
-
-
 # Singleton instance
 token_service = TokenService()
