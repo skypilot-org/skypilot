@@ -97,6 +97,13 @@ Delete a volume with ``sky volumes delete``:
 
 If the volume is in use, it will be marked as ``IN_USE`` and cannot be deleted.
 
+You can also check the volumes in the SkyPilot dashboard.
+
+.. figure:: ../images/volumes.png
+    :alt: SkyPilot volumes
+    :align: center
+    :width: 80%
+
 Volumes on GCP
 --------------
 
