@@ -71,7 +71,7 @@ spec:
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
         {{- if .Values.apiService.dbConnectionSecretName }}
-        - name: SKYPILOT_DB_CONNECTION_STRING
+        - name: SKYPILOT_DB_CONNECTION_URI
           valueFrom:
             secretKeyRef:
               name: {{ .Values.apiService.dbConnectionSecretName }}
