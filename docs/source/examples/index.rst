@@ -25,7 +25,7 @@ A collection of examples demonstrating the use cases of SkyPilot.
    Other Frameworks <frameworks/index>
    AI Applications <applications/index>
    AI Performance <performance/index>
-   Periodic and Trigger based Tasks <periodic-and-trigger/index>
+   Trigger based Tasks <periodic-and-trigger/index>
 
 .. _examples-contribute:
 
