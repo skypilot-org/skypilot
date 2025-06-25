@@ -1553,6 +1553,43 @@ async def all_contexts(request: fastapi.Request) -> None:
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
+@app.get('/gpu-metrics')
+async def gpu_metrics(request: fastapi.Request) -> None:
+    """Gets the GPU metrics from multiple external k8s clusters"""
+    from sky.metrics import utils as metrics_utils
+
+    contexts = core.get_all_contexts()
+
+    all_metrics = []
+    successful_contexts = 0
+
+    tasks = [
+        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
+        for context in contexts
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f'Failed to get metrics for context {contexts[i]}: {result}')
+        else:
+            metrics_text = result
+            all_metrics.append(metrics_text)
+            successful_contexts += 1
+
+    # For now, just print all metrics
+    # TODO(rohan): return structured response
+    # TODO(rohan): add cluster name as metrics label
+    combined_metrics = "\n\n".join(all_metrics)
+    print(combined_metrics)
+
+    return {
+        "status": "success",
+        "contexts_processed": successful_contexts,
+        "total_contexts": len(contexts),
+        "failed_contexts": len(contexts) - successful_contexts
+    }
 
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
