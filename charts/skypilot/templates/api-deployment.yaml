@@ -70,6 +70,13 @@ spec:
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
+        {{- if .Values.apiService.dbConnectionSecretName }}
+        - name: SKYPILOT_DB_CONNECTION_URI
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.apiService.dbConnectionSecretName }}
+              key: connection_string
+        {{- end }}
         - name: SKYPILOT_GRACE_PERIOD_SECONDS
           value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         # Use tini as the init process
