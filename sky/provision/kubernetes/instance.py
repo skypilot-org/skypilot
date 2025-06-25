@@ -853,10 +853,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 existing_rules)
             pod_spec_copy['spec']['affinity'] = pod_spec_config
 
-        # Check if any PVCs with access mode ReadWriteOnce or ReadWriteOncePod
-        # is used by any pod in the namespace.
-        volume.check_pvc_usage_for_pod(context, namespace, pod_spec_copy)
-
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU
         # slice nodes. We need this toleration to allow the pod to be scheduled
@@ -899,6 +895,10 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             except Exception as e:
                 print('Deployment failed', e)
                 raise e
+
+        # Check if any PVCs with access mode ReadWriteOnce or ReadWriteOncePod
+        # is used by any pod in the namespace.
+        volume.check_pvc_usage_for_pod(context, namespace, pod_spec_copy)
 
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
