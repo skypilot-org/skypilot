@@ -358,29 +358,14 @@ async def get_service_account_tokens(
 
     result = []
     for token in tokens:
-        token_info = {
-            'token_id': token['token_id'],
-            'token_name': token['token_name'],
-            'created_at': token['created_at'],
-            'last_used_at': token['last_used_at'],
-            'expires_at': token['expires_at'],
-            'creator_user_hash': token['creator_user_hash'],
-            'service_account_user_id': token['service_account_user_id'],
-        }
+        token_info = token.to_dict()
 
         # Add creator display name
-        creator_user = global_user_state.get_user(token['creator_user_hash'])
-        token_info[
-            'creator_name'] = creator_user.name if creator_user else 'Unknown'
-
-        # Add service account name
-        sa_user = global_user_state.get_user(token['service_account_user_id'])
-        token_info['service_account_name'] = (sa_user.name if sa_user else
-                                              token['token_name'])
+        creator_user = global_user_state.get_user(token.creator_user_hash)
+        token_info['creator_name'] = creator_user.name if creator_user else 'Unknown'
 
         # Add service account roles
-        roles = permission.permission_service.get_user_roles(
-            token['service_account_user_id'])
+        roles = permission.permission_service.get_user_roles(token.service_account_user_id)
         token_info['service_account_roles'] = roles
 
         result.append(token_info)
@@ -388,22 +373,16 @@ async def get_service_account_tokens(
     return result
 
 
-def _generate_service_account_user_id(token_name: str,
+def _generate_service_account_user_id(service_account_name: str,
                                       creator_user_id: str) -> str:
-    """Generate a unique user ID for a service account."""
-    # Create a deterministic yet unique ID based on creator and token name
-    # but add some randomness to avoid collisions
-    random_suffix = secrets.token_hex(8)  # 16 character hex string
-    # Use sa- prefix followed by first 8 chars of creator ID, token name, and
-    # random suffix.
-    # Limit total length to keep it manageable.
-    safe_token_name = re.sub(
-        r'[^a-zA-Z0-9]', '',
-        token_name)[:8]  # Remove special chars, limit length
-    creator_prefix = creator_user_id[:8]  # First 8 chars of creator ID
-    service_account_id = (f'sa-{creator_prefix}-{safe_token_name}-'
-                          f'{random_suffix}')
-    return service_account_id
+    """Generate a deterministic user ID for a service account.
+    
+    This creates a stable service account ID that allows multiple tokens
+    to be created for the same service account.
+    """
+    # Use the model method for consistency
+    return models.ServiceAccount.generate_service_account_id(
+        service_account_name, creator_user_id)
 
 
 @router.post('/service-account-tokens')
@@ -420,6 +399,15 @@ async def create_service_account_token(
         raise fastapi.HTTPException(status_code=400,
                                     detail='Token name is required')
 
+    # Use service_account_name if provided, otherwise use token_name
+    service_account_name = (token_body.service_account_name.strip() 
+                           if token_body.service_account_name 
+                           else token_body.token_name.strip())
+
+    if not service_account_name:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Service account name cannot be empty')
+
     # Validate expiration (allow 0 as special value for "never expire")
     if (token_body.expires_in_days is not None and
             token_body.expires_in_days < 0):
@@ -432,20 +420,15 @@ async def create_service_account_token(
         # pylint: disable=import-outside-toplevel
         from sky.users.token_service import token_service
 
-        # Generate a unique service account user ID
-        service_account_user_id = _generate_service_account_user_id(
-            token_body.token_name.strip(), auth_user.id)
-
-        # Create a user entry for the service account
-        service_account_user = models.User(id=service_account_user_id,
-                                           name=token_body.token_name.strip())
-        global_user_state.add_or_update_user(service_account_user)
+        # Get or create the service account using the new model
+        service_account = global_user_state.get_or_create_service_account(
+            service_account_name, auth_user.id)
 
         # Add service account to permission system with default role
         # Import here to avoid circular imports
         # pylint: disable=import-outside-toplevel
         from sky.users.permission import permission_service
-        permission_service.add_user_if_not_exists(service_account_user_id)
+        permission_service.add_user_if_not_exists(service_account.id)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
@@ -455,26 +438,31 @@ async def create_service_account_token(
         # Create JWT-based token with service account user ID
         token_data = token_service.create_token(
             creator_user_id=auth_user.id,
-            service_account_user_id=service_account_user_id,
+            service_account_user_id=service_account.id,
             token_name=token_body.token_name.strip(),
             expires_in_days=expires_in_days)
 
-        # Store token metadata in database
-        global_user_state.add_service_account_token(
+        # Create the token model
+        token = models.ServiceAccountToken(
             token_id=token_data['token_id'],
             token_name=token_body.token_name.strip(),
             token_hash=token_data['token_hash'],
-            creator_user_hash=auth_user.id,
-            service_account_user_id=service_account_user_id,
-            expires_at=token_data['expires_at'])
+            service_account=service_account,
+            created_at=token_data['created_at'],
+            expires_at=token_data['expires_at']
+        )
+
+        # Store token in database using the new model-based function
+        global_user_state.add_service_account_token(token)
 
         # Return the JWT token only once (never stored in plain text)
         return {
             'token_id': token_data['token_id'],
             'token_name': token_body.token_name.strip(),
+            'service_account_name': service_account_name,
             'token': token_data['token'],  # Full JWT token with sky_ prefix
             'expires_at': token_data['expires_at'],
-            'service_account_user_id': service_account_user_id,
+            'service_account_user_id': service_account.id,
             'creator_user_id': auth_user.id,
             'message': 'Please save this token - it will not be shown again!'
         }
@@ -499,22 +487,20 @@ async def delete_service_account_token(
                                     detail='Authentication required')
 
     # Get token info first
-    token_info = global_user_state.get_service_account_token(
-        token_body.token_id)
-    if token_info is None:
+    token = global_user_state.get_service_account_token(token_body.token_id)
+    if token is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions using Casbin policy system
     if not permission.permission_service.check_service_account_token_permission(
-            auth_user.id, token_info['creator_user_hash'], 'delete'):
+            auth_user.id, token.creator_user_hash, 'delete'):
         raise fastapi.HTTPException(
             status_code=403,
             detail='You can only delete your own tokens. Only admins can '
             'delete tokens owned by other users.')
 
     # Delete the token
-    deleted = global_user_state.delete_service_account_token(
-        token_body.token_id)
+    deleted = global_user_state.delete_service_account_token(token_body.token_id)
     if not deleted:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
@@ -532,13 +518,13 @@ async def get_service_account_role(
                                     detail='Authentication required')
 
     # Get token info to find the service account user ID
-    token_info = global_user_state.get_service_account_token(role_body.token_id)
-    if token_info is None:
+    token = global_user_state.get_service_account_token(role_body.token_id)
+    if token is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions - only creator or admin can view roles
     if not permission.permission_service.check_service_account_token_permission(
-            auth_user.id, token_info['creator_user_hash'], 'view'):
+            auth_user.id, token.creator_user_hash, 'view'):
         raise fastapi.HTTPException(
             status_code=403,
             detail='You can only view roles for your own service accounts. '
@@ -546,13 +532,11 @@ async def get_service_account_role(
             'users.')
 
     # Get service account roles
-    service_account_user_id = token_info['service_account_user_id']
-    roles = permission.permission_service.get_user_roles(
-        service_account_user_id)
+    roles = permission.permission_service.get_user_roles(token.service_account_user_id)
 
     return {
         'token_id': role_body.token_id,
-        'service_account_user_id': service_account_user_id,
+        'service_account_user_id': token.service_account_user_id,
         'roles': roles
     }
 
@@ -569,13 +553,13 @@ async def update_service_account_role(
                                     detail='Authentication required')
 
     # Get token info to find the service account user ID
-    token_info = global_user_state.get_service_account_token(role_body.token_id)
-    if token_info is None:
+    token = global_user_state.get_service_account_token(role_body.token_id)
+    if token is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions - only creator or admin can update roles
     if not permission.permission_service.check_service_account_token_permission(
-            auth_user.id, token_info['creator_user_hash'], 'update'):
+            auth_user.id, token.creator_user_hash, 'update'):
         raise fastapi.HTTPException(
             status_code=403,
             detail='You can only update roles for your own service accounts. '
@@ -584,14 +568,13 @@ async def update_service_account_role(
 
     try:
         # Update service account role
-        service_account_user_id = token_info['service_account_user_id']
-        permission.permission_service.update_role(service_account_user_id,
+        permission.permission_service.update_role(token.service_account_user_id,
                                                   role_body.role)
 
         return {
             'message': f'Service account role updated to {role_body.role}',
             'token_id': role_body.token_id,
-            'service_account_user_id': service_account_user_id,
+            'service_account_user_id': token.service_account_user_id,
             'new_role': role_body.role
         }
     except Exception as e:  # pylint: disable=broad-except
@@ -615,14 +598,13 @@ async def rotate_service_account_token(
                                     detail='Authentication required')
 
     # Get token info
-    token_info = global_user_state.get_service_account_token(
-        token_body.token_id)
-    if token_info is None:
+    token = global_user_state.get_service_account_token(token_body.token_id)
+    if token is None:
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions - same as delete permission (only creator or admin)
     if not permission.permission_service.check_service_account_token_permission(
-            auth_user.id, token_info['creator_user_hash'], 'delete'):
+            auth_user.id, token.creator_user_hash, 'delete'):
         raise fastapi.HTTPException(
             status_code=403,
             detail='You can only rotate your own tokens. Only admins can '
@@ -648,10 +630,10 @@ async def rotate_service_account_token(
             expires_in_days = None
         elif expires_in_days is None:
             # No expiration specified, try to preserve original expiration
-            if token_info['expires_at']:
+            if token.expires_at:
                 import time
                 current_time = time.time()
-                remaining_seconds = token_info['expires_at'] - current_time
+                remaining_seconds = token.expires_at - current_time
                 if remaining_seconds > 0:
                     expires_in_days = max(1,
                                           int(remaining_seconds / (24 * 3600)))
@@ -661,9 +643,9 @@ async def rotate_service_account_token(
 
         # Generate new JWT token with same service account user ID
         token_data = token_service.create_token(
-            creator_user_id=token_info['creator_user_hash'],
-            service_account_user_id=token_info['service_account_user_id'],
-            token_name=token_info['token_name'],
+            creator_user_id=token.creator_user_hash,
+            service_account_user_id=token.service_account_user_id,
+            token_name=token.token_name,
             expires_in_days=expires_in_days)
 
         # Update token in database with new token hash
@@ -675,10 +657,10 @@ async def rotate_service_account_token(
         # Return the new JWT token only once (never stored in plain text)
         return {
             'token_id': token_body.token_id,
-            'token_name': token_info['token_name'],
+            'token_name': token.token_name,
             'token': token_data['token'],  # Full JWT token with sky_ prefix
             'expires_at': token_data['expires_at'],
-            'service_account_user_id': token_info['service_account_user_id'],
+            'service_account_user_id': token.service_account_user_id,
             'message': ('Token rotated successfully! Please save this new '
                         'token - it will not be shown again!')
         }
@@ -687,3 +669,44 @@ async def rotate_service_account_token(
         logger.error(f'Failed to rotate service account token: {e}')
         raise fastapi.HTTPException(
             status_code=500, detail='Failed to rotate service account token')
+
+
+@router.get('/service-account-tokens/by-service-account/{service_account_user_id}')
+async def get_service_account_tokens_by_service_account(
+        request: fastapi.Request,
+        service_account_user_id: str) -> List[Dict[str, Any]]:
+    """Get all tokens for a specific service account."""
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Authentication required')
+
+    # Get tokens for the specific service account
+    tokens = global_user_state.get_service_account_tokens_by_service_account_id(
+        service_account_user_id)
+
+    # Check permissions - only creator or admin can view tokens
+    for token in tokens:
+        if not permission.permission_service.check_service_account_token_permission(
+                auth_user.id, token.creator_user_hash, 'view'):
+            raise fastapi.HTTPException(
+                status_code=403,
+                detail='You can only view tokens for your own service accounts. '
+                'Only admins can view tokens for service accounts owned by other '
+                'users.')
+
+    result = []
+    for token in tokens:
+        token_info = token.to_dict()
+
+        # Add creator display name
+        creator_user = global_user_state.get_user(token.creator_user_hash)
+        token_info['creator_name'] = creator_user.name if creator_user else 'Unknown'
+
+        # Add service account roles
+        roles = permission.permission_service.get_user_roles(token.service_account_user_id)
+        token_info['service_account_roles'] = roles
+
+        result.append(token_info)
+
+    return result

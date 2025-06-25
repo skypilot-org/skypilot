@@ -361,6 +361,7 @@ class UserImportBody(RequestBody):
 class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
+    service_account_name: Optional[str] = None  # If not provided, use token_name
     expires_in_days: Optional[int] = None
 
 

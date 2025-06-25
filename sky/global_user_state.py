@@ -471,9 +471,323 @@ def get_user(user_id: str) -> Optional[models.User]:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
         return None
-    return models.User(id=row.id, name=row.name, password=row.password)
+    
+    # Check if this is a service account
+    if user_id.startswith('sa-'):
+        # Try to find the creator from any service account tokens
+        with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            token_row = session.query(service_account_token_table).filter_by(
+                service_account_user_id=user_id).first()
+        creator_user_hash = token_row.creator_user_hash if token_row else ""
+        
+        return models.ServiceAccount(
+            id=row.id, 
+            name=row.name, 
+            password=row.password,
+            creator_user_hash=creator_user_hash,
+            service_account_name=row.name
+        )
+    else:
+        return models.User(id=row.id, name=row.name, password=row.password)
 
 
+@_init_db
+def get_service_account_by_id(service_account_id: str) -> Optional[models.ServiceAccount]:
+    """Get a service account by its ID."""
+    user = get_user(service_account_id)
+    if user and user.is_service_account:
+        return user
+    return None
+
+
+@_init_db
+def get_or_create_service_account(service_account_name: str, creator_user_hash: str) -> models.ServiceAccount:
+    """Get an existing service account or create a new one."""
+    service_account_id = models.ServiceAccount.generate_service_account_id(
+        service_account_name, creator_user_hash
+    )
+    
+    existing_service_account = get_service_account_by_id(service_account_id)
+    if existing_service_account:
+        return existing_service_account
+    
+    # Create new service account
+    service_account = models.ServiceAccount.create_service_account(
+        service_account_name, creator_user_hash
+    )
+    add_or_update_user(service_account)
+    return service_account
+
+
+@_init_db
+def add_service_account_token(token: models.ServiceAccountToken) -> None:
+    """Add a service account token to the database."""
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(service_account_token_table).values(
+            token_id=token.token_id,
+            token_name=token.token_name,
+            token_hash=token.token_hash,
+            created_at=token.created_at,
+            expires_at=token.expires_at,
+            creator_user_hash=token.creator_user_hash,
+            service_account_user_id=token.service_account_user_id)
+        session.execute(insert_stmnt)
+        session.commit()
+
+
+@_init_db
+def get_service_account_token(token_id: str) -> Optional[models.ServiceAccountToken]:
+    """Get a service account token by token_id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(service_account_token_table).filter_by(
+            token_id=token_id).first()
+    if row is None:
+        return None
+    
+    # Get the associated service account
+    service_account = get_service_account_by_id(row.service_account_user_id)
+    if not service_account:
+        # Service account doesn't exist, create a placeholder
+        service_account = models.ServiceAccount(
+            id=row.service_account_user_id,
+            name="Unknown Service Account",
+            creator_user_hash=row.creator_user_hash,
+            service_account_name="Unknown Service Account"
+        )
+    
+    return models.ServiceAccountToken.from_db_record(
+        {
+            'token_id': row.token_id,
+            'token_name': row.token_name,
+            'token_hash': row.token_hash,
+            'created_at': row.created_at,
+            'last_used_at': row.last_used_at,
+            'expires_at': row.expires_at,
+        },
+        service_account
+    )
+
+
+@_init_db
+def get_user_service_account_tokens(user_hash: str) -> List[models.ServiceAccountToken]:
+    """Get all service account tokens for a user (as creator)."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).filter_by(
+            creator_user_hash=user_hash).all()
+    
+    tokens = []
+    for row in rows:
+        service_account = get_service_account_by_id(row.service_account_user_id)
+        if not service_account:
+            # Create placeholder service account
+            service_account = models.ServiceAccount(
+                id=row.service_account_user_id,
+                name="Unknown Service Account",
+                creator_user_hash=row.creator_user_hash,
+                service_account_name="Unknown Service Account"
+            )
+        
+        token = models.ServiceAccountToken.from_db_record(
+            {
+                'token_id': row.token_id,
+                'token_name': row.token_name,
+                'token_hash': row.token_hash,
+                'created_at': row.created_at,
+                'last_used_at': row.last_used_at,
+                'expires_at': row.expires_at,
+            },
+            service_account
+        )
+        tokens.append(token)
+    
+    return tokens
+
+
+@_init_db
+def get_service_account_tokens_by_service_account_id(
+        service_account_user_id: str) -> List[models.ServiceAccountToken]:
+    """Get all service account tokens for a specific service account user ID."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).filter_by(
+            service_account_user_id=service_account_user_id).all()
+    
+    service_account = get_service_account_by_id(service_account_user_id)
+    if not service_account and rows:
+        # Create placeholder service account
+        service_account = models.ServiceAccount(
+            id=service_account_user_id,
+            name="Unknown Service Account",
+            creator_user_hash=rows[0].creator_user_hash,
+            service_account_name="Unknown Service Account"
+        )
+    
+    tokens = []
+    for row in rows:
+        token = models.ServiceAccountToken.from_db_record(
+            {
+                'token_id': row.token_id,
+                'token_name': row.token_name,
+                'token_hash': row.token_hash,
+                'created_at': row.created_at,
+                'last_used_at': row.last_used_at,
+                'expires_at': row.expires_at,
+            },
+            service_account
+        )
+        tokens.append(token)
+    
+    return tokens
+
+
+@_init_db
+def get_all_service_account_tokens() -> List[models.ServiceAccountToken]:
+    """Get all service account tokens across all users (for admin access)."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).all()
+    
+    tokens = []
+    service_accounts_cache = {}  # Cache to avoid repeated queries
+    
+    for row in rows:
+        # Use cache to avoid repeated queries for same service account
+        if row.service_account_user_id not in service_accounts_cache:
+            service_account = get_service_account_by_id(row.service_account_user_id)
+            if not service_account:
+                # Create placeholder service account
+                service_account = models.ServiceAccount(
+                    id=row.service_account_user_id,
+                    name="Unknown Service Account",
+                    creator_user_hash=row.creator_user_hash,
+                    service_account_name="Unknown Service Account"
+                )
+            service_accounts_cache[row.service_account_user_id] = service_account
+        
+        service_account = service_accounts_cache[row.service_account_user_id]
+        token = models.ServiceAccountToken.from_db_record(
+            {
+                'token_id': row.token_id,
+                'token_name': row.token_name,
+                'token_hash': row.token_hash,
+                'created_at': row.created_at,
+                'last_used_at': row.last_used_at,
+                'expires_at': row.expires_at,
+            },
+            service_account
+        )
+        tokens.append(token)
+    
+    return tokens
+
+
+@_init_db
+def delete_service_account_token(token_id: str) -> bool:
+    """Delete a service account token.
+
+    Returns:
+        True if token was found and deleted.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.query(service_account_token_table).filter_by(
+            token_id=token_id).delete()
+        session.commit()
+    return result > 0
+
+
+@_init_db
+def rotate_service_account_token(token_id: str,
+                                 new_token_hash: str,
+                                 new_expires_at: Optional[int] = None) -> None:
+    """Rotate a service account token by updating its hash and expiration.
+
+    Args:
+        token_id: The token ID to rotate.
+        new_token_hash: The new hashed token value.
+        new_expires_at: New expiration timestamp, or None for no expiration.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(service_account_token_table).filter_by(
+            token_id=token_id
+        ).update({
+            service_account_token_table.c.token_hash: new_token_hash,
+            service_account_token_table.c.expires_at: new_expires_at,
+            service_account_token_table.c.last_used_at: None,  # Reset last used
+            # Update creation time
+            service_account_token_table.c.created_at: current_time,
+        })
+        session.commit()
+
+    if count == 0:
+        raise ValueError(f'Service account token {token_id} not found.')
+
+
+@_init_db
+def update_service_account_token_last_used(token_id: str) -> None:
+    """Update the last_used_at timestamp for a service account token."""
+    assert _SQLALCHEMY_ENGINE is not None
+    last_used_at = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(service_account_token_table).filter_by(
+            token_id=token_id).update(
+                {service_account_token_table.c.last_used_at: last_used_at})
+        session.commit()
+
+
+# Legacy function for backward compatibility
+@_init_db
+def add_service_account_token_legacy(token_id: str,
+                              token_name: str,
+                              token_hash: str,
+                              creator_user_hash: str,
+                              service_account_user_id: str,
+                              expires_at: Optional[int] = None) -> None:
+    """Legacy function to add a service account token to the database."""
+    # Get or create the service account
+    service_account = get_service_account_by_id(service_account_user_id)
+    if not service_account:
+        # Create a placeholder service account
+        service_account = models.ServiceAccount(
+            id=service_account_user_id,
+            name=token_name,  # Use token name as fallback
+            creator_user_hash=creator_user_hash,
+            service_account_name=token_name
+        )
+        add_or_update_user(service_account)
+    
+    # Create the token model
+    token = models.ServiceAccountToken(
+        token_id=token_id,
+        token_name=token_name,
+        token_hash=token_hash,
+        service_account=service_account,
+        created_at=int(time.time()),
+        expires_at=expires_at
+    )
+    
+    # Use the new model-based function
+    add_service_account_token(token)
+
+
+@_init_db
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -1488,15 +1802,22 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
 
 
 @_init_db
-def add_service_account_token(token_id: str,
-                              token_name: str,
-                              token_hash: str,
-                              creator_user_hash: str,
-                              service_account_user_id: str,
-                              expires_at: Optional[int] = None) -> None:
-    """Add a service account token to the database."""
+def get_system_config(config_key: str) -> Optional[str]:
+    """Get a system configuration value by key."""
     assert _SQLALCHEMY_ENGINE is not None
-    created_at = int(time.time())
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(system_config_table).filter_by(
+            config_key=config_key).first()
+    if row is None:
+        return None
+    return row.config_value
+
+
+@_init_db
+def set_system_config(config_key: str, config_value: str) -> None:
+    """Set a system configuration value."""
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -1508,114 +1829,20 @@ def add_service_account_token(token_id: str,
         else:
             raise ValueError('Unsupported database dialect')
 
-        insert_stmnt = insert_func(service_account_token_table).values(
-            token_id=token_id,
-            token_name=token_name,
-            token_hash=token_hash,
-            created_at=created_at,
-            expires_at=expires_at,
-            creator_user_hash=creator_user_hash,
-            service_account_user_id=service_account_user_id)
-        session.execute(insert_stmnt)
+        insert_stmnt = insert_func(system_config_table).values(
+            config_key=config_key,
+            config_value=config_value,
+            created_at=current_time,
+            updated_at=current_time)
+
+        upsert_stmnt = insert_stmnt.on_conflict_do_update(
+            index_elements=[system_config_table.c.config_key],
+            set_={
+                system_config_table.c.config_value: config_value,
+                system_config_table.c.updated_at: current_time,
+            })
+        session.execute(upsert_stmnt)
         session.commit()
-
-
-@_init_db
-def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
-    """Get a service account token by token_id."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(service_account_token_table).filter_by(
-            token_id=token_id).first()
-    if row is None:
-        return None
-    return {
-        'token_id': row.token_id,
-        'token_name': row.token_name,
-        'token_hash': row.token_hash,
-        'created_at': row.created_at,
-        'last_used_at': row.last_used_at,
-        'expires_at': row.expires_at,
-        'creator_user_hash': row.creator_user_hash,
-        'service_account_user_id': row.service_account_user_id,
-    }
-
-
-@_init_db
-def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
-    """Get all service account tokens for a user (as creator)."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(service_account_token_table).filter_by(
-            creator_user_hash=user_hash).all()
-    return [{
-        'token_id': row.token_id,
-        'token_name': row.token_name,
-        'token_hash': row.token_hash,
-        'created_at': row.created_at,
-        'last_used_at': row.last_used_at,
-        'expires_at': row.expires_at,
-        'creator_user_hash': row.creator_user_hash,
-        'service_account_user_id': row.service_account_user_id,
-    } for row in rows]
-
-
-@_init_db
-def update_service_account_token_last_used(token_id: str) -> None:
-    """Update the last_used_at timestamp for a service account token."""
-    assert _SQLALCHEMY_ENGINE is not None
-    last_used_at = int(time.time())
-
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(service_account_token_table).filter_by(
-            token_id=token_id).update(
-                {service_account_token_table.c.last_used_at: last_used_at})
-        session.commit()
-
-
-@_init_db
-def delete_service_account_token(token_id: str) -> bool:
-    """Delete a service account token.
-
-    Returns:
-        True if token was found and deleted.
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.query(service_account_token_table).filter_by(
-            token_id=token_id).delete()
-        session.commit()
-    return result > 0
-
-
-@_init_db
-def rotate_service_account_token(token_id: str,
-                                 new_token_hash: str,
-                                 new_expires_at: Optional[int] = None) -> None:
-    """Rotate a service account token by updating its hash and expiration.
-
-    Args:
-        token_id: The token ID to rotate.
-        new_token_hash: The new hashed token value.
-        new_expires_at: New expiration timestamp, or None for no expiration.
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    current_time = int(time.time())
-
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(service_account_token_table).filter_by(
-            token_id=token_id
-        ).update({
-            service_account_token_table.c.token_hash: new_token_hash,
-            service_account_token_table.c.expires_at: new_expires_at,
-            service_account_token_table.c.last_used_at: None,  # Reset last used
-            # Update creation time
-            service_account_token_table.c.created_at: current_time,
-        })
-        session.commit()
-
-    if count == 0:
-        raise ValueError(f'Service account token {token_id} not found.')
 
 
 @_init_db
@@ -1687,66 +1914,4 @@ def remove_cluster_yaml(cluster_name: str):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).delete()
-        session.commit()
-
-
-@_init_db
-def get_all_service_account_tokens() -> List[Dict[str, Any]]:
-    """Get all service account tokens across all users (for admin access)."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(service_account_token_table).all()
-    return [{
-        'token_id': row.token_id,
-        'token_name': row.token_name,
-        'token_hash': row.token_hash,
-        'created_at': row.created_at,
-        'last_used_at': row.last_used_at,
-        'expires_at': row.expires_at,
-        'creator_user_hash': row.creator_user_hash,
-        'service_account_user_id': row.service_account_user_id,
-    } for row in rows]
-
-
-@_init_db
-def get_system_config(config_key: str) -> Optional[str]:
-    """Get a system configuration value by key."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(system_config_table).filter_by(
-            config_key=config_key).first()
-    if row is None:
-        return None
-    return row.config_value
-
-
-@_init_db
-def set_system_config(config_key: str, config_value: str) -> None:
-    """Set a system configuration value."""
-    assert _SQLALCHEMY_ENGINE is not None
-    current_time = int(time.time())
-
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        if (_SQLALCHEMY_ENGINE.dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
-        elif (_SQLALCHEMY_ENGINE.dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
-        else:
-            raise ValueError('Unsupported database dialect')
-
-        insert_stmnt = insert_func(system_config_table).values(
-            config_key=config_key,
-            config_value=config_value,
-            created_at=current_time,
-            updated_at=current_time)
-
-        upsert_stmnt = insert_stmnt.on_conflict_do_update(
-            index_elements=[system_config_table.c.config_key],
-            set_={
-                system_config_table.c.config_value: config_value,
-                system_config_table.c.updated_at: current_time,
-            })
-        session.execute(upsert_stmnt)
         session.commit()
