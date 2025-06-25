@@ -22,9 +22,9 @@ Comparison between the two methods:
     "Setup", "Automatically enabled", "Bring your Okta, Google Workspace, or other SSO provider"
 
 
-.. _api-server-auth-basic:
+.. _api-server-basic-auth:
 
-Basic Auth
+Basic auth
 ----------
 
 Basic auth is automatically enabled if you use the :ref:`helm chart
@@ -37,9 +37,9 @@ Example login command:
 
     $ sky api login -e http://username:password@<API_SERVER_ENDPOINT>
 
-.. _api-server-auth-sso:
+.. _api-server-auth-proxy:
 
-SSO (Recommended)
+SSO (recommended)
 ------------------
 
 You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
@@ -218,7 +218,7 @@ SkyPilot provides basic RBAC (role-based access control) support. Two roles are 
 - **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
 - **Admin**: Manage SkyPilot API server settings, users, and workspaces.
 
-RBAC support is enabled only when :ref:`SSO authentication <api-server-auth-sso>` is used (not when using :ref:`basic auth <api-server-auth-basic>`).
+RBAC support is enabled only when :ref:`SSO authentication <api-server-auth-proxy>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
 SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
