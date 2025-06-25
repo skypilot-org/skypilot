@@ -287,6 +287,10 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if volume_mounts %}
+        securityContext:
+          fsGroup: 1000
+        {% endif %}
 
         # Add node selector if GPU/TPUs are requested:
         {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) %}
