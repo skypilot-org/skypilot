@@ -13,6 +13,9 @@ from sky import skypilot_config
 
 # ---------- Test workspace switching ----------
 @pytest.mark.no_remote_server
+@pytest.mark.skipif(
+    not os.getenv('BUILDKITE'),
+    reason="Skipping workspace switching test when BUILDKITE env not set")
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #
