@@ -1,5 +1,4 @@
 """SDK functions for managed jobs."""
-import os
 import pathlib
 import tempfile
 import typing
