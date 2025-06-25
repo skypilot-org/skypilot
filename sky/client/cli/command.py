@@ -204,13 +204,14 @@ def _get_cluster_records_and_set_ssh_config(
 
 
 def _get_glob_matches(candidate_names: List[str],
-                      glob_patterns: List[str]) -> List[str]:
+                      glob_patterns: List[str],
+                      resource_type: str = 'Storage') -> List[str]:
     """Returns a list of names that match the glob pattern."""
     glob_storages = []
     for glob_pattern in glob_patterns:
         glob_storage = fnmatch.filter(candidate_names, glob_pattern)
         if not glob_storage:
-            click.echo(f'Storage {glob_pattern} not found.')
+            click.echo(f'{resource_type} {glob_pattern} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -3961,7 +3962,9 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         names = [volume['name'] for volume in all_volumes]
     else:
         existing_volume_names = [volume['name'] for volume in all_volumes]
-        names = _get_glob_matches(existing_volume_names, names)
+        names = _get_glob_matches(existing_volume_names,
+                                  names,
+                                  resource_type='Volume')
     if names:
         if not yes:
             volume_names = ', '.join(names)
@@ -3980,8 +3983,6 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
-    else:
-        click.echo('No volumes to delete.')
 
 
 @cli.group(cls=_NaturalOrderGroup)

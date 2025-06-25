@@ -268,12 +268,12 @@ function VolumesTable({
   };
 
   const formatSize = (size) => {
-    if (!size) return 'N/A';
+    if (!size) return '-';
     return size;
   };
 
   const formatTimestamp = (timestamp) => {
-    if (!timestamp) return 'N/A';
+    if (!timestamp) return '-';
     try {
       const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
       return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();

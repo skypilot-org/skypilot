@@ -19,8 +19,8 @@ export async function getVolumes() {
           name: volume.name,
           launched_at: volume.launched_at,
           user_hash: volume.user_hash,
-          user_name: volume.user_name,
-          workspace: volume.workspace,
+          user_name: volume.user_name || '-',
+          workspace: volume.workspace || '-',
           last_attached_at: volume.last_attached_at,
           status: volume.status,
           type: volume.type,
@@ -30,9 +30,9 @@ export async function getVolumes() {
           infra: infra,
           size: `${volume.size}Gi`,
           config: volume.config,
-          storage_class: volume.config?.storage_class_name || '',
-          access_mode: volume.config?.access_mode || '',
-          namespace: volume.config?.namespace || '',
+          storage_class: volume.config?.storage_class_name || '-',
+          access_mode: volume.config?.access_mode || '-',
+          namespace: volume.config?.namespace || '-',
           name_on_cloud: volume.name_on_cloud,
         };
       }) || [];
