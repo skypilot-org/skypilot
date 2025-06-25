@@ -93,7 +93,7 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
             # Remove stream parameter as it's not supported by TestClient
             stream = kwargs.pop('stream', False)
             # Extract and format query parameters
-            if 'params' in kwargs:
+            if 'params' in kwargs and kwargs['params'] is not None:
                 kwargs['params'] = {
                     k: v for k, v in kwargs['params'].items() if v is not None
                 }

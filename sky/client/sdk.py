@@ -37,6 +37,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -64,15 +65,17 @@ if typing.TYPE_CHECKING:
     import sky
 else:
     psutil = adaptors_common.LazyImport('psutil')
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
+_LINE_PROCESSED_KEY = 'line_processed'
+
 
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
-                    output_stream: Optional['io.TextIOBase'] = None) -> Any:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> Any:
     """Streams the response to the console.
 
     Args:
@@ -80,12 +83,23 @@ def stream_response(request_id: Optional[str],
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
+        resumable: Whether the response is resumable on retry. If True, the
+            streaming will start from the previous failure point on retry.
     """
 
+    retry_context: Optional[rest.RetryContext] = None
+    if resumable:
+        retry_context = rest.get_retry_context()
     try:
+        line_count = 0
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
-                print(line, flush=True, end='', file=output_stream)
+                line_count += 1
+                if retry_context is None:
+                    print(line, flush=True, end='', file=output_stream)
+                elif line_count > retry_context.line_processed:
+                    print(line, flush=True, end='', file=output_stream)
+                    retry_context.line_processed = line_count
         if request_id is not None:
             return get(request_id)
     except Exception:  # pylint: disable=broad-except
@@ -132,9 +146,9 @@ def check(infra_list: Optional[Tuple[str, ...]],
     body = payloads.CheckBody(clouds=clouds,
                               verbose=verbose,
                               workspace=workspace)
-    response = requests.post(f'{server_common.get_server_url()}/check',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/check',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -158,9 +172,9 @@ def enabled_clouds(workspace: Optional[str] = None,
     """
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
-    response = requests.get((f'{server_common.get_server_url()}/enabled_clouds?'
-                             f'workspace={workspace}&expand={expand}'),
-                            cookies=server_common.get_api_cookie_jar())
+    response = rest.get((f'{server_common.get_server_url()}/enabled_clouds?'
+                         f'workspace={workspace}&expand={expand}'),
+                        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -208,10 +222,9 @@ def list_accelerators(gpus_only: bool = True,
         require_price=require_price,
         case_sensitive=case_sensitive,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/list_accelerators',
-        json=json.loads(body.model_dump_json()),
-        cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/list_accelerators',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -249,7 +262,7 @@ def list_accelerator_counts(
         quantity_filter=quantity_filter,
         clouds=clouds,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/list_accelerator_counts',
         json=json.loads(body.model_dump_json()),
         cookies=server_common.get_api_cookie_jar())
@@ -289,16 +302,16 @@ def optimize(
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/optimize',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/optimize',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
 def workspaces() -> server_common.RequestId:
     """Gets the workspaces."""
-    response = requests.get(f'{server_common.get_server_url()}/workspaces',
-                            cookies=server_common.get_api_cookie_jar())
+    response = rest.get(f'{server_common.get_server_url()}/workspaces',
+                        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -332,9 +345,9 @@ def validate(
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/validate',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/validate',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     if response.status_code == 400:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
@@ -618,7 +631,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/launch',
         json=json.loads(body.model_dump_json()),
         timeout=5,
@@ -702,7 +715,7 @@ def exec(  # pylint: disable=redefined-builtin
         backend=backend.NAME if backend else None,
     )
 
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/exec',
         json=json.loads(body.model_dump_json()),
         timeout=5,
@@ -711,9 +724,12 @@ def exec(  # pylint: disable=redefined-builtin
     return server_common.get_request_id(response)
 
 
+# TODO(aylei): when retry logs request, there will be duplciated log entries.
+# We should fix this.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_on_server_unavailable()
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
@@ -752,7 +768,7 @@ def tail_logs(cluster_name: str,
         follow=follow,
         tail=tail,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
@@ -760,7 +776,12 @@ def tail_logs(cluster_name: str,
                  None),
         cookies=server_common.get_api_cookie_jar())
     request_id = server_common.get_request_id(response)
-    return stream_response(request_id, response, output_stream)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return stream_response(request_id=request_id,
+                           response=response,
+                           output_stream=output_stream,
+                           resumable=(tail == 0))
 
 
 @usage_lib.entrypoint
@@ -794,9 +815,9 @@ def download_logs(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/download_logs',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/download_logs',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     job_id_remote_path_dict = stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(
@@ -874,7 +895,7 @@ def start(
         down=down,
         force=force,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/start',
         json=json.loads(body.model_dump_json()),
         timeout=5,
@@ -920,7 +941,7 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/down',
         json=json.loads(body.model_dump_json()),
         timeout=5,
@@ -969,7 +990,7 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/stop',
         json=json.loads(body.model_dump_json()),
         timeout=5,
@@ -1039,7 +1060,7 @@ def autostop(
         idle_minutes=idle_minutes,
         down=down,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/autostop',
         json=json.loads(body.model_dump_json()),
         timeout=5,
@@ -1102,9 +1123,9 @@ def queue(cluster_name: str,
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/queue',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/queue',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1144,9 +1165,9 @@ def job_status(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/job_status',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/job_status',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1198,9 +1219,9 @@ def cancel(
         job_ids=job_ids,
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )
-    response = requests.post(f'{server_common.get_server_url()}/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/cancel',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1294,9 +1315,9 @@ def status(
         refresh=refresh,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/status',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/status',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1329,9 +1350,9 @@ def endpoints(
         cluster=cluster,
         port=port,
     )
-    response = requests.post(f'{server_common.get_server_url()}/endpoints',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/endpoints',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1374,9 +1395,9 @@ def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylin
             }
     """
     body = payloads.CostReportBody(days=days)
-    response = requests.post(f'{server_common.get_server_url()}/cost_report',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/cost_report',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1405,8 +1426,8 @@ def storage_ls() -> server_common.RequestId:
                 }
         ]
     """
-    response = requests.get(f'{server_common.get_server_url()}/storage/ls',
-                            cookies=server_common.get_api_cookie_jar())
+    response = rest.get(f'{server_common.get_server_url()}/storage/ls',
+                        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1429,9 +1450,9 @@ def storage_delete(name: str) -> server_common.RequestId:
         ValueError: If the storage does not exist.
     """
     body = payloads.StorageBody(name=name)
-    response = requests.post(f'{server_common.get_server_url()}/storage/delete',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/storage/delete',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1468,9 +1489,9 @@ def local_up(gpus: bool,
                                 cleanup=cleanup,
                                 context_name=context_name,
                                 password=password)
-    response = requests.post(f'{server_common.get_server_url()}/local_up',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/local_up',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1486,8 +1507,8 @@ def local_down() -> server_common.RequestId:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('sky local down is only supported when running '
                              'SkyPilot locally.')
-    response = requests.post(f'{server_common.get_server_url()}/local_down',
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/local_down',
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1508,9 +1529,9 @@ def ssh_up(infra: Optional[str] = None) -> server_common.RequestId:
         infra=infra,
         cleanup=False,
     )
-    response = requests.post(f'{server_common.get_server_url()}/ssh_up',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/ssh_up',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1531,9 +1552,9 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
         infra=infra,
         cleanup=True,
     )
-    response = requests.post(f'{server_common.get_server_url()}/ssh_down',
-                             json=json.loads(body.model_dump_json()),
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/ssh_down',
+                         json=json.loads(body.model_dump_json()),
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1556,7 +1577,7 @@ def realtime_kubernetes_gpu_availability(
         quantity_filter=quantity_filter,
         is_ssh=is_ssh,
     )
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/'
         'realtime_kubernetes_gpu_availability',
         json=json.loads(body.model_dump_json()),
@@ -1589,7 +1610,7 @@ def kubernetes_node_info(
             information.
     """
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
-    response = requests.post(
+    response = rest.post(
         f'{server_common.get_server_url()}/kubernetes_node_info',
         json=json.loads(body.model_dump_json()),
         cookies=server_common.get_api_cookie_jar())
@@ -1620,18 +1641,20 @@ def status_kubernetes() -> server_common.RequestId:
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
     """
-    response = requests.get(
-        f'{server_common.get_server_url()}/status_kubernetes',
-        cookies=server_common.get_api_cookie_jar())
+    response = rest.get(f'{server_common.get_server_url()}/status_kubernetes',
+                        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
 # === API request APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def get(request_id: str) -> Any:
     """Waits for and gets the result of a request.
+
+    This function will not check the server health since /api/get is typically
+    not the first API call in an SDK session and checking the server health
+    may cause GET /api/get being sent to a restarted API server.
 
     Args:
         request_id: The request ID of the request to get.
@@ -1645,7 +1668,7 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
-    response = requests.get(
+    response = rest.get_without_retry(
         f'{server_common.get_server_url()}/api/get?request_id={request_id}',
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
@@ -1723,7 +1746,7 @@ def stream_and_get(
         'follow': follow,
         'format': 'console',
     }
-    response = requests.get(
+    response = rest.get_without_retry(
         f'{server_common.get_server_url()}/api/stream',
         params=params,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
@@ -1783,10 +1806,10 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         echo(f'Cancelling {len(request_ids)} request{plural}: '
              f'{request_id_str}...')
 
-    response = requests.post(f'{server_common.get_server_url()}/api/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=server_common.get_api_cookie_jar())
+    response = rest.post(f'{server_common.get_server_url()}/api/cancel',
+                         json=json.loads(body.model_dump_json()),
+                         timeout=5,
+                         cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1810,7 +1833,7 @@ def api_status(
     """
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
-    response = requests.get(
+    response = rest.get(
         f'{server_common.get_server_url()}/api/status',
         params=server_common.request_body_to_params(body),
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
@@ -1849,8 +1872,8 @@ def api_info() -> Dict[str, Any]:
         Note that user may be None if we are not using an auth proxy.
 
     """
-    response = requests.get(f'{server_common.get_server_url()}/api/health',
-                            cookies=server_common.get_api_cookie_jar())
+    response = rest.get(f'{server_common.get_server_url()}/api/health',
+                        cookies=server_common.get_api_cookie_jar())
     response.raise_for_status()
     return response.json()
 

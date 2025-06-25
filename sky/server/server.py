@@ -45,6 +45,7 @@ from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import metrics
+from sky.server import state
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -380,12 +381,32 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to control requests when server is shutting down."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if state.get_block_requests():
+            # Allow /api/ paths to continue, which are critical to operate
+            # on-going requests but will not submit new requests.
+            if not request.url.path.startswith('/api/'):
+                # Client will retry on 503 error.
+                return fastapi.responses.JSONResponse(
+                    status_code=503,
+                    content={
+                        'detail': 'Server is shutting down, '
+                                  'please try again later.'
+                    })
+
+        return await call_next(request)
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
+app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
 app.add_middleware(CacheControlStaticMiddleware)
 app.add_middleware(
@@ -831,6 +852,10 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
+    if state.get_block_requests():
+        raise fastapi.HTTPException(
+            status_code=503,
+            detail='Server is shutting down, please try again later.')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -1150,6 +1175,10 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         if request_task.status > requests_lib.RequestStatus.RUNNING:
+            if request_task.should_retry:
+                raise fastapi.HTTPException(
+                    status_code=503,
+                    detail=f'Request {request_id!r} should be retried')
             request_error = request_task.get_error()
             if request_error is not None:
                 raise fastapi.HTTPException(status_code=500,
@@ -1504,7 +1533,8 @@ if __name__ == '__main__':
     config = server_config.compute_server_config(cmd_args.deploy)
     num_workers = config.num_server_workers
 
-    sub_procs = []
+    queue_server: Optional[multiprocessing.Process] = None
+    workers: List[executor.RequestWorker] = []
     try:
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
             metrics_thread = threading.Thread(target=metrics.run_metrics_server,
@@ -1512,7 +1542,7 @@ if __name__ == '__main__':
                                                     cmd_args.metrics_port),
                                               daemon=True)
             metrics_thread.start()
-        sub_procs = executor.start(config)
+        queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
@@ -1529,17 +1559,9 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
 
-        def cleanup(proc: multiprocessing.Process) -> None:
-            try:
-                proc.terminate()
-                proc.join()
-            finally:
-                # The process may not be started yet, close it anyway.
-                proc.close()
-
-        # Terminate processes in reverse order in case dependency, especially
-        # queue server. Terminate queue server first does not affect the
-        # correctness of cleanup but introduce redundant error messages.
-        subprocess_utils.run_in_parallel(cleanup,
-                                         list(reversed(sub_procs)),
-                                         num_threads=len(sub_procs))
+        subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
+                                         workers,
+                                         num_threads=len(workers))
+        if queue_server is not None:
+            queue_server.kill()
+            queue_server.join()

@@ -63,6 +63,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`metrics <helm-values-apiService-metrics>`:
       :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
       :ref:`port <helm-values-apiService-metrics-port>`: 9090
+    :ref:`terminationGracePeriodSeconds <helm-values-apiService-terminationGracePeriodSeconds>`: 60
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -448,6 +449,20 @@ Default: ``9090``
   apiService:
     metrics:
       port: 9090
+
+.. _helm-values-apiService-terminationGracePeriodSeconds:
+
+``apiService.terminationGracePeriodSeconds``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The number of seconds to wait for the API server to finish processing the request before shutting down. Refer to :ref:`sky-api-server-graceful-upgrade` for more details.
+
+Default: ``60``
+
+.. code-block:: yaml
+
+  apiService:
+    terminationGracePeriodSeconds: 300
 
 .. _helm-values-storage:
 
