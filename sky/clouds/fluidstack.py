@@ -21,6 +21,7 @@ if typing.TYPE_CHECKING:
 
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 else:
     requests = adaptors_common.LazyImport('requests')
 
@@ -188,6 +189,7 @@ class Fluidstack(clouds.Cloud):
         zones: Optional[List[clouds.Zone]],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
 
         assert zones is None, 'FluidStack does not support zones.'

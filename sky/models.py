@@ -7,6 +7,8 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+import pydantic
+
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -107,3 +109,15 @@ class KubernetesNodesInfo:
             },
             hint=data['hint'],
         )
+
+
+class VolumeConfig(pydantic.BaseModel):
+    """Configuration for creating a volume."""
+    name: str
+    type: str
+    cloud: str
+    region: Optional[str]
+    zone: Optional[str]
+    name_on_cloud: str
+    size: Optional[str]
+    config: Dict[str, Any] = {}

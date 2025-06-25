@@ -64,6 +64,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
 # pylint: disable=ungrouped-imports
@@ -545,6 +546,7 @@ app.include_router(users_rest.router, prefix='/users', tags=['users'])
 app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
+app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 
 
 @app.get('/token')
@@ -705,6 +707,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     ctx.override_envs(validate_body.env_vars)
 
     def validate_dag(dag: dag_utils.dag_lib.Dag):
+        # Resolve the volumes before admin policy and validation.
+        dag.resolve_and_validate_volumes()
         # TODO: Admin policy may contain arbitrary code, which may be expensive
         # to run and may block the server thread. However, moving it into the
         # executor adds a ~150ms penalty on the local API server because of
@@ -1583,6 +1587,11 @@ async def complete_cluster_name(incomplete: str,) -> List[str]:
 @app.get('/api/completion/storage_name')
 async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
+
+
+@app.get('/api/completion/volume_name')
+async def complete_volume_name(incomplete: str,) -> List[str]:
+    return global_user_state.get_volume_names_start_with(incomplete)
 
 
 @app.get('/dashboard/{full_path:path}')
