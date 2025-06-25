@@ -5404,13 +5404,18 @@ def ssh():
               is_flag=True,
               hidden=True,
               help='Run the command asynchronously.')
-def ssh_up(infra: Optional[str], async_call: bool):
-    """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
+@click.option('--file',
+              '-f',
+              required=False,
+              help='The file containing the SSH targets.')
+def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
+    """Set up a cluster using SSH targets from a file. If not specified,
+    ~/.sky/ssh_node_pools.yaml will be used.
 
-    This command sets up a Kubernetes cluster on the machines specified in
-    ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
+    This command sets up a Kubernetes cluster on the machines specified in the
+    config file and configures SkyPilot to use it.
     """
-    request_id = sdk.ssh_up(infra=infra)
+    request_id = sdk.ssh_up(infra=infra, file=file)
     if async_call:
         print(f'Request submitted with ID: {request_id}')
     else:
