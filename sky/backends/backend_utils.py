@@ -632,12 +632,13 @@ def write_cluster_config(
         ), region, zones, num_nodes, dryrun, volume_mounts)
     config_dict = {}
 
-    specific_reservations = set(
-        cloud_config_utils.get_cloud_config_value(
-            cloud=str(to_provision.cloud).lower(),
-            region=region.name,
-            keys=('specific_reservations',),
-            default_value=set()))
+    ddd = cloud_config_utils.get_cloud_config_value(
+        cloud=str(to_provision.cloud).lower(),
+        region=to_provision.region,
+        keys=('specific_reservations',),
+        default_value=set())
+    logger.info(f'ddd: {ddd}')
+    specific_reservations = set(ddd)
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials

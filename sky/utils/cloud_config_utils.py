@@ -27,10 +27,13 @@ def get_cloud_config_value(
 
     if region and region_key:
         property_value = skypilot_config.get_nested(
-            (cloud, region_key, region) + keys, None, override_configs)
+            keys=(cloud, region_key, region) + keys,
+            default_value=None,
+            override_configs=override_configs)
     # if no override found for specified region
     if property_value is None:
         property_value = skypilot_config.get_nested(
-            (cloud,) + keys, default_value if default_value else None,
-            override_configs)
+            keys=(cloud,) + keys,
+            default_value=default_value,
+            override_configs=override_configs)
     return property_value

@@ -14,10 +14,10 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
-from sky.utils import cloud_config_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -915,7 +915,10 @@ def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
 
     # test provision_timeout property
     context_a_provision_timeout = cloud_config_utils.get_cloud_config_value(
-        cloud='kubernetes', region='contextA', keys=('provision_timeout',), default_value=10)
+        cloud='kubernetes',
+        region='contextA',
+        keys=('provision_timeout',),
+        default_value=10)
     assert context_a_provision_timeout == 10
     context_b_provision_timeout = cloud_config_utils.get_cloud_config_value(
         cloud='kubernetes', region='contextB', keys=('provision_timeout',))
