@@ -169,7 +169,11 @@ Behavior when the API server is being upgraded:
 * For non-critical on-going requests (e.g. ``sky logs``), it cancells them and return an error to ask client retry;
 * For new requests, it returns an error to ask client retry;
 
-SkyPilot Python SDK and CLI will retry until the new version of API server start and resume the workflow.
+SkyPilot Python SDK and CLI will retry until the new version of API server start and resume the workflow:
+
+.. image:: https://i.imgur.com/QJhDL2M.gif
+  :alt: GIF for graceful upgrade
+  :align: center
 
 To ensure that all the regular critical requests can complete within the timeout, you can adjust the timeout by setting :ref:`apiService.terminationGracePeriodSeconds <helm-values-apiService-terminationGracePeriodSeconds>` in helm values based on your workload, e.g.:
 
