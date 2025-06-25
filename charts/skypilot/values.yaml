@@ -31,8 +31,7 @@ apiService:
   # Set ~/.sky/config.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
   # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
-  config: |
-    db: postgresql://skypilot:skypilot@localhost/skypilot
+  config: null
   # config: |
   #   admin_policy: admin_policy_examples.AddLabelsPolicy
   #
@@ -302,61 +301,8 @@ nebiusCredentials:
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
 
-# Cloud SQL credentials for the proxy
-cloudSqlCredentials:
-  enabled: true
-  # Name of the secret containing the Cloud SQL credentials. Only used if enabled is true.
-  credentialsSecretName: cloud-sql-credentials
-
 # Extra init containers to run before the api container
 extraInitContainers:
-  - name: cloud-sql-proxy
-    restartPolicy: Always
-    # It is recommended to use the latest version of the Cloud SQL Auth Proxy
-    # Make sure to update on a regular schedule!
-    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
-    args:
-      # If connecting from a VPC-native GKE cluster, you can use the
-      # following flag to have the proxy connect over private IP
-      # - "--private-ip"
-
-      # If you are not connecting with Automatic IAM, you can delete
-      # the following flag.
-      # - "--auto-iam-authn"
-
-      # Use service account key file for authentication
-      - "--credentials-file=/var/secrets/google/service-account-key.json"
-
-      # Enable structured logging with LogEntry format:
-      - "--structured-logs"
-
-      # Replace DB_PORT with the port the proxy should listen on
-      - "--port=5432"
-      - "sky-dev-465:us-east5:seungjin-test"
-
-    securityContext:
-      # The default Cloud SQL Auth Proxy image runs as the
-      # "nonroot" user and group (uid: 65532) by default.
-      runAsNonRoot: true
-    # You should use resource requests/limits as a best practice to prevent
-    # pods from consuming too many resources and affecting the execution of
-    # other pods. You should adjust the following values based on what your
-    # application needs. For details, see
-    # https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
-    resources:
-      requests:
-        # The proxy's memory use scales linearly with the number of active
-        # connections. Fewer open connections will use less memory. Adjust
-        # this value based on your application's requirements.
-        memory: "2Gi"
-        # The proxy's CPU use scales linearly with the amount of IO between
-        # the database and the application. Adjust this value based on your
-        # application's requirements.
-        cpu: "1"
-    volumeMounts:
-    - name: cloud-sql-credentials
-      mountPath: /var/secrets/google
-      readOnly: true
 
 # Set securityContext for the api pod
 podSecurityContext: {}

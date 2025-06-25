@@ -367,11 +367,6 @@ spec:
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
       {{- end }}
-      {{- if .Values.cloudSqlCredentials.enabled }}
-      - name: cloud-sql-credentials
-        secret:
-          secretName: {{ .Values.cloudSqlCredentials.credentialsSecretName }}
-      {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
