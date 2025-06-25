@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import importlib
 import os
 import subprocess
@@ -30,9 +31,13 @@ if not os.path.exists(POLICY_PATH):
 
 
 @pytest.fixture
-def add_example_policy_paths():
-    # Add to path to be able to import
-    sys.path.append(os.path.join(POLICY_PATH, 'example_policy'))
+def add_example_policy_paths(monkeypatch):
+    # Patch sys.path in fixture scope to avoid interven the global path
+    test_path = copy.copy(sys.path)
+    test_path.append(os.path.join(POLICY_PATH, 'example_policy'))
+    with monkeypatch.context() as m:
+        m.setattr(sys, 'path', test_path)
+        yield
 
 
 @pytest.fixture
