@@ -34,18 +34,24 @@ def volume_refresh():
             continue
         cloud = config.cloud
         usedby = provision.get_volume_usedby(cloud, config)
-        logger.info(f'Volume {volume_name} usedby: {usedby}')
         with _volume_lock(volume_name):
-            # The IN_USE status is updated timely when launching
-            # clusters or jobs so we don't need to update it here.
+            latest_volume = global_user_state.get_volume_by_name(volume_name)
+            if latest_volume is None:
+                logger.warning(f'Volume {volume_name} not found.')
+                continue
+            status = latest_volume.get('status')
             if not usedby:
-                latest_volume = global_user_state.get_volume_by_name(
-                    volume_name)
-                if latest_volume is None:
-                    logger.warning(f'Volume {volume_name} not found.')
-                    continue
-                global_user_state.update_volume_status(
-                    volume_name, status=status_lib.VolumeStatus.READY)
+                if status != status_lib.VolumeStatus.READY:
+                    logger.info(f'Update volume {volume_name} '
+                                f'status to READY')
+                    global_user_state.update_volume_status(
+                        volume_name, status=status_lib.VolumeStatus.READY)
+            else:
+                if status != status_lib.VolumeStatus.IN_USE:
+                    logger.info(f'Update volume {volume_name} '
+                                f'status to IN_USE, usedby: {usedby}')
+                    global_user_state.update_volume_status(
+                        volume_name, status=status_lib.VolumeStatus.IN_USE)
 
 
 def volume_list() -> List[Dict[str, Any]]:

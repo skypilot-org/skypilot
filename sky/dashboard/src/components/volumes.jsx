@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
-import dashboardCache from '@/lib/cache';
+import { TimestampWithTooltip } from '@/components/utils';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
@@ -48,8 +48,6 @@ export function Volumes() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const handleRefresh = () => {
-    dashboardCache.invalidate(getVolumes);
-
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -184,7 +182,7 @@ function VolumesTable({
     setLoading(true);
     setLocalLoading(true);
     try {
-      const volumesData = await dashboardCache.get(getVolumes);
+      const volumesData = await getVolumes();
       setData(volumesData);
     } catch (error) {
       console.error('Failed to fetch volumes:', error);
@@ -276,7 +274,7 @@ function VolumesTable({
     if (!timestamp) return '-';
     try {
       const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+      return <TimestampWithTooltip date={date} />;
     } catch {
       return 'Invalid Date';
     }
@@ -330,18 +328,6 @@ function VolumesTable({
               >
                 Type{getSortDirection('type')}
               </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('storage_class')}
-              >
-                Storage Class{getSortDirection('storage_class')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('access_mode')}
-              >
-                Access Mode{getSortDirection('access_mode')}
-              </TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -382,8 +368,6 @@ function VolumesTable({
                     {formatTimestamp(volume.last_attached_at)}
                   </TableCell>
                   <TableCell>{volume.type || 'N/A'}</TableCell>
-                  <TableCell>{volume.storage_class || 'default'}</TableCell>
-                  <TableCell>{volume.access_mode || 'N/A'}</TableCell>
                   <TableCell>
                     <Button
                       variant="ghost"
