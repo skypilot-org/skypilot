@@ -368,6 +368,22 @@ class StorageBody(RequestBody):
     name: str
 
 
+class VolumeApplyBody(RequestBody):
+    """The request body for the volume apply endpoint."""
+    name: str
+    volume_type: str
+    cloud: str
+    region: Optional[str] = None
+    zone: Optional[str] = None
+    size: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
+class VolumeDeleteBody(RequestBody):
+    """The request body for the volume delete endpoint."""
+    names: List[str]
+
+
 class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
@@ -611,3 +627,8 @@ class UpdateConfigBody(RequestBody):
 class GetConfigBody(RequestBody):
     """The request body for getting the entire SkyPilot configuration."""
     pass
+
+
+class CostReportBody(RequestBody):
+    """The request body for the cost report endpoint."""
+    days: Optional[int] = 30

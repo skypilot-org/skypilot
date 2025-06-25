@@ -413,6 +413,8 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
+# Environment variable that is set to 'true' if metrics are enabled.
+ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
@@ -449,18 +451,29 @@ TIME_PATTERN: str = (
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,
+    'ki': 2**10,
     'mb': 2**20,
+    'mi': 2**20,
     'gb': 2**30,
+    'gi': 2**30,
     'tb': 2**40,
+    'ti': 2**40,
     'pb': 2**50,
+    'pi': 2**50,
 }
 
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
-    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
-    ')?$/i')
-MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
+    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit.upper() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'  # pylint: disable=line-too-long
+    ')?$')
+
+LAST_USE_TRUNC_LENGTH = 25
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000
 DEFAULT_PRIORITY = 0
+
+GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
+COST_REPORT_DEFAULT_DAYS = 30

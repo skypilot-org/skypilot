@@ -11,13 +11,9 @@ This page provides an overview of the steps you should follow to upgrade a remot
 .. _sky-api-server-helm-upgrade:
 
 Upgrade API server deployed with Helm
------------------------------------------
+-------------------------------------
 
-Here we introduce the steps for upgrading a remote API server deployed with :ref:`Helm deployement <sky-api-server-deploy>`.
-
-.. note::
-
-    Upgrading the API server introduces downtime. We recommend scheduling the upgrade during a **maintenance window**: cordon and drain the old API server, then perform the upgrade.
+With :ref:`Helm deployement <sky-api-server-deploy>`, it is possible to :ref:`upgrade the SkyPilot API server gracefully<sky-api-server-graceful-upgrade>` without causing client-side error with the steps below.
 
 Step 1: Prepare an upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -41,15 +37,6 @@ Step 1: Prepare an upgrade
 Step 2: Upgrade the API server and clients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. note::
-
-    To minimize the impact of upgrading, you can :ref:`cordon and drain the API server <cordon-drain-api-server>` before performing this step. The optional cordon and drain step enforces that all requests be finished before the upgrade and there is no new request during the upgrade.
-    
-    If you choose not to perform cordon and drain, upgrade has the following behaviors:
-    
-    * Upgrading the API server will interrupt any pending and ongoing requests on the API server, e.g., ongoining ``sky launch``. Clients can recover ongoing requests by running the same commands again after the new API server starts.
-    * Upgrading only the server or only the client may break compatibility between them. In this case, an error will be raised on the client side, with a hint to upgrade the client to the same version as the server.
-
 Upgrade the clients:
 
 .. code-block:: bash
@@ -64,6 +51,7 @@ Upgrade the API server:
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.image=${IMAGE_REPO}:${VERSION}
 
+When the API server is being upgraded, the SkyPilot CLI and Python SDK will automatically retry requests until the new version of the API server is started. So the upgrade process is graceful if the new version of the API server does not break :ref:`API compatbility<sky-api-server-api-compatibility>`. For more details, refer to :ref:`sky-api-server-graceful-upgrade`.
 
 Optionally, you can watch the upgrade progress with:
 
@@ -77,7 +65,7 @@ Optionally, you can watch the upgrade progress with:
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
     skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
 
-The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. If the API server was cordoned previously, the cordon will be removed automatically after the upgrade.
+The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``.
 
 .. note::
 
@@ -97,88 +85,6 @@ Verify the API server is able to serve requests and the version is consistent wi
     └── User: aclice (abcd1234)
 
 If possible, you can also trigger your pipelines that depend on the API server to verify there is no compatibility issue after the upgrade.
-
-.. _cordon-drain-api-server:
-
-Optional: Cordon and drain the API server
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
-The following steps ensure graceful upgrade of the API server: (1) Reject new request to the API server (cordon), and (2) Wait for all existing requests to finish on the old API server (drain) during the maintenance window.
-
-.. note:: 
-  It requires ``patch`` and ``exec`` (or ``port-forward``) access to the API server Pod.
-
-1. Cordon SkyPilot API server to reject new requests:
-
-.. code-block:: bash
-
-    kubectl get pod -l app=${RELEASE_NAME}-api -oname | xargs kubectl patch --type merge -p '{"metadata": {"labels": {"skypilot.co/ready": null}}}'
-    
-.. note::
-    All new requests will be rejected by the Ingress after this step. Make sure there is no critical service depending on the API server before proceeding.
-
-2. Verify the API server is cordoned, you should see the following error:
-
-.. code-block:: console
-
-    $ sky api info
-    sky.exceptions.ApiServerConnectionError: Could not connect to SkyPilot API server at <ENDPOINT>. Please ensure that the server is running. Try: curl <ENDPIONT>
-
-.. dropdown:: Resolve cordon failure for early nightly release
-
-    If you are upgrading from an early nightly build that does not support cordoning (``sky api info`` will succeed), you can manually enable cordon support by running:
-
-    .. code-block:: bash
-
-        kubectl patch service ${RELEASE_NAME}-api-service -p '{"spec":{"selector":{"skypilot.co/ready":"true"}}}'
-    
-    After the patch, verify the API server is cordoned again.
-
-3. Drain the old API server by waiting for all current requests to finish, or canceling them:
-
-.. tab-set::
-
-    .. tab-item:: Inspecting requests
-
-        You can inspect the status of requests by running:
-
-        .. code-block:: console
-
-            $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl exec {} -c skypilot-api -- sky api status
-            sky api status
-            ID                                    User             Name        Created         Status
-            942f6ab3-f5b6-4a50-acd6-0e8ad64a3ec2  <USER>           sky.launch  a few secs ago  PENDING
-            8c5f19ca-513c-4068-b9c9-d4b7728f46fb  <USER>           sky.logs    26 secs ago     RUNNING
-            skypilot-status-refresh-daemon        skypilot-system  sky.status  25 mins ago     RUNNING
-
-        .. note::
-
-            The ``skypilot-status-refresh-daemon`` is a background process managed by API server that is never stopped. Also, ``sky.logs`` can last for a long time. Both of them can be safely interrupted.
-    
-    .. tab-item:: Canceling requests
-
-        You can cancel less critical requests by running:
-
-        .. code-block:: console
-
-            $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl exec {} -c skypilot-api -- sky api cancel ${ID}
-
-.. dropdown:: Using port-forward to access the API server
-
-    If you do not have ``exec`` access to the API server Pod, you can also use ``port-forward`` to access the api status:
-
-    .. code-block:: console
-
-        $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl port-forward {} 46580:46580 > /tmp/port-forward.log 2>&1 &
-        $ PORT_FORWARD_PID=$!
-        $ sky api login -e http://127.0.0.1:46580
-        # Polling the status
-        $ sky api status
-        # Cancel less critical requests if needed
-        $ sky api cancel ${ID}
-        # Stop the port-forward after you are satisfied with the status
-        $ kill $PORT_FORWARD_PID
 
 .. _sky-api-server-vm-upgrade:
 
@@ -246,3 +152,41 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
     Using SkyPilot API server: <ENDPOINT>
     ├── Status: healthy, commit: 022a5c3ffe258f365764b03cb20fac70934f5a60, version: 1.0.0.dev20250410
     └── User: aclice (abcd1234)
+
+.. _sky-api-server-graceful-upgrade:
+
+Graceful upgrade
+----------------
+
+A server can be gracefully upgraded when the following conditions are met:
+
+* :ref:`Helm deployment<sky-api-server-deploy>` is used;
+* Versions before and after upgrade are :ref:`compatible<sky-api-server-api-compatibility>`;
+
+Behavior when the API server is being upgraded:
+
+* For critical on-going requests (e.g. ``sky launch``), it waits them to finish with a timeout;
+* For non-critical on-going requests (e.g. ``sky logs``), it cancells them and return an error to ask client retry;
+* For new requests, it returns an error to ask client retry;
+
+SkyPilot Python SDK and CLI will retry until the new version of API server start and resume the workflow.
+
+To ensure that all the regular critical requests can complete within the timeout, you can adjust the timeout by setting :ref:`apiService.terminationGracePeriodSeconds <helm-values-apiService-terminationGracePeriodSeconds>` in helm values based on your workload, e.g.:
+
+.. code-block:: bash
+
+    helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set apiService.terminationGracePeriodSeconds=300
+
+.. _sky-api-server-api-compatibility:
+
+API compatbility
+----------------
+
+SkyPilot maintain an internal API version which will be bumped when an incompatible API change is introduced. Client and server can only communicate when they run on the same API version.
+
+The version strategy of SkyPilot follows the following API compatbility guarantees:
+
+* The API version will not be bumped within a minor version, i.e. upgrading patch version is guaranteed to be compatible;
+* The API version might be bumped between minior versions, i.e. upgrading minior version should be treated as operation that breaks API compatibility;
+* There is no guarantee about the API version in the nightly build;

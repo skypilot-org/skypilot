@@ -2,7 +2,7 @@
 // This utility manages background preloading of cache data to improve page switching performance
 
 import dashboardCache from './cache';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
@@ -15,6 +15,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
+    getClusterHistory: { fn: getClusterHistory, args: [] },
     getManagedJobs: { fn: getManagedJobs, args: [{ allUsers: true }] },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
@@ -28,7 +29,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getWorkspaces', 'getUsers'],
+    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces', 'getUsers'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: ['getInfraData', 'getClusters', 'getManagedJobs'],
     workspaces: [

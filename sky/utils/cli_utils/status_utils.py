@@ -7,7 +7,6 @@ import colorama
 
 from sky import backends
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -137,7 +136,8 @@ def get_total_cost_of_displayed_records(
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           controller_name: Optional[str] = None):
+                           controller_name: Optional[str] = None,
+                           days: Optional[int] = None):
     """Compute cluster table values and display for cost report.
 
     For each cluster, this shows: cluster name, resources, launched time,
@@ -200,23 +200,21 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
+        controller_record = cluster_records[0]
         if controller_name is not None:
-            controller = controller_utils.Controllers.from_name(controller_name)
-            if controller is None:
-                raise ValueError(f'Controller {controller_name} not found.')
-            controller_handle: backends.CloudVmRayResourceHandle = (
-                cluster_records[0]['handle'])
-            autostop_config = (
-                controller_handle.launched_resources.autostop_config)
-            if autostop_config is not None:
+            autostop = controller_record.get('autostop', None)
+            autostop_str = ''
+            if autostop is not None:
                 autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
-                                f'idle for {autostop_config.idle_minutes}min)'
+                                f'idle for {autostop}min)'
                                 f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{autostop_str}')
         else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+            days_str = '' if days is None else f' (last {days} days)'
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Clusters{days_str}'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
 
@@ -345,7 +343,9 @@ def _get_infra(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
 
 
 def _get_status_value_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> int:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> int:
+    del truncate
     status = cluster_cost_report_record['status']
     if status is None:
         return -1
@@ -353,7 +353,9 @@ def _get_status_value_for_cost_report(
 
 
 def _get_status_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     status = cluster_cost_report_record['status']
     if status is None:
         return f'{colorama.Style.DIM}TERMINATED{colorama.Style.RESET_ALL}'
@@ -361,7 +363,9 @@ def _get_status_for_cost_report(
 
 
 def _get_resources_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
@@ -373,7 +377,9 @@ def _get_resources_for_cost_report(
 
 
 def _get_price_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
@@ -383,7 +389,9 @@ def _get_price_for_cost_report(
 
 
 def _get_estimated_cost_for_cost_report(
-        cluster_cost_report_record: _ClusterCostReportRecord) -> str:
+        cluster_cost_report_record: _ClusterCostReportRecord,
+        truncate: bool = True) -> str:
+    del truncate
     cost = cluster_cost_report_record['total_cost']
 
     if not cost:
