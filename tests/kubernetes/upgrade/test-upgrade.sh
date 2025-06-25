@@ -82,9 +82,7 @@ for pid in "${sky_pids[@]}"; do
     fi
 done
 
-s=$(cat $log_file)
-
-echo $s | grep "count: 1" | wc -l | grep 1 || (echo "Incorrect log tailing, refer to $log_file for details" && exit 1)
-echo $s | grep "count: 300" | wc -l | grep 1 || (echo "Incorrect log tailing, refer to $log_file for details" && exit 1)
+cat $log_file | grep "count: 1$" | wc -l | grep 1 || (echo "Incorrect log tailing, refer to $log_file for details" && exit 1)
+cat $log_file | grep "count: 300$" | wc -l | grep 1 || (echo "Incorrect log tailing, refer to $log_file for details" && exit 1)
 
 sky down $CLUSTER_NAME -y
