@@ -73,6 +73,8 @@ apiService:
     enabled: false
     # The port to expose the metrics on, default to 9090.
     port: 9090
+  # Custom annotations for the API server deployment
+  annotations: null
 
   # Skip resource check for the API server, not recommended for production deployment
   skipResourceCheck: false

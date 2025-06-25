@@ -20,6 +20,9 @@ spec:
         prometheus.io/path: "/metrics"
         prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
         {{- end }}
+        {{- if .Values.apiService.annotations }}
+        {{- toYaml .Values.apiService.annotations | nindent 8 }}
+        {{- end }}
       labels:
         app: {{ .Release.Name }}-api
         # This label indicates that the API server is ready to serve requests.
