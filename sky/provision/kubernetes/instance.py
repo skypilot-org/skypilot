@@ -3,7 +3,6 @@ import copy
 import json
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
-import uuid
 
 from sky import exceptions
 from sky import sky_logging
@@ -818,9 +817,12 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
                 constants.WORKER_NODE_TAGS)
-            pod_uuid = str(uuid.uuid4())[:6]
-            pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
-            pod_spec_copy['metadata']['name'] = f'{pod_name}-worker'
+            pod_name = f'{cluster_name_on_cloud}-worker{i}'
+            if pod_name in running_pods:
+                # If the pod is already running, we skip creating it.
+                return
+            pod_spec_copy['metadata']['name'] = pod_name
+            pod_spec_copy['metadata']['labels']['component'] = pod_name
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
             # This is not set as a hard constraint because if different nodes
