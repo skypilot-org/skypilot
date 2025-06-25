@@ -189,26 +189,29 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                                     idle_minutes_to_autostop=None)
 
 
-@mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
-            return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
 def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
-    dag, config = _load_task_and_apply_policy(
-        task,
-        os.path.join(POLICY_PATH, 'dynamic_kubernetes_contexts_update.yaml'))
+    with mock.patch(
+            'sky.provision.kubernetes.utils.get_all_kube_context_names',
+            return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3']):
+        dag, config = _load_task_and_apply_policy(
+            task,
+            os.path.join(POLICY_PATH,
+                         'dynamic_kubernetes_contexts_update.yaml'))
 
-    assert config.get_nested(
-        ('kubernetes', 'allowed_contexts'),
-        None) == ['kind-skypilot', 'kind-skypilot2'
-                 ], 'Kubernetes allowed contexts should be updated'
-
-    with admin_policy_utils.apply_and_use_config_in_current_request(dag):
-        assert skypilot_config.get_nested(
+        assert config.get_nested(
             ('kubernetes', 'allowed_contexts'),
             None) == ['kind-skypilot', 'kind-skypilot2'
-                     ], 'Global skypilot config should be updated'
-    assert skypilot_config.get_nested(
-        ('kubernetes', 'allowed_contexts'),
-        None) is None, 'Global skypilot config should be restored after request'
+                     ], 'Kubernetes allowed contexts should be updated'
+
+        with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+            assert skypilot_config.get_nested(
+                ('kubernetes', 'allowed_contexts'),
+                None) == ['kind-skypilot', 'kind-skypilot2'
+                         ], 'Global skypilot config should be updated'
+        assert skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'),
+            None) is None, ('Global skypilot config should be restored '
+                            'after request')
 
 
 def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
