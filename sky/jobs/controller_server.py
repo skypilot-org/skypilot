@@ -1,5 +1,7 @@
 """Controller server for managing jobs."""
 
+import asyncio
+import os
 import logging
 from typing import Optional
 
@@ -14,7 +16,18 @@ from sky.jobs import state
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
+
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def startup_event():
+    # Will happen multiple times, who cares though
+    os.makedirs(SIGNAL_PATH, exist_ok=True)
+
+    # Will loop forever, do it in the background
+    asyncio.create_task(controller.cancel_job())
 
 
 class JobRequest(BaseModel):
@@ -43,7 +56,8 @@ async def cancel_job(job_id: int):
     """Cancel an existing job."""
     logger.info(f'Cancelling job {job_id}')
     try:
-        await controller.cancel_job(job_id)
+        with open(f'{SIGNAL_PATH}/{job_id}', 'w') as f:
+            f.write('')
         return {'status': 'success', 'message': f'Job {job_id} cancelled'}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
