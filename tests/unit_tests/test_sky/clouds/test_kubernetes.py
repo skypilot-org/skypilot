@@ -55,20 +55,23 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.utils.cloud_config_utils.get_cloud_config_value')
     def test_global_allowed_contexts_when_no_workspace_config(
-            self, mock_get_nested, mock_get_workspace_cloud,
+            self, get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
         """Test using global allowed_contexts when workspace config is None."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_nested.return_value = ['ctx2', 'ctx3']
+        get_cloud_config_value.return_value = ['ctx2', 'ctx3']
 
         result = kubernetes.Kubernetes.existing_allowed_contexts()
 
         self.assertEqual(result, ['ctx2', 'ctx3'])
-        mock_get_nested.assert_called_once_with(
-            ('kubernetes', 'allowed_contexts'), None)
+        get_cloud_config_value.assert_called_once_with(
+            cloud='kubernetes',
+            keys=('allowed_contexts',),
+            region=None,
+            default_value=None)
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
@@ -294,14 +297,14 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.utils.cloud_config_utils.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_enabled_with_user_security_context(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
+            mock_get_workspace_cloud, get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
@@ -314,11 +317,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_accelerator_label_keys.return_value = []
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)  # Not exec auth
-        mock_get_nested.side_effect = lambda path, default=None, override_configs=None: {
+        get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=None: {
             ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
             ('kubernetes', 'provision_timeout'): 10,
             ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get(path, default)
+        }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
@@ -362,14 +366,14 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.utils.cloud_config_utils.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_disabled_when_no_high_perf_networking(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
+            mock_get_workspace_cloud, get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
@@ -382,11 +386,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_accelerator_label_keys.return_value = []
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)  # Not exec auth
-        mock_get_nested.side_effect = lambda path, default=None, override_configs=None: {
+        get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=None: {
             ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
             ('kubernetes', 'provision_timeout'): 10,
             ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get(path, default)
+        }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
@@ -429,14 +434,14 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.utils.cloud_config_utils.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_disabled_when_network_tier_not_best(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
+            mock_get_workspace_cloud, get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
@@ -453,11 +458,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_accelerator_label_keys.return_value = []
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)  # Not exec auth
-        mock_get_nested.side_effect = lambda path, default=None, override_configs=None: {
+        get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=None: {
             ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
             ('kubernetes', 'provision_timeout'): 10,
             ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get(path, default)
+        }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
@@ -497,14 +503,14 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
     @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.utils.cloud_config_utils.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     def test_nebius_network_tier_with_gpu_environment_variables(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_nested, mock_is_exec_auth,
+            mock_get_workspace_cloud, get_cloud_config_value, mock_is_exec_auth,
             mock_get_gpu_resource_key, mock_get_accelerator_label_key_values,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes,
@@ -542,11 +548,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
                                                               ], None, None)
         mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
 
-        mock_get_nested.side_effect = lambda path, default=None, override_configs=None: {
+        get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=None: {
             ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
             ('kubernetes', 'provision_timeout'): 10,
             ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get(path, default)
+        }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
