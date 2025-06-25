@@ -1538,7 +1538,7 @@ def _update_remote_ssh_node_pools(file: str,
         hosts_info = ssh_utils.prepare_hosts_info(
             name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
         pools_config[name] = {'hosts': hosts_info}
-    requests.post(f'{server_common.get_server_url()}/ssh_node_pools',
+    rest.post(f'{server_common.get_server_url()}/ssh_node_pools',
                   json=pools_config,
                   cookies=server_common.get_api_cookie_jar())
 
@@ -1559,7 +1559,7 @@ def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
             raise ValueError(f'SSH key file not found: {key_file_path}')
 
     with open(os.path.expanduser(key_file_path), 'rb') as key_file:
-        response = requests.post(
+        response = rest.post(
             f'{server_common.get_server_url()}/ssh_node_pools/keys',
             files={
                 'key_file': (key_name, key_file, 'application/octet-stream')
