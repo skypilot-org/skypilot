@@ -1,13 +1,52 @@
-.. _api-server-auth-proxy:
+.. _api-server-auth:
 
-Using an Auth Proxy with the SkyPilot API Server
-================================================
+Authentication and RBAC
+=========================
+
+SkyPilot API server supports two authentication methods:
+
+- **Basic auth**: Use an admin-configured username and password to authenticate.
+- **SSO (recommended)**: Use an auth proxy (e.g.,
+  `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__) to
+  authenticate. For example, Okta, Google Workspace, or other SSO providers are supported.
+
+Comparison between the two methods:
+
+.. csv-table::
+    :header: "", "Basic Auth", "SSO (recommended)"
+    :widths: 20, 40, 40
+    :align: left
+
+    "User identity", "Client's ``whoami`` + hash of MAC address", "User email (e.g., ``who@skypilot.co``), read from ``X-Auth-Request-Email``"
+    "SkyPilot RBAC", "Not supported", "Supported"
+    "Setup", "Automatically enabled", "Bring your Okta, Google Workspace, or other SSO provider"
+
+
+.. _api-server-auth-basic:
+
+Basic Auth
+----------
+
+Basic auth is automatically enabled if you use the :ref:`helm chart
+<sky-api-server-deploy>` to deploy the API server. See the ``AUTH_STRING``
+environment variable in the deployment instructions.
+
+Example login command:
+
+.. code-block:: console
+
+    $ sky api login -e http://username:password@<API_SERVER_ENDPOINT>
+
+.. _api-server-auth-sso:
+
+SSO (Recommended)
+------------------
 
 You can deploy the SkyPilot API server behind an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
 
 The SkyPilot implementation is flexible and will work with most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta, see :ref:`oauth2-proxy-okta`.
 
-.. image:: ../../../images/client-server/auth-proxy-user-flow.svg
+.. image:: ../../images/client-server/auth-proxy-user-flow.svg
     :alt: SkyPilot with auth proxy
     :align: center
     :width: 80%
@@ -15,7 +54,7 @@ The SkyPilot implementation is flexible and will work with most cookie-based bro
 .. _auth-proxy-user-flow:
 
 User flow
----------
+~~~~~~~~~
 
 While logging into an API server, SkyPilot will attempt to detect an auth proxy. If detected, the user must log in via a browser:
 
@@ -31,14 +70,14 @@ While logging into an API server, SkyPilot will attempt to detect an auth proxy.
 
 Opening ``http://a.b.c.d/token`` in the browser will force the user to authenticate as required by the auth proxy.
 
-.. image:: ../../../images/client-server/okta.png
+.. image:: ../../images/client-server/okta.png
     :alt: Okta auth page
     :align: center
     :width: 60%
 
 After authentication, the user will be redirected to the SkyPilot token page:
 
-.. image:: ../../../images/client-server/token-page.png
+.. image:: ../../images/client-server/token-page.png
     :alt: SkyPilot token page
     :align: center
     :width: 80%
@@ -60,15 +99,15 @@ This will copy the relevant auth cookies from the browser into the CLI.
 
 SkyPilot will use the user info passed by the auth proxy in your SkyPilot API server.
 
-.. image:: ../../../images/client-server/cluster-users.png
+.. image:: ../../images/client-server/cluster-users.png
     :alt: User emails in the SkyPilot dashboard
     :align: center
     :width: 70%
 
 .. _oauth2-proxy-okta:
 
-Setting up OAuth2 Proxy with Okta
----------------------------------
+Setting up Okta
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup.
 
@@ -77,14 +116,14 @@ To integrate with Okta, OAuth2 Proxy uses OpenID Connect (OIDC) and follows the 
 Here's how to set it up:
 
 Create application in Okta
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. From your Okta admin panel, navigate to **Applications > Applications**, then click the **Create App Integration** button.
 
    * **Sign-in method:** ``OIDC - OpenID Connect``
    * **Application type:** ``Web Application``
 
-.. image:: ../../../images/client-server/okta-setup.png
+.. image:: ../../images/client-server/okta-setup.png
     :alt: SkyPilot token page
     :align: center
     :width: 80%
@@ -98,7 +137,7 @@ Create application in Okta
 3. Click **Save**. You will need the Client ID and a Client Secret in the next step.
 
 Deploy in Helm
-~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^
 
 Set up the environment variables for your API server deployment. ``NAMESPACE`` and ``RELEASE_NAME`` should be set to the currently installed namespace and release:
 
@@ -140,7 +179,7 @@ To make sure it's working, visit your endpoint URL in a browser. You should be r
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
 
 Okta integration FAQ
-~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^
 
 * I'm getting a `400 Bad Request error <https://support.okta.com/help/s/article/The-redirect-uri-parameter-must-be-an-absolute-URI?language=en_US>`__  from Okta when I open the endpoint URL in a browser.
 
@@ -150,7 +189,7 @@ Okta integration FAQ
 .. _auth-proxy-byo:
 
 Optional: Bring your own auth proxy
------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Under the hood, SkyPilot uses cookies just like a browser to authenticate to an auth proxy. This means that most web authentication proxies should work with the SkyPilot API server. This can be convenient if you already have a standardized auth proxy setup for services you deploy.
 
@@ -160,7 +199,7 @@ To log into the CLI, use ``sky api login`` as normal - it should automatically d
 
 During the login flow, the token provided by the web login will encode the cookies used for authentication. By pasting this into the CLI, the CLI will also be able to authenticate using the cookies.
 
-.. image:: ../../../images/client-server/auth-proxy-internals.svg
+.. image:: ../../images/client-server/auth-proxy-internals.svg
     :alt: SkyPilot auth proxy architecture
     :align: center
     :width: 100%
@@ -170,3 +209,37 @@ During the login flow, the token provided by the web login will encode the cooki
     If your auth proxy is not automatically detected, try using ``sky api login --cookies`` to force auth proxy mode.
 
 If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will use it as the username in all requests.
+
+SkyPilot RBAC
+-------------
+
+SkyPilot provides basic RBAC (role-based access control) support. Two roles are supported:
+
+- **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
+- **Admin**: Manage SkyPilot API server settings, users, and workspaces.
+
+RBAC support is enabled only when :ref:`SSO authentication <api-server-auth-sso>` is used (not when using :ref:`basic auth <api-server-auth-basic>`).
+
+Config :ref:`config-yaml-rbac-default-role` determines whether a new
+SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
+set to ``admin`` to ease first-time setup.
+
+User management
+~~~~~~~~~~~~~~~
+
+SkyPilot automatically creates a user for each authenticated user. The user's email is used as the username.
+
+Admins can click on the **Users** tab in the SkyPilot dashboard to manage users and their roles.
+
+.. figure:: ../../images/client-server/users.png
+    :align: center
+    :width: 80%
+
+Supported operations:
+
+* ``Admin`` role can create users, update the role for all users, and delete users.
+* ``User`` role can view all users and their roles.
+
+
+
+
