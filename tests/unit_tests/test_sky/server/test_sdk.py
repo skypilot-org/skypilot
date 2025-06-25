@@ -75,7 +75,8 @@ def test_cookie_jar_file(set_api_cookie_jar):
 
 
 def test_api_info():
-    with mock.patch('sky.server.common.make_authenticated_request') as mock_make_request:
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
         mock_response = mock.Mock()
         mock_response.json.return_value = {
             "status": "healthy",
@@ -86,7 +87,7 @@ def test_api_info():
         mock_response.raise_for_status.return_value = None
         mock_response.cookies = requests.cookies.RequestsCookieJar()
         mock_make_request.return_value = mock_response
-        
+
         with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
                        ) as mock_server_healthy:
             mock_server_healthy.return_value = None
@@ -101,7 +102,8 @@ def test_api_info():
 
 
 def test_api_info_with_cookie_file(set_api_cookie_jar):
-    with mock.patch('sky.server.common.make_authenticated_request') as mock_make_request:
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
         mock_response = mock.Mock()
         mock_response.json.return_value = {
             "status": "healthy",
@@ -112,7 +114,7 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
         mock_response.raise_for_status.return_value = None
         mock_response.cookies = requests.cookies.RequestsCookieJar()
         mock_make_request.return_value = mock_response
-        
+
         with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
                        ) as mock_server_healthy:
             mock_server_healthy.return_value = None
