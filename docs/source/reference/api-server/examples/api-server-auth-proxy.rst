@@ -67,7 +67,7 @@ SkyPilot will use the user info passed by the auth proxy in your SkyPilot API se
 
 .. _service-accounts:
 
-Service Accounts
+Service accounts
 ----------------
 
 Service accounts provide secure programmatic access to the SkyPilot API server without browser authentication. Perfect for CI/CD pipelines and automation.
@@ -90,7 +90,7 @@ Architecture
 * Each service account has its own unique user ID and owns its resources  
 * Can be assigned admin or user roles with appropriate permissions
 
-Creating Service Accounts
+Creating service accounts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Navigate to **Users > Service Accounts** in the SkyPilot dashboard
@@ -118,7 +118,7 @@ Authenticate with the service account token:
 * Store tokens securely (Kubernetes secrets, etc.)
 * Use separate accounts for different purposes
 
-Example: GitHub Actions
+Example: GitHub actions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: yaml
