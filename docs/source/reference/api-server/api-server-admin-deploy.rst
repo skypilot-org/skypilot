@@ -513,6 +513,8 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
 .. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
+    **Option 1: Set the DB connection URI via config**
+
     Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
     To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 
@@ -540,6 +542,33 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
             db: postgresql://<username>:<password>@<host>:<port>/<database>
 
     See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
+
+    **Option 2: Set the DB connection URI via Kubernetes secret**
+
+    Create a Kubernetes secret that contains the DB connection URI:
+
+    .. code-block:: bash
+
+        kubectl create secret generic skypilot-db-connection-uri \
+          --namespace $NAMESPACE \
+          --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
+    
+
+    When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
+
+    .. code-block:: bash
+
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+          --namespace $NAMESPACE \
+          --reuse-values \
+          --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
+
+    You can also directly set this value in the ``values.yaml`` file, e.g.:
+
+    .. code-block:: yaml
+
+        apiService:
+          dbConnectionSecretName: skypilot-db-connection-uri
 
     .. note::
 

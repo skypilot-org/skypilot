@@ -418,8 +418,8 @@ ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 
 # Environment variable that is used as the DB connection string for the
 # skypilot server.
-ENV_VAR_DB_CONNECTION_STRING = (
-    f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_STRING')
+ENV_VAR_DB_CONNECTION_URI = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
