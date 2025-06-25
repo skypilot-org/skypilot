@@ -545,6 +545,8 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
     **Option 2: Set the DB connection URI via Kubernetes secret**
 
+    (available on nightly version 20250626 and later)
+    
     Create a Kubernetes secret that contains the DB connection URI:
 
     .. code-block:: bash

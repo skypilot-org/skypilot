@@ -1288,7 +1288,9 @@ even if ``db`` is specified.
 
 .. note::
 
-  The ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+  (available on nightly version 20250626 and later)
+
+  ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
 
 .. note::
 
