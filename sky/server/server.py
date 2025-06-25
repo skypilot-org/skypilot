@@ -16,6 +16,7 @@ import posixpath
 import re
 import shutil
 import sys
+import threading
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -43,6 +44,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
 from sky.server.requests import executor
@@ -399,6 +401,9 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+# Use environment variable to make the metrics middleware optional.
+if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+    app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
@@ -1490,6 +1495,7 @@ async def serve_dashboard(full_path: str):
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
             content = f.read()
+
         return fastapi.responses.HTMLResponse(content=content)
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
@@ -1513,7 +1519,13 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', default=46580, type=int)
     parser.add_argument('--deploy', action='store_true')
+    # Serve metrics on a separate port to isolate it from the application APIs:
+    # metrics port will not be exposed to the public network typically.
+    parser.add_argument('--metrics-port', default=9090, type=int)
     cmd_args = parser.parse_args()
+    if cmd_args.port == cmd_args.metrics_port:
+        raise ValueError('port and metrics-port cannot be the same')
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -1524,7 +1536,14 @@ if __name__ == '__main__':
     queue_server: Optional[multiprocessing.Process] = None
     workers: List[executor.RequestWorker] = []
     try:
+        if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+            metrics_thread = threading.Thread(target=metrics.run_metrics_server,
+                                              args=(cmd_args.host,
+                                                    cmd_args.metrics_port),
+                                              daemon=True)
+            metrics_thread.start()
         queue_server, workers = executor.start(config)
+
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
