@@ -16,12 +16,12 @@ import colorama
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
-import yaml
 
 import sky
 from sky import serve
 from sky import skypilot_config
 from sky.clouds import AWS
+from sky.clouds import gcp
 from sky.clouds import GCP
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -87,6 +87,14 @@ JOB_WAIT_NOT_RUNNING = (
     'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
     'sleep 10; s=$(sky jobs queue);'
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
+
+ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
+    'GOOGLE_APPLICATION_CREDENTIALS='
+    f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+    'gcloud auth activate-service-account '
+    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+    '2> /dev/null || true; '
+    'gsutil')
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
@@ -782,3 +790,32 @@ def get_response_from_request_id(request_id: str) -> Any:
         return request_task.get_return_value()
     raise RuntimeError(f'Failed to get request {request_id}: '
                        f'{response.status_code} {response.text}')
+
+
+def with_config(cmd: str, config_path: str) -> str:
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
+            f'{cmd}')
+
+
+def _get_controller_pod_name(controller_name: str) -> str:
+    return (
+        'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
+        'APP:.metadata.labels.app --no-headers | '
+        f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
+
+
+def kill_and_wait_controller(controller_name: str) -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    assert controller_name in ['serve', 'jobs'
+                              ], (f'Invalid controller name: {controller_name}')
+    return (
+        f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
+        f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        f'until new_controller_pod=$({_get_controller_pod_name(controller_name)}) && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && '
+        'kubectl get pod $new_controller_pod | grep "1/1"; do '
+        f'  echo "Waiting for new {controller_name} controller pod..."; sleep 5; '
+        'done; '
+        f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
+    )

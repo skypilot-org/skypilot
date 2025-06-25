@@ -9,6 +9,7 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import threading
 import time
 import traceback
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
@@ -326,6 +327,26 @@ def refresh_cluster_status_event():
         time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+def managed_job_status_refresh_event():
+    """Refresh the managed job status for controller consolidation mode."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    # We run the recovery logic before starting the event loop as those two are
+    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
+    from sky.utils import controller_utils
+    if controller_utils.high_availability_specified(
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
+        managed_job_utils.ha_recovery_for_consolidation_mode()
+    # After recovery, we start the event loop.
+    from sky.skylet import events
+    event = events.ManagedJobEvent()
+    while True:
+        time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+        event.run()
+
+
 @dataclasses.dataclass
 class InternalRequestDaemon:
     id: str
@@ -340,7 +361,10 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
-                          event_fn=refresh_cluster_status_event)
+                          event_fn=refresh_cluster_status_event),
+    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
+                          name='managed-job-status',
+                          event_fn=managed_job_status_refresh_event),
 ]
 
 
@@ -392,10 +416,6 @@ def kill_requests(request_ids: Optional[List[str]] = None,
     return cancelled_request_ids
 
 
-_DB_PATH = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
-pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-
-
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -433,6 +453,7 @@ def create_table(cursor, conn):
 
 
 _DB = None
+_init_db_lock = threading.Lock()
 
 
 def init_db(func):
@@ -441,8 +462,15 @@ def init_db(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global _DB
-        if _DB is None:
-            _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+        if _DB is not None:
+            return func(*args, **kwargs)
+        with _init_db_lock:
+            if _DB is None:
+                db_path = os.path.expanduser(
+                    server_constants.API_SERVER_REQUEST_DB_PATH)
+                pathlib.Path(db_path).parents[0].mkdir(parents=True,
+                                                       exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper

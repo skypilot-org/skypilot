@@ -65,7 +65,7 @@ Steps for training on your cloud(s):
 # Launch it on managed spot to save 3x cost
 sky jobs launch -n vicuna train.yaml
 ```
-Note: if you would like to see the training curve on W&B, you can add `--env WANDB_API_KEY` to the above command, which will propagate your local W&B API key in the environment variable to the job.
+Note: if you would like to see the training curve on W&B, you can add `--secret WANDB_API_KEY` to the above command, which will propagate your local W&B API key securely to the job.
 
 [Optional] Train a larger 13B model
 ```

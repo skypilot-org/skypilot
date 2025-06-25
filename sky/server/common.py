@@ -9,11 +9,13 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import typing
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Tuple, Union
 from urllib import parse
 import uuid
 
@@ -128,6 +130,8 @@ class ApiServerInfo:
     version: Optional[str] = None
     version_on_disk: Optional[str] = None
     commit: Optional[str] = None
+    user: Optional[Dict[str, Any]] = None
+    basic_auth_enabled: bool = False
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
@@ -261,11 +265,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             version = result.get('version')
             version_on_disk = result.get('version_on_disk')
             commit = result.get('commit')
+            user = result.get('user')
+            basic_auth_enabled = result.get('basic_auth_enabled')
             server_info = ApiServerInfo(status=ApiServerStatus.HEALTHY,
                                         api_version=api_version,
                                         version=version,
                                         version_on_disk=version_on_disk,
-                                        commit=commit)
+                                        commit=commit,
+                                        user=user,
+                                        basic_auth_enabled=basic_auth_enabled)
             if api_version is None or version is None or commit is None:
                 logger.warning(f'API server response missing '
                                f'version info. {server_url} may '
@@ -320,7 +328,10 @@ def get_request_id(response: 'requests.Response') -> RequestId:
 
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
-                      foreground: bool = False):
+                      foreground: bool = False,
+                      metrics: bool = False,
+                      metrics_port: Optional[int] = None,
+                      enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
@@ -350,21 +361,32 @@ def _start_api_server(deploy: bool = False,
             args += ['--deploy']
         if host is not None:
             args += [f'--host={host}']
+        if metrics_port is not None:
+            args += [f'--metrics-port={metrics_port}']
 
         if foreground:
             # Replaces the current process with the API server
             os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+            _set_metrics_env_var(os.environ, metrics, deploy)
+            if enable_basic_auth:
+                os.environ[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
+        # For spawn mode, copy the environ to avoid polluting the SDK process.
+        server_env = os.environ.copy()
+        server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        _set_metrics_env_var(server_env, metrics, deploy)
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        if enable_basic_auth:
+            server_env[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
         with open(log_path, 'w', encoding='utf-8') as log_file:
             # Because the log file is opened using a with statement, it may seem
             # that the file will be closed when the with statement is exited
@@ -426,12 +448,32 @@ def _start_api_server(deploy: bool = False,
                 f'SkyPilot API server started. {dashboard_msg}'))
 
 
+def _set_metrics_env_var(env: Union[Dict[str, str], os._Environ], metrics: bool,
+                         deploy: bool):
+    """Sets the metrics environment variables.
+
+    Args:
+        env: The environment variables to set.
+        metrics: Whether to enable metrics.
+        deploy: Whether the server is running in deploy mode, which means
+            multiple processes might be running.
+    """
+    if metrics:
+        env[constants.ENV_VAR_SERVER_METRICS_ENABLED] = 'true'
+        if deploy:
+            metrics_dir = os.path.join(tempfile.gettempdir(), 'metrics')
+            shutil.rmtree(metrics_dir, ignore_errors=True)
+            os.makedirs(metrics_dir, exist_ok=True)
+            # Refer to https://prometheus.github.io/client_python/multiprocess/
+            env['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
+
+
 def check_server_healthy(
     endpoint: Optional[str] = None
-) -> Literal[
+) -> Tuple[Literal[
         # Use an incomplete list of Literals here to enforce raising for other
         # enum values.
-        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH]:
+        ApiServerStatus.HEALTHY, ApiServerStatus.NEEDS_AUTH], ApiServerInfo]:
     """Check if the API server is healthy.
 
     Args:
@@ -508,7 +550,7 @@ def check_server_healthy(
 
         hinted_for_server_install_version_mismatch = True
 
-    return api_server_status
+    return api_server_status, api_server_info
 
 
 def _get_version_info_hint(server_info: ApiServerInfo) -> str:
@@ -559,10 +601,13 @@ def get_skypilot_version_on_disk() -> str:
 
 def check_server_healthy_or_start_fn(deploy: bool = False,
                                      host: str = '127.0.0.1',
-                                     foreground: bool = False):
+                                     foreground: bool = False,
+                                     metrics: bool = False,
+                                     metrics_port: Optional[int] = None,
+                                     enable_basic_auth: bool = False):
     api_server_status = None
     try:
-        api_server_status = check_server_healthy()
+        api_server_status, _ = check_server_healthy()
         if api_server_status == ApiServerStatus.NEEDS_AUTH:
             endpoint = get_server_url()
             with ux_utils.print_exception_no_traceback():
@@ -580,7 +625,8 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             # have started the server while we were waiting for the lock.
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host, foreground)
+                _start_api_server(deploy, host, foreground, metrics,
+                                  metrics_port, enable_basic_auth)
 
 
 def check_server_healthy_or_start(func):

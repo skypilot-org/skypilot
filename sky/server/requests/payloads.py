@@ -5,7 +5,6 @@ kwargs for the payloads, otherwise, we have to keep the default values the sync
 with the backend functions. The benefit of having the default values in the
 payloads is that a user can find the default values in the Restful API docs.
 """
-import getpass
 import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -58,8 +57,7 @@ def request_body_env_vars() -> dict:
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
-                                                 getpass.getuser())
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     # Remove the path to config file, as the config content is included in the
@@ -336,10 +334,28 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserCreateBody(RequestBody):
+    """The request body for the user create endpoint."""
+    username: str
+    password: str
+    role: Optional[str] = None
+
+
+class UserDeleteBody(RequestBody):
+    """The request body for the user delete endpoint."""
+    user_id: str
+
+
 class UserUpdateBody(RequestBody):
     """The request body for the user update endpoint."""
     user_id: str
-    role: str
+    role: Optional[str] = None
+    password: Optional[str] = None
+
+
+class UserImportBody(RequestBody):
+    """The request body for the user import endpoint."""
+    csv_content: str
 
 
 class DownloadBody(RequestBody):
@@ -595,3 +611,8 @@ class UpdateConfigBody(RequestBody):
 class GetConfigBody(RequestBody):
     """The request body for getting the entire SkyPilot configuration."""
     pass
+
+
+class CostReportBody(RequestBody):
+    """The request body for the cost report endpoint."""
+    days: Optional[int] = 30

@@ -3,7 +3,7 @@
 SkyPilot supports AWS Inferentia accelerators. The Neuron SDK is a runtime and compiler for running deep learning models on AWS Inferentia chips. Here is an example of how to use the Neuron SDK to launch a Llama 3 8b model on an Inferentia chip:
 
 ```bash
-$ sky launch -c aws-inf inferentia.yaml --env HF_TOKEN=hf_xxx
+$ sky launch -c aws-inf inferentia.yaml --secret HF_TOKEN=hf_xxx
 ```
 
 To send an example request to the model, you can use the following command:
@@ -45,7 +45,8 @@ resources:
 
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-  HF_TOKEN: # fill
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 setup: |
   if command -v nvidia-smi; then

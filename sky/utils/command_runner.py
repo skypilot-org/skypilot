@@ -4,6 +4,7 @@ import hashlib
 import os
 import pathlib
 import shlex
+import sys
 import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
 
@@ -231,9 +232,9 @@ class CommandRunner:
             self,
             source: str,
             target: str,
-            node_destination: str,
+            node_destination: Optional[str],
             up: bool,
-            rsh_option: str,
+            rsh_option: Optional[str],
             # Advanced options.
             log_path: str = os.devnull,
             stream_logs: bool = True,
@@ -283,28 +284,43 @@ class CommandRunner:
                         RSYNC_EXCLUDE_OPTION.format(
                             shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
-        rsync_command.append(f'-e {shlex.quote(rsh_option)}')
+        if rsh_option is not None:
+            rsync_command.append(f'-e {shlex.quote(rsh_option)}')
+        maybe_dest_prefix = ('' if node_destination is None else
+                             f'{node_destination}:')
 
         if up:
             resolved_target = target
-            if target.startswith('~'):
-                remote_home_dir = _get_remote_home_dir_with_retry()
-                resolved_target = target.replace('~', remote_home_dir)
+            if node_destination is None:
+                # Is a local rsync. Directly resolve the target.
+                resolved_target = str(
+                    pathlib.Path(target).expanduser().resolve())
+            else:
+                if target.startswith('~'):
+                    remote_home_dir = _get_remote_home_dir_with_retry()
+                    resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
-                f'{node_destination}:{resolved_target!r}',
+                f'{maybe_dest_prefix}{resolved_target!r}',
             ])
         else:
             resolved_source = source
-            if source.startswith('~'):
-                remote_home_dir = _get_remote_home_dir_with_retry()
-                resolved_source = source.replace('~', remote_home_dir)
+            if node_destination is None:
+                resolved_target = str(
+                    pathlib.Path(target).expanduser().resolve())
+                resolved_source = str(
+                    pathlib.Path(source).expanduser().resolve())
+            else:
+                resolved_target = os.path.expanduser(target)
+                if source.startswith('~'):
+                    remote_home_dir = _get_remote_home_dir_with_retry()
+                    resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
-                f'{node_destination}:{resolved_source!r}',
-                f'{os.path.expanduser(target)!r}',
+                f'{maybe_dest_prefix}{resolved_source!r}',
+                f'{resolved_target!r}',
             ])
         command = ' '.join(rsync_command)
         logger.debug(f'Running rsync command: {command}')
@@ -561,7 +577,7 @@ class SSHCommandRunner(CommandRunner):
         if self.ssh_control_name is not None:
             control_path = _ssh_control_path(self.ssh_control_name)
             if control_path is not None:
-                # Suppress the `Exit request sent.` output for this comamnd
+                # Suppress the `Exit request sent.` output for this command
                 # which would interrupt the CLI spinner.
                 cmd = (f'ssh -O exit -S {control_path}/%C '
                        f'{self.ssh_user}@{self.ip} > /dev/null 2>&1')
@@ -964,3 +980,93 @@ class KubernetesCommandRunner(CommandRunner):
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
             get_remote_home_dir=get_remote_home_dir)
+
+
+class LocalProcessCommandRunner(CommandRunner):
+    """Runner for local process commands."""
+
+    def __init__(self):
+        super().__init__('local')
+
+    @timeline.event
+    @context_utils.cancellation_guard
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: bool = False,
+            port_forward: Optional[List[Tuple[int, int]]] = None,
+            # Advanced options.
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
+            source_bashrc: bool = False,
+            skip_num_lines: int = 0,
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Use subprocess to run the command."""
+        del port_forward, ssh_mode, connect_timeout  # Unused.
+
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_num_lines=skip_num_lines,
+                                               source_bashrc=source_bashrc)
+
+        log_dir = os.path.expanduser(os.path.dirname(log_path))
+        os.makedirs(log_dir, exist_ok=True)
+
+        executable = None
+        command = [command_str]
+        if not process_stream:
+            if stream_logs:
+                command += [
+                    f'| tee {log_path}',
+                    # This also requires the executor to be '/bin/bash' instead
+                    # of the default '/bin/sh'.
+                    '; exit ${PIPESTATUS[0]}'
+                ]
+            else:
+                command += [f'> {log_path}']
+            executable = '/bin/bash'
+        command_str = ' '.join(command)
+        # For local process, the API server might not have this python path
+        # setup. But this command runner should only be triggered from the API
+        # server (in controller consolidation mode), so we can safely replace
+        # the python path with the executable of the API server.
+        command_str = command_str.replace(constants.SKY_PYTHON_CMD,
+                                          sys.executable)
+        logger.debug(f'Running command locally: {command_str}')
+        return log_lib.run_with_log(command_str,
+                                    log_path,
+                                    require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
+                                    shell=True,
+                                    executable=executable,
+                                    **kwargs)
+
+    @timeline.event
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Use rsync to sync the source to the target."""
+        self._rsync(source,
+                    target,
+                    node_destination=None,
+                    up=up,
+                    rsh_option=None,
+                    log_path=log_path,
+                    stream_logs=stream_logs,
+                    max_retry=max_retry)

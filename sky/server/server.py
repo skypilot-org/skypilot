@@ -16,6 +16,7 @@ import posixpath
 import re
 import shutil
 import sys
+import threading
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
@@ -23,6 +24,7 @@ import zipfile
 import aiofiles
 import fastapi
 from fastapi.middleware import cors
+from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
 
 import sky
@@ -42,6 +44,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -102,6 +105,74 @@ logger = sky_logging.init_logger(__name__)
 # response will block other requests from being processed.
 
 
+def _basic_auth_401_response(content: str):
+    """Return a 401 response with basic auth realm."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        content=content)
+
+
+# TODO(hailong): Remove this function and use request.state.auth_user instead.
+async def _override_user_info_in_request_body(request: fastapi.Request,
+                                              auth_user: Optional[models.User]):
+    body = await request.body()
+    if auth_user and body:
+        try:
+            original_json = await request.json()
+        except json.JSONDecodeError as e:
+            logger.error(f'Error parsing request JSON: {e}')
+        else:
+            logger.debug(f'Overriding user for {request.state.request_id}: '
+                         f'{auth_user.name}, {auth_user.id}')
+            if 'env_vars' in original_json:
+                if isinstance(original_json.get('env_vars'), dict):
+                    original_json['env_vars'][
+                        constants.USER_ID_ENV_VAR] = auth_user.id
+                    original_json['env_vars'][
+                        constants.USER_ENV_VAR] = auth_user.name
+                else:
+                    logger.warning(
+                        f'"env_vars" in request body is not a dictionary '
+                        f'for request {request.state.request_id}. '
+                        'Skipping user info injection into body.')
+            else:
+                original_json['env_vars'] = {}
+                original_json['env_vars'][
+                    constants.USER_ID_ENV_VAR] = auth_user.id
+                original_json['env_vars'][
+                    constants.USER_ENV_VAR] = auth_user.name
+            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+
+
+def _try_set_basic_auth_user(request: fastapi.Request):
+    auth_header = request.headers.get('authorization')
+    if not auth_header or not auth_header.lower().startswith('basic '):
+        return
+
+    # Check username and password
+    encoded = auth_header.split(' ', 1)[1]
+    try:
+        decoded = base64.b64decode(encoded).decode()
+        username, password = decoded.split(':', 1)
+    except Exception:  # pylint: disable=broad-except
+        return
+
+    users = global_user_state.get_user_by_name(username)
+    if not users:
+        return
+
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        username_encoded = username.encode('utf8')
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                apr_md5_crypt.verify(password, user.password)):
+            request.state.auth_user = user
+            break
+
+
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -112,7 +183,7 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 request.url.path.startswith('/api/')):
             return await call_next(request)
 
-        auth_user = _get_auth_user_header(request)
+        auth_user = request.state.auth_user
         if auth_user is None:
             return await call_next(request)
 
@@ -149,6 +220,50 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle HTTP Basic Auth."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.url.path.startswith('/api/'):
+            # Try to set the auth user from the basic auth header so the
+            # following endpoint handlers can leverage the auth_user info
+            _try_set_basic_auth_user(request)
+            return await call_next(request)
+
+        auth_header = request.headers.get('authorization')
+        if not auth_header or not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid basic auth')
+
+        # Check username and password
+        encoded = auth_header.split(' ', 1)[1]
+        try:
+            decoded = base64.b64decode(encoded).decode()
+            username, password = decoded.split(':', 1)
+        except Exception:  # pylint: disable=broad-except
+            return _basic_auth_401_response('Invalid basic auth')
+
+        users = global_user_state.get_user_by_name(username)
+        if not users:
+            return _basic_auth_401_response('Invalid credentials')
+
+        valid_user = False
+        for user in users:
+            if not user.name or not user.password:
+                continue
+            username_encoded = username.encode('utf8')
+            db_username_encoded = user.name.encode('utf8')
+            if (username_encoded == db_username_encoded and
+                    apr_md5_crypt.verify(password, user.password)):
+                valid_user = True
+                request.state.auth_user = user
+                await _override_user_info_in_request_body(request, user)
+                break
+        if not valid_user:
+            return _basic_auth_401_response('Invalid credentials')
+
+        return await call_next(request)
+
+
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
@@ -168,33 +283,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         else:
             request.state.auth_user = None
 
-        body = await request.body()
-        if auth_user and body:
-            try:
-                original_json = await request.json()
-            except json.JSONDecodeError as e:
-                logger.error(f'Error parsing request JSON: {e}')
-            else:
-                logger.debug(f'Overriding user for {request.state.request_id}: '
-                             f'{auth_user.name}, {auth_user.id}')
-                if 'env_vars' in original_json:
-                    if isinstance(original_json.get('env_vars'), dict):
-                        original_json['env_vars'][
-                            constants.USER_ID_ENV_VAR] = auth_user.id
-                        original_json['env_vars'][
-                            constants.USER_ENV_VAR] = auth_user.name
-                    else:
-                        logger.warning(
-                            f'"env_vars" in request body is not a dictionary '
-                            f'for request {request.state.request_id}. '
-                            'Skipping user info injection into body.')
-                else:
-                    original_json['env_vars'] = {}
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
-                request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+        await _override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -292,6 +381,9 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+# Use environment variable to make the metrics middleware optional.
+if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+    app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(PathCleanMiddleware)
@@ -306,6 +398,9 @@ app.add_middleware(
     allow_headers=['*'],
     # TODO(syang): remove X-Request-ID when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
+if str(enable_basic_auth).lower() == 'true':
+    app.add_middleware(BasicAuthMiddleware)
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
@@ -954,13 +1049,14 @@ async def download(download_body: payloads.DownloadBody) -> None:
                                     detail=f'Error creating zip file: {str(e)}')
 
 
-@app.get('/cost_report')
-async def cost_report(request: fastapi.Request) -> None:
+@app.post('/cost_report')
+async def cost_report(request: fastapi.Request,
+                      cost_report_body: payloads.CostReportBody) -> None:
     """Gets the cost report of a cluster."""
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='cost_report',
-        request_body=payloads.RequestBody(),
+        request_body=cost_report_body,
         func=core.cost_report,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -1232,7 +1328,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
           disk, which can be used to warn about restarting the API server
         - commit: str; The commit hash of SkyPilot used for API server.
     """
-    user = _get_auth_user_header(request)
+    user = request.state.auth_user
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,
@@ -1240,6 +1336,8 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
         'user': user.to_dict() if user is not None else None,
+        'basic_auth_enabled': os.environ.get(
+            constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
     }
 
 
@@ -1368,6 +1466,7 @@ async def serve_dashboard(full_path: str):
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
             content = f.read()
+
         return fastapi.responses.HTMLResponse(content=content)
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
@@ -1391,7 +1490,13 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', default=46580, type=int)
     parser.add_argument('--deploy', action='store_true')
+    # Serve metrics on a separate port to isolate it from the application APIs:
+    # metrics port will not be exposed to the public network typically.
+    parser.add_argument('--metrics-port', default=9090, type=int)
     cmd_args = parser.parse_args()
+    if cmd_args.port == cmd_args.metrics_port:
+        raise ValueError('port and metrics-port cannot be the same')
+
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -1401,7 +1506,14 @@ if __name__ == '__main__':
 
     sub_procs = []
     try:
+        if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+            metrics_thread = threading.Thread(target=metrics.run_metrics_server,
+                                              args=(cmd_args.host,
+                                                    cmd_args.metrics_port),
+                                              daemon=True)
+            metrics_thread.start()
         sub_procs = executor.start(config)
+
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.

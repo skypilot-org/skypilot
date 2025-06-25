@@ -17,6 +17,7 @@ class User:
     id: str
     # Display name of the user
     name: Optional[str] = None
+    password: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
@@ -47,6 +48,8 @@ class KubernetesNodeInfo:
     # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
     total: Dict[str, int]
     free: Dict[str, int]
+    # IP address of the node (external IP preferred, fallback to internal IP)
+    ip_address: Optional[str] = None
 
 
 @dataclasses.dataclass

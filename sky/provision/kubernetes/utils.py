@@ -133,6 +133,30 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
 
+def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
+    """Normalize TPU names to the k8s-compatible name and extract count."""
+    # Examples:
+    # 'tpu-v6e-8' -> ('tpu-v6e-slice', 8)
+    # 'tpu-v5litepod-4' -> ('tpu-v5-lite-podslice', 4)
+
+    gcp_to_k8s_patterns = [
+        (r'^tpu-v6e-(\d+)$', 'tpu-v6e-slice'),
+        (r'^tpu-v5p-(\d+)$', 'tpu-v5p-slice'),
+        (r'^tpu-v5litepod-(\d+)$', 'tpu-v5-lite-podslice'),
+        (r'^tpu-v5lite-(\d+)$', 'tpu-v5-lite-device'),
+        (r'^tpu-v4-(\d+)$', 'tpu-v4-podslice'),
+    ]
+
+    for pattern, replacement in gcp_to_k8s_patterns:
+        match = re.match(pattern, accelerator)
+        if match:
+            count = int(match.group(1))
+            return replacement, count
+
+    # Default fallback
+    return accelerator, 1
+
+
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
@@ -427,6 +451,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
+        acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
         count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
                                                        {}).get(acc_count, None)
         if count_to_topology is None:
@@ -460,6 +485,14 @@ class GKELabelFormatter(GPULabelFormatter):
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        try:
+            _ = cls.get_accelerator_from_label_value(value)
+            return True, ''
+        except ValueError as e:
+            return False, str(e)
 
 
 class GFDLabelFormatter(GPULabelFormatter):
@@ -565,17 +598,29 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
-    label_formatter = None
-
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
+        skip = False
         for _, label_list in node_labels.items():
-            for label, _ in label_list:
+            for label, value in label_list:
                 if lf.match_label_key(label):
-                    label_formatter = lf()
-                    return label_formatter, node_labels
+                    valid, reason = lf.validate_label_value(value)
+                    if valid:
+                        return lf(), node_labels
+                    else:
+                        logger.warning(f'GPU label {label} matched for label '
+                                       f'formatter {lf.__class__.__name__}, '
+                                       f'but has invalid value {value}. '
+                                       f'Reason: {reason}. '
+                                       'Skipping...')
+                        skip = True
+                        break
+            if skip:
+                break
+        if skip:
+            continue
 
-    return label_formatter, node_labels
+    return None, node_labels
 
 
 class Autoscaler:
@@ -754,6 +799,8 @@ class GKEAutoscaler(Autoscaler):
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
                 if 'resourceLabels' in node_config:
+                    requested_acc_type, requested_acc_count = normalize_tpu_accelerator_name(
+                        requested_acc_type)
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
@@ -993,7 +1040,7 @@ def check_instance_fits(context: Optional[str],
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    def check_tpu_fits(candidate_instance_type: 'KubernetesInstanceType',
+    def check_tpu_fits(acc_type: str, acc_count: int,
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on requested TPU.
 
@@ -1003,8 +1050,6 @@ def check_instance_fits(context: Optional[str],
         node (node_tpu_chip_count) and the total TPU chips across the entire
         podslice (topology_chip_count) are correctly handled.
         """
-        acc_type = candidate_instance_type.accelerator_type
-        acc_count = candidate_instance_type.accelerator_count
         tpu_list_in_cluster = []
         for node in node_list:
             if acc_type == node.metadata.labels[
@@ -1055,7 +1100,8 @@ def check_instance_fits(context: Optional[str],
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason
         else:
@@ -1141,8 +1187,8 @@ def get_accelerator_label_key_values(
 
     is_ssh_node_pool = context.startswith('ssh-') if context else False
     cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
-    context_display_name = context.lstrip('ssh-') if (
-        context and is_ssh_node_pool) else context
+    context_display_name = common_utils.removeprefix(
+        context, 'ssh-') if (context and is_ssh_node_pool) else context
 
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
@@ -2688,6 +2734,21 @@ def get_kubernetes_node_info(
                     node.metadata.labels.get(label_key))
                 break
 
+        # Extract IP address from node addresses (prefer external, fallback to internal)
+        node_ip = None
+        if node.status.addresses:
+            # First try to find external IP
+            for address in node.status.addresses:
+                if address.type == 'ExternalIP':
+                    node_ip = address.address
+                    break
+            # If no external IP, try to find internal IP
+            if node_ip is None:
+                for address in node.status.addresses:
+                    if address.type == 'InternalIP':
+                        node_ip = address.address
+                        break
+
         allocated_qty = 0
         accelerator_count = get_node_accelerator_count(node.status.allocatable)
 
@@ -2719,7 +2780,8 @@ def get_kubernetes_node_info(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
-            free={'accelerators_available': int(accelerators_available)})
+            free={'accelerators_available': int(accelerators_available)},
+            ip_address=node_ip)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
@@ -2911,7 +2973,8 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 def is_tpu_on_gke(accelerator: str) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
-    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
+    normalized, _ = normalize_tpu_accelerator_name(accelerator)
+    return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
 def get_node_accelerator_count(attribute_dict: dict) -> int:

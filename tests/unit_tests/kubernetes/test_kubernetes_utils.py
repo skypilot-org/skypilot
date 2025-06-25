@@ -277,3 +277,31 @@ users:
             # Clean up temporary files
             os.unlink(f1.name)
             os.unlink(f2.name)
+
+
+def test_detect_gpu_label_formatter_invalid_label_skip():
+    """Tests that on finding a matching label, the
+    detect_gpu_label_formatter method will skip if
+    the label value is invalid."""
+
+    # this is an invalid GKE gpu label
+    valid, _ = utils.GKELabelFormatter.validate_label_value('H100_NVLINK_80GB')
+    assert not valid
+
+    # make node mocks with incorrect labels, as shown in
+    # https://github.com/skypilot-org/skypilot/issues/5628
+    mock_node = mock.MagicMock()
+    mock_node.metadata.name = 'node'
+    mock_node.metadata.labels = {
+        'cloud.google.com/gke-accelerator': 'H100_NVLINK_80GB',
+        'gpu.nvidia.com/class': 'H100_NVLINK_80GB',
+        'gpu.nvidia.com/count': '8',
+        'gpu.nvidia.com/model': 'H100_NVLINK_80GB',
+        'gpu.nvidia.com/vram': '81'
+    }
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=[mock_node]):
+        lf, _ = utils.detect_gpu_label_formatter('whatever')
+        assert lf is not None
+        assert isinstance(lf, utils.CoreWeaveLabelFormatter)

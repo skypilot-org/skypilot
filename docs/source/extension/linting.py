@@ -45,6 +45,8 @@ ALLOWED_TERMS = {
     'Google',
     'Amazon',
     'Okta',
+    'Prometheus',
+    'Grafana',
     # Framework names
     'vLLM',
     'TGI',

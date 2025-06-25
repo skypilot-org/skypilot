@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --secret HF_TOKEN
 #
 # curl /v1/chat/completions:
 #
@@ -31,7 +31,8 @@
 
 envs:
   MODEL_NAME: databricks/dbrx-instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 service:
   replicas: 2

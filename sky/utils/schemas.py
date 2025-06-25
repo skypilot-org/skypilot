@@ -43,14 +43,20 @@ _AUTOSTOP_SCHEMA = {
         {
             # Shorthand to set idle_minutes by directly specifying, e.g.
             #   autostop: 5
-            'type': 'integer',
-            'minimum': 0,
+            'anyOf': [{
+                'type': 'string',
+                'pattern': constants.TIME_PATTERN,
+                'minimum': 0,
+            }, {
+                'type': 'integer',
+            }]
         },
         {
             'type': 'object',
             'required': [],
             'additionalProperties': False,
             'properties': {
+                # TODO(luca): update field to use time units as well.
                 'idle_minutes': {
                     'type': 'integer',
                     'minimum': 0,
@@ -190,7 +196,12 @@ def _get_single_resources_schema():
                     'type': 'object',
                     'properties': {
                         'disk_size': {
-                            'type': 'integer',
+                            'anyOf': [{
+                                'type': 'string',
+                                'pattern': constants.MEMORY_SIZE_PATTERN,
+                            }, {
+                                'type': 'integer',
+                            }],
                         },
                         'disk_tier': {
                             'type': 'string',
@@ -214,7 +225,12 @@ def _get_single_resources_schema():
                 },
             },
             'disk_size': {
-                'type': 'integer',
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.MEMORY_SIZE_PATTERN,
+                }, {
+                    'type': 'integer',
+                }],
             },
             'disk_tier': {
                 'type': 'string',
@@ -273,6 +289,11 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'priority': {
+                'type': 'integer',
+                'minimum': constants.MIN_PRIORITY,
+                'maximum': constants.MAX_PRIORITY,
+            },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -365,6 +386,7 @@ def get_resources_schema():
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -404,7 +426,12 @@ def get_storage_schema():
                 'type': 'object',
                 'properties': {
                     'disk_size': {
-                        'type': 'integer',
+                        'anyOf': [{
+                            'type': 'string',
+                            'pattern': constants.MEMORY_SIZE_PATTERN,
+                        }, {
+                            'type': 'integer',
+                        }],
                     },
                     'disk_tier': {
                         'type': 'string',
@@ -645,18 +672,6 @@ def get_task_schema():
             'service': {
                 'type': 'object',
             },
-            'job': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'priority': {
-                        'type': 'integer',
-                        'minimum': 0,
-                        'maximum': 1000,
-                    },
-                },
-            },
             'setup': {
                 'type': 'string',
             },
@@ -668,6 +683,17 @@ def get_task_schema():
                 'required': [],
                 'patternProperties': {
                     # Checks env keys are valid env var names.
+                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                        'type': ['string', 'null']
+                    }
+                },
+                'additionalProperties': False,
+            },
+            'secrets': {
+                'type': 'object',
+                'required': [],
+                'patternProperties': {
+                    # Checks secret keys are valid env var names.
                     '^[a-zA-Z_][a-zA-Z0-9_]*$': {
                         'type': ['string', 'null']
                     }
@@ -861,30 +887,41 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
-    controller_resources_schema = {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'controller': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'resources': resources_schema,
-                    'high_availability': {
-                        'type': 'boolean',
-                    },
-                    'autostop': _AUTOSTOP_SCHEMA,
-                }
+
+    def _get_controller_schema(add_consolidation_mode: bool = False):
+        controller_properties = {
+            'resources': resources_schema,
+            'high_availability': {
+                'type': 'boolean',
+                'default': False,
             },
-            'bucket': {
-                'type': 'string',
-                'pattern': '^(https|s3|gs|r2|cos)://.+',
-                'required': [],
+            'autostop': _AUTOSTOP_SCHEMA,
+        }
+        if add_consolidation_mode:
+            controller_properties['consolidation_mode'] = {
+                'type': 'boolean',
+                'default': False,
+            }
+
+        return {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'controller': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': controller_properties,
+                },
+                'bucket': {
+                    'type': 'string',
+                    'pattern': '^(https|s3|gs|r2|cos)://.+',
+                    'required': [],
+                }
             }
         }
-    }
+
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -1052,6 +1089,16 @@ def get_config_schema():
                         }
                     }
                 },
+                'kueue': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'local_queue_name': {
+                            'type': 'string',
+                        },
+                    },
+                },
             }
         },
         'ssh': {
@@ -1149,9 +1196,17 @@ def get_config_schema():
 
     admin_policy_schema = {
         'type': 'string',
-        # Check regex to be a valid python module path
-        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
-                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+        'anyOf': [
+            {
+                # Check regex to be a valid python module path
+                'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                            r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+            },
+            {
+                # Check for valid HTTP/HTTPS URL
+                'pattern': r'^https?://.*$',
+            }
+        ]
     }
 
     allowed_clouds = {
@@ -1334,6 +1389,35 @@ def get_config_schema():
         }
     }
 
+    logs_schema = {
+        'type': 'object',
+        'required': ['store'],
+        'additionalProperties': False,
+        'properties': {
+            'store': {
+                'type': 'string',
+                'case_insensitive_enum': ['gcp'],
+            },
+            'gcp': {
+                'type': 'object',
+                'properties': {
+                    'project_id': {
+                        'type': 'string',
+                    },
+                    'credentials_file': {
+                        'type': 'string',
+                    },
+                    'additional_labels': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(
@@ -1355,8 +1439,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': controller_resources_schema,
-            'serve': controller_resources_schema,
+            'jobs': _get_controller_schema(add_consolidation_mode=True),
+            'serve': _get_controller_schema(add_consolidation_mode=False),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
@@ -1366,6 +1450,7 @@ def get_config_schema():
             'workspaces': workspaces_schema,
             'provision': provision_configs,
             'rbac': rbac_schema,
+            'logs': logs_schema,
             **cloud_configs,
         },
     }

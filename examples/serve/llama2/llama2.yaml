@@ -10,8 +10,6 @@
 # could also check the endpoint by running:
 #   sky serve status --endpoint llama2
 
-# TODO(tian): Change usage to `HF_TOKEN=<your-token> sky serve up -n llama2 examples/serve/llama2/llama2.yaml --env HF_TOKEN` once we have `--env` enabled.
-
 service:
   readiness_probe: /v1/models
   replicas: 2
@@ -25,7 +23,9 @@ resources:
 
 envs:
   MODEL_SIZE: 7
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 setup: |
   conda activate chatbot
