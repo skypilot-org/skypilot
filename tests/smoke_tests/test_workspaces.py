@@ -13,9 +13,6 @@ from sky import skypilot_config
 
 # ---------- Test workspace switching ----------
 @pytest.mark.no_remote_server
-@pytest.mark.skipif(
-    not os.getenv('BUILDKITE'),
-    reason="Skipping workspace switching test when BUILDKITE env not set")
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #
@@ -25,6 +22,10 @@ def test_workspace_switching(generic_cloud: str):
     # 3. Updates .sky.yaml to set "ws-train" as active workspace
     # 4. Launches another cluster with workspace "train-ws"
     # 5. Verifies both workspaces function correctly
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip(
+            'Skipping workspace switching test when not in Buildkite environment'
+        )
     ws1_name = 'ws-1'
     ws2_name = 'ws-2'
     server_config_content = textwrap.dedent(f"""\

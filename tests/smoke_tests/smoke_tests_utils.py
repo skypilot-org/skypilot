@@ -28,6 +28,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -819,3 +820,8 @@ def kill_and_wait_controller(controller_name: str) -> str:
         'done; '
         f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
     )
+
+
+def is_in_buildkite_env() -> bool:
+    """Check if the test is running in the Buildkite environment."""
+    return env_options.Options.RUNNING_IN_BUILDKITE.get()
