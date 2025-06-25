@@ -624,6 +624,11 @@ class VolumeTopologyConflictError(Exception):
     pass
 
 
+class ServerTemporarilyUnavailableError(Exception):
+    """Raised when the server is temporarily unavailable."""
+    pass
+
+
 class RestfulPolicyError(Exception):
     """Raised when failed to call a RESTful policy."""
     pass
