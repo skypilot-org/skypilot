@@ -10,6 +10,7 @@ import React, {
 import PropTypes from 'prop-types';
 import { CircularProgress } from '@mui/material';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -143,6 +144,7 @@ const SuccessDisplay = ({ message, onDismiss }) => {
 };
 
 export function Users() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = useRef(null);
   const isMobile = useMobile();
@@ -186,6 +188,18 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
+
+  // Handle URL parameters for tab selection
+  useEffect(() => {
+    if (router.isReady) {
+      const tab = router.query.tab;
+      if (tab === 'service-accounts') {
+        setActiveMainTab('service-accounts');
+      } else {
+        setActiveMainTab('users');
+      }
+    }
+  }, [router.isReady, router.query.tab]);
 
   useEffect(() => {
     async function fetchHealth() {
@@ -453,7 +467,10 @@ export function Users() {
                 ? 'text-sky-blue border-sky-500'
                 : 'text-gray-500 hover:text-gray-700 border-transparent'
             }`}
-            onClick={() => setActiveMainTab('users')}
+            onClick={() => {
+              setActiveMainTab('users');
+              router.push('/users', undefined, { shallow: true });
+            }}
           >
             Users
           </button>
@@ -463,7 +480,12 @@ export function Users() {
                 ? 'text-sky-blue border-sky-500'
                 : 'text-gray-500 hover:text-gray-700 border-transparent'
             }`}
-            onClick={() => setActiveMainTab('service-accounts')}
+            onClick={() => {
+              setActiveMainTab('service-accounts');
+              router.push('/users?tab=service-accounts', undefined, {
+                shallow: true,
+              });
+            }}
           >
             Service Accounts
           </button>

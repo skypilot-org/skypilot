@@ -127,6 +127,15 @@ const formatUserDisplay = (username, userId) => {
   return usernameBase;
 };
 
+// Helper function to generate user link based on whether it's a service account
+const getUserLink = (userHash) => {
+  // Service accounts have user_hash starting with 'sa-'
+  if (userHash && userHash.startsWith('sa-')) {
+    return '/users?tab=service-accounts';
+  }
+  return '/users';
+};
+
 // Helper function to format duration in a human-readable way
 const formatDuration = (durationSeconds) => {
   if (!durationSeconds || durationSeconds === 0) {
@@ -771,7 +780,12 @@ export function ClusterTable({
                         </Link>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        {item.user}
+                        <Link
+                          href={getUserLink(item.user_hash)}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.user}
+                        </Link>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <Link

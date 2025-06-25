@@ -142,6 +142,15 @@ const formatUserDisplay = (username, userId) => {
   return usernameBase;
 };
 
+// Helper function to generate user link based on whether it's a service account
+const getUserLink = (userHash) => {
+  // Service accounts have user_hash starting with 'sa-'
+  if (userHash && userHash.startsWith('sa-')) {
+    return '/users?tab=service-accounts';
+  }
+  return '/users';
+};
+
 // Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -1032,7 +1041,14 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.user}</TableCell>
+                      <TableCell>
+                        <Link
+                          href={getUserLink(item.user_hash)}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.user}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <Link
                           href="/workspaces"
@@ -1550,7 +1566,14 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <Link
+                        href={getUserLink(item.user_hash)}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.user}
+                      </Link>
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
