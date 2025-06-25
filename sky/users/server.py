@@ -37,13 +37,14 @@ async def users() -> List[Dict[str, Any]]:
     user_list = global_user_state.get_all_users()
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"
-        if user.id.startswith('sa-'):
+        if user.is_service_account():
             continue
 
         user_roles = permission.permission_service.get_user_roles(user.id)
         all_users.append({
             'id': user.id,
             'name': user.name,
+            'created_at': user.created_at,
             'role': user_roles[0] if user_roles else ''
         })
     return all_users
@@ -301,7 +302,7 @@ async def user_export() -> Dict[str, Any]:
         exported_users = []
         for user in user_list:
             # Filter out service accounts - they have IDs starting with "sa-"
-            if user.id.startswith('sa-'):
+            if user.is_service_account():
                 continue
 
             # Get user role

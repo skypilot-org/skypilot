@@ -1627,6 +1627,7 @@ def get(request_id: str) -> Any:
     response = server_common.make_authenticated_request(
         'GET',
         f'/api/get?request_id={request_id}',
+        retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     request_task = None
@@ -1706,6 +1707,7 @@ def stream_and_get(
         'GET',
         '/api/stream',
         params=params,
+        retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)

@@ -4,7 +4,6 @@ import collections
 import dataclasses
 import getpass
 import os
-import time
 from typing import Any, Dict, Optional
 
 import pydantic
@@ -21,6 +20,7 @@ class User:
     # Display name of the user
     name: Optional[str] = None
     password: Optional[str] = None
+    created_at: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
@@ -38,33 +38,9 @@ class User:
         user_hash = common_utils.get_user_hash()
         return User(id=user_hash, name=user_name)
 
-
-@dataclasses.dataclass
-class ServiceAccountToken:
-    """Dataclass to store service account token information."""
-    token_id: str
-    user_hash: str
-    token_name: str
-    token_hash: str
-    created_at: int
-    last_used_at: Optional[int] = None
-    expires_at: Optional[int] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'token_id': self.token_id,
-            'user_hash': self.user_hash,
-            'token_name': self.token_name,
-            'created_at': self.created_at,
-            'last_used_at': self.last_used_at,
-            'expires_at': self.expires_at,
-        }
-
-    def is_expired(self) -> bool:
-        """Check if the token is expired."""
-        if self.expires_at is None:
-            return False
-        return time.time() > self.expires_at
+    def is_service_account(self) -> bool:
+        """Check if the user is a service account."""
+        return self.id.startswith('sa-')
 
 
 RealtimeGpuAvailability = collections.namedtuple(

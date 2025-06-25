@@ -128,25 +128,16 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 
 
 @retry_on_server_unavailable()
-def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
-    """Send a POST request to the API server, retry on server temporarily
+def request(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server, retry on server temporarily
     unavailable."""
-    response = requests.post(url, data=data, json=json, **kwargs)
+    response = requests.request(method, url, **kwargs)
     handle_server_unavailable(response)
     return response
 
 
-@retry_on_server_unavailable()
-def get(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server, retry on server temporarily
-    unavailable."""
-    response = requests.get(url, params=params, **kwargs)
-    handle_server_unavailable(response)
-    return response
-
-
-def get_without_retry(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server without retry."""
-    response = requests.get(url, params=params, **kwargs)
+def request_without_retry(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server without retry."""
+    response = requests.request(method, url, **kwargs)
     handle_server_unavailable(response)
     return response

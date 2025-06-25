@@ -189,6 +189,7 @@ def get_cookies_from_response(
 def make_authenticated_request(method: str,
                                path: str,
                                server_url: Optional[str] = None,
+                               retry: bool = True,
                                **kwargs) -> 'requests.Response':
     """Make an authenticated HTTP request to the API server.
 
@@ -227,7 +228,11 @@ def make_authenticated_request(method: str,
             kwargs['cookies'] = get_api_cookie_jar()
 
     # Make the request
-    return requests.request(method, url, **kwargs)
+    if retry:
+        return rest.request(method, url, **kwargs)
+    else:
+        assert method == 'GET', 'Only GET requests can be done without retry'
+        return rest.request_without_retry(method, url, **kwargs)
 
 
 @annotations.lru_cache(scope='global')
@@ -288,21 +293,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            # Prepare headers and URL for service account authentication
-            headers = service_account_auth.get_service_account_headers()
-            health_url = (
-                service_account_auth.get_api_url_with_service_account_path(
-                    server_url, '/api/health'))
-
-            # Use either service account auth or cookie auth
-            if headers:
-                response = requests.get(health_url,
-                                        timeout=2.5,
-                                        headers=headers)
-            else:
-                response = requests.get(f'{server_url}/api/health',
-                                        timeout=2.5,
-                                        cookies=get_api_cookie_jar())
+            response = make_authenticated_request('GET',
+                                                  '/api/health',
+                                                  timeout=2.5)
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
