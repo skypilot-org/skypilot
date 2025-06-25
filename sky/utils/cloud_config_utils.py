@@ -21,7 +21,7 @@ def get_cloud_config_value(
        return either default_value if specified or None
     """
     property_value = None
-    region_key = 'contexts' if cloud == 'kubernetes' else 'regions'
+    region_key = None
     if cloud == 'kubernetes':
         region_key = 'contexts'
 

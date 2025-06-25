@@ -534,16 +534,24 @@ def get_expirable_clouds(
                     keys=('remote_identity',),
                     default_value=None)
                 if context_remote_identity is not None:
-                    remote_identities.append(context_remote_identity)
+                    if isinstance(context_remote_identity, str):
+                        remote_identities.append(context_remote_identity)
+                    elif isinstance(context_remote_identity, list):
+                        remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
             global_remote_identity = cloud_config_utils.get_cloud_config_value(
                 cloud='kubernetes',
                 region=None,
                 keys=('remote_identity',),
-                default_value=schemas.get_default_remote_identity(
-                    str(cloud).lower()))
+                default_value=None)
             if global_remote_identity is not None:
-                remote_identities.append(global_remote_identity)
+                if isinstance(global_remote_identity, str):
+                    remote_identities.append(global_remote_identity)
+                elif isinstance(global_remote_identity, list):
+                    remote_identities.extend(global_remote_identity)
+            if not remote_identities:
+                remote_identities = [schemas.get_default_remote_identity(
+                    str(cloud).lower())]
         else:
             remote_identities = cloud_config_utils.get_cloud_config_value(
                 cloud=str(cloud).lower(),
