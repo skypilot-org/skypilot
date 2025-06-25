@@ -5,9 +5,9 @@ from typing import List, Optional, Union
 
 import click
 
-from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -17,12 +17,8 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
-    import requests
-
     import sky
     from sky.serve import serve_utils
-else:
-    requests = adaptors_common.LazyImport('requests')
 
 
 @context.contextual
@@ -296,6 +292,7 @@ def status(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_on_server_unavailable()
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
@@ -378,7 +375,10 @@ def tail_logs(service_name: str,
         timeout=(5, None),
         stream=True)
     request_id = server_common.get_request_id(response)
-    sdk.stream_response(request_id, response, output_stream)
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=True)
 
 
 @usage_lib.entrypoint

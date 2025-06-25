@@ -18,6 +18,8 @@ from sky.utils import common_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
+logging.getLogger('casbin.model').setLevel(sky_logging.ERROR)
+logging.getLogger('casbin.rbac').setLevel(sky_logging.ERROR)
 logger = sky_logging.init_logger(__name__)
 
 # Filelocks for the policy update.

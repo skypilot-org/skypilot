@@ -37,6 +37,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -64,15 +65,17 @@ if typing.TYPE_CHECKING:
     import sky
 else:
     psutil = adaptors_common.LazyImport('psutil')
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
+_LINE_PROCESSED_KEY = 'line_processed'
+
 
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
-                    output_stream: Optional['io.TextIOBase'] = None) -> Any:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False) -> Any:
     """Streams the response to the console.
 
     Args:
@@ -80,12 +83,23 @@ def stream_response(request_id: Optional[str],
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
+        resumable: Whether the response is resumable on retry. If True, the
+            streaming will start from the previous failure point on retry.
     """
 
+    retry_context: Optional[rest.RetryContext] = None
+    if resumable:
+        retry_context = rest.get_retry_context()
     try:
+        line_count = 0
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
-                print(line, flush=True, end='', file=output_stream)
+                line_count += 1
+                if retry_context is None:
+                    print(line, flush=True, end='', file=output_stream)
+                elif line_count > retry_context.line_processed:
+                    print(line, flush=True, end='', file=output_stream)
+                    retry_context.line_processed = line_count
         if request_id is not None:
             return get(request_id)
     except Exception:  # pylint: disable=broad-except
@@ -696,9 +710,12 @@ def exec(  # pylint: disable=redefined-builtin
     return server_common.get_request_id(response)
 
 
+# TODO(aylei): when retry logs request, there will be duplciated log entries.
+# We should fix this.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@rest.retry_on_server_unavailable()
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
@@ -745,7 +762,12 @@ def tail_logs(cluster_name: str,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     request_id = server_common.get_request_id(response)
-    return stream_response(request_id, response, output_stream)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return stream_response(request_id=request_id,
+                           response=response,
+                           output_stream=output_stream,
+                           resumable=(tail == 0))
 
 
 @usage_lib.entrypoint
@@ -1582,10 +1604,13 @@ def status_kubernetes() -> server_common.RequestId:
 
 # === API request APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def get(request_id: str) -> Any:
     """Waits for and gets the result of a request.
+
+    This function will not check the server health since /api/get is typically
+    not the first API call in an SDK session and checking the server health
+    may cause GET /api/get being sent to a restarted API server.
 
     Args:
         request_id: The request ID of the request to get.
@@ -1816,6 +1841,8 @@ def api_start(
     deploy: bool = False,
     host: str = '127.0.0.1',
     foreground: bool = False,
+    metrics: bool = False,
+    metrics_port: Optional[int] = None,
     enable_basic_auth: bool = False,
 ) -> None:
     """Starts the API server.
@@ -1830,6 +1857,8 @@ def api_start(
             if deploy is True, to allow remote access.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
+        metrics: Whether to export metrics of the API server.
+        metrics_port: The port to export metrics of the API server.
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
     Returns:
@@ -1851,6 +1880,7 @@ def api_start(
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
+                                                   metrics, metrics_port,
                                                    enable_basic_auth)
     if foreground:
         # Explain why current process exited

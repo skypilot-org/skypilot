@@ -396,7 +396,7 @@ export function Clusters() {
                 />
               </div>
               <span className="ml-2 text-sm text-gray-700">
-                Show History (last 30 days)
+                Show history (Last 30 days)
               </span>
             </label>
           </div>

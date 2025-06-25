@@ -13,6 +13,16 @@ spec:
       app: {{ .Release.Name }}-api
   template:
     metadata:
+      annotations:
+        {{- if .Values.apiService.metrics.enabled }}
+        # Well-known annotations for Prometheus to scrape the metrics.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
+        {{- if .Values.apiService.annotations }}
+        {{- toYaml .Values.apiService.annotations | nindent 8 }}
+        {{- end }}
       labels:
         app: {{ .Release.Name }}-api
         # This label indicates that the API server is ready to serve requests.
@@ -25,6 +35,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
+      terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
@@ -63,6 +74,8 @@ spec:
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
+        - name: SKYPILOT_GRACE_PERIOD_SECONDS
+          value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -157,7 +170,10 @@ spec:
           httpGet:
             path: /api/health
             port: 46580
-          periodSeconds: 30
+          successThreshold: 1
+          failureThreshold: 3
+          periodSeconds: 5
+          initialDelaySeconds: 5
         volumeMounts:
         {{- if .Values.storage.enabled }}
         - name: state-volume

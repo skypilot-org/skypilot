@@ -7,10 +7,10 @@ import webbrowser
 import click
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -22,11 +22,7 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
-    import requests
-
     import sky
-else:
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -194,6 +190,7 @@ def cancel(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_on_server_unavailable()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,
@@ -240,7 +237,12 @@ def tail_logs(name: Optional[str] = None,
         stream=True,
         timeout=(5, None))
     request_id = server_common.get_request_id(response)
-    return sdk.stream_response(request_id, response, output_stream)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=(tail == 0))
 
 
 @usage_lib.entrypoint

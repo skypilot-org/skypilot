@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
@@ -25,6 +25,7 @@ import {
   NonCapitalizedTooltip,
   formatFullTimestamp,
 } from '@/components/utils';
+import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -66,6 +67,10 @@ function ClusterDetails() {
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const isMobile = useMobile();
+  const [timeRange, setTimeRange] = useState({
+    from: 'now-1h',
+    to: 'now',
+  });
   const {
     clusterData,
     clusterJobData,
@@ -75,6 +80,76 @@ function ClusterDetails() {
     refreshData,
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
+
+  // GPU metrics state
+  const [matchedClusterName, setMatchedClusterName] = useState(null);
+  const [isLoadingClusterMatch, setIsLoadingClusterMatch] = useState(false);
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
+  }, []);
+
+  // Fetch available clusters from Grafana and find matching cluster
+  const fetchMatchingCluster = useCallback(async () => {
+    if (!isGrafanaAvailable || !clusterData?.cluster) return;
+
+    setIsLoadingClusterMatch(true);
+    try {
+      const grafanaUrl = getGrafanaUrl();
+      const endpoint =
+        '/api/datasources/proxy/1/api/v1/label/label_skypilot_cluster/values';
+
+      const response = await fetch(`${grafanaUrl}${endpoint}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data && data.data.length > 0) {
+          // Find cluster that matches our current cluster name as prefix
+          const matchingCluster = data.data.find((cluster) =>
+            cluster.startsWith(clusterData.cluster)
+          );
+          if (matchingCluster) {
+            setMatchedClusterName(matchingCluster);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching matching cluster:', error);
+    } finally {
+      setIsLoadingClusterMatch(false);
+    }
+  }, [clusterData?.cluster, isGrafanaAvailable]);
+
+  // Fetch matching cluster when component mounts and Grafana is available
+  useEffect(() => {
+    if (isGrafanaAvailable && clusterData?.cluster) {
+      fetchMatchingCluster();
+    }
+  }, [clusterData?.cluster, fetchMatchingCluster, isGrafanaAvailable]);
+
+  // Function to build Grafana panel URL with filters
+  const buildGrafanaMetricsUrl = (panelId) => {
+    const grafanaUrl = getGrafanaUrl();
+    // Use the matched cluster name if available, otherwise fall back to the display name
+    const clusterParam = matchedClusterName || clusterData?.cluster || '$__all';
+
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-instance=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
+  };
 
   // Update isInitialLoad when cluster details are first loaded (not waiting for jobs)
   React.useEffect(() => {
@@ -123,6 +198,13 @@ function ClusterDetails() {
 
   const handleVSCodeClick = () => {
     setIsVSCodeModalOpen(true);
+  };
+
+  const handleTimeRangePreset = (preset) => {
+    setTimeRange({
+      from: `now-${preset}`,
+      to: 'now',
+    });
   };
 
   // Render loading state until data is available
@@ -201,6 +283,14 @@ function ClusterDetails() {
             clusterJobData={clusterJobData}
             clusterJobsLoading={clusterJobsLoading}
             refreshClusterJobsOnly={refreshClusterJobsOnly}
+            isVSCodeModalOpen={isVSCodeModalOpen}
+            setIsVSCodeModalOpen={setIsVSCodeModalOpen}
+            timeRange={timeRange}
+            handleTimeRangePreset={handleTimeRangePreset}
+            buildGrafanaMetricsUrl={buildGrafanaMetricsUrl}
+            matchedClusterName={matchedClusterName}
+            isLoadingClusterMatch={isLoadingClusterMatch}
+            isGrafanaAvailable={isGrafanaAvailable}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -209,6 +299,14 @@ function ClusterDetails() {
             clusterJobData={[]}
             clusterJobsLoading={false}
             refreshClusterJobsOnly={() => {}}
+            isVSCodeModalOpen={false}
+            setIsVSCodeModalOpen={() => {}}
+            timeRange={timeRange}
+            handleTimeRangePreset={handleTimeRangePreset}
+            buildGrafanaMetricsUrl={buildGrafanaMetricsUrl}
+            matchedClusterName={null}
+            isLoadingClusterMatch={false}
+            isGrafanaAvailable={false}
             isHistoricalCluster={true}
           />
         ) : (
@@ -242,6 +340,14 @@ function ActiveTab({
   clusterJobData,
   clusterJobsLoading,
   refreshClusterJobsOnly,
+  isVSCodeModalOpen,
+  setIsVSCodeModalOpen,
+  timeRange,
+  handleTimeRangePreset,
+  buildGrafanaMetricsUrl,
+  matchedClusterName,
+  isLoadingClusterMatch,
+  isGrafanaAvailable,
   isHistoricalCluster = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
@@ -332,7 +438,7 @@ function ActiveTab({
     <div>
       {/* Cluster Info Card */}
       <div className="mb-6">
-        <Card>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
           <div className="flex items-center justify-between px-4 pt-4">
             <h3 className="text-lg font-semibold">
               {isHistoricalCluster ? 'Historical Cluster Details' : 'Details'}
@@ -551,8 +657,113 @@ function ActiveTab({
               )}
             </div>
           </div>
-        </Card>
+        </div>
       </div>
+
+      {/* GPU Metrics Section - Only show for Kubernetes in-cluster */}
+      {clusterData &&
+        clusterData.full_infra === 'Kubernetes (in-cluster)' &&
+        isGrafanaAvailable && (
+          <div className="mb-6">
+            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">GPU Metrics</h3>
+                </div>
+
+                {/* Filtering Controls */}
+                <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                  <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                    {/* Time Range Selection */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                        Time Range:
+                      </label>
+                      <div className="flex gap-1">
+                        {[
+                          { label: '15m', value: '15m' },
+                          { label: '1h', value: '1h' },
+                          { label: '6h', value: '6h' },
+                          { label: '24h', value: '24h' },
+                          { label: '7d', value: '7d' },
+                        ].map((preset) => (
+                          <button
+                            key={preset.value}
+                            onClick={() => handleTimeRangePreset(preset.value)}
+                            className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                              timeRange.from === `now-${preset.value}` &&
+                              timeRange.to === 'now'
+                                ? 'bg-sky-blue text-white border-sky-blue'
+                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Show current selection info */}
+                  <div className="mt-2 text-xs text-gray-500">
+                    Showing: {clusterData?.cluster} • Time: {timeRange.from} to{' '}
+                    {timeRange.to}
+                    {isLoadingClusterMatch && (
+                      <span> • Finding cluster data...</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* GPU Utilization */}
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaMetricsUrl('1')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Utilization"
+                        className="rounded"
+                        key={`gpu-util-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* GPU Memory Utilization */}
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaMetricsUrl('2')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Memory Utilization"
+                        className="rounded"
+                        key={`gpu-memory-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* GPU Power Usage */}
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                    <div className="p-2">
+                      <iframe
+                        src={buildGrafanaMetricsUrl('4')}
+                        width="100%"
+                        height="400"
+                        frameBorder="0"
+                        title="GPU Power Usage"
+                        className="rounded"
+                        key={`gpu-power-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Jobs Table - Only show for active clusters */}
       {!isHistoricalCluster && (
