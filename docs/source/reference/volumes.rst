@@ -1,45 +1,41 @@
 .. _volumes:
 
-Cloud Volumes
-=============
+Volumes
+=======
 
-SkyPilot supports mounting **reattachable network volumes** (e.g., GCP Persistent Disks) or
-**temporary instance volumes** (e.g., GCP Local SSDs) to a non-Kubernetes SkyPilot cluster and mounting
-**PVCs** to a Kubernetes SkyPilot cluster.
+Volumes offer a high-performance alternative to :ref:`cloud buckets <sky-storage>` for storing data. Unlike buckets, volumes are limited to a single region and cannot be accessed across regions and clouds. 
 
-Currently, the following volume types are supported:
+SkyPilot supports creating and managing volumes directly through the ``sky`` CLI and the web dashboard.
 
-- GCP
+Supported volume types:
 
-  - Network volumes: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_
-  - Instance volumes: `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_ (temporary)
+- Kubernetes: `Persistent Volume Claims (PVCs) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
+- GCP: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ and `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_
 
-- Kubernetes
-
-  - PVCs: `Persistent Volume Claims <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
-
-Use cases
----------
-
-Use volumes for regional storage with high performance. A volume is created in a
-particular region and can only be attached to instances in the same region.
-
-Use :ref:`Cloud Buckets <sky-storage>` for object storage that works across zones, regions, and clouds.
 
 .. _volumes-on-kubernetes:
 
 Volumes on Kubernetes
 ---------------------
 
-SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters.
+SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters through three commands:
 
-Creating a PVC volume
-~~~~~~~~~~~~~~~~~~~~~
+- ``sky volumes apply``: Create a new volume
+- ``sky volumes ls``: List all volumes
+- ``sky volumes delete``: Delete a volume
 
-1. Prepare a volume YAML file (e.g., ``volume.yaml``):
+.. note::
+
+  Volumes are shared across users on a SkyPilot API server. A user can mount volumes created by other users. This is useful for sharing caches and data across users.
+
+Quickstart
+~~~~~~~~~~
+
+1. Prepare a volume YAML file:
 
    .. code-block:: yaml
 
+     # volume.yaml
      name: new-pvc
      type: k8s-pvc
      infra: kubernetes  # or k8s or k8s/context
@@ -49,16 +45,11 @@ Creating a PVC volume
        storage_class_name: csi-mounted-fs-path-sc  # optional
        access_mode: ReadWriteMany  # optional
 
-2. Create the volume using SkyPilot:
+2. Create the volume with ``sky volumes apply volume.yaml``:
 
-   .. code-block:: bash
+   .. code-block:: console
 
-     sky volumes apply volume.yaml
-
-   You'll be prompted to confirm the creation:
-
-   .. code-block:: text
-
+     $ sky volumes apply volume.yaml
      Proceed to create volume 'new-pvc'? [Y/n]: Y
      Creating PVC: new-pvc-73ec42f2-5c6c4e
 
@@ -66,60 +57,52 @@ Creating a PVC volume
 
    .. code-block:: yaml
 
-     resources:
-       cpus: 4+
-
-     num_nodes: 2
-
+     # task.yaml
      volumes:
-       /mnt/data: new-pvc
+       /mnt/data: new-pvc  # The volume new-pvc will be mounted to /mnt/data
 
-Managing PVC volumes
-~~~~~~~~~~~~~~~~~~~~
+     run: |
+       echo "Hello, World!" > /mnt/data/hello.txt
 
-List all volumes:
+Managing volumes
+~~~~~~~~~~~~~~~~
 
-.. code-block:: bash
+List all volumes with ``sky volumes ls``:
 
-  sky volumes ls
+.. code-block:: console
 
-Example output:
+  $ sky volumes ls
+  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE
+  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  <timestamp>
 
-.. code-block:: text
 
-  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE
-  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32
+.. tip::
 
-.. code-block:: bash
+  Use ``-v`` to view detailed information about a volume.
 
-  sky volumes ls -v
+  .. code-block:: console
 
-Example output:
+    $ sky volumes ls -v
+    NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE             NAME_ON_CLOUD            STORAGE_CLASS           ACCESS_MODE
+    new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  2025-06-24 10:18:32  new-pvc-73ec42f2-5c6c4e  csi-mounted-fs-path-sc  ReadWriteMany
 
-.. code-block:: text
+Delete a volume with ``sky volumes delete``:
 
-  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE         STATUS  LAST_USE             NAME_ON_CLOUD            STORAGE_CLASS           ACCESS_MODE
-  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8 mins ago  IN_USE  2025-06-24 10:18:32  new-pvc-73ec42f2-5c6c4e  csi-mounted-fs-path-sc  ReadWriteMany
+.. code-block:: console
 
-Delete a volume:
-
-.. code-block:: bash
-
-  sky volumes delete new-pvc
-
-You'll be prompted to confirm the deletion:
-
-.. code-block:: text
-
-  Deleting 1 volume: new-pvc. Proceed? [Y/n]:
+  $ sky volumes delete new-pvc
+  Proceed to delete volume 'new-pvc'? [Y/n]: Y
   Deleting PVC: new-pvc-73ec42f2-5c6c4e
 
-.. note::
-  - Both the SkyPilot volume resource and the underlying Kubernetes PVC will be deleted.
-  - If the volume is in use, it will be marked as ``IN_USE`` and cannot be deleted.
+
+If the volume is in use, it will be marked as ``IN_USE`` and cannot be deleted.
 
 Volumes on GCP
 --------------
+
+.. note::
+
+  GCP volume support is currently in development, and will be updated to use the ``sky volumes`` commands.
 
 Volumes on GCP are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
 
@@ -207,7 +190,7 @@ There are three ways to mount volumes:
 Configuration options
 ~~~~~~~~~~~~~~~~~~~~~
 
-Here's a complete example showing all available configuration options:
+Here's a complete example showing all available configuration options for GCP volumes:
 
 .. code-block:: yaml
 
