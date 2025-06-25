@@ -55,13 +55,13 @@ def test_workspace_switching(generic_cloud: str):
         f.write(ws2_config_content)
         ws2_config_path = f.name
 
-    change_config_cmd = 'mkdir -p .sky && rm -f .sky/config.yaml || true && cp {config_path} .sky/config.yaml'
+    change_config_cmd = 'rm -f .sky.yaml || true && cp {config_path} .sky.yaml'
 
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test_workspace_switching',
         [
-            f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} SKYPILOT_DEBUG=0 {smoke_tests_utils.SKY_API_RESTART}',
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
             # Launch first cluster with workspace ws-default
             change_config_cmd.format(config_path=ws1_config_path),
             f'sky launch -y --async -c {name}-1 '
@@ -84,7 +84,8 @@ def test_workspace_switching(generic_cloud: str):
             f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
-            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
+            f'rm -f .sky.yaml || true',
+            f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is \'default\'"',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
             change_config_cmd.format(config_path=ws2_config_path),
@@ -95,8 +96,10 @@ def test_workspace_switching(generic_cloud: str):
         teardown=(
             f'{change_config_cmd.format(config_path=ws1_config_path)} && sky down -y {name}-1; '
             f'{change_config_cmd.format(config_path=ws2_config_path)} && sky down -y {name}-2; '
+            f'rm -f .sky.yaml || true; '
             # restore the original config
-            f'SKYPILOT_DEBUG=0 {smoke_tests_utils.SKY_API_RESTART}'),
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && {smoke_tests_utils.SKY_API_RESTART}'
+        ),
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
