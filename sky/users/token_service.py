@@ -34,10 +34,10 @@ def _jwt_secret_lock() -> Generator[None, None, None]:
             yield
     except filelock.Timeout as e:
         raise RuntimeError(f'Failed to initialize JWT secret due to a timeout '
-                          f'when trying to acquire the lock at '
-                          f'{JWT_SECRET_LOCK_PATH}. '
-                          'Please try again or manually remove the lock '
-                          f'file if you believe it is stale.') from e
+                           f'when trying to acquire the lock at '
+                           f'{JWT_SECRET_LOCK_PATH}. '
+                           'Please try again or manually remove the lock '
+                           f'file if you believe it is stale.') from e
 
 
 class TokenService:
@@ -51,26 +51,28 @@ class TokenService:
         with _jwt_secret_lock():
             # Try to get from database (persistent across deployments)
             try:
-                db_secret = global_user_state.get_system_config(JWT_SECRET_DB_KEY)
+                db_secret = global_user_state.get_system_config(
+                    JWT_SECRET_DB_KEY)
                 if db_secret:
                     logger.debug('Retrieved existing JWT secret from database')
                     return db_secret
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get JWT secret from database: {e}')
-            
+
             # Generate a new secret and store in database
             new_secret = secrets.token_urlsafe(64)
             try:
-                global_user_state.set_system_config(JWT_SECRET_DB_KEY, new_secret)
+                global_user_state.set_system_config(JWT_SECRET_DB_KEY,
+                                                    new_secret)
                 logger.info(
                     'Generated new JWT secret and stored in database. '
                     'This secret will persist across API server restarts.')
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to store new JWT secret in database: {e}. '
                     f'Using in-memory secret (tokens will not persist '
                     f'across restarts).')
-            
+
             return new_secret
 
     def create_token(self,
@@ -150,10 +152,9 @@ class TokenService:
 
         try:
             # Decode and verify JWT (without issuer verification)
-            payload = jwt.decode(
-                jwt_token,
-                self.secret_key,
-                algorithms=[JWT_ALGORITHM])
+            payload = jwt.decode(jwt_token,
+                                 self.secret_key,
+                                 algorithms=[JWT_ALGORITHM])
 
             # Manually verify issuer using our shortened field name
             token_issuer = payload.get('i')
@@ -193,6 +194,7 @@ class TokenService:
     def get_token_hash(self, token: str) -> str:
         """Get hash of a token for database lookup."""
         return hashlib.sha256(token.encode()).hexdigest()
+
 
 # Singleton instance
 token_service = TokenService()

@@ -375,8 +375,8 @@ async def get_service_account_tokens(
 
         # Add service account name
         sa_user = global_user_state.get_user(token['service_account_user_id'])
-        token_info['service_account_name'] = (sa_user.name
-                                               if sa_user else token['token_name'])
+        token_info['service_account_name'] = (sa_user.name if sa_user else
+                                              token['token_name'])
 
         # Add service account roles
         roles = permission.permission_service.get_user_roles(
@@ -437,9 +437,8 @@ async def create_service_account_token(
             token_body.token_name.strip(), auth_user.id)
 
         # Create a user entry for the service account
-        service_account_user = models.User(
-            id=service_account_user_id,
-            name=token_body.token_name.strip())
+        service_account_user = models.User(id=service_account_user_id,
+                                           name=token_body.token_name.strip())
         global_user_state.add_or_update_user(service_account_user)
 
         # Add service account to permission system with default role

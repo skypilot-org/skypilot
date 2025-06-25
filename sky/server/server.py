@@ -220,6 +220,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
 
+
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
@@ -267,7 +268,6 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
-
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
@@ -275,12 +275,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Only process requests with the a path prefix /sa
         if not request.url.path.startswith('/sa/'):
             return await call_next(request)
-        
+
         # Check if service account tokens are enabled
-        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS, 'false').lower()
+        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                                    'false').lower()
         if sa_enabled != 'true':
             logger.warning('Service account authentication disabled')
-            return fastapi.responses.JSONResponse(status_code=401, content={'detail': 'Service account authentication disabled'})
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Service account authentication disabled'})
 
         auth_header = request.headers.get('authorization')
         if not auth_header or not auth_header.lower().startswith('bearer '):
@@ -304,12 +307,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             # Verify and decode JWT token
             payload = token_service.verify_token(sa_token)
-            
+
             if payload is None:
-                logger.warning('BearerTokenMiddleware: Token verification failed')
+                logger.warning(
+                    'BearerTokenMiddleware: Token verification failed')
                 return fastapi.responses.JSONResponse(
                     status_code=401,
-                    content={'detail': 'Invalid or expired service account token'})
+                    content={
+                        'detail': 'Invalid or expired service account token'
+                    })
 
             # Extract user information from JWT payload
             user_id = payload.get('sub')  # Subject = service account user ID
@@ -339,22 +345,29 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # Don't fail authentication if we can't update last used time
                 logger.debug(f'Failed to update token last used time: {e}')
 
-                        # Set the authenticated user - this integrates with Casbin RBAC
-            auth_user = models.User(id=user_id, name=user_name or user_info.name)
+                # Set the authenticated user - this integrates with Casbin RBAC
+            auth_user = models.User(id=user_id,
+                                    name=user_name or user_info.name)
             request.state.auth_user = auth_user
 
             # Override user info in request body for service account requests
             await _override_user_info_in_request_body(request, auth_user)
 
             logger.info(
-                f'BearerTokenMiddleware: Successfully authenticated service account - '
-                f'user_id={user_id}, user_name={auth_user.name}, token_id={token_id}')
+                f'BearerTokenMiddleware: Successfully authenticated service '
+                f'account - user_id={user_id}, user_name={auth_user.name}, '
+                f'token_id={token_id}')
 
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'BearerTokenMiddleware: Service account token authentication failed: {e}', exc_info=True)
+            logger.error(
+                'BearerTokenMiddleware: Service account token authentication '
+                f'failed: {e}',
+                exc_info=True)
             return fastapi.responses.JSONResponse(
                 status_code=401,
-                content={'detail': f'Service account authentication failed: {str(e)}'})
+                content={
+                    'detail': f'Service account authentication failed: {str(e)}'
+                })
 
         # Strip the /sa prefix from the request path
         request.scope['path'] = request.scope['path'].replace('/sa/', '/', 1)

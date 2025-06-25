@@ -43,6 +43,7 @@ import {
   UploadIcon,
   DownloadIcon,
   PlusIcon,
+  CopyIcon,
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
@@ -182,7 +183,6 @@ export function Users() {
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [tokenToRotate, setTokenToRotate] = useState(null);
   const [rotating, setRotating] = useState(false);
-  const [rotatedToken, setRotatedToken] = useState(null);
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
@@ -633,8 +633,6 @@ export function Users() {
           setTokenToRotate={setTokenToRotate}
           rotating={rotating}
           setRotating={setRotating}
-          rotatedToken={rotatedToken}
-          setRotatedToken={setRotatedToken}
           searchQuery={serviceAccountSearchQuery}
           setSearchQuery={setServiceAccountSearchQuery}
         />
@@ -1447,8 +1445,6 @@ function ServiceAccountTokensView({
   setTokenToRotate,
   rotating,
   setRotating,
-  rotatedToken,
-  setRotatedToken,
   searchQuery,
   setSearchQuery,
 }) {
@@ -1463,7 +1459,6 @@ function ServiceAccountTokensView({
   const [rotateExpiration, setRotateExpiration] = useState('');
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [createdToken, setCreatedToken] = useState(null);
   const [copySuccess, setCopySuccess] = useState('');
 
   // Add new state for tokens displayed within dialogs
@@ -1626,7 +1621,6 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
-        setCreateSuccess('Service account token created successfully!');
         setNewToken({ token_name: '', expires_in_days: 30 });
         await fetchTokensAndCounts();
       } else {
@@ -1691,9 +1685,6 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setRotatedTokenInDialog(data.token);
-        setCreateSuccess(
-          `Token "${tokenToRotate.token_name}" rotated successfully!`
-        );
         await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
@@ -1947,8 +1938,16 @@ function ServiceAccountTokensView({
       )}
 
       {/* Create Service Account Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={showCreateDialog}
+        onOpenChange={(open) => {
+          setShowCreateDialog(open);
+          if (!open) {
+            setCreatedTokenInDialog(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Create Service Account</DialogTitle>
             <DialogDescription>
@@ -1961,27 +1960,35 @@ function ServiceAccountTokensView({
               /* Token Created Successfully - Show Token */
               <>
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <h4 className="text-sm font-medium text-green-900 mb-2">
-                    ⚠️ Token Created Successfully - Save This Token Now!
-                  </h4>
+                  <div className="flex items-center mb-3">
+                    <h4 className="text-sm font-medium text-green-900">
+                      ⚠️ Token created successfully - save this token now!
+                    </h4>
+                    <CustomTooltip
+                      content={copySuccess ? 'Copied!' : 'Copy token'}
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={() => copyToClipboard(createdTokenInDialog)}
+                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                      >
+                        {copySuccess ? (
+                          <CheckIcon className="w-4 h-4" />
+                        ) : (
+                          <CopyIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                    </CustomTooltip>
+                  </div>
                   <p className="text-sm text-green-700 mb-3">
                     This token will not be shown again. Please copy and store it
                     securely.
                   </p>
-                  <div className="flex items-center space-x-2">
-                    <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
+                  <div className="bg-white border border-green-300 rounded-md p-3">
+                    <code className="text-sm text-gray-800 font-mono break-all block">
                       {createdTokenInDialog}
                     </code>
-                    <button
-                      onClick={() => copyToClipboard(createdTokenInDialog)}
-                      className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                    >
-                      Copy
-                    </button>
                   </div>
-                  {copySuccess && (
-                    <p className="text-sm text-green-600 mt-1">{copySuccess}</p>
-                  )}
                 </div>
               </>
             ) : (
@@ -2102,8 +2109,18 @@ function ServiceAccountTokensView({
       </Dialog>
 
       {/* Rotate Token Dialog */}
-      <Dialog open={showRotateDialog} onOpenChange={setShowRotateDialog}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={showRotateDialog}
+        onOpenChange={(open) => {
+          setShowRotateDialog(open);
+          if (!open) {
+            setTokenToRotate(null);
+            setRotateExpiration('');
+            setRotatedTokenInDialog(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Rotate Service Account Token</DialogTitle>
             <DialogDescription>
@@ -2117,51 +2134,108 @@ function ServiceAccountTokensView({
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
-            <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
-                New Expiration (days)
-              </label>
-              <input
-                type="number"
-                className="border rounded px-3 py-2 w-full"
-                placeholder="Leave empty to preserve current expiration"
-                min="0"
-                max="365"
-                value={rotateExpiration}
-                onChange={(e) => setRotateExpiration(e.target.value)}
-              />
-              <p className="text-xs text-gray-500">
-                Leave empty to preserve current expiration. Enter number of days
-                for new expiration, or enter 0 to set to never expire. Maximum
-                365 days.
-              </p>
-            </div>
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded">
-              <p className="text-sm text-amber-700">
-                ⚠️ Any systems using the current token will need to be updated
-                with the new token.
-              </p>
-            </div>
+            {rotatedTokenInDialog ? (
+              /* Token Rotated Successfully - Show Token */
+              <>
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center mb-3">
+                    <h4 className="text-sm font-medium text-blue-900">
+                      🔄 Token rotated successfully - save this new token now!
+                    </h4>
+                    <CustomTooltip
+                      content={copySuccess ? 'Copied!' : 'Copy token'}
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={() => copyToClipboard(rotatedTokenInDialog)}
+                        className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-1 ml-2"
+                      >
+                        {copySuccess ? (
+                          <CheckIcon className="w-4 h-4" />
+                        ) : (
+                          <CopyIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                    </CustomTooltip>
+                  </div>
+                  <p className="text-sm text-blue-700 mb-3">
+                    This new token replaces the old one. Please copy and store
+                    it securely. The old token is now invalid.
+                  </p>
+                  <div className="bg-white border border-blue-300 rounded-md p-3">
+                    <code className="text-sm text-gray-800 font-mono break-all block">
+                      {rotatedTokenInDialog}
+                    </code>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Token Rotation Form */
+              <>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    New Expiration (days)
+                  </label>
+                  <input
+                    type="number"
+                    className="border rounded px-3 py-2 w-full"
+                    placeholder="Leave empty to preserve current expiration"
+                    min="0"
+                    max="365"
+                    value={rotateExpiration}
+                    onChange={(e) => setRotateExpiration(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Leave empty to preserve current expiration. Enter number of
+                    days for new expiration, or enter 0 to set to never expire.
+                    Maximum 365 days.
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded">
+                  <p className="text-sm text-amber-700">
+                    ⚠️ Any systems using the current token will need to be
+                    updated with the new token.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-              onClick={() => {
-                setShowRotateDialog(false);
-                setTokenToRotate(null);
-                setRotateExpiration('');
-              }}
-              disabled={rotating}
-            >
-              Cancel
-            </button>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2"
-              onClick={handleRotateToken}
-              disabled={rotating}
-            >
-              {rotating ? 'Rotating...' : 'Rotate Token'}
-            </button>
+            {rotatedTokenInDialog ? (
+              <button
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2"
+                onClick={() => {
+                  setShowRotateDialog(false);
+                  setTokenToRotate(null);
+                  setRotateExpiration('');
+                  setRotatedTokenInDialog(null);
+                }}
+              >
+                Close
+              </button>
+            ) : (
+              <>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+                  onClick={() => {
+                    setShowRotateDialog(false);
+                    setTokenToRotate(null);
+                    setRotateExpiration('');
+                    setRotatedTokenInDialog(null);
+                  }}
+                  disabled={rotating}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2"
+                  onClick={handleRotateToken}
+                  disabled={rotating}
+                >
+                  {rotating ? 'Rotating...' : 'Rotate Token'}
+                </button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

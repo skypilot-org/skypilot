@@ -1741,7 +1741,7 @@ def set_system_config(config_key: str, config_value: str) -> None:
             config_value=config_value,
             created_at=current_time,
             updated_at=current_time)
-        
+
         upsert_stmnt = insert_stmnt.on_conflict_do_update(
             index_elements=[system_config_table.c.config_key],
             set_={
