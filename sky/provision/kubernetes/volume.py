@@ -6,6 +6,7 @@ from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.volumes import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,6 +23,33 @@ def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
         config.config['namespace'] = namespace
     return context, namespace
+
+
+def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
+                            pod_spec: Dict[str, Any]) -> None:
+    """Checks if the PVC is used by any pod in the namespace."""
+    volumes = pod_spec.get('spec', {}).get('volumes', [])
+    if not volumes:
+        return
+    once_modes = [
+        volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value,
+        volume_lib.VolumeAccessMode.READ_WRITE_ONCE_POD.value
+    ]
+    for volume in volumes:
+        pvc_name = volume.get('persistentVolumeClaim', {}).get('claimName')
+        if not pvc_name:
+            continue
+        pvc = kubernetes.core_api(
+            context).read_namespaced_persistent_volume_claim(
+                name=pvc_name, namespace=namespace)
+        access_mode = pvc.spec.access_modes[0]
+        if access_mode not in once_modes:
+            continue
+        usedby = _get_volume_usedby(context, namespace, pvc_name)
+        if usedby:
+            raise config_lib.KubernetesError(f'Volume {pvc_name} with access '
+                                             f'mode {access_mode} is already '
+                                             f'in use by {usedby}.')
 
 
 def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
@@ -48,10 +76,9 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
-def get_volume_usedby(config: models.VolumeConfig) -> List[str]:
+def _get_volume_usedby(context: Optional[str], namespace: str,
+                       pvc_name: str) -> List[str]:
     """Gets the usedby resources of a volume."""
-    context, namespace = _get_context_namespace(config)
-    pvc_name = config.name_on_cloud
     usedby = []
     # Get all pods in the namespace
     pods = kubernetes.core_api(context).list_namespaced_pod(namespace=namespace)
@@ -62,6 +89,13 @@ def get_volume_usedby(config: models.VolumeConfig) -> List[str]:
                     if volume.persistent_volume_claim.claim_name == pvc_name:
                         usedby.append(pod.metadata.name)
     return usedby
+
+
+def get_volume_usedby(config: models.VolumeConfig) -> List[str]:
+    """Gets the usedby resources of a volume."""
+    context, namespace = _get_context_namespace(config)
+    pvc_name = config.name_on_cloud
+    return _get_volume_usedby(context, namespace, pvc_name)
 
 
 def create_persistent_volume_claim(namespace: str, context: Optional[str],

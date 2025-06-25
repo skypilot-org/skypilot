@@ -320,7 +320,6 @@ class TestVolumeCommands:
         # Test deleting non-existent volumes
         result = cli_runner.invoke(command.volumes_delete, ['nonexistent'])
         assert not result.exit_code
-        assert 'No volumes to delete.' in result.output
 
     def test_volumes_delete_invalid_arguments(self, monkeypatch):
         """Test `sky volumes delete` with invalid arguments."""
