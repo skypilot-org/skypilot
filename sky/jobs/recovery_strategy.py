@@ -303,7 +303,7 @@ class StrategyExecutor:
                         # however, scheduled_launch uses scheduler functions
                         # that acquire filelocks, no async file lock exists
                         # so it would have to be run in a coroutine anyway.
-                        sdk.get(request_id)
+                        sdk.stream_and_get(request_id)
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
