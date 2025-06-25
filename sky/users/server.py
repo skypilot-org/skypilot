@@ -37,7 +37,6 @@ async def users() -> List[Dict[str, Any]]:
     user_list = global_user_state.get_all_users()
     for user in user_list:
         # Filter out service accounts - they have IDs starting with "sa-"
-        # or names starting with "serviceaccount-"
         if user.id.startswith('sa-'):
             continue
 
@@ -302,9 +301,7 @@ async def user_export() -> Dict[str, Any]:
         exported_users = []
         for user in user_list:
             # Filter out service accounts - they have IDs starting with "sa-"
-            # or names starting with "serviceaccount-"
-            if (user.id.startswith('sa-') or
-                (user.name and user.name.startswith('serviceaccount-'))):
+            if user.id.startswith('sa-'):
                 continue
 
             # Get user role
@@ -378,9 +375,8 @@ async def get_service_account_tokens(
 
         # Add service account name
         sa_user = global_user_state.get_user(token['service_account_user_id'])
-        token_info['service_account_name'] = (
-            sa_user.name
-            if sa_user else f'serviceaccount-{token["token_name"]}')
+        token_info['service_account_name'] = (sa_user.name
+                                               if sa_user else token['token_name'])
 
         # Add service account roles
         roles = permission.permission_service.get_user_roles(
@@ -443,7 +439,7 @@ async def create_service_account_token(
         # Create a user entry for the service account
         service_account_user = models.User(
             id=service_account_user_id,
-            name=f'serviceaccount-{token_body.token_name.strip()}')
+            name=token_body.token_name.strip())
         global_user_state.add_or_update_user(service_account_user)
 
         # Add service account to permission system with default role

@@ -1,10 +1,13 @@
 """JWT-based service account token management for SkyPilot."""
 
+import contextlib
 import datetime
 import hashlib
+import os
 import secrets
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Generator, Optional
 
+import filelock
 import jwt
 
 from sky import global_user_state
@@ -17,6 +20,25 @@ JWT_ALGORITHM = 'HS256'
 JWT_ISSUER = 'sky'  # Shortened for compact tokens
 JWT_SECRET_DB_KEY = 'jwt_secret'
 
+# File lock for JWT secret initialization
+JWT_SECRET_LOCK_PATH = os.path.expanduser('~/.sky/.jwt_secret_init.lock')
+JWT_SECRET_LOCK_TIMEOUT_SECONDS = 20
+
+
+@contextlib.contextmanager
+def _jwt_secret_lock() -> Generator[None, None, None]:
+    """Context manager for JWT secret initialization lock."""
+    try:
+        with filelock.FileLock(JWT_SECRET_LOCK_PATH,
+                               JWT_SECRET_LOCK_TIMEOUT_SECONDS):
+            yield
+    except filelock.Timeout as e:
+        raise RuntimeError(f'Failed to initialize JWT secret due to a timeout '
+                          f'when trying to acquire the lock at '
+                          f'{JWT_SECRET_LOCK_PATH}. '
+                          'Please try again or manually remove the lock '
+                          f'file if you believe it is stale.') from e
+
 
 class TokenService:
     """Service for managing JWT-based service account tokens."""
@@ -26,28 +48,30 @@ class TokenService:
 
     def _get_or_generate_secret(self) -> str:
         """Get JWT secret from database or generate a new one."""
-        # Try to get from database (persistent across deployments)
-        try:
-            db_secret = global_user_state.get_system_config(JWT_SECRET_DB_KEY)
-            if db_secret:
-                return db_secret
-        except Exception as e:
-            logger.debug(f'Failed to get JWT secret from database: {e}')
-        
-        # Generate a new secret and store in database
-        new_secret = secrets.token_urlsafe(64)
-        try:
-            global_user_state.set_system_config(JWT_SECRET_DB_KEY, new_secret)
-            logger.info(
-                'Generated new JWT secret and stored in database. '
-                'This secret will persist across API server restarts.')
-        except Exception as e:
-            logger.warning(
-                f'Failed to store new JWT secret in database: {e}. '
-                f'Using in-memory secret (tokens will not persist '
-                f'across restarts).')
-        
-        return new_secret
+        with _jwt_secret_lock():
+            # Try to get from database (persistent across deployments)
+            try:
+                db_secret = global_user_state.get_system_config(JWT_SECRET_DB_KEY)
+                if db_secret:
+                    logger.debug('Retrieved existing JWT secret from database')
+                    return db_secret
+            except Exception as e:
+                logger.debug(f'Failed to get JWT secret from database: {e}')
+            
+            # Generate a new secret and store in database
+            new_secret = secrets.token_urlsafe(64)
+            try:
+                global_user_state.set_system_config(JWT_SECRET_DB_KEY, new_secret)
+                logger.info(
+                    'Generated new JWT secret and stored in database. '
+                    'This secret will persist across API server restarts.')
+            except Exception as e:
+                logger.warning(
+                    f'Failed to store new JWT secret in database: {e}. '
+                    f'Using in-memory secret (tokens will not persist '
+                    f'across restarts).')
+            
+            return new_secret
 
     def create_token(self,
                      creator_user_id: str,
@@ -125,12 +149,17 @@ class TokenService:
         jwt_token = token[4:]
 
         try:
-            # Decode and verify JWT
+            # Decode and verify JWT (without issuer verification)
             payload = jwt.decode(
                 jwt_token,
                 self.secret_key,
-                algorithms=[JWT_ALGORITHM],
-                issuer=JWT_ISSUER)  # Use constant for consistency
+                algorithms=[JWT_ALGORITHM])
+
+            # Manually verify issuer using our shortened field name
+            token_issuer = payload.get('i')
+            if token_issuer != JWT_ISSUER:
+                logger.warning(f'Invalid token issuer: {token_issuer}')
+                return None
 
             # Verify token type
             token_type = payload.get('y')
@@ -155,39 +184,15 @@ class TokenService:
             return normalized_payload
 
         except jwt.ExpiredSignatureError:
-            logger.debug('Token has expired')
+            logger.warning('Token has expired')
             return None
         except jwt.InvalidTokenError as e:
-            logger.debug(f'Invalid token: {e}')
+            logger.warning(f'Invalid token: {e}')
             return None
 
     def get_token_hash(self, token: str) -> str:
         """Get hash of a token for database lookup."""
         return hashlib.sha256(token.encode()).hexdigest()
-
-    def set_jwt_secret_in_database(self, secret: str) -> None:
-        """Manually set the JWT secret in the database.
-        
-        This is useful for migration scenarios or when you want to 
-        set a specific secret value.
-        """
-        try:
-            global_user_state.set_system_config(JWT_SECRET_DB_KEY, secret)
-            # Update the in-memory secret
-            self.secret_key = secret
-            logger.info('JWT secret updated in database')
-        except Exception as e:
-            logger.error(f'Failed to set JWT secret in database: {e}')
-            raise
-
-    def get_jwt_secret_from_database(self) -> Optional[str]:
-        """Get the current JWT secret from the database."""
-        try:
-            return global_user_state.get_system_config(JWT_SECRET_DB_KEY)
-        except Exception as e:
-            logger.debug(f'Failed to get JWT secret from database: {e}')
-            return None
-
 
 # Singleton instance
 token_service = TokenService()

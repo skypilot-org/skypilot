@@ -1466,6 +1466,10 @@ function ServiceAccountTokensView({
   const [createdToken, setCreatedToken] = useState(null);
   const [copySuccess, setCopySuccess] = useState('');
 
+  // Add new state for tokens displayed within dialogs
+  const [createdTokenInDialog, setCreatedTokenInDialog] = useState(null);
+  const [rotatedTokenInDialog, setRotatedTokenInDialog] = useState(null);
+
   // Role editing state
   const [editingTokenId, setEditingTokenId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
@@ -1621,9 +1625,8 @@ function ServiceAccountTokensView({
 
       if (response.ok) {
         const data = await response.json();
-        setCreatedToken(data.token);
+        setCreatedTokenInDialog(data.token);
         setCreateSuccess('Service account token created successfully!');
-        setShowCreateDialog(false);
         setNewToken({ token_name: '', expires_in_days: 30 });
         await fetchTokensAndCounts();
       } else {
@@ -1687,13 +1690,10 @@ function ServiceAccountTokensView({
 
       if (response.ok) {
         const data = await response.json();
-        setRotatedToken(data.token);
+        setRotatedTokenInDialog(data.token);
         setCreateSuccess(
           `Token "${tokenToRotate.token_name}" rotated successfully!`
         );
-        setShowRotateDialog(false);
-        setTokenToRotate(null);
-        setRotateExpiration('');
         await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
@@ -1730,72 +1730,6 @@ function ServiceAccountTokensView({
 
   return (
     <>
-      {/* Created Token Display */}
-      {createdToken && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <h4 className="text-sm font-medium text-green-900 mb-2">
-            ⚠️ Token Created Successfully - Save This Token Now!
-          </h4>
-          <p className="text-sm text-green-700 mb-3">
-            This token will not be shown again. Please copy and store it
-            securely.
-          </p>
-          <div className="flex items-center space-x-2">
-            <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
-              {createdToken}
-            </code>
-            <button
-              onClick={() => copyToClipboard(createdToken)}
-              className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              Copy
-            </button>
-          </div>
-          {copySuccess && (
-            <p className="text-sm text-green-600 mt-1">{copySuccess}</p>
-          )}
-          <button
-            onClick={() => setCreatedToken(null)}
-            className="mt-3 text-sm text-green-600 hover:text-green-800"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Rotated Token Display */}
-      {rotatedToken && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h4 className="text-sm font-medium text-blue-900 mb-2">
-            🔄 Token Rotated Successfully - Save This New Token Now!
-          </h4>
-          <p className="text-sm text-blue-700 mb-3">
-            This new token replaces the old one. Please copy and store it
-            securely. The old token is now invalid.
-          </p>
-          <div className="flex items-center space-x-2">
-            <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
-              {rotatedToken}
-            </code>
-            <button
-              onClick={() => copyToClipboard(rotatedToken)}
-              className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Copy
-            </button>
-          </div>
-          {copySuccess && (
-            <p className="text-sm text-blue-600 mt-1">{copySuccess}</p>
-          )}
-          <button
-            onClick={() => setRotatedToken(null)}
-            className="mt-3 text-sm text-blue-600 hover:text-blue-800"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
       {/* Tokens Table */}
       {filteredTokens.length === 0 ? (
         <div className="text-center py-12">
@@ -2023,59 +1957,108 @@ function ServiceAccountTokensView({
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
-            <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
-                Token Name
-              </label>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                placeholder="e.g., ci-pipeline, monitoring-system"
-                value={newToken.token_name}
-                onChange={(e) =>
-                  setNewToken({ ...newToken, token_name: e.target.value })
-                }
-              />
-            </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700">
-                Expiration (days)
-              </label>
-              <input
-                type="number"
-                className="border rounded px-3 py-2 w-full"
-                placeholder="30"
-                min="0"
-                max="365"
-                value={newToken.expires_in_days || ''}
-                onChange={(e) =>
-                  setNewToken({
-                    ...newToken,
-                    expires_in_days: e.target.value
-                      ? parseInt(e.target.value)
-                      : null,
-                  })
-                }
-              />
-              <p className="text-xs text-gray-500">
-                Leave empty or enter 0 to never expire. Maximum 365 days.
-              </p>
-            </div>
+            {createdTokenInDialog ? (
+              /* Token Created Successfully - Show Token */
+              <>
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-green-900 mb-2">
+                    ⚠️ Token Created Successfully - Save This Token Now!
+                  </h4>
+                  <p className="text-sm text-green-700 mb-3">
+                    This token will not be shown again. Please copy and store it
+                    securely.
+                  </p>
+                  <div className="flex items-center space-x-2">
+                    <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
+                      {createdTokenInDialog}
+                    </code>
+                    <button
+                      onClick={() => copyToClipboard(createdTokenInDialog)}
+                      className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  {copySuccess && (
+                    <p className="text-sm text-green-600 mt-1">{copySuccess}</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* Token Creation Form */
+              <>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Token Name
+                  </label>
+                  <input
+                    className="border rounded px-3 py-2 w-full"
+                    placeholder="e.g., ci-pipeline, monitoring-system"
+                    value={newToken.token_name}
+                    onChange={(e) =>
+                      setNewToken({ ...newToken, token_name: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Expiration (days)
+                  </label>
+                  <input
+                    type="number"
+                    className="border rounded px-3 py-2 w-full"
+                    placeholder="30"
+                    min="0"
+                    max="365"
+                    value={newToken.expires_in_days || ''}
+                    onChange={(e) =>
+                      setNewToken({
+                        ...newToken,
+                        expires_in_days: e.target.value
+                          ? parseInt(e.target.value)
+                          : null,
+                      })
+                    }
+                  />
+                  <p className="text-xs text-gray-500">
+                    Leave empty or enter 0 to never expire. Maximum 365 days.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-              onClick={() => setShowCreateDialog(false)}
-              disabled={creating}
-            >
-              Cancel
-            </button>
-            <button
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
-              onClick={handleCreateToken}
-              disabled={creating || !newToken.token_name.trim()}
-            >
-              {creating ? 'Creating...' : 'Create Token'}
-            </button>
+            {createdTokenInDialog ? (
+              <button
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                onClick={() => {
+                  setShowCreateDialog(false);
+                  setCreatedTokenInDialog(null);
+                }}
+              >
+                Close
+              </button>
+            ) : (
+              <>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+                  onClick={() => {
+                    setShowCreateDialog(false);
+                    setCreatedTokenInDialog(null);
+                  }}
+                  disabled={creating}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-sky-600 text-white hover:bg-sky-700 h-10 px-4 py-2"
+                  onClick={handleCreateToken}
+                  disabled={creating || !newToken.token_name.trim()}
+                >
+                  {creating ? 'Creating...' : 'Create Token'}
+                </button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
