@@ -2734,6 +2734,21 @@ def get_kubernetes_node_info(
                     node.metadata.labels.get(label_key))
                 break
 
+        # Extract IP address from node addresses (prefer external, fallback to internal)
+        node_ip = None
+        if node.status.addresses:
+            # First try to find external IP
+            for address in node.status.addresses:
+                if address.type == 'ExternalIP':
+                    node_ip = address.address
+                    break
+            # If no external IP, try to find internal IP
+            if node_ip is None:
+                for address in node.status.addresses:
+                    if address.type == 'InternalIP':
+                        node_ip = address.address
+                        break
+
         allocated_qty = 0
         accelerator_count = get_node_accelerator_count(node.status.allocatable)
 
@@ -2765,7 +2780,8 @@ def get_kubernetes_node_info(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
-            free={'accelerators_available': int(accelerators_available)})
+            free={'accelerators_available': int(accelerators_available)},
+            ip_address=node_ip)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
