@@ -160,7 +160,7 @@ class TestFormatVolumeTable:
 
         result = utils.format_volume_table(volumes, show_all=False)
 
-        assert result == 'No volumes.'
+        assert result == 'No existing volumes.'
 
     def test_format_volume_table_pvc_volumes(self):
         """Test format_volume_table with PVC volumes."""
@@ -209,7 +209,7 @@ class TestFormatVolumeTable:
 
         result = utils.format_volume_table(volumes, show_all=False)
 
-        assert result == 'No volumes.'
+        assert result == 'No existing volumes.'
         mock_logger.warning.assert_called_once_with(
             'Unknown volume type: unknown-type')
 

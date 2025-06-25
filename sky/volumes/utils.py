@@ -105,8 +105,8 @@ class PVCVolumeTable(VolumeTable):
                 row.get('type', ''),
                 infra,
                 size,
-                row.get('user_name', ''),
-                row.get('workspace', ''),
+                row.get('user_name', '-'),
+                row.get('workspace', '-'),
                 log_utils.readable_time_duration(row.get('launched_at', 0)),
                 row.get('status', ''),
                 last_attached_at_str,
@@ -114,7 +114,7 @@ class PVCVolumeTable(VolumeTable):
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(
-                    row.get('config', {}).get('storage_class_name', ''))
+                    row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
 
             self.table.add_row(table_row)

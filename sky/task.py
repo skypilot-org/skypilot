@@ -450,7 +450,7 @@ class Task:
         for target, source in self.file_mounts.items():
             location = f'file_mounts.{target}: {source}'
             self._validate_mount_path(target, location)
-            self._validate_mount_path(source, location)
+            self._validate_path(source, location)
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -465,23 +465,9 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
-            # TODO(zhwu): /home/username/sky_workdir as the target path need
-            # to be filtered out as well.
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
-                        'destination path of a file mount, as it will be used '
-                        'by the workdir. If uploading a file/folder to the '
-                        'workdir is needed, please specify the full path to '
-                        'the file/folder.')
 
     def _validate_mount_path(self, path: str, location: str):
-        if path.endswith('/'):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Mount paths cannot end with a slash '
-                                 f'Found: {path} in {location}')
+        self._validate_path(path, location)
         # TODO(zhwu): /home/username/sky_workdir as the target path need
         # to be filtered out as well.
         if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
@@ -492,6 +478,12 @@ class Task:
                     'by the workdir. If uploading a file/folder to the '
                     'workdir is needed, please specify the full path to '
                     'the file/folder.')
+
+    def _validate_path(self, path: str, location: str):
+        if path.endswith('/'):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Mount paths cannot end with a slash '
+                                 f'Found: {path} in {location}')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -792,6 +784,7 @@ class Task:
             return None
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
+            self._validate_mount_path(dst_path, location='volumes')
             # Shortcut for `dst_path: volume_name`
             if isinstance(vol, str):
                 volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
