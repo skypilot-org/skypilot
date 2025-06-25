@@ -471,6 +471,13 @@ def get_user(user_id: str) -> Optional[models.User]:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
         return None
+    
+    # Automatically detect service accounts and return ServiceAccount model
+    if user_id.startswith('sa-'):
+        return models.ServiceAccount.from_db_record(
+            models.User(id=row.id, name=row.name, password=row.password)
+        )
+    
     return models.User(id=row.id, name=row.name, password=row.password)
 
 
@@ -479,10 +486,18 @@ def get_user_by_name(username: str) -> List[models.User]:
         rows = session.query(user_table).filter_by(name=username).all()
     if len(rows) == 0:
         return []
-    return [
-        models.User(id=row.id, name=row.name, password=row.password)
-        for row in rows
-    ]
+    
+    users = []
+    for row in rows:
+        # Automatically detect service accounts and return ServiceAccount model
+        if row.id.startswith('sa-'):
+            users.append(models.ServiceAccount.from_db_record(
+                models.User(id=row.id, name=row.name, password=row.password)
+            ))
+        else:
+            users.append(models.User(id=row.id, name=row.name, password=row.password))
+    
+    return users
 
 
 def delete_user(user_id: str) -> None:
@@ -496,10 +511,18 @@ def get_all_users() -> List[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
-    return [
-        models.User(id=row.id, name=row.name, password=row.password)
-        for row in rows
-    ]
+    
+    users = []
+    for row in rows:
+        # Automatically detect service accounts and return ServiceAccount model
+        if row.id.startswith('sa-'):
+            users.append(models.ServiceAccount.from_db_record(
+                models.User(id=row.id, name=row.name, password=row.password)
+            ))
+        else:
+            users.append(models.User(id=row.id, name=row.name, password=row.password))
+    
+    return users
 
 
 @_init_db
