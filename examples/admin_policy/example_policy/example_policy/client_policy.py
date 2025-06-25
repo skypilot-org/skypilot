@@ -27,15 +27,13 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
             if not _LOCAL_GCP_CREDENTIALS_SET_ENV_VAR in user_request.task.envs:
                 raise RuntimeError(
                     f'Policy {cls.__name__} was not applied at client-side. '
-                    'Please install the policy and retry.'
-                )
+                    'Please install the policy and retry.')
             cv = user_request.task.envs[_LOCAL_GCP_CREDENTIALS_SET_ENV_VAR]
             if (cv != _POLICY_VERSION):
                 raise RuntimeError(
                     f'Policy {cls.__name__} at {cv} was applied at client-side '
                     f'but the server requires {_POLICY_VERSION} to be applied. '
-                    'Please upgrade the policy and retry.'
-                )
+                    'Please upgrade the policy and retry.')
             return sky.MutatedUserRequest(user_request.task,
                                           user_request.skypilot_config)
 
