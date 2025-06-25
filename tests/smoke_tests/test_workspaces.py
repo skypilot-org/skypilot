@@ -55,18 +55,20 @@ def test_workspace_switching(generic_cloud: str):
         f.write(ws2_config_content)
         ws2_config_path = f.name
 
+    change_config_cmd = 'mkdir -p .sky && rm -f .sky/config.yaml || true && cp {config_path} .sky/config.yaml'
+
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test_workspace_switching',
         [
-            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path}; {smoke_tests_utils.get_cmd_restart_api_server()}',
+            f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} SKYPILOT_DEBUG=0 {smoke_tests_utils.SKY_API_RESTART}',
             # Launch first cluster with workspace ws-default
-            f'rm -f .sky/config.yaml || true && cp {ws1_config_path} .sky/config.yaml',
+            change_config_cmd.format(config_path=ws1_config_path),
             f'sky launch -y --async -c {name}-1 '
             f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'echo hi',
             # Launch second cluster with workspace train-ws
-            f'rm -f .sky/config.yaml || true && cp {ws2_config_path} .sky/config.yaml',
+            change_config_cmd.format(config_path=ws2_config_path),
             f'sky launch -y -c {name}-2 '
             f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'echo hi',
@@ -75,7 +77,7 @@ def test_workspace_switching(generic_cloud: str):
                 timeout=smoke_tests_utils.get_timeout(generic_cloud)),
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 | grep {ws1_name}',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep {ws2_name}',
-            f'rm -f .sky/config.yaml || true && cp {ws1_config_path} .sky/config.yaml',
+            change_config_cmd.format(config_path=ws1_config_path),
             f's=$(sky down -y {name}-1 {name}-2); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
@@ -85,16 +87,16 @@ def test_workspace_switching(generic_cloud: str):
             f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "is in workspace {ws2_name!r}, but the active workspace is {ws1_name!r}"',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 | grep UP',
-            f'rm -f .sky/config.yaml || true && cp {ws2_config_path} .sky/config.yaml',
+            change_config_cmd.format(config_path=ws2_config_path),
             f's=$(sky down -y {name}-2 2>&1); echo "$s"; echo "$s" | grep "Terminating cluster {name}-2...done."',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-1 && exit 1 || true',
             f's=$(sky status); echo "$s"; echo "$s" | grep {name}-2 && exit 1 || true',
         ],
         teardown=(
-            f'rm -f .sky/config.yaml || true && cp {ws1_config_path} .sky/config.yaml && sky down -y {name}-1; '
-            f'rm -f .sky/config.yaml || true && cp {ws2_config_path} .sky/config.yaml && sky down -y {name}-2; '
+            f'{change_config_cmd.format(config_path=ws1_config_path)} && sky down -y {name}-1; '
+            f'{change_config_cmd.format(config_path=ws2_config_path)} && sky down -y {name}-2; '
             # restore the original config
-            f'{smoke_tests_utils.get_cmd_restart_api_server()}'),
+            f'SKYPILOT_DEBUG=0 {smoke_tests_utils.SKY_API_RESTART}'),
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)

@@ -97,6 +97,19 @@ ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
     '2> /dev/null || true; '
     'gsutil')
 
+ENDPOINT = 'http://127.0.0.1:46580/api/health'
+
+# Fix the flakyness of the test, server may not ready when we run the command after restart.
+WAIT_FOR_API = (
+    'for i in $(seq 1 30); do '
+    f'if curl -s {ENDPOINT} > /dev/null; then '
+    'echo "API is up and running"; break; fi; '
+    'echo "Waiting for API to be ready... ($i/30)"; '
+    '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
+    'sleep 1; done')
+
+SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
+
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
 _ALL_CLUSTER_STATUSES = "|".join([status.value for status in sky.ClusterStatus])
@@ -253,10 +266,6 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
         timeout=timeout)
-
-
-def get_cmd_restart_api_server():
-    return 'sky api stop || true && sky api start'
 
 
 # Managed job functions
