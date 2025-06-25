@@ -526,7 +526,7 @@ def get_expirable_clouds(
             # get all custom contexts
             contexts = kubernetes_utils.get_custom_k8s_contexts_names()
             # add remote_identity of each context if it exists
-            remote_identities = []
+            remote_identities = None
             for context in contexts:
                 context_remote_identity = cloud_config_utils.get_cloud_config_value(
                     cloud='kubernetes',
@@ -534,8 +534,11 @@ def get_expirable_clouds(
                     keys=('remote_identity',),
                     default_value=None)
                 if context_remote_identity is not None:
+                    if remote_identities is None:
+                        remote_identities = []
                     if isinstance(context_remote_identity, str):
-                        remote_identities.append(context_remote_identity)
+                        remote_identities.append(
+                            {context: context_remote_identity})
                     elif isinstance(context_remote_identity, list):
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
@@ -545,13 +548,15 @@ def get_expirable_clouds(
                 keys=('remote_identity',),
                 default_value=None)
             if global_remote_identity is not None:
+                if remote_identities is None:
+                    remote_identities = []
                 if isinstance(global_remote_identity, str):
-                    remote_identities.append(global_remote_identity)
+                    remote_identities.append({'*': global_remote_identity})
                 elif isinstance(global_remote_identity, list):
                     remote_identities.extend(global_remote_identity)
-            if not remote_identities:
-                remote_identities = [schemas.get_default_remote_identity(
-                    str(cloud).lower())]
+            if remote_identities is None:
+                remote_identities = schemas.get_default_remote_identity(
+                    str(cloud).lower())
         else:
             remote_identities = cloud_config_utils.get_cloud_config_value(
                 cloud=str(cloud).lower(),
@@ -640,13 +645,12 @@ def write_cluster_config(
         ), region, zones, num_nodes, dryrun, volume_mounts)
     config_dict = {}
 
-    ddd = cloud_config_utils.get_cloud_config_value(
-        cloud=str(to_provision.cloud).lower(),
-        region=to_provision.region,
-        keys=('specific_reservations',),
-        default_value=set())
-    logger.info(f'ddd: {ddd}')
-    specific_reservations = set(ddd)
+    specific_reservations = set(
+        cloud_config_utils.get_cloud_config_value(
+            cloud=str(to_provision.cloud).lower(),
+            region=to_provision.region,
+            keys=('specific_reservations',),
+            default_value=set()))
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials

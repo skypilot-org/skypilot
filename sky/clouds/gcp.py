@@ -232,7 +232,7 @@ class GCP(clouds.Cloud):
         # Clusters created with MIG (only GPU clusters) cannot be stopped.
         if (cloud_config_utils.get_cloud_config_value(
                 cloud='gcp',
-                region=None,
+                region=resources.region,
                 keys=('managed_instance_group',),
                 override_configs=resources.cluster_config_overrides) is not None
                 and resources.accelerators):
@@ -508,7 +508,7 @@ class GCP(clouds.Cloud):
         }
         enable_gpu_direct = cloud_config_utils.get_cloud_config_value(
             cloud='gcp',
-            region=None,
+            region=region_name,
             keys=('enable_gpu_direct',),
             default_value=False,
             override_configs=resources.cluster_config_overrides)
@@ -597,7 +597,7 @@ class GCP(clouds.Cloud):
 
         managed_instance_group_config = cloud_config_utils.get_cloud_config_value(
             cloud='gcp',
-            region=None,
+            region=region_name,
             keys=('managed_instance_group',),
             default_value=None,
             override_configs=resources.cluster_config_overrides)
@@ -612,7 +612,7 @@ class GCP(clouds.Cloud):
         resources_vars[
             'force_enable_external_ips'] = cloud_config_utils.get_cloud_config_value(
                 cloud='gcp',
-                region=None,
+                region=region_name,
                 keys=('force_enable_external_ips',),
                 default_value=False)
 
@@ -641,13 +641,13 @@ class GCP(clouds.Cloud):
         resources_vars[
             'enable_gvnic'] = cloud_config_utils.get_cloud_config_value(
                 cloud='gcp',
-                region=None,
+                region=region_name,
                 keys=('enable_gvnic',),
                 default_value=False,
                 override_configs=resources.cluster_config_overrides)
         placement_policy = cloud_config_utils.get_cloud_config_value(
             cloud='gcp',
-            region=None,
+            region=region_name,
             keys=('placement_policy',),
             default_value=None,
             override_configs=resources.cluster_config_overrides)
