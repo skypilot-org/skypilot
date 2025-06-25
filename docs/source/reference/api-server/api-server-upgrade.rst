@@ -171,7 +171,7 @@ Behavior when the API server is being upgraded:
 
 SkyPilot Python SDK and CLI will retry until the new version of API server start and resume the workflow:
 
-.. image:: https://i.imgur.com/QJhDL2M.gif
+.. image:: https://i.imgur.com/iI7lrr4.gif
   :alt: GIF for graceful upgrade
   :align: center
 
