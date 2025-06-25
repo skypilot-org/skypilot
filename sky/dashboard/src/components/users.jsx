@@ -1465,11 +1465,11 @@ function ServiceAccountTokensView({
   const [deleting, setDeleting] = useState(false);
   const [createdToken, setCreatedToken] = useState(null);
   const [copySuccess, setCopySuccess] = useState('');
-  
+
   // Role editing state
   const [editingTokenId, setEditingTokenId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
-  
+
   // Enhanced tokens with cluster/job counts
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
 
@@ -1477,55 +1477,58 @@ function ServiceAccountTokensView({
   const fetchTokensAndCounts = async () => {
     try {
       setLoading(true);
-      
+
       // Step 1: Fetch service account tokens
-      const tokensResponse = await apiClient.get('/users/service-account-tokens');
+      const tokensResponse = await apiClient.get(
+        '/users/service-account-tokens'
+      );
       if (!tokensResponse.ok) {
         console.error('Failed to fetch tokens');
         setTokens([]);
         setTokensWithCounts([]);
         return;
       }
-      
+
       const tokensData = await tokensResponse.json();
       setTokens(tokensData || []);
-      
+
       // Step 2: Fetch clusters and jobs data in parallel
       const [clustersResponse, jobsResponse] = await Promise.all([
         dashboardCache.get(getClusters),
         dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
       ]);
-      
+
       const clustersData = clustersResponse || [];
       const jobsData = jobsResponse?.jobs || [];
-      
+
       // Step 3: Calculate counts for each service account
       const enhancedTokens = (tokensData || []).map((token) => {
         const serviceAccountId = token.service_account_user_id;
-        
+
         // Count clusters owned by this service account
         const serviceAccountClusters = clustersData.filter(
           (cluster) => cluster.user_hash === serviceAccountId
         );
-        
+
         // Count jobs owned by this service account
         const serviceAccountJobs = jobsData.filter(
           (job) => job.user_hash === serviceAccountId
         );
-        
+
         return {
           ...token,
           clusterCount: serviceAccountClusters.length,
           jobCount: serviceAccountJobs.length,
           // Extract primary role
-          primaryRole: token.service_account_roles && token.service_account_roles.length > 0
-            ? token.service_account_roles[0]
-            : 'user'
+          primaryRole:
+            token.service_account_roles &&
+            token.service_account_roles.length > 0
+              ? token.service_account_roles[0]
+              : 'user',
         };
       });
-      
+
       setTokensWithCounts(enhancedTokens);
-      
     } catch (error) {
       console.error('Error fetching tokens and counts:', error);
       setTokens([]);
@@ -1558,19 +1561,22 @@ function ServiceAccountTokensView({
       setCreateError(new Error('Token ID or role is missing.'));
       return;
     }
-    
+
     setLoading(true);
     try {
-      const response = await apiClient.post('/users/service-account-tokens/update-role', {
-        token_id: tokenId,
-        role: currentEditingRole,
-      });
-      
+      const response = await apiClient.post(
+        '/users/service-account-tokens/update-role',
+        {
+          token_id: tokenId,
+          role: currentEditingRole,
+        }
+      );
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to update role');
       }
-      
+
       setCreateSuccess('Service account role updated successfully!');
       await fetchTokensAndCounts(); // Refresh data
       handleCancelEdit(); // Exit edit mode
@@ -1703,7 +1709,7 @@ function ServiceAccountTokensView({
   // Filter tokens based on search query
   const filteredTokens = tokensWithCounts.filter((token) => {
     if (!searchQuery?.trim()) return true;
-    
+
     const query = searchQuery.toLowerCase();
     return (
       token.token_name?.toLowerCase().includes(query) ||
@@ -1844,7 +1850,9 @@ function ServiceAccountTokensView({
                           <>
                             <select
                               value={currentEditingRole}
-                              onChange={(e) => setCurrentEditingRole(e.target.value)}
+                              onChange={(e) =>
+                                setCurrentEditingRole(e.target.value)
+                              }
                               className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
                             >
                               <option value="admin">Admin</option>
@@ -1867,13 +1875,19 @@ function ServiceAccountTokensView({
                           </>
                         ) : (
                           <>
-                            <span className="capitalize">{token.primaryRole}</span>
+                            <span className="capitalize">
+                              {token.primaryRole}
+                            </span>
                             {/* Only show edit role button if admin or owner */}
                             {(userRoleCache?.role === 'admin' ||
-                              token.creator_user_hash === userRoleCache?.id) && (
+                              token.creator_user_hash ===
+                                userRoleCache?.id) && (
                               <button
                                 onClick={() =>
-                                  handleEditClick(token.token_id, token.primaryRole)
+                                  handleEditClick(
+                                    token.token_id,
+                                    token.primaryRole
+                                  )
                                 }
                                 className="text-blue-600 hover:text-blue-700 p-1"
                                 title="Edit role"

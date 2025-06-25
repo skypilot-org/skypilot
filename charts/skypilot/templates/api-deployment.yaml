@@ -47,8 +47,8 @@ spec:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
               key: auth
         {{- end }}
-        {{- if and .Values.apiService.enableUserManagement .Values.apiService.enableServiceAccounts }}
-        - name: ENABLE_SERVICE_ACCOUNT_TOKENS
+        {{- if .Values.apiService.enableServiceAccounts }}
+        - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}

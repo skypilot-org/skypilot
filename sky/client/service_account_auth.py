@@ -46,12 +46,15 @@ def get_service_account_headers() -> dict:
     """Get HTTP headers for service account authentication.
 
     Returns:
-        Dictionary with Authorization header if token is available,
-        empty dict otherwise.
+        Dictionary with Authorization header and service account marker
+        if token is available, empty dict otherwise.
     """
     token = get_service_account_token()
     if token:
-        return {'Authorization': f'Bearer {token}'}
+        return {
+            'Authorization': f'Bearer {token}',
+            'X-Service-Account-Auth': 'true'
+        }
     return {}
 
 

@@ -114,8 +114,11 @@ def _basic_auth_401_response(content: str):
 # TODO(hailong): Remove this function and use request.state.auth_user instead.
 async def _override_user_info_in_request_body(request: fastapi.Request,
                                               auth_user: Optional[models.User]):
+    if auth_user is None:
+        return
+
     body = await request.body()
-    if auth_user and body:
+    if body:
         try:
             original_json = await request.json()
         except json.JSONDecodeError as e:
@@ -171,71 +174,6 @@ def _try_set_basic_auth_user(request: fastapi.Request):
             break
 
 
-def _try_set_bearer_token_user(request: fastapi.Request):
-    """Try to authenticate user using bearer token (JWT-based)."""
-    # Check if service account tokens are enabled
-    if os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNT_TOKENS,
-                      'false').lower() != 'true':
-        return
-
-    auth_header = request.headers.get('authorization')
-    if not auth_header or not auth_header.lower().startswith('bearer '):
-        return
-
-    # Extract token
-    sa_token = auth_header.split(' ', 1)[1]
-
-    # Check if token has the expected sky_ prefix
-    if not sa_token.startswith('sky_'):
-        return
-
-    try:
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.token_service import token_service
-
-        # Verify and decode JWT token
-        payload = token_service.verify_token(sa_token)
-        if payload is None:
-            return  # Invalid or expired token
-
-        # Extract user information from JWT payload
-        user_id = payload.get('sub')  # Subject = service account user ID
-        user_name = payload.get('name')
-        token_id = payload.get('token_id')
-
-        if not user_id or not token_id:
-            logger.warning('Invalid token payload: missing user_id or token_id')
-            return
-
-        # Verify user still exists in database
-        user_info = global_user_state.get_user(user_id)
-        if user_info is None:
-            logger.warning(f'Token user {user_id} no longer exists')
-            return
-
-        # Update last used timestamp for token tracking
-        try:
-            global_user_state.update_service_account_token_last_used(token_id)
-        except Exception as e:  # pylint: disable=broad-except
-            # Don't fail authentication if we can't update last used time
-            logger.debug(f'Failed to update token last used time: {e}')
-
-        # Set the authenticated user - this integrates with Casbin RBAC
-        # user_id is the service account user ID
-        request.state.auth_user = models.User(id=user_id,
-                                              name=user_name or user_info.name)
-
-        logger.debug(
-            f'Authenticated service account {user_info.name} via service '
-            'account token')
-
-    except Exception as e:  # pylint: disable=broad-except
-        # If there's any error, just return without authentication
-        logger.debug(f'Service account token authentication failed: {e}')
-        return
-
-
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -282,34 +220,20 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
 
-
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to handle HTTP Basic Auth and Bearer Token Auth."""
+    """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/api/'):
-            # Try to set the auth user from basic auth or bearer token
+            # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
-            if not hasattr(request.state,
-                           'auth_user') or request.state.auth_user is None:
-                _try_set_bearer_token_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
         if not auth_header:
             return _basic_auth_401_response('Authentication required')
 
-        # Try bearer token authentication first
-        if auth_header.lower().startswith('bearer '):
-            _try_set_bearer_token_user(request)
-            if hasattr(request.state,
-                       'auth_user') and request.state.auth_user is not None:
-                await _override_user_info_in_request_body(
-                    request, request.state.auth_user)
-                return await call_next(request)
-            return _basic_auth_401_response('Invalid bearer token')
-
-        # Fall back to basic auth
+        # Only handle basic auth
         if not auth_header.lower().startswith('basic '):
             return _basic_auth_401_response('Invalid authentication method')
 
@@ -343,15 +267,104 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+
+class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle Bearer Token Auth (Service Accounts)."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # Only process requests with the a path prefix /sa
+        if not request.url.path.startswith('/sa/'):
+            return await call_next(request)
+        
+        # Check if service account tokens are enabled
+        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS, 'false').lower()
+        if sa_enabled != 'true':
+            logger.warning('Service account authentication disabled')
+            return fastapi.responses.JSONResponse(status_code=401, content={'detail': 'Service account authentication disabled'})
+
+        auth_header = request.headers.get('authorization')
+        if not auth_header or not auth_header.lower().startswith('bearer '):
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={
+                    'detail': 'Bearer token required for service account access'
+                })
+
+        # Extract and validate service account token
+        sa_token = auth_header.split(' ', 1)[1]
+        if not sa_token.startswith('sky_'):
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid service account token format'})
+
+        try:
+            # Import here to avoid circular imports
+            # pylint: disable=import-outside-toplevel
+            from sky.users.token_service import token_service
+
+            # Verify and decode JWT token
+            payload = token_service.verify_token(sa_token)
+            
+            if payload is None:
+                logger.warning('BearerTokenMiddleware: Token verification failed')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Invalid or expired service account token'})
+
+            # Extract user information from JWT payload
+            user_id = payload.get('sub')  # Subject = service account user ID
+            user_name = payload.get('name')
+            token_id = payload.get('token_id')
+
+            if not user_id or not token_id:
+                logger.warning(
+                    'Invalid token payload: missing user_id or token_id')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Invalid token payload'})
+
+            # Verify user still exists in database
+            user_info = global_user_state.get_user(user_id)
+            if user_info is None:
+                logger.warning(f'Token user {user_id} no longer exists')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Service account user no longer exists'})
+
+            # Update last used timestamp for token tracking
+            try:
+                global_user_state.update_service_account_token_last_used(
+                    token_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # Don't fail authentication if we can't update last used time
+                logger.debug(f'Failed to update token last used time: {e}')
+
+                        # Set the authenticated user - this integrates with Casbin RBAC
+            auth_user = models.User(id=user_id, name=user_name or user_info.name)
+            request.state.auth_user = auth_user
+
+            # Override user info in request body for service account requests
+            await _override_user_info_in_request_body(request, auth_user)
+
+            logger.info(
+                f'BearerTokenMiddleware: Successfully authenticated service account - '
+                f'user_id={user_id}, user_name={auth_user.name}, token_id={token_id}')
+
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'BearerTokenMiddleware: Service account token authentication failed: {e}', exc_info=True)
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': f'Service account authentication failed: {str(e)}'})
+
+        # Strip the /sa prefix from the request path
+        request.scope['path'] = request.scope['path'].replace('/sa/', '/', 1)
+        return await call_next(request)
+
+
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        # If auth_user is already set, skip this middleware, as it has been
-        # authenticated by a previous middleware.
-        if request.state.auth_user is not None:
-            return await call_next(request)
-
         auth_user = _get_auth_user_header(request)
 
         # Add user to database if auth_user is present
@@ -482,6 +495,9 @@ app.add_middleware(
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
 if str(enable_basic_auth).lower() == 'true':
     app.add_middleware(BasicAuthMiddleware)
+# Bearer token middleware should always be present to handle service account
+# authentication
+app.add_middleware(BearerTokenMiddleware)
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
@@ -1410,6 +1426,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
+    logger.info(f'Health endpoint: request.state.auth_user = {user}')
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,

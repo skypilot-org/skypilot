@@ -3,8 +3,8 @@
 import contextlib
 import hashlib
 import os
-import secrets
 import re
+import secrets
 from typing import Any, Dict, Generator, List
 
 import fastapi
@@ -36,12 +36,11 @@ async def users() -> List[Dict[str, Any]]:
     all_users = []
     user_list = global_user_state.get_all_users()
     for user in user_list:
-        # Filter out service accounts - they have IDs starting with "sa-" 
+        # Filter out service accounts - they have IDs starting with "sa-"
         # or names starting with "serviceaccount-"
-        if (user.id.startswith('sa-') or 
-            (user.name and user.name.startswith('serviceaccount-'))):
+        if user.id.startswith('sa-'):
             continue
-            
+
         user_roles = permission.permission_service.get_user_roles(user.id)
         all_users.append({
             'id': user.id,
@@ -299,15 +298,15 @@ async def user_export() -> Dict[str, Any]:
 
         # Create CSV content
         csv_lines = ['username,password,role']  # Header
-        
+
         exported_users = []
         for user in user_list:
-            # Filter out service accounts - they have IDs starting with "sa-" 
+            # Filter out service accounts - they have IDs starting with "sa-"
             # or names starting with "serviceaccount-"
-            if (user.id.startswith('sa-') or 
+            if (user.id.startswith('sa-') or
                 (user.name and user.name.startswith('serviceaccount-'))):
                 continue
-                
+
             # Get user role
             user_roles = permission.permission_service.get_user_roles(user.id)
             role = user_roles[0] if user_roles else rbac.get_default_role()
@@ -399,11 +398,15 @@ def _generate_service_account_user_id(token_name: str,
     # Create a deterministic yet unique ID based on creator and token name
     # but add some randomness to avoid collisions
     random_suffix = secrets.token_hex(8)  # 16 character hex string
-    # Use sa- prefix followed by first 8 chars of creator ID, token name, and random suffix
-    # Limit total length to keep it manageable
-    safe_token_name = re.sub(r'[^a-zA-Z0-9]', '', token_name)[:8]  # Remove special chars, limit length
+    # Use sa- prefix followed by first 8 chars of creator ID, token name, and
+    # random suffix.
+    # Limit total length to keep it manageable.
+    safe_token_name = re.sub(
+        r'[^a-zA-Z0-9]', '',
+        token_name)[:8]  # Remove special chars, limit length
     creator_prefix = creator_user_id[:8]  # First 8 chars of creator ID
-    service_account_id = f'sa-{creator_prefix}-{safe_token_name}-{random_suffix}'
+    service_account_id = (f'sa-{creator_prefix}-{safe_token_name}-'
+                          f'{random_suffix}')
     return service_account_id
 
 

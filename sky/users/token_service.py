@@ -2,12 +2,12 @@
 
 import datetime
 import hashlib
-import os
 import secrets
 from typing import Any, Dict, Optional
 
 import jwt
 
+from sky import global_user_state
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
@@ -15,7 +15,7 @@ logger = sky_logging.init_logger(__name__)
 # JWT Configuration
 JWT_ALGORITHM = 'HS256'
 JWT_ISSUER = 'sky'  # Shortened for compact tokens
-JWT_SECRET_ENV = 'SKYPILOT_JWT_SECRET'
+JWT_SECRET_DB_KEY = 'jwt_secret'
 
 
 class TokenService:
@@ -25,17 +25,29 @@ class TokenService:
         self.secret_key = self._get_or_generate_secret()
 
     def _get_or_generate_secret(self) -> str:
-        """Get JWT secret from environment or generate a new one."""
-        secret = os.environ.get(JWT_SECRET_ENV)
-        if not secret:
-            # Generate a secure random secret
-            secret = secrets.token_urlsafe(64)
+        """Get JWT secret from database or generate a new one."""
+        # Try to get from database (persistent across deployments)
+        try:
+            db_secret = global_user_state.get_system_config(JWT_SECRET_DB_KEY)
+            if db_secret:
+                return db_secret
+        except Exception as e:
+            logger.debug(f'Failed to get JWT secret from database: {e}')
+        
+        # Generate a new secret and store in database
+        new_secret = secrets.token_urlsafe(64)
+        try:
+            global_user_state.set_system_config(JWT_SECRET_DB_KEY, new_secret)
+            logger.info(
+                'Generated new JWT secret and stored in database. '
+                'This secret will persist across API server restarts.')
+        except Exception as e:
             logger.warning(
-                f'No JWT secret found in {JWT_SECRET_ENV}, generated a new '
-                'one. '
-                'For production, set a persistent secret in the environment '
-                'variable.')
-        return secret
+                f'Failed to store new JWT secret in database: {e}. '
+                f'Using in-memory secret (tokens will not persist '
+                f'across restarts).')
+        
+        return new_secret
 
     def create_token(self,
                      creator_user_id: str,
@@ -152,6 +164,29 @@ class TokenService:
     def get_token_hash(self, token: str) -> str:
         """Get hash of a token for database lookup."""
         return hashlib.sha256(token.encode()).hexdigest()
+
+    def set_jwt_secret_in_database(self, secret: str) -> None:
+        """Manually set the JWT secret in the database.
+        
+        This is useful for migration scenarios or when you want to 
+        set a specific secret value.
+        """
+        try:
+            global_user_state.set_system_config(JWT_SECRET_DB_KEY, secret)
+            # Update the in-memory secret
+            self.secret_key = secret
+            logger.info('JWT secret updated in database')
+        except Exception as e:
+            logger.error(f'Failed to set JWT secret in database: {e}')
+            raise
+
+    def get_jwt_secret_from_database(self) -> Optional[str]:
+        """Get the current JWT secret from the database."""
+        try:
+            return global_user_state.get_system_config(JWT_SECRET_DB_KEY)
+        except Exception as e:
+            logger.debug(f'Failed to get JWT secret from database: {e}')
+            return None
 
 
 # Singleton instance

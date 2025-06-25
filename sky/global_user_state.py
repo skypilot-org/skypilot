@@ -172,6 +172,15 @@ cluster_yaml_table = sqlalchemy.Table(
     sqlalchemy.Column('yaml', sqlalchemy.Text),
 )
 
+system_config_table = sqlalchemy.Table(
+    'system_config',
+    Base.metadata,
+    sqlalchemy.Column('config_key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('config_value', sqlalchemy.Text),
+    sqlalchemy.Column('created_at', sqlalchemy.Integer),
+    sqlalchemy.Column('updated_at', sqlalchemy.Integer),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -1697,3 +1706,47 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
         'creator_user_hash': row.creator_user_hash,
         'service_account_user_id': row.service_account_user_id,
     } for row in rows]
+
+
+@_init_db
+def get_system_config(config_key: str) -> Optional[str]:
+    """Get a system configuration value by key."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(system_config_table).filter_by(
+            config_key=config_key).first()
+    if row is None:
+        return None
+    return row.config_value
+
+
+@_init_db
+def set_system_config(config_key: str, config_value: str) -> None:
+    """Set a system configuration value."""
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(system_config_table).values(
+            config_key=config_key,
+            config_value=config_value,
+            created_at=current_time,
+            updated_at=current_time)
+        
+        upsert_stmnt = insert_stmnt.on_conflict_do_update(
+            index_elements=[system_config_table.c.config_key],
+            set_={
+                system_config_table.c.config_value: config_value,
+                system_config_table.c.updated_at: current_time,
+            })
+        session.execute(upsert_stmnt)
+        session.commit()
