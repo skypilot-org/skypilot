@@ -21,11 +21,11 @@ class TestVolumeCore:
         mock_volumes = [{
             'name': 'test-volume-1',
             'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.READY
+            'status': status_lib.VolumeStatus.IN_USE
         }, {
             'name': 'test-volume-2',
             'handle': mock.MagicMock(cloud='gcp', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.READY
+            'status': status_lib.VolumeStatus.IN_USE
         }]
 
         # Mock global_user_state
