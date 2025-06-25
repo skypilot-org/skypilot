@@ -318,11 +318,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)  # Not exec auth
         get_cloud_config_value.side_effect = (
-            lambda cloud, keys, region, default_value=None, override_configs=None: {
-            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
-            ('kubernetes', 'provision_timeout'): 10,
-            ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get((cloud,) + keys, default_value))
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
@@ -387,11 +388,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)  # Not exec auth
         get_cloud_config_value.side_effect = (
-            lambda cloud, keys, region, default_value=None, override_configs=None: {
-            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
-            ('kubernetes', 'provision_timeout'): 10,
-            ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get((cloud,) + keys, default_value))
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
@@ -459,11 +461,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_workspace_cloud.return_value.get.return_value = None
         mock_is_exec_auth.return_value = (False, None)  # Not exec auth
         get_cloud_config_value.side_effect = (
-            lambda cloud, keys, region, default_value=None, override_configs=None: {
-            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
-            ('kubernetes', 'provision_timeout'): 10,
-            ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get((cloud,) + keys, default_value))
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
@@ -549,11 +552,12 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
 
         get_cloud_config_value.side_effect = (
-            lambda cloud, keys, region, default_value=None, override_configs=None: {
-            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
-            ('kubernetes', 'provision_timeout'): 10,
-            ('kubernetes', 'high_availability', 'storage_class_name'): None,
-        }.get((cloud,) + keys, default_value))
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
 
         # Mock networking
         mock_port_mode = mock.MagicMock()
