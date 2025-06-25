@@ -12,6 +12,7 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 _CREDENTIAL_FILES = [
     # credential files for Cudo,
@@ -201,6 +202,7 @@ class Cudo(clouds.Cloud):
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
         del zones, cluster_name  # unused
         resources = resources.assert_launchable()

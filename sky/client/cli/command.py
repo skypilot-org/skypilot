@@ -81,6 +81,8 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
+from sky.volumes import utils as volumes_utils
+from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
     import types
@@ -202,13 +204,14 @@ def _get_cluster_records_and_set_ssh_config(
 
 
 def _get_glob_matches(candidate_names: List[str],
-                      glob_patterns: List[str]) -> List[str]:
+                      glob_patterns: List[str],
+                      resource_type: str = 'Storage') -> List[str]:
     """Returns a list of names that match the glob pattern."""
     glob_storages = []
     for glob_pattern in glob_patterns:
         glob_storage = fnmatch.filter(candidate_names, glob_pattern)
         if not glob_storage:
-            click.echo(f'Storage {glob_pattern} not found.')
+            click.echo(f'{resource_type} {glob_pattern} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -284,6 +287,19 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
     response = requests_lib.get(
         f'{server_common.get_server_url()}'
         f'/api/completion/storage_name?incomplete={incomplete}',
+        timeout=2.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _complete_volume_name(ctx: click.Context, param: click.Parameter,
+                          incomplete: str) -> List[str]:
+    """Handle shell completion for volume names."""
+    del ctx, param  # Unused.
+    response = requests_lib.get(
+        f'{server_common.get_server_url()}'
+        f'/api/completion/volume_name?incomplete={incomplete}',
         timeout=2.0,
     )
     response.raise_for_status()
@@ -531,8 +547,9 @@ def _parse_override_params(
     return override_params
 
 
-def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    """Checks if entrypoint is a readable YAML file.
+def _check_yaml_only(
+        entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], bool, str]:
+    """Checks if entrypoint is a readable YAML file without confirmation.
 
     Args:
         entrypoint: Path to a YAML file.
@@ -580,6 +597,17 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                 invalid_reason = ('yaml.safe_load() failed. Please check if the'
                                   ' path is correct.')
         is_yaml = False
+    return is_yaml, result, yaml_file_provided, invalid_reason
+
+
+def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """Checks if entrypoint is a readable YAML file.
+
+    Args:
+        entrypoint: Path to a YAML file.
+    """
+    is_yaml, result, yaml_file_provided, invalid_reason = _check_yaml_only(
+        entrypoint)
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
@@ -3763,6 +3791,196 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
             _async_call_or_wait(request_id, async_call, 'sky.storage')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
+                         f'{common_utils.format_exception(e, use_bracket=True)}'
+                         f'{colorama.Style.RESET_ALL}')
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def volumes():
+    """SkyPilot Volumes CLI."""
+    pass
+
+
+@volumes.command('apply', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('entrypoint',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help='Volume name. Override the name defined in the YAML.')
+@click.option('--infra',
+              required=False,
+              type=str,
+              help='Infra. Format: k8s, k8s/context-name. '
+              'Override the infra defined in the YAML.')
+@click.option(
+    '--type',
+    required=False,
+    type=str,
+    help='Volume type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--size',
+              required=False,
+              type=str,
+              help='Volume size. Override the size defined in the YAML.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@_add_click_options(flags.COMMON_OPTIONS)
+@usage_lib.entrypoint
+def volumes_apply(
+        entrypoint: Optional[Tuple[str, ...]],
+        name: Optional[str],
+        infra: Optional[str],
+        type: Optional[str],  # pylint: disable=redefined-builtin
+        size: Optional[str],
+        yes: bool,
+        async_call: bool):
+    """Apply a volume.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Apply a volume from a YAML file.
+        sky volumes apply volume.yaml
+        \b
+        # Apply a volume from a command.
+        sky volumes apply --name pvc1 --infra k8s --type pvc --size 100Gi
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume as volume_lib
+
+    volume_config_dict: Dict[str, Any] = {}
+    if entrypoint is not None and len(entrypoint) > 0:
+        entrypoint_str = ' '.join(entrypoint)
+        is_yaml, yaml_config, yaml_file_provided, invalid_reason = (
+            _check_yaml_only(entrypoint_str))
+        if not is_yaml:
+            if yaml_file_provided:
+                raise click.BadParameter(f'{entrypoint_str!r} looks like a '
+                                         f'yaml path but {invalid_reason}')
+            else:
+                raise click.BadParameter(
+                    f'{entrypoint_str!r} needs to be a YAML file')
+        if yaml_config is not None:
+            volume_config_dict = yaml_config.copy()
+
+    # Create Volume instance
+    volume = volume_lib.Volume.from_dict(volume_config_dict)
+
+    # Normalize the volume config with CLI options
+    volume.normalize_config(name=name, infra=infra, type=type, size=size)
+
+    logger.debug(f'Volume config: {volume.to_dict()}')
+
+    if not yes:
+        click.confirm(f'Proceed to create volume {volume.name!r}?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
+    # Call SDK to create volume
+    try:
+        request_id = volumes_sdk.apply(volume)
+        _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
+    except RuntimeError as e:
+        logger.error(f'{colorama.Fore.RED}Error applying volume: '
+                     f'{common_utils.format_exception(e, use_bracket=True)}'
+                     f'{colorama.Style.RESET_ALL}')
+
+
+@volumes.command('ls', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('--verbose',
+              '-v',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def volumes_ls(verbose: bool):
+    """List volumes managed by SkyPilot."""
+    request_id = volumes_sdk.ls()
+    all_volumes = sdk.stream_and_get(request_id)
+    volume_table = volumes_utils.format_volume_table(all_volumes,
+                                                     show_all=verbose)
+    click.echo(volume_table)
+
+
+@volumes.command('delete', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_volume_name))
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Delete all volumes.')
+@click.option('--yes',
+              '-y',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Skip confirmation prompt.')
+@_add_click_options(flags.COMMON_OPTIONS)
+@usage_lib.entrypoint
+def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
+    """Delete volumes.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Delete two volumes.
+        sky volumes delete pvc1 pvc2
+        \b
+        # Delete all volumes matching glob pattern 'pvc*'.
+        sky volumes delete "pvc*"
+        \b
+        # Delete all volumes.
+        sky volumes delete -a
+    """
+    if sum([bool(names), all]) != 1:
+        raise click.UsageError('Either --all or a name must be specified.')
+    all_volumes = sdk.get(volumes_sdk.ls())
+    if all:
+        if not all_volumes:
+            click.echo('No volumes to delete.')
+            return
+        names = [volume['name'] for volume in all_volumes]
+    else:
+        existing_volume_names = [volume['name'] for volume in all_volumes]
+        names = _get_glob_matches(existing_volume_names,
+                                  names,
+                                  resource_type='Volume')
+    if names:
+        if not yes:
+            volume_names = ', '.join(names)
+            volume_str = 'volumes' if len(names) > 1 else 'volume'
+            click.confirm(
+                f'Deleting {len(names)} {volume_str}: '
+                f'{volume_names}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+
+        try:
+            _async_call_or_wait(volumes_sdk.delete(names), async_call,
+                                'sky.volumes.delete')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
 

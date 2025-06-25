@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 import sky
@@ -3297,3 +3297,37 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
 
     format_kubeconfig_exec_auth(config, path)
     return path
+
+
+def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
+                                   resource_name: str) -> None:
+    """Helper to delete Kubernetes resources with 404 handling and retries.
+
+    Args:
+        delete_func: Function to call to delete the resource
+        resource_type: Type of resource being deleted (e.g. 'service'),
+            used in logging
+        resource_name: Name of the resource being deleted, used in logging
+    """
+    max_retries = 3
+    retry_delay = 5  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            delete_func()
+            return
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                logger.warning(
+                    f'terminate_instances: Tried to delete {resource_type} '
+                    f'{resource_name}, but the {resource_type} was not '
+                    'found (404).')
+                return
+            elif attempt < max_retries - 1:
+                logger.warning(f'terminate_instances: Failed to delete '
+                               f'{resource_type} {resource_name} (attempt '
+                               f'{attempt + 1}/{max_retries}). Error: {e}. '
+                               f'Retrying in {retry_delay} seconds...')
+                time.sleep(retry_delay)
+            else:
+                raise

@@ -451,17 +451,25 @@ TIME_PATTERN: str = (
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,
+    'ki': 2**10,
     'mb': 2**20,
+    'mi': 2**20,
     'gb': 2**30,
+    'gi': 2**30,
     'tb': 2**40,
+    'ti': 2**40,
     'pb': 2**50,
+    'pi': 2**50,
 }
 
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
-    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
-    ')?$/i')
-MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
+    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit.upper() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'  # pylint: disable=line-too-long
+    ')?$')
+
+LAST_USE_TRUNC_LENGTH = 25
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000
