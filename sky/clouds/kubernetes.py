@@ -25,6 +25,7 @@ from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -394,7 +395,9 @@ class Kubernetes(clouds.Cloud):
         return 0
 
     @staticmethod
-    def _calculate_provision_timeout(num_nodes: int) -> int:
+    def _calculate_provision_timeout(
+            num_nodes: int,
+            volume_mounts: Optional[List['volume_lib.VolumeMount']]) -> int:
         """Calculate provision timeout based on number of nodes.
 
         The timeout scales linearly with the number of nodes to account for
@@ -409,19 +412,33 @@ class Kubernetes(clouds.Cloud):
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
+        if volume_mounts is not None:
+            for volume_mount in volume_mounts:
+                if (volume_mount.volume_config.type ==
+                        volume_lib.VolumeType.PVC.value):
+                    if (volume_mount.volume_config.config.get(
+                            'access_mode', '') ==
+                            volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
+                        # GKE may take several minutes to provision a PV
+                        # supporting READ_WRITE_MANY with filestore.
+                        base_timeout = 180
+                        max_timeout = 240
+                        break
 
         return int(
             min(base_timeout + (per_node_timeout * (num_nodes - 1)),
                 max_timeout))
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: 'resources_utils.ClusterName',
-            region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: 'resources_utils.ClusterName',
+        region: Optional['clouds.Region'],
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
@@ -562,7 +579,7 @@ class Kubernetes(clouds.Cloud):
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
 
-        timeout = self._calculate_provision_timeout(num_nodes)
+        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
         timeout = skypilot_config.get_nested(
             ('kubernetes', 'provision_timeout'),
             timeout,
@@ -653,6 +670,7 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
             'k8s_high_availability_restarting_signal_file':
                 (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
+            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),

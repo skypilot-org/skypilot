@@ -33,6 +33,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -65,6 +66,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+    from sky.volumes import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -540,16 +542,18 @@ def get_expirable_clouds(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources_lib.Resources',
-        num_nodes: int,
-        cluster_config_template: str,
-        cluster_name: str,
-        local_wheel_path: pathlib.Path,
-        wheel_hash: str,
-        region: clouds.Region,
-        zones: Optional[List[clouds.Zone]] = None,
-        dryrun: bool = False,
-        keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+    to_provision: 'resources_lib.Resources',
+    num_nodes: int,
+    cluster_config_template: str,
+    cluster_name: str,
+    local_wheel_path: pathlib.Path,
+    wheel_hash: str,
+    region: clouds.Region,
+    zones: Optional[List[clouds.Zone]] = None,
+    dryrun: bool = False,
+    keep_launch_fields_in_existing_config: bool = True,
+    volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns:
@@ -597,7 +601,7 @@ def write_cluster_config(
         resources_utils.ClusterName(
             cluster_name,
             cluster_name_on_cloud,
-        ), region, zones, num_nodes, dryrun)
+        ), region, zones, num_nodes, dryrun, volume_mounts)
     config_dict = {}
 
     specific_reservations = set(
@@ -730,6 +734,15 @@ def write_cluster_config(
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name)
 
+    volume_mount_vars = []
+    if volume_mounts is not None:
+        for vol in volume_mounts:
+            volume_mount_vars.append({
+                'name': vol.volume_name,
+                'path': vol.path,
+                'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+            })
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -820,6 +833,9 @@ def write_cluster_config(
 
                 # High availability
                 'high_availability': high_availability_specified,
+
+                # Volume mounts
+                'volume_mounts': volume_mount_vars,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -2454,6 +2470,17 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    if (managed_job_utils.is_consolidation_mode() and
+            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+        cn = 'local-controller-consolidation'
+        return backends.LocalResourcesHandle(
+            cluster_name=cn,
+            cluster_name_on_cloud=cn,
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=sky.Resources(cloud=clouds.Cloud(),
+                                             instance_type=cn),
+        )
     if non_existent_message is None:
         non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name

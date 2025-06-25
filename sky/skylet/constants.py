@@ -401,6 +401,8 @@ PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
 PERSISTENT_RUN_RESTARTING_SIGNAL_FILE = (
     '~/.sky/.controller_recovery_restarting_signal')
 
+HA_PERSISTENT_RECOVERY_LOG_PATH = '/tmp/ha_recovery.log'
+
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
@@ -411,6 +413,8 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
+# Environment variable that is set to 'true' if metrics are enabled.
+ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
@@ -436,39 +440,40 @@ LOGGING_CONFIG_DIR = '~/.sky/logging'
 
 # Resources constants
 TIME_UNITS = {
-    's': 1 / 60,
-    'sec': 1 / 60,
     'm': 1,
-    'min': 1,
     'h': 60,
-    'hr': 60,
     'd': 24 * 60,
-    'day': 24 * 60,
+    'w': 7 * 24 * 60,
 }
 
 TIME_PATTERN: str = (
     f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
 
 MEMORY_SIZE_UNITS = {
-    'b': 1,
-    'k': 2**10,
     'kb': 2**10,
-    'm': 2**20,
+    'ki': 2**10,
     'mb': 2**20,
-    'g': 2**30,
+    'mi': 2**20,
     'gb': 2**30,
-    't': 2**40,
+    'gi': 2**30,
     'tb': 2**40,
-    'p': 2**50,
+    'ti': 2**40,
     'pb': 2**50,
+    'pi': 2**50,
 }
 
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
-    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}'
-    ')?$/i')
-MEMORY_SIZE_PLUS_PATTERN = f'{MEMORY_SIZE_PATTERN[:-3]}+?$/i'
+    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit.upper() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'  # pylint: disable=line-too-long
+    ')?$')
+
+LAST_USE_TRUNC_LENGTH = 25
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000
 DEFAULT_PRIORITY = 0
+
+GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
+COST_REPORT_DEFAULT_DAYS = 30

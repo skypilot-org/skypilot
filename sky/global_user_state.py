@@ -111,6 +111,23 @@ storage_table = sqlalchemy.Table(
     sqlalchemy.Column('status', sqlalchemy.Text),
 )
 
+volume_table = sqlalchemy.Table(
+    'volumes',
+    Base.metadata,
+    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace',
+                      sqlalchemy.Text,
+                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+    sqlalchemy.Column('last_attached_at',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('last_use', sqlalchemy.Text),
+    sqlalchemy.Column('status', sqlalchemy.Text),
+)
+
 # Table for Cluster History
 # usage_intervals: List[Tuple[int, int]]
 #  Specifies start and end timestamps of cluster.
@@ -134,6 +151,12 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
     sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('last_creation_yaml',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_creation_command',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -308,6 +331,21 @@ def create_table():
             'password',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'last_creation_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'last_creation_command',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+
         session.commit()
 
 
@@ -597,6 +635,14 @@ def add_or_update_cluster(cluster_name: str,
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+        creation_info = {}
+        if conditional_values.get('last_creation_yaml') is not None:
+            creation_info = {
+                'last_creation_yaml':
+                    conditional_values.get('last_creation_yaml'),
+                'last_creation_command':
+                    conditional_values.get('last_creation_command'),
+            }
 
         insert_stmnt = insert_func(cluster_history_table).values(
             cluster_hash=cluster_hash,
@@ -605,7 +651,9 @@ def add_or_update_cluster(cluster_name: str,
             requested_resources=pickle.dumps(requested_resources),
             launched_resources=pickle.dumps(launched_resources),
             usage_intervals=pickle.dumps(usage_intervals),
-            user_hash=user_hash)
+            user_hash=user_hash,
+            **creation_info,
+        )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[cluster_history_table.c.cluster_hash],
             set_={
@@ -617,7 +665,8 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(launched_resources),
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.user_hash: user_hash
+                cluster_history_table.c.user_hash: user_hash,
+                **creation_info,
             })
         session.execute(do_update_stmt)
 
@@ -1027,40 +1076,122 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 @_init_db
-def get_clusters_from_history() -> List[Dict[str, Any]]:
+def get_clusters_from_history(
+        days: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get cluster reports from history.
+
+    Args:
+        days: If specified, only include historical clusters (those not
+              currently active) that were last used within the past 'days'
+              days. Active clusters are always included regardless of this
+              parameter.
+
+    Returns:
+        List of cluster records with history information.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(
-            cluster_history_table.join(cluster_table,
-                                       cluster_history_table.c.cluster_hash ==
-                                       cluster_table.c.cluster_hash,
-                                       isouter=True)).all()
+        # Explicitly select columns from both tables to avoid ambiguity
+        query = session.query(
+            cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.requested_resources,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.last_creation_yaml,
+            cluster_history_table.c.last_creation_command,
+            cluster_table.c.status, cluster_table.c.workspace,
+            cluster_table.c.status_updated_at).select_from(
+                cluster_history_table.join(cluster_table,
+                                           cluster_history_table.c.cluster_hash
+                                           == cluster_table.c.cluster_hash,
+                                           isouter=True))
 
-    # '(cluster_hash, name, num_nodes, requested_resources, '
-    #         'launched_resources, usage_intervals) '
+        rows = query.all()
+
+    # Prepare filtering parameters
+    cutoff_time = None
+    if days is not None:
+        cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
+
     records = []
     for row in rows:
-        # TODO: use namedtuple instead of dict
         user_hash = _get_user_hash_or_current_user(row.user_hash)
-        status = row.status
-        if status is not None:
-            status = status_lib.ClusterStatus[status]
+        launched_at = _get_cluster_launch_time(row.cluster_hash)
+        duration = _get_cluster_duration(row.cluster_hash)
+
+        # Parse status
+        status = None
+        if row.status:
+            status = status_lib.ClusterStatus[row.status]
+
+        # Apply filtering: always include active clusters, filter historical
+        # ones by time
+        if cutoff_time is not None and status is None:  # Historical cluster
+            # For historical clusters, check if they were used recently
+            # Use the most recent activity from usage_intervals to determine
+            # last use
+            usage_intervals = []
+            if row.usage_intervals:
+                try:
+                    usage_intervals = pickle.loads(row.usage_intervals)
+                except (pickle.PickleError, AttributeError):
+                    usage_intervals = []
+
+            # Find the most recent activity time from usage_intervals
+            last_activity_time = None
+            if usage_intervals:
+                # Get the end time of the last interval (or start time if
+                # still running)
+                last_interval = usage_intervals[-1]
+                last_activity_time = (last_interval[1] if last_interval[1]
+                                      is not None else last_interval[0])
+
+            # Skip historical clusters that haven't been used recently
+            if last_activity_time is None or last_activity_time < cutoff_time:
+                continue
+
+        # Parse launched resources safely
+        launched_resources = None
+        if row.launched_resources:
+            try:
+                launched_resources = pickle.loads(row.launched_resources)
+            except (pickle.PickleError, AttributeError):
+                launched_resources = None
+
+        # Parse usage intervals safely
+        usage_intervals = []
+        if row.usage_intervals:
+            try:
+                usage_intervals = pickle.loads(row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                usage_intervals = []
+
+        # Get user name from user hash
+        user = get_user(user_hash)
+        user_name = user.name if user is not None else None
+
         record = {
             'name': row.name,
-            'launched_at': _get_cluster_launch_time(row.cluster_hash),
-            'duration': _get_cluster_duration(row.cluster_hash),
+            'launched_at': launched_at,
+            'duration': duration,
             'num_nodes': row.num_nodes,
-            'resources': pickle.loads(row.launched_resources),
+            'resources': launched_resources,
             'cluster_hash': row.cluster_hash,
-            'usage_intervals': pickle.loads(row.usage_intervals),
+            'usage_intervals': usage_intervals,
             'status': status,
             'user_hash': user_hash,
+            'user_name': user_name,
+            'workspace': row.workspace,
+            'last_creation_yaml': row.last_creation_yaml,
+            'last_creation_command': row.last_creation_command,
         }
 
         records.append(record)
 
     # sort by launch time, descending in recency
-    records = sorted(records, key=lambda record: -record['launched_at'])
+    records = sorted(records, key=lambda record: -(record['launched_at'] or 0))
     return records
 
 
@@ -1310,6 +1441,118 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': status_lib.StorageStatus[row.status],
         })
     return records
+
+
+@_init_db
+def get_volume_names_start_with(starts_with: str) -> List[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(volume_table).filter(
+            volume_table.c.name.like(f'{starts_with}%')).all()
+    return [row.name for row in rows]
+
+
+@_init_db
+def get_volumes() -> List[Dict[str, Any]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(volume_table).all()
+    records = []
+    for row in rows:
+        records.append({
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': pickle.loads(row.handle),
+            'user_hash': row.user_hash,
+            'workspace': row.workspace,
+            'last_attached_at': row.last_attached_at,
+            'last_use': row.last_use,
+            'status': status_lib.VolumeStatus[row.status],
+        })
+    return records
+
+
+@_init_db
+def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(volume_table).filter_by(name=name).first()
+    if row:
+        return {
+            'name': row.name,
+            'launched_at': row.launched_at,
+            'handle': pickle.loads(row.handle),
+            'user_hash': row.user_hash,
+            'workspace': row.workspace,
+            'last_attached_at': row.last_attached_at,
+            'last_use': row.last_use,
+            'status': status_lib.VolumeStatus[row.status],
+        }
+    return None
+
+
+@_init_db
+def add_volume(name: str, config: models.VolumeConfig,
+               status: status_lib.VolumeStatus) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    volume_launched_at = int(time.time())
+    handle = pickle.dumps(config)
+    last_use = common_utils.get_current_command()
+    user_hash = common_utils.get_current_user().id
+    active_workspace = skypilot_config.get_active_workspace()
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+        insert_stmnt = insert_func(volume_table).values(
+            name=name,
+            launched_at=volume_launched_at,
+            handle=handle,
+            user_hash=user_hash,
+            workspace=active_workspace,
+            last_attached_at=None,
+            last_use=last_use,
+            status=status.value,
+        )
+        do_update_stmt = insert_stmnt.on_conflict_do_nothing()
+        session.execute(do_update_stmt)
+        session.commit()
+
+
+@_init_db
+def update_volume(name: str, last_attached_at: int,
+                  status: status_lib.VolumeStatus) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.last_attached_at: last_attached_at,
+            volume_table.c.status: status.value,
+        })
+        session.commit()
+
+
+@_init_db
+def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.status: status.value,
+        })
+        session.commit()
+
+
+@_init_db
+def delete_volume(name: str) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).delete()
+        session.commit()
 
 
 @_init_db

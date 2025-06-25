@@ -42,20 +42,10 @@ from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.adaptors import nebius
-from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import controller_utils
-
-ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
-    'GOOGLE_APPLICATION_CREDENTIALS='
-    f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
-    'gcloud auth activate-service-account '
-    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
-    '2> /dev/null || true; '
-    'gsutil')
 
 
 # ---------- file_mounts ----------
@@ -249,7 +239,7 @@ def test_gcp_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
-    ls_hello_command = f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
+    ls_hello_command = f'{smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, cloud, False, True)
@@ -383,87 +373,6 @@ def test_kubernetes_context_switch():
         timeout=20 * 60,  # 20 mins
     )
     smoke_tests_utils.run_one_test(test)
-
-
-# TODO (SKY-1119): These tests may fail as it can require access cloud
-# credentials for getting azure storage commands, even though the API server
-# is running remotely. We should fix this.
-@pytest.mark.no_vast  # Requires AWS
-@pytest.mark.no_hyperbolic  # Requires AWS
-@pytest.mark.parametrize(
-    'image_id',
-    [
-        'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
-        'docker:ubuntu:18.04',
-        # Test image with python 3.11 installed by default.
-        'docker:continuumio/miniconda3:24.1.2-0',
-        # Test python>=3.12 where SkyPilot should automatically create a separate
-        # conda env for runtime with python 3.10.
-        'docker:continuumio/miniconda3:latest',
-    ])
-def test_docker_storage_mounts(generic_cloud: str, image_id: str):
-    # Tests bucket mounting on docker container
-    name = smoke_tests_utils.get_cluster_name()
-    timestamp = str(time.time()).replace('.', '')
-    storage_name = f'sky-test-{timestamp}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    # ubuntu 18.04 does not support fuse3, and blobfuse2 depends on fuse3.
-    azure_mount_unsupported_ubuntu_version = '18.04'
-    # Commands to verify bucket upload. We need to check all three
-    # storage types because the optimizer may pick any of them.
-    s3_command = f'aws s3 ls {storage_name}/hello.txt'
-    gsutil_command = (f'{{ {ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
-                      f'ls gs://{storage_name}/hello.txt; }}')
-    azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
-        storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
-    # TODO(zpoint): this is a temporary fix. We should make it more robust.
-    # If azure is used, the azure blob storage checking assumes the bucket is
-    # created in the centralus region when getting the storage account. We
-    # should set the cluster to be launched in the same region.
-    region_str = f'/centralus' if generic_cloud == 'azure' else ''
-    if azure_mount_unsupported_ubuntu_version in image_id:
-        # The store for mount_private_mount is not specified in the template.
-        # If we're running on Azure, the private mount will be created on
-        # azure blob. Also, if we're running on Kubernetes, the private mount
-        # might be created on azure blob to avoid the issue of the fuse adapter
-        # not being able to access the mount point. That will not be supported on
-        # the ubuntu 18.04 image and thus fail. For other clouds, the private mount
-        # on other storage types (GCS/S3) should succeed.
-        include_private_mount = False if (
-            generic_cloud == 'azure' or generic_cloud == 'kubernetes') else True
-        content = template.render(storage_name=storage_name,
-                                  include_azure_mount=False,
-                                  include_private_mount=include_private_mount)
-    else:
-        content = template.render(storage_name=storage_name,)
-    cloud_dependencies_setup_cmd = ' && '.join(
-        controller_utils._get_cloud_dependencies_installation_commands(
-            controller_utils.Controllers.JOBS_CONTROLLER))
-    quoted_check = shlex.quote(
-        f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
-        f'{cloud_dependencies_setup_cmd}; {s3_command} || {gsutil_command} || '
-        f'{azure_blob_command}')
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --infra {generic_cloud}{region_str} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id {image_id} {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            # Check AWS, GCP, or Azure storage mount.
-            f'sky exec {name} {quoted_check}',
-            f'sky logs {name} 2 --status',  # Ensure the bucket check succeeded.
-        ]
-        test = smoke_tests_utils.Test(
-            'docker_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.cloudflare
@@ -913,7 +822,7 @@ class TestStorageWithCredentials:
                 url = f'gs://{bucket_name}'
             if recursive:
                 url = f'"{url}/**"'
-            return f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls {url}'
+            return f'{smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             # azure isrecursive by default
             storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
@@ -957,7 +866,7 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.GCS:
             assert bucket_name is not None
             return (
-                f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls -L -b gs://{bucket_name}/ | '
+                f'{smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls -L -b gs://{bucket_name}/ | '
                 'grep "Location constraint" | '
                 'awk \'{print tolower($NF)}\'')
         elif store_type == storage_lib.StoreType.AZURE:

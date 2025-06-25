@@ -30,6 +30,9 @@ from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky.volumes import volume as volume_lib
+
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
@@ -289,7 +292,8 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            self._disk_size = int(parse_memory_resource(disk_size, 'disk_size'))
+            self._disk_size = int(
+                resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
@@ -707,11 +711,11 @@ class Resources:
             self._memory = None
             return
 
-        memory = parse_memory_resource(str(memory),
-                                       'memory',
-                                       ret_type=float,
-                                       allow_plus=True,
-                                       allow_x=True)
+        memory = resources_utils.parse_memory_resource(str(memory),
+                                                       'memory',
+                                                       ret_type=float,
+                                                       allow_plus=True,
+                                                       allow_x=True)
         self._memory = memory
         if memory.endswith(('+', 'x')):
             # 'x' is used internally for make sure our resources used by
@@ -1465,11 +1469,15 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
-    def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
-                              region: clouds.Region,
-                              zones: Optional[List[clouds.Zone]],
-                              num_nodes: int,
-                              dryrun: bool) -> Dict[str, Optional[str]]:
+    def make_deploy_variables(
+        self,
+        cluster_name: resources_utils.ClusterName,
+        region: clouds.Region,
+        zones: Optional[List[clouds.Zone]],
+        num_nodes: int,
+        dryrun: bool,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
         These variables are divided into two categories: cloud-specific and
@@ -1491,7 +1499,7 @@ class Resources:
         # Cloud specific variables
         assert self.cloud is not None, 'Cloud must be specified'
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, num_nodes, dryrun)
+            self, cluster_name, region, zones, num_nodes, dryrun, volume_mounts)
 
         # TODO(andyl): Should we print some warnings if users' envs share
         # same names with the cloud specific variables, but not enabled
@@ -2291,67 +2299,3 @@ def parse_time_minutes(time: str) -> int:
                 continue
 
     raise ValueError(f'Invalid time format: {time}')
-
-
-def parse_memory_resource(resource_qty_str: Union[str, int, float],
-                          field_name: str,
-                          ret_type: type = int,
-                          unit: str = 'g',
-                          allow_plus: bool = False,
-                          allow_x: bool = False,
-                          allow_rounding: bool = False) -> str:
-    """Returns memory size in chosen units given a resource quantity string.
-
-    Args:
-        resource_qty_str: Resource quantity string
-        unit: Unit to convert to
-        allow_plus: Whether to allow '+' prefix
-        allow_x: Whether to allow 'x' suffix
-    """
-    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
-
-    error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
-                f' got {resource_qty_str}'
-
-    resource_str = str(resource_qty_str)
-
-    # Handle plus and x suffixes, x is only used internally for jobs controller
-    plus = ''
-    if resource_str.endswith('+'):
-        if allow_plus:
-            resource_str = resource_str[:-1]
-            plus = '+'
-        else:
-            raise ValueError(error_msg)
-
-    x = ''
-    if resource_str.endswith('x'):
-        if allow_x:
-            resource_str = resource_str[:-1]
-            x = 'x'
-        else:
-            raise ValueError(error_msg)
-
-    try:
-        # We assume it is already in the wanted units to maintain backwards
-        # compatibility
-        ret_type(resource_str)
-        return f'{resource_str}{plus}{x}'
-    except ValueError:
-        pass
-
-    resource_str = resource_str.lower()
-    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
-        if resource_str.endswith(mem_unit):
-            try:
-                value = ret_type(resource_str[:-len(mem_unit)])
-                converted = (value * multiplier /
-                             constants.MEMORY_SIZE_UNITS[unit])
-                if not allow_rounding and ret_type(converted) != converted:
-                    raise ValueError(error_msg)
-                converted = ret_type(converted)
-                return f'{converted}{plus}{x}'
-            except ValueError:
-                continue
-
-    raise ValueError(error_msg)
