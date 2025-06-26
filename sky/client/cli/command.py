@@ -4966,8 +4966,9 @@ def serve_down(
               help='Sync down logs to the local machine. Can be combined with '
               '--controller, --load-balancer, or a replica ID to narrow scope.')
 @click.option(
-    '--tail',
-    default=0,
+    '--number',
+    '-n',
+    default=None,
     type=int,
     help='The number of lines to display from the end of the log file. '
     'Default is 0, which means print all lines.')
@@ -4983,7 +4984,7 @@ def serve_logs(
     load_balancer: bool,
     replica_ids: Tuple[int, ...],
     sync_down: bool,
-    tail: int,
+    number: int,
 ):
     """Tail or sync down logs of a service.
 
@@ -5004,7 +5005,7 @@ def serve_logs(
         sky serve logs [SERVICE_NAME] 1
         \b
         # Show the last 100 lines of the controller logs
-        sky serve logs --controller --tail 100 [SERVICE_NAME]
+        sky serve logs --controller --number 100 [SERVICE_NAME]
         \b
         # Sync down all logs of the service (controller, LB, all replicas)
         sky serve logs [SERVICE_NAME] --sync-down
@@ -5012,8 +5013,10 @@ def serve_logs(
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
-
-    tail = max(tail, 0)
+    if number is None:
+        number = -1
+    else:
+        number = max(number, 0)
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
@@ -5049,7 +5052,7 @@ def serve_logs(
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
                                      replica_ids=list(replica_ids),
-                                     tail=tail)
+                                     number=number)
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Service {service_name} logs: '
@@ -5092,7 +5095,7 @@ def serve_logs(
                             target=target_component,
                             replica_id=target_replica_id,
                             follow=follow,
-                            tail=tail)
+                            number=number)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
