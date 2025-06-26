@@ -10,6 +10,15 @@ import starlette.middleware.base
 
 from sky import models
 from sky.server.server import BearerTokenMiddleware
+from sky.skylet import constants
+
+
+@pytest.fixture(autouse=True)
+def enable_service_accounts():
+    """Enable service accounts for all tests in this module."""
+    with mock.patch.dict(os.environ,
+                         {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
+        yield
 
 
 class TestBearerTokenMiddleware:

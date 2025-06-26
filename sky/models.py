@@ -40,7 +40,7 @@ class User:
 
     def is_service_account(self) -> bool:
         """Check if the user is a service account."""
-        return self.id.startswith('sa-')
+        return self.id.lower().startswith('sa-')
 
 
 RealtimeGpuAvailability = collections.namedtuple(

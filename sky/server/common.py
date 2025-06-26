@@ -221,7 +221,7 @@ def make_authenticated_request(method: str,
         url = service_account_auth.get_api_url_with_service_account_path(
             server_url, path)
     else:
-        url = f'{server_url}{path}' if not path.startswith(
+        url = f'{server_url}/{path}' if not path.startswith(
             '/') else f'{server_url}{path}'
         # Use cookie authentication
         if 'cookies' not in kwargs:

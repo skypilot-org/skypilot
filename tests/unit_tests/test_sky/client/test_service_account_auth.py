@@ -51,14 +51,17 @@ class TestServiceAccountAuth:
     def test_get_service_account_token_invalid_format_config(
             self, mock_get_config):
         """Test getting invalid format service account token from config."""
-        mock_config = mock.Mock()
-        mock_config.get_nested.return_value = 'invalid_token'
-        mock_get_config.return_value = mock_config
+        # Ensure no environment variable interferes with the test
+        with mock.patch.dict(os.environ, {}, clear=True):
+            mock_config = mock.Mock()
+            mock_config.get_nested.return_value = 'invalid_token'
+            mock_get_config.return_value = mock_config
 
-        with pytest.raises(
-                ValueError,
-                match='Invalid service account token format in config file'):
-            service_account_auth.get_service_account_token()
+            with pytest.raises(
+                    ValueError,
+                    match='Invalid service account token format in config file'
+            ):
+                service_account_auth.get_service_account_token()
 
     @mock.patch('sky.skypilot_config.get_user_config')
     def test_get_service_account_token_config_exception(self, mock_get_config):

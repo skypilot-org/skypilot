@@ -152,7 +152,7 @@ class TestServiceAccountModels:
         user.created_at = None
         assert user.created_at is None
 
-    @mock.patch('sky.models.datetime')
+    @mock.patch('datetime.datetime')
     def test_user_created_at_auto_timestamp(self, mock_datetime):
         """Test automatic timestamp setting if implemented."""
         # Mock current timestamp
