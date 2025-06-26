@@ -3,6 +3,7 @@ import abc
 import dataclasses
 import typing
 from typing import Any, Dict, Optional
+import json
 
 import colorama
 import pydantic
@@ -216,7 +217,7 @@ class RestfulAdminPolicy(PolicyTemplate):
         try:
             response = requests.post(
                 self.policy_url,
-                json=user_request.encode(),
+                json=json.loads(user_request.encode()),
                 headers={'Content-Type': 'application/json'},
                 # TODO(aylei): make this configurable
                 timeout=30)
