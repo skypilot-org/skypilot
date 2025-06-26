@@ -5358,27 +5358,29 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
-@click.option('--get-token',
+@click.option('--relogin',
               is_flag=True,
               default=False,
-              help='Force token-based login.')
+              help='Force relogin with OAuth2 when enabled.')
 @click.option(
     '--service-account-token',
-    '--sa-token',
+    '--token',
+    '-t',
     required=False,
     help='Service account token for authentication (starts with ``sky_``).')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str], get_token: bool,
+def api_login(endpoint: Optional[str], relogin: bool,
               service_account_token: Optional[str]):
     """Logs into a SkyPilot API server.
 
-    Authentication methods (in priority order):
+    If your remote API server has enabled OAuth2 authentication, you can use
+    one of the following methods to login:
 
-    1. Service account token via ``--sa-token`` flag
+    1. OAuth2 browser-based authentication (default)
 
-    2. Service account token in ``~/.sky/config.yaml``
+    2. Service account token via ``--token`` flag
 
-    3. OAuth2 browser-based authentication (default)
+    3. Service account token in ``~/.sky/config.yaml``
 
     Examples:
 
@@ -5391,7 +5393,7 @@ def api_login(endpoint: Optional[str], get_token: bool,
       sky api login -e https://api.example.com --sa-token sky_abc123...
 
     """
-    sdk.api_login(endpoint, get_token, service_account_token)
+    sdk.api_login(endpoint, relogin, service_account_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

@@ -2076,7 +2076,7 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
 @usage_lib.entrypoint
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
-              get_token: bool = False,
+              relogin: bool = False,
               service_account_token: Optional[str] = None) -> None:
     """Logs into a SkyPilot API server.
 
@@ -2089,7 +2089,7 @@ def api_login(endpoint: Optional[str] = None,
     Args:
         endpoint: The endpoint of the SkyPilot API server, e.g.,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
-        get_token: Whether to force getting a new token even if not needed.
+        relogin: Whether to force relogin with OAuth2 when enabled.
         service_account_token: Service account token for authentication.
 
     Returns:
@@ -2137,7 +2137,7 @@ def api_login(endpoint: Optional[str] = None,
 
     server_status, api_server_info = server_common.check_server_healthy(
         endpoint)
-    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or get_token:
+    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
         server: Optional[oauth_lib.HTTPServer] = None
