@@ -954,7 +954,6 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. toctree::
    :hidden:
 
-    Authentication and RBAC <auth>
     API server metrics monitoring <examples/api-server-metrics-setup>
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
