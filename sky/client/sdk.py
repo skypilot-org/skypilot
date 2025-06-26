@@ -2048,8 +2048,9 @@ def _save_config_updates(endpoint: Optional[str] = None,
 
         # Update endpoint if provided
         if endpoint is not None:
-            if 'api_server' not in config:
-                config['api_server'] = {}
+            # We should always reset the api_server config to avoid legacy
+            # service account token.
+            config['api_server'] = {}
             config['api_server']['endpoint'] = endpoint
 
         # Update service account token if provided
