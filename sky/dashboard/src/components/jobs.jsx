@@ -50,6 +50,8 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { UserDisplay } from '@/components/elements/UserDisplay';
+import { formatUserDisplay } from '@/utils/userUtils';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -121,36 +123,6 @@ export function filterJobsByUser(jobs, userFilter) {
   });
 }
 
-// Helper function to format username for display (reuse from clusters.jsx)
-const formatUserDisplay = (username, userId) => {
-  if (username && username.includes('@')) {
-    const emailPrefix = username.split('@')[0];
-    // Show email prefix with userId if they're different
-    if (userId && userId !== emailPrefix) {
-      return `${emailPrefix} (${userId})`;
-    }
-    return emailPrefix;
-  }
-  // If no email, show username with userId in parentheses only if they're different
-  const usernameBase = username || userId || 'N/A';
-
-  // Skip showing userId if it's the same as username
-  if (userId && userId !== usernameBase) {
-    return `${usernameBase} (${userId})`;
-  }
-
-  return usernameBase;
-};
-
-// Helper function to generate user link based on whether it's a service account
-const getUserLink = (userHash) => {
-  // Service accounts have user_hash starting with 'sa-'
-  if (userHash && userHash.startsWith('sa-')) {
-    return '/users?tab=service-accounts';
-  }
-  return '/users';
-};
-
 // Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -164,87 +136,30 @@ const formatSubmittedTime = (timestamp) => {
 
 // Helper function to shorten time strings for jobs
 function shortenTimeForJobs(timeString) {
-  if (!timeString || typeof timeString !== 'string') {
-    return timeString;
+  const shortenings = {
+    seconds: 's',
+    second: 's',
+    minutes: 'm',
+    minute: 'm',
+    hours: 'h',
+    hour: 'h',
+    days: 'd',
+    day: 'd',
+    months: 'mo',
+    month: 'mo',
+    years: 'y',
+    year: 'y',
+    weeks: 'w',
+    week: 'w',
+  };
+
+  let shortened = timeString;
+  for (const [long, short] of Object.entries(shortenings)) {
+    const regex = new RegExp(`\\b${long}\\b`, 'g');
+    shortened = shortened.replace(regex, short);
   }
 
-  // Handle "just now" case
-  if (timeString === 'just now') {
-    return 'now';
-  }
-
-  // Handle "less than a minute ago" case
-  if (timeString.toLowerCase() === 'less than a minute ago') {
-    return 'Less than 1m ago';
-  }
-
-  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
-  const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
-  if (aboutMatch) {
-    const num = aboutMatch[1];
-    const unit = aboutMatch[2];
-    const unitMap = {
-      second: 's',
-      seconds: 's',
-      minute: 'm',
-      minutes: 'm',
-      hour: 'h',
-      hours: 'h',
-      day: 'd',
-      days: 'd',
-      month: 'mo',
-      months: 'mo',
-      year: 'yr',
-      years: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `${num}${unitMap[unit]} ago`;
-    }
-  }
-
-  // Handle "a minute ago", "an hour ago", etc.
-  const singleUnitMatch = timeString.match(/^a[n]?\s+(\w+)\s+ago$/);
-  if (singleUnitMatch) {
-    const unit = singleUnitMatch[1];
-    const unitMap = {
-      second: 's',
-      minute: 'm',
-      hour: 'h',
-      day: 'd',
-      month: 'mo',
-      year: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `1${unitMap[unit]} ago`;
-    }
-  }
-
-  // Handle "X units ago"
-  const multiUnitMatch = timeString.match(/^(\d+)\s+(\w+)\s+ago$/);
-  if (multiUnitMatch) {
-    const num = multiUnitMatch[1];
-    const unit = multiUnitMatch[2];
-    const unitMap = {
-      second: 's',
-      seconds: 's',
-      minute: 'm',
-      minutes: 'm',
-      hour: 'h',
-      hours: 'h',
-      day: 'd',
-      days: 'd',
-      month: 'mo',
-      months: 'mo',
-      year: 'yr',
-      years: 'yr',
-    };
-    if (unitMap[unit]) {
-      return `${num}${unitMap[unit]} ago`;
-    }
-  }
-
-  // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
-  return timeString;
+  return shortened;
 }
 
 export function ManagedJobs() {
@@ -1042,20 +957,10 @@ export function ManagedJobsTable({
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Link
-                            href={getUserLink(item.user_hash)}
-                            className="text-blue-600 hover:underline"
-                          >
-                            {item.user}
-                          </Link>
-                          {item.user_hash &&
-                            item.user_hash.startsWith('sa-') && (
-                              <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-2">
-                                SA
-                              </span>
-                            )}
-                        </div>
+                        <UserDisplay 
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
                       </TableCell>
                       <TableCell>
                         <Link
@@ -1575,19 +1480,10 @@ export function ClusterJobs({
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Link
-                          href={getUserLink(item.user_hash)}
-                          className="text-blue-600 hover:underline"
-                        >
-                          {item.user}
-                        </Link>
-                        {item.user_hash && item.user_hash.startsWith('sa-') && (
-                          <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-2">
-                            SA
-                          </span>
-                        )}
-                      </div>
+                      <UserDisplay 
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
                     </TableCell>
                     <TableCell>
                       <Link
@@ -1776,7 +1672,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? 'show less' : 'show more'}
+          {isExpanded ? '... show less' : '... show more'}
         </button>
       )}
     </div>

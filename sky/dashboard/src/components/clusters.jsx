@@ -55,6 +55,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -125,15 +126,6 @@ const formatUserDisplay = (username, userId) => {
   }
 
   return usernameBase;
-};
-
-// Helper function to generate user link based on whether it's a service account
-const getUserLink = (userHash) => {
-  // Service accounts have user_hash starting with 'sa-'
-  if (userHash && userHash.startsWith('sa-')) {
-    return '/users?tab=service-accounts';
-  }
-  return '/users';
 };
 
 // Helper function to format duration in a human-readable way
@@ -780,20 +772,10 @@ export function ClusterTable({
                         </Link>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        <div className="flex items-center gap-1">
-                          <Link
-                            href={getUserLink(item.user_hash)}
-                            className="text-blue-600 hover:underline"
-                          >
-                            {item.user}
-                          </Link>
-                          {item.user_hash &&
-                            item.user_hash.startsWith('sa-') && (
-                              <span className="px-1.5 text-xs bg-gray-100 text-gray-700 rounded font-medium ml-2">
-                                SA
-                              </span>
-                            )}
-                        </div>
+                        <UserDisplay 
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <Link
