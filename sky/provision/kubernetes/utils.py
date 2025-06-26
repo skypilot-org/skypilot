@@ -2450,9 +2450,8 @@ def combine_pod_config_fields(
     if isinstance(cloud, clouds.SSH):
         kubernetes_config = cloud_config_utils.get_cloud_config_value(
             cloud='ssh', region=None, keys=('pod_config',), default_value={})
-
         override_pod_config = cloud_config_utils.get_cloud_config_value_from_dict(
-            dict_config=override_pod_config,
+            dict_config=cluster_config_overrides,
             cloud='ssh',
             keys=('pod_config',),
             default_value={})

@@ -39,6 +39,7 @@ def get_cloud_config_value(
             override_configs=override_configs)
     return property_value
 
+
 def get_cloud_config_value_from_dict(
         dict_config: Dict[str, Any],
         cloud: str,
