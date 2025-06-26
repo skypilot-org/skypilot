@@ -82,18 +82,21 @@ class UserRequest:
             skypilot_config=common_utils.dump_yaml_str(
                 dict(self.skypilot_config)),
             request_options=self.request_options,
-            at_client_side=self.at_client_side).model_dump_json()
+            at_client_side=self.at_client_side,
+        ).model_dump_json()
 
     @classmethod
     def decode(cls, body: str) -> 'UserRequest':
         user_request_body = _UserRequestBody.model_validate_json(body)
-        return cls(task=sky.Task.from_yaml_config(
-            common_utils.read_yaml_all_str(user_request_body.task)[0]),
-                   skypilot_config=config_utils.Config.from_dict(
-                       common_utils.read_yaml_all_str(
-                           user_request_body.skypilot_config)[0]),
-                   request_options=user_request_body.request_options,
-                   at_client_side=user_request_body.at_client_side)
+        return cls(
+            task=sky.Task.from_yaml_config(
+                common_utils.read_yaml_all_str(user_request_body.task)[0]),
+            skypilot_config=config_utils.Config.from_dict(
+                common_utils.read_yaml_all_str(
+                    user_request_body.skypilot_config)[0]),
+            request_options=user_request_body.request_options,
+            at_client_side=user_request_body.at_client_side,
+        )
 
 
 class _MutatedUserRequestBody(pydantic.BaseModel):
@@ -113,7 +116,7 @@ class MutatedUserRequest:
         return _MutatedUserRequestBody(
             task=common_utils.dump_yaml_str(self.task.to_yaml_config()),
             skypilot_config=common_utils.dump_yaml_str(
-                dict(self.skypilot_config))).model_dump_json()
+                dict(self.skypilot_config),)).model_dump_json()
 
     @classmethod
     def decode(cls, mutated_user_request_body: str) -> 'MutatedUserRequest':
@@ -123,7 +126,7 @@ class MutatedUserRequest:
             common_utils.read_yaml_all_str(mutated_user_request_body.task)[0]),
                    skypilot_config=config_utils.Config.from_dict(
                        common_utils.read_yaml_all_str(
-                           mutated_user_request_body.skypilot_config)[0]))
+                           mutated_user_request_body.skypilot_config)[0],))
 
 
 class PolicyInterface:
