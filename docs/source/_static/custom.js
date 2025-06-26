@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'External Logging Storage' },
         { selector: '.toctree-l1 > a', text: 'Authentication and RBAC' },
         { selector: '.toctree-l1 > a', text: 'Cloud Volumes' },
+        { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

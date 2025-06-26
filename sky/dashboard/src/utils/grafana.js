@@ -34,11 +34,8 @@ export const checkGrafanaAvailability = async () => {
         signal: AbortSignal.timeout(5000),
       });
 
-      // Consider Grafana available if we get any response from the Grafana API
-      // This includes 200 (OK), 401 (Unauthorized), 403 (Forbidden), etc.
-      // A 401/403 means Grafana is running but requires authentication
-      grafanaAvailabilityCache =
-        response.status >= 200 && response.status < 500;
+      // Consider Grafana available if we get any 200 response from the Grafana API
+      const grafanaAvailabilityCache = response.status == 200;
       return grafanaAvailabilityCache;
     } catch (error) {
       console.debug('Grafana availability check failed:', error);

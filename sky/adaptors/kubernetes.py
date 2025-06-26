@@ -133,12 +133,7 @@ def _load_config(context: Optional[str] = None):
                     '\nHint: Kubernetes attempted to query the current-context '
                     'set in kubeconfig. Check if the current-context is valid.')
             with ux_utils.print_exception_no_traceback():
-                if is_ssh_node_pool:
-                    # For SSH Node Pool, we don't want to surface k8s errors
-                    # (e.g., missing context) unless debug flag is set.
-                    logging.debug(f'Kubernetes error: {suffix}')
-                else:
-                    raise ValueError(err_str) from None
+                raise ValueError(err_str) from None
 
     if context == in_cluster_context_name() or context is None:
         try:

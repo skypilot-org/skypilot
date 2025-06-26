@@ -76,6 +76,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    dag.resolve_and_validate_volumes()
     # TODO: We apply the admin policy only on the first DAG optimization which
     # is shown on `sky launch`. The optimizer is also invoked during failover,
     # but we do not apply the admin policy there. We should apply the admin
@@ -1304,6 +1305,26 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup=cleanup,
         infra=infra,
     )
+
+
+@usage_lib.entrypoint
+def ssh_status(context_name: str) -> Tuple[bool, str]:
+    """Check the status of an SSH Node Pool context.
+
+    Args:
+        context_name: The SSH context name (e.g., 'ssh-my-cluster')
+
+    Returns:
+        Tuple[bool, str]: (is_ready, reason)
+            - is_ready: True if the SSH Node Pool is ready, False otherwise
+            - reason: Explanation of the status
+    """
+    try:
+        is_ready, reason = clouds.SSH.check_single_context(context_name)
+        return is_ready, reason
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('Failed to check SSH context: '
+                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

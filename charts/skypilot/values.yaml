@@ -27,6 +27,10 @@ apiService:
   # They are only used when `enableUserManagement` is true.
   initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
   initialBasicAuthSecret: null
+  # The number of seconds to wait for the API server to finish processing the request before shutting down.
+  # If the API server is not able to finish processing the request within the grace period, the request will be aborted.
+  # The default value is 60 seconds.
+  terminationGracePeriodSeconds: 60
 
   # Set ~/.sky/config.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
@@ -49,6 +53,10 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Set the DB connection string for the API server.
+  # If this field is set, config must be null.
+  dbConnectionSecretName: null
+
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
   # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/ssh_node_pools.yaml`
@@ -69,6 +77,8 @@ apiService:
     enabled: false
     # The port to expose the metrics on, default to 9090.
     port: 9090
+  # Custom annotations for the API server deployment
+  annotations: null
 
   # Skip resource check for the API server, not recommended for production deployment
   skipResourceCheck: false
