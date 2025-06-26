@@ -2606,12 +2606,13 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     return f'{cluster_name_on_cloud}-head'
 
 
-def get_custom_k8s_contexts_names() -> List[str]:
+def get_custom_config_k8s_contexts() -> List[str]:
     """Returns the list of context names from the config"""
-    contexts = cloud_config_utils.get_cloud_config_value(cloud='kubernetes',
-                                                         region=None,
-                                                         keys=('contexts',),
-                                                         default_value={})
+    contexts = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes',
+        region=None,
+        keys=('per_context_config',),
+        default_value={})
     return [*contexts] or []
 
 
@@ -2622,6 +2623,21 @@ SPOT_LABEL_MAP = {
     kubernetes_enums.KubernetesAutoscalerType.GKE.value:
         ('cloud.google.com/gke-spot', 'true')
 }
+
+
+def get_autoscaler_type(
+    context: Optional[str] = None
+) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
+    """Returns the autoscaler type by reading from config"""
+    autoscaler_type = cloud_config_utils.get_cloud_config_value(
+        cloud='kubernetes',
+        region=context,
+        keys=('autoscaler',),
+        default_value=None)
+    if autoscaler_type is not None:
+        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
+            autoscaler_type)
+    return autoscaler_type
 
 
 def get_spot_label(
@@ -2647,11 +2663,7 @@ def get_spot_label(
 
     # Check if autoscaler is configured. Allow spot instances if autoscaler type
     # is known to support spot instances.
-    autoscaler_type = cloud_config_utils.get_cloud_config_value(
-        cloud='kubernetes',
-        region=context,
-        keys=('autoscaler',),
-        default_value=None)
+    autoscaler_type = get_autoscaler_type(context=context)
     if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
         return SPOT_LABEL_MAP[autoscaler_type.value]
 

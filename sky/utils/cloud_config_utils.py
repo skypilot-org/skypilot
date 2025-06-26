@@ -24,7 +24,7 @@ def get_cloud_config_value(
     property_value = None
     region_key = None
     if cloud == 'kubernetes':
-        region_key = 'contexts'
+        region_key = 'per_context_config'
 
     if region and region_key:
         property_value = skypilot_config.get_nested(
@@ -60,7 +60,7 @@ def get_cloud_config_value_from_dict(
     property_value = None
     region_key = None
     if cloud == 'kubernetes':
-        region_key = 'contexts'
+        region_key = 'per_context_config'
 
     if region and region_key:
         property_value = input_config.get_nested(

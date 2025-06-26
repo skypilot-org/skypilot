@@ -524,7 +524,7 @@ def get_expirable_clouds(
         # Kubernetes config might have context-specific properties
         if isinstance(cloud, clouds.Kubernetes):
             # get all custom contexts
-            contexts = kubernetes_utils.get_custom_k8s_contexts_names()
+            contexts = kubernetes_utils.get_custom_config_k8s_contexts()
             # add remote_identity of each context if it exists
             remote_identities = None
             for context in contexts:

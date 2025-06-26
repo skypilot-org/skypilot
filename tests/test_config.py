@@ -924,7 +924,7 @@ def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
         cloud='kubernetes', region='contextB', keys=('provision_timeout',))
     assert context_b_provision_timeout == 60
 
-    contexts = kubernetes_utils.get_custom_k8s_contexts_names()
+    contexts = kubernetes_utils.get_custom_config_k8s_contexts()
     assert len(contexts) == 2
     assert contexts[0] == 'contextA'
     assert contexts[1] == 'contextB'
