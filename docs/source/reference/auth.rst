@@ -10,7 +10,7 @@ SkyPilot API server supports two authentication methods:
   `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__) to
   authenticate. For example, Okta, Google Workspace, or other SSO providers are supported.
 
-Comparison between the two methods:
+Comparison of the two methods:
 
 .. csv-table::
     :header: "", "Basic Auth", "SSO (recommended)"
@@ -35,7 +35,7 @@ Example login command:
 
 .. code-block:: console
 
-    $ sky api login -e http://username:password@<API_SERVER_ENDPOINT>
+    $ sky api login -e http://username:password@<SKYPILOT_API_SERVER_ENDPOINT>
 
 .. _api-server-auth-proxy:
 
@@ -46,7 +46,7 @@ You can deploy the SkyPilot API server behind an web authentication proxy, such 
 
 The SkyPilot implementation is flexible and will work with most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta, see :ref:`oauth2-proxy-okta`.
 
-.. image:: ../../images/client-server/auth-proxy-user-flow.svg
+.. image:: ../images/client-server/auth-proxy-user-flow.svg
     :alt: SkyPilot with auth proxy
     :align: center
     :width: 80%
@@ -60,46 +60,27 @@ While logging into an API server, SkyPilot will attempt to detect an auth proxy.
 
 .. code-block:: console
 
-    $ sky api login
-    Enter your SkyPilot API server endpoint: http://a.b.c.d
-    Authentication is needed. Please visit this URL to get a token:
+    $ sky api login -e http://<SKYPILOT_API_SERVER_ENDPOINT>
+    A web browser has been opened at http://<SKYPILOT_API_SERVER_ENDPOINT>/token?local_port=8000. Please continue the login in the web browser.
 
-    http://a.b.c.d/token
+Login in the browser to authenticate as required by the auth proxy.
 
-    Paste the token:
-
-Opening ``http://a.b.c.d/token`` in the browser will force the user to authenticate as required by the auth proxy.
-
-.. image:: ../../images/client-server/okta.png
+.. image:: ../images/client-server/okta.png
     :alt: Okta auth page
     :align: center
     :width: 60%
 
-After authentication, the user will be redirected to the SkyPilot token page:
-
-.. image:: ../../images/client-server/token-page.png
-    :alt: SkyPilot token page
-    :align: center
-    :width: 80%
-
-Copy and paste the token into the terminal to save the auth for the SkyPilot CLI.
+After authentication, the CLI will automatically copy the relevant auth cookies from the browser into the CLI.
 
 .. code-block:: console
 
     ...
+    Logged into SkyPilot API server at: http://<SKYPILOT_API_SERVER_ENDPOINT>
+    └── Dashboard: http://<SKYPILOT_API_SERVER_ENDPOINT>/dashboard
 
-    http://a.b.c.d/token
+SkyPilot will automatically use the user email from the auth proxy to create a user in the SkyPilot API server.
 
-    Paste the token: eyJfb2F1dGgyX3Byb3h5IjogInVYcFRTTGZGSEVYeHVGWXB2NEc4dHNKTzVET253YkRVVEJ5SkVFM1cxYkg1V29TQVhSRk4tLXg1NFotT1hab0ZsV1BMUEJicTE2NXZmZmdWQ0FrVnQtMktlM0hpenczOWhLLTRMZ3...
-    Logged into SkyPilot API server at: http://a.b.c.d
-    └── Dashboard: http://a.b.c.d/dashboard
-
-
-This will copy the relevant auth cookies from the browser into the CLI.
-
-SkyPilot will use the user info passed by the auth proxy in your SkyPilot API server.
-
-.. image:: ../../images/client-server/cluster-users.png
+.. image:: ../images/client-server/cluster-users.png
     :alt: User emails in the SkyPilot dashboard
     :align: center
     :width: 70%
@@ -123,7 +104,7 @@ Create application in Okta
    * **Sign-in method:** ``OIDC - OpenID Connect``
    * **Application type:** ``Web Application``
 
-.. image:: ../../images/client-server/okta-setup.png
+.. image:: ../images/client-server/okta-setup.png
     :alt: SkyPilot token page
     :align: center
     :width: 80%
@@ -199,7 +180,7 @@ To log into the CLI, use ``sky api login`` as normal - it should automatically d
 
 During the login flow, the token provided by the web login will encode the cookies used for authentication. By pasting this into the CLI, the CLI will also be able to authenticate using the cookies.
 
-.. image:: ../../images/client-server/auth-proxy-internals.svg
+.. image:: ../images/client-server/auth-proxy-internals.svg
     :alt: SkyPilot auth proxy architecture
     :align: center
     :width: 100%
@@ -231,7 +212,7 @@ SkyPilot automatically creates a user for each authenticated user. The user's em
 
 Admins can click on the **Users** tab in the SkyPilot dashboard to manage users and their roles.
 
-.. figure:: ../../images/client-server/users.png
+.. figure:: ../images/client-server/users.png
     :align: center
     :width: 80%
 
