@@ -5390,7 +5390,7 @@ def api_login(endpoint: Optional[str], relogin: bool,
       sky api login -e https://api.example.com
       \b
       # Service account token login
-      sky api login -e https://api.example.com --sa-token sky_abc123...
+      sky api login -e https://api.example.com --token sky_abc123...
 
     """
     sdk.api_login(endpoint, relogin, service_account_token)
