@@ -27,6 +27,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import status_lib
+    from sky.volumes import volume as volume_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -307,6 +308,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 

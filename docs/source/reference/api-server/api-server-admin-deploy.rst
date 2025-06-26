@@ -513,6 +513,8 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
 .. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
+    **Option 1: Set the DB connection URI via config**
+
     Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
     To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 
@@ -540,6 +542,35 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
             db: postgresql://<username>:<password>@<host>:<port>/<database>
 
     See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
+
+    **Option 2: Set the DB connection URI via Kubernetes secret**
+
+    (available on nightly version 20250626 and later)
+    
+    Create a Kubernetes secret that contains the DB connection URI:
+
+    .. code-block:: bash
+
+        kubectl create secret generic skypilot-db-connection-uri \
+          --namespace $NAMESPACE \
+          --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
+    
+
+    When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
+
+    .. code-block:: bash
+
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+          --namespace $NAMESPACE \
+          --reuse-values \
+          --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
+
+    You can also directly set this value in the ``values.yaml`` file, e.g.:
+
+    .. code-block:: yaml
+
+        apiService:
+          dbConnectionSecretName: skypilot-db-connection-uri
 
     .. note::
 
@@ -607,6 +638,47 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
     .. note::
 
         ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
+
+Optional: Set up GPU monitoring and metrics
+-------------------------------------------
+
+SkyPilot dashboard can be optionally configured to expose GPU metrics and API server metrics.
+
+.. raw:: html
+
+   <div style="display: flex; gap: 20px; margin: 10px auto; justify-content: center; max-width: 1200px; align-items: end;">
+     <div style="flex: 1; text-align: center; display: flex; flex-direction: column; height: 350px;">
+       <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+         <img src="../../_images/api-srv-metrics.jpg" alt="API Server Metrics Dashboard" style="width: 100%; max-width: 600px;">
+       </div>
+       <p style="margin-top: 5px; margin-bottom: 0;">API Server Metrics Dashboard</p>
+     </div>
+     <div style="flex: 1; text-align: center; display: flex; flex-direction: column; height: 350px;">
+       <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+         <img src="../../_images/gpu-metrics.png" alt="GPU Metrics Dashboard" style="width: 100%; max-width: 600px;">
+       </div>
+       <p style="margin-top: 5px; margin-bottom: 0;">GPU Metrics Dashboard</p>
+     </div>
+   </div>
+
+To enable metrics, set ``apiService.metrics.enabled=true``, ``prometheus.enabled=true`` and ``grafana.enabled=true`` in the Helm chart.
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.metrics.enabled=true \
+      --set prometheus.enabled=true \
+      --set grafana.enabled=true
+
+
+For detailed setup instructions (including how to set up external Prometheus and Grafana), see:
+
+* :ref:`API Server Metrics Setup <api-server-metrics-setup>`
+* :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
+
+
 
 Upgrade the API server
 -----------------------
@@ -916,4 +988,6 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Advanced: Use OAuth/Okta Proxy <examples/api-server-auth-proxy>
+    Advanced: API server metrics monitoring <examples/api-server-metrics-setup>
+    Advanced: GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>

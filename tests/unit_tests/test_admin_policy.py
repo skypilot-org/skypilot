@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import importlib
 import os
 import subprocess
@@ -30,9 +31,13 @@ if not os.path.exists(POLICY_PATH):
 
 
 @pytest.fixture
-def add_example_policy_paths():
-    # Add to path to be able to import
-    sys.path.append(os.path.join(POLICY_PATH, 'example_policy'))
+def add_example_policy_paths(monkeypatch):
+    # Patch sys.path in fixture scope to avoid interven the global path
+    test_path = copy.copy(sys.path)
+    test_path.append(os.path.join(POLICY_PATH, 'example_policy'))
+    with monkeypatch.context() as m:
+        m.setattr(sys, 'path', test_path)
+        yield
 
 
 @pytest.fixture
@@ -189,26 +194,29 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                                     idle_minutes_to_autostop=None)
 
 
-@mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
-            return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
 def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
-    dag, config = _load_task_and_apply_policy(
-        task,
-        os.path.join(POLICY_PATH, 'dynamic_kubernetes_contexts_update.yaml'))
+    with mock.patch(
+            'sky.provision.kubernetes.utils.get_all_kube_context_names',
+            return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3']):
+        dag, config = _load_task_and_apply_policy(
+            task,
+            os.path.join(POLICY_PATH,
+                         'dynamic_kubernetes_contexts_update.yaml'))
 
-    assert config.get_nested(
-        ('kubernetes', 'allowed_contexts'),
-        None) == ['kind-skypilot', 'kind-skypilot2'
-                 ], 'Kubernetes allowed contexts should be updated'
-
-    with admin_policy_utils.apply_and_use_config_in_current_request(dag):
-        assert skypilot_config.get_nested(
+        assert config.get_nested(
             ('kubernetes', 'allowed_contexts'),
             None) == ['kind-skypilot', 'kind-skypilot2'
-                     ], 'Global skypilot config should be updated'
-    assert skypilot_config.get_nested(
-        ('kubernetes', 'allowed_contexts'),
-        None) is None, 'Global skypilot config should be restored after request'
+                     ], 'Kubernetes allowed contexts should be updated'
+
+        with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+            assert skypilot_config.get_nested(
+                ('kubernetes', 'allowed_contexts'),
+                None) == ['kind-skypilot', 'kind-skypilot2'
+                         ], 'Global skypilot config should be updated'
+        assert skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'),
+            None) is None, ('Global skypilot config should be restored '
+                            'after request')
 
 
 def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
@@ -361,8 +369,8 @@ def test_restful_policy(add_example_policy_paths, task):
             'Connection failed')
 
         with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                           match='Failed to validate request with admin '
-                           'policy URL http://localhost:8080'):
+                           match='Failed to call admin policy URL '
+                           'http://localhost:8080: Connection failed'):
             _load_task_and_apply_policy(
                 task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
 
@@ -372,8 +380,8 @@ def test_restful_policy(add_example_policy_paths, task):
             requests.exceptions.HTTPError('404 Client Error'))
 
         with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                           match='Failed to validate request with admin '
-                           'policy URL http://localhost:8080'):
+                           match='Failed to call admin policy URL '
+                           'http://localhost:8080: 404 Client Error'):
             _load_task_and_apply_policy(
                 task, os.path.join(POLICY_PATH, 'restful_policy.yaml'))
 
@@ -414,7 +422,7 @@ def _policy_server(policy: str) -> Iterator[str]:
         pypath = pypath + ':' + env['PYTHONPATH']
     env['PYTHONPATH'] = pypath
     proc = subprocess.Popen(
-        f'python {POLICY_PATH}/example_server/policy_server.py --port {port} --policy {policy}',
+        f'python {POLICY_PATH}/example_server/dynamic_policy_server.py --port {port} --policy {policy}',
         shell=True,
         env=env)
     start_time = time.time()
@@ -468,3 +476,13 @@ def test_restful_policy_server(add_example_policy_paths, task):
             assert r.autostop_config is not None
             assert r.autostop_config.enabled is True
             assert r.autostop_config.idle_minutes == 10
+
+    with _policy_server('RejectAllPolicy') as url, \
+        tempfile.NamedTemporaryFile() as temp_file:
+        temp_file.write(f'admin_policy: {url}/'.encode('utf-8'))
+        temp_file.flush()
+
+        # Verify the exception from REST policy server is exposed to user.
+        with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                           match='Reject all policy'):
+            _load_task_and_apply_policy(task, temp_file.name)
