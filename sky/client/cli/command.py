@@ -5366,7 +5366,7 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
     '--service-account-token',
     '--sa-token',
     required=False,
-    help='Service account token for authentication (starts with sky_).')
+    help='Service account token for authentication (starts with ``sky_``).')
 @usage_lib.entrypoint
 def api_login(endpoint: Optional[str], get_token: bool,
               service_account_token: Optional[str]):
@@ -5374,19 +5374,21 @@ def api_login(endpoint: Optional[str], get_token: bool,
 
     Authentication methods (in priority order):
 
-    1. Service account token via --sa-token flag
-    2. Service account token in ~/.sky/config.yaml
+    1. Service account token via ``--sa-token`` flag
+
+    2. Service account token in ``~/.sky/config.yaml``
+
     3. OAuth2 browser-based authentication (default)
 
     Examples:
 
     .. code-block:: bash
 
-        # OAuth2 browser login
-        sky api login -e https://api.example.com
-
-        # Service account token login
-        sky api login -e https://api.example.com --sa-token sky_abc123...
+      # OAuth2 browser login
+      sky api login -e https://api.example.com
+      \b
+      # Service account token login
+      sky api login -e https://api.example.com --sa-token sky_abc123...
 
     """
     sdk.api_login(endpoint, get_token, service_account_token)
