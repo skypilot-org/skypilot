@@ -125,8 +125,7 @@ Example: GitHub actions
 
     # .github/workflows/deploy.yml
     - name: Configure SkyPilot
-      run: |
-        sky api login -e ${{ vars.SKYPILOT_API_ENDPOINT }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
+      run: sky api login -e ${{ vars.SKYPILOT_API_ENDPOINT }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
         
     - name: Launch training job
       run: sky launch training.yaml
