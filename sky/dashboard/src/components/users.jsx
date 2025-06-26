@@ -2174,9 +2174,9 @@ function ServiceAccountTokensView({
             {rotatedTokenInDialog ? (
               /* Token Rotated Successfully - Show Token */
               <>
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
-                    <h4 className="text-sm font-medium text-blue-900">
+                    <h4 className="text-sm font-medium text-green-900">
                       🔄 Token rotated successfully - save this new token now!
                     </h4>
                     <CustomTooltip
@@ -2185,7 +2185,7 @@ function ServiceAccountTokensView({
                     >
                       <button
                         onClick={() => copyToClipboard(rotatedTokenInDialog)}
-                        className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-1 ml-2"
+                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
                       >
                         {copySuccess ? (
                           <CheckIcon className="w-4 h-4" />
@@ -2195,11 +2195,11 @@ function ServiceAccountTokensView({
                       </button>
                     </CustomTooltip>
                   </div>
-                  <p className="text-sm text-blue-700 mb-3">
+                  <p className="text-sm text-green-700 mb-3">
                     This new token replaces the old one. Please copy and store
                     it securely. The old token is now invalid.
                   </p>
-                  <div className="bg-white border border-blue-300 rounded-md p-3">
+                  <div className="bg-white border border-green-300 rounded-md p-3">
                     <code className="text-sm text-gray-800 font-mono break-all block">
                       {rotatedTokenInDialog}
                     </code>
@@ -2240,7 +2240,7 @@ function ServiceAccountTokensView({
           <DialogFooter>
             {rotatedTokenInDialog ? (
               <button
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2"
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-green-600 text-white hover:bg-green-700 h-10 px-4 py-2"
                 onClick={() => {
                   setShowRotateDialog(false);
                   setTokenToRotate(null);
@@ -2265,7 +2265,7 @@ function ServiceAccountTokensView({
                   Cancel
                 </button>
                 <button
-                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2"
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-green-600 text-white hover:bg-green-700 h-10 px-4 py-2"
                   onClick={handleRotateToken}
                   disabled={rotating}
                 >
