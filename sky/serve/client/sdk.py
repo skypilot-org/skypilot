@@ -303,7 +303,7 @@ def tail_logs(service_name: str,
               replica_id: Optional[int] = None,
               follow: bool = True,
               output_stream: Optional['io.TextIOBase'] = None,
-              number: int = -1) -> None:
+              tail: int = -1) -> None:
     """Tails logs for a service.
 
     Usage:
@@ -373,7 +373,7 @@ def tail_logs(service_name: str,
         target=target,
         replica_id=replica_id,
         follow=follow,
-        number=number,
+        tail=tail,
     )
     response = rest.post(
         f'{server_common.get_server_url()}/serve/logs',
@@ -399,7 +399,7 @@ def sync_down_logs(service_name: str,
                        List[Union[str,
                                   'serve_utils.ServiceComponent']]]] = None,
                    replica_ids: Optional[List[int]] = None,
-                   number: int = -1) -> None:
+                   tail: int = -1) -> None:
     """Sync down logs from the service components to a local directory.
 
     This function syncs logs from the specified service components (controller,
@@ -438,7 +438,7 @@ def sync_down_logs(service_name: str,
         local_dir=local_dir,
         targets=targets,
         replica_ids=replica_ids,
-        number=number,
+        tail=tail,
     )
     response = rest.post(
         f'{server_common.get_server_url()}/serve/sync-down-logs',

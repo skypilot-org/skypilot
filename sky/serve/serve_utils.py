@@ -56,15 +56,12 @@ def get_num_service_threshold():
 
 
 def _read_last_n_lines(file_handle: typing.TextIO, n: int) -> List[str]:
-    """Efficiently read the last N lines from a file without loading the entire file.
-    
-    This uses a reverse-reading approach that reads the file in chunks from the end,
+    """Read the last N lines from a file without loading the entire file.
+    This reverse reads the file in chunks from the end,
     which is much more memory-efficient than reading the entire file.
-    
     Args:
         file_handle: Open file handle
         n: Number of lines to read from the end
-        
     Returns:
         List of the last N lines (with newlines preserved)
     """
@@ -107,7 +104,7 @@ def _read_last_n_lines(file_handle: typing.TextIO, n: int) -> List[str]:
         # File doesn't end with newline
         result_lines = all_lines[-n:]
 
-    # Add newlines back (except for the very last line if file doesn't end with newline)
+    # Add newlines back (except the last line if file doesn't end with newline)
     result = []
     for i, line in enumerate(result_lines):
         if i == len(result_lines) - 1 and (not all_lines or
@@ -925,7 +922,7 @@ def _follow_logs_with_provision_expanding(
 
 
 def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
-                        number: int) -> str:
+                        tail: int) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -935,9 +932,9 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
         with open(log_file_name, 'r', encoding='utf-8') as f:
-            if number != -1:
+            if tail != -1:
                 # Efficiently read only the last N lines from the file
-                lines = _read_last_n_lines(f, number)
+                lines = _read_last_n_lines(f, tail)
                 for line in lines:
                     print(line, end='', flush=True)
             else:
@@ -968,8 +965,8 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
     # Handle launch logs based on number parameter
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        if number != -1:
-            lines = _read_last_n_lines(f, number)
+        if tail != -1:
+            lines = _read_last_n_lines(f, tail)
             for line in lines:
                 print(line, end='', flush=True)
         for line in _follow_logs_with_provision_expanding(
@@ -1005,7 +1002,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool, number: int) -> str:
+                              follow: bool, tail: int) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -1022,9 +1019,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 
     with open(os.path.expanduser(log_file), 'r', newline='',
               encoding='utf-8') as f:
-        if number != -1:
+        if tail != -1:
             # Efficiently read only the last N lines from the file
-            lines = _read_last_n_lines(f, number)
+            lines = _read_last_n_lines(f, tail)
             for line in lines:
                 print(line, end='', flush=True)
             if follow:
@@ -1235,10 +1232,10 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool, number: int) -> str:
+                            follow: bool, tail: int) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow}, number={number})',
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
@@ -1246,10 +1243,10 @@ class ServeCodeGen:
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
                                   stream_controller: bool, follow: bool,
-                                  number: int) -> str:
+                                  tail: int) -> str:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow}, number={number})',
+            f'{stream_controller}, follow={follow}, tail={tail})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
