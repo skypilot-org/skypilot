@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import base64
 import contextlib
-import dataclasses
 import datetime
 import hashlib
 import json
@@ -47,6 +46,7 @@ from sky.server import constants as server_constants
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
+from sky.server import versions
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -402,10 +402,41 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add API version to the request."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        version_info = versions.check_version_compatibility(request.headers,
+                                                            remote='client')
+        # Bypass version handling for backward compatibility with clients prior
+        # to v0.11.0, the client will check the version in the body of
+        # /api/health response and hint an upgrade.
+        # TODO(aylei): remove this after v0.13.0 is released.
+        if version_info is None:
+            return await call_next(request)
+        if version_info.error is None:
+            versions.set_remote_api_version(version_info.api_version)
+            versions.set_remote_version(version_info.version)
+            response = await call_next(request)
+        else:
+            response = fastapi.responses.JSONResponse(
+                status_code=400,
+                content={
+                    'error': common.ApiServerStatus.VERSION_MISMATCH.value,
+                    'message': version_info.error,
+                })
+        response.headers[server_constants.API_VERSION_HEADER] = str(
+            server_constants.API_VERSION)
+        response.headers[server_constants.VERSION_HEADER] = \
+            versions.get_local_readable_version()
+        return response
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
+app.add_middleware(APIVersionMiddleware)
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
@@ -1147,7 +1178,7 @@ async def local_down(request: fastapi.Request) -> None:
 
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> requests_lib.RequestPayload:
+async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
         request_task = requests_lib.get_request(request_id)
@@ -1162,9 +1193,8 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
                     detail=f'Request {request_id!r} should be retried')
             request_error = request_task.get_error()
             if request_error is not None:
-                raise fastapi.HTTPException(status_code=500,
-                                            detail=dataclasses.asdict(
-                                                request_task.encode()))
+                raise fastapi.HTTPException(
+                    status_code=500, detail=request_task.encode().model_dump())
             return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
@@ -1302,7 +1332,7 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
-) -> List[requests_lib.RequestPayload]:
+) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
         statuses = None
@@ -1341,7 +1371,10 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
     user = request.state.auth_user
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
-        'api_version': server_constants.API_VERSION,
+        # Kept for backward compatibility, clients before 0.11.0 will read this
+        # field to check compatibility and hint the user to upgrade the CLI.
+        # TODO(aylei): remove this field after 0.13.0
+        'api_version': str(server_constants.API_VERSION),
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,

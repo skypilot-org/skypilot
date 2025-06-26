@@ -1752,11 +1752,11 @@ def get(request_id: str) -> Any:
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
-            requests_lib.RequestPayload(**response.json()))
+            payloads.RequestPayload(**response.json()))
     elif response.status_code == 500:
         try:
             request_task = requests_lib.Request.decode(
-                requests_lib.RequestPayload(**response.json().get('detail')))
+                payloads.RequestPayload(**response.json().get('detail')))
             logger.debug(f'Got request with error: {request_task.name}')
         except Exception:  # pylint: disable=broad-except
             request_task = None
@@ -1895,7 +1895,7 @@ def api_status(
     request_ids: Optional[List[str]] = None,
     # pylint: disable=redefined-builtin
     all_status: bool = False
-) -> List[requests_lib.RequestPayload]:
+) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
     Args:
@@ -1916,9 +1916,7 @@ def api_status(
                  None),
         cookies=server_common.get_api_cookie_jar())
     server_common.handle_request_error(response)
-    return [
-        requests_lib.RequestPayload(**request) for request in response.json()
-    ]
+    return [payloads.RequestPayload(**request) for request in response.json()]
 
 
 # === API server management APIs ===

@@ -24,7 +24,9 @@ class TestBackwardCompatibility:
     SERVE_PREFIX = 'test-back-compat'
     TEST_TIMEOUT = 1800  # 30 minutes
     BASE_API_VERSION = constants.API_VERSION
+    BASE_MIN_COMPATIBLE_API_VERSION = constants.MIN_COMPATIBLE_API_VERSION
     CURRENT_API_VERSION = constants.API_VERSION
+    CURRENT_MIN_COMPATIBLE_API_VERSION = constants.MIN_COMPATIBLE_API_VERSION
 
     # Environment paths
     BASE_ENV_DIR = pathlib.Path(
@@ -140,13 +142,21 @@ class TestBackwardCompatibility:
             'uv pip install -e .[all]',)
 
         base_sky_api_version = subprocess.run(
-            f'{self.ACTIVATE_BASE} && python -c "from sky.server import constants; print(constants.API_VERSION)"',
+            f'{self.ACTIVATE_BASE} && python -c "'
+            'from sky.server import constants; '
+            'print(constants.API_VERSION); '
+            # Handle the base that does not have MIN_COMPATIBLE_API_VERSION defined
+            'min_compatible_version = constants.MIN_COMPATIBLE_API_VERSION if hasattr(constants, "MIN_COMPATIBLE_API_VERSION") else constants.API_VERSION; '
+            'print(min_compatible_version);'
+            '"',
             shell=True,
             check=False,
             text=True,
             capture_output=True)
-        TestBackwardCompatibility.BASE_API_VERSION = base_sky_api_version.stdout.strip(
-        )
+        base_versions = base_sky_api_version.stdout.strip().split('\n')
+        TestBackwardCompatibility.BASE_API_VERSION = base_versions[0]
+        TestBackwardCompatibility.BASE_MIN_COMPATIBLE_API_VERSION = \
+            base_versions[1]
 
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
@@ -396,11 +406,19 @@ class TestBackwardCompatibility:
 
     def test_client_server_compatibility(self, generic_cloud: str):
         """Test client server compatibility across versions"""
-        if self.BASE_API_VERSION != self.CURRENT_API_VERSION:
-            pytest.skip(
+        if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
+                self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
+            # This test runs against the master branch or the latest release
+            # version, which must enforce compatibility in this test based on
+            # our new version strategy that adjacent minor versions must be
+            # compatible.
+            pytest.fail(
                 f'Base API version: {self.BASE_API_VERSION} and current API '
-                f'version: {self.CURRENT_API_VERSION} are different, '
-                'skipping test')
+                f'version: {self.CURRENT_API_VERSION} are not compatible:'
+                f'- Base minimal compatible API version: {self.BASE_MIN_COMPATIBLE_API_VERSION}'
+                f'- Current minimal compatible API version: {self.CURRENT_MIN_COMPATIBLE_API_VERSION}'
+                'Change is rejected since it breaks the compatibility between adjacent versions'
+            )
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
         commands = [

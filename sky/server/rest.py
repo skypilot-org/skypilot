@@ -12,6 +12,8 @@ import colorama
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.server import constants
+from sky.server import versions
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -27,6 +29,12 @@ else:
 F = TypeVar('F', bound=Callable[..., Any])
 
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+# Global session for client-server communication.
+_session = requests.Session()
+_session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
+_session.headers[constants.VERSION_HEADER] = \
+    versions.get_local_readable_version()
 
 
 class RetryContext:
@@ -132,22 +140,29 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
     """Send a POST request to the API server, retry on server temporarily
     unavailable."""
-    response = requests.post(url, data=data, json=json, **kwargs)
-    handle_server_unavailable(response)
-    return response
+    return request('POST', url, data=data, json=json, **kwargs)
 
 
 @retry_on_server_unavailable()
 def get(url, params=None, **kwargs) -> 'requests.Response':
     """Send a GET request to the API server, retry on server temporarily
     unavailable."""
-    response = requests.get(url, params=params, **kwargs)
-    handle_server_unavailable(response)
-    return response
+    return request('GET', url, params=params, **kwargs)
 
 
 def get_without_retry(url, params=None, **kwargs) -> 'requests.Response':
     """Send a GET request to the API server without retry."""
-    response = requests.get(url, params=params, **kwargs)
+    return request('GET', url, params=params, **kwargs)
+
+
+def request(method: str, url: str, **kwargs) -> 'requests.Response':
+    """Send a request to the API server."""
+    response = _session.request(method, url, **kwargs)
     handle_server_unavailable(response)
+    remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
+    remote_version = response.headers.get(constants.VERSION_HEADER)
+    if remote_api_version is not None:
+        versions.set_remote_api_version(int(remote_api_version))
+    if remote_version is not None:
+        versions.set_remote_version(remote_version)
     return response

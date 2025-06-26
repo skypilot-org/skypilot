@@ -4,10 +4,30 @@ import os
 
 from sky.skylet import constants
 
-# API server version, whenever there is a change in API server that requires a
-# restart of the local API server or error out when the client does not match
-# the server version.
-API_VERSION = '10'
+# SkyPilot API version that the code currently use. This version should be
+# bumped when:
+# - there is a change in API that breaks the compatbility;
+# - or special compatbility handling based on the version info is needed.
+API_VERSION = 11
+
+# The minimum remote API version that the code can still work with. This
+# is usually set to the API version of the lowest SkyPilot pypi version that
+# current code guarantees to be compatible with.
+# Note (dev): This field is typically set by the CI pipeline based on our
+# versioning strategy and should not be updated manually.
+MIN_COMPATIBLE_API_VERSION = 11
+
+# The minimum SkyPilot release version that the code can still work with.
+# This provides a user-friendly message of MIN_COMPATIBLE_API_VERSION, and
+# should be updated when MIN_COMPATIBLE_API_VERSION is updated. Refer to
+# MIN_COMPATIBLE_API_VERSION for more details.
+MIN_COMPATIBLE_VERSION = '0.11.0'
+
+# The HTTP header name for the API version of the sender.
+API_VERSION_HEADER = 'X-SkyPilot-API-Version'
+
+# The HTTP header name for the SkyPilot version of the sender.
+VERSION_HEADER = 'X-SkyPilot-Version'
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
