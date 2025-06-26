@@ -42,7 +42,7 @@ if typing.TYPE_CHECKING:
 # `sky.jobs.controller` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.jobs.controller')
-
+logger.info(f'core: {core}')
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     dag = dag_utils.load_chain_dag_from_yaml(dag_yaml)
