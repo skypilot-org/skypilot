@@ -171,7 +171,7 @@ Behavior when the API server is being upgraded:
 
 SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., tailing logs) will automatically resume:
 
-.. image:: https://i.imgur.com/iI7lrr4.gif
+.. image:: https://i.imgur.com/jUjXu0J.gif
   :alt: GIF for graceful upgrade
   :align: center
 
