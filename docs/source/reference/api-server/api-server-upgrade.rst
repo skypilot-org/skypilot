@@ -165,13 +165,13 @@ A server can be gracefully upgraded when the following conditions are met:
 
 Behavior when the API server is being upgraded:
 
-* For critical on-going requests (e.g. ``sky launch``), it waits them to finish with a timeout;
-* For non-critical on-going requests (e.g. ``sky logs``), it cancells them and return an error to ask client retry;
+* For critical on-going requests (e.g. launching a cluster), it waits them to finish with a timeout;
+* For non-critical on-going requests (e.g. log tailing), it cancels them and return an error to ask client retry;
 * For new requests, it returns an error to ask client retry;
 
 SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., tailing logs) will automatically resume:
 
-.. image:: https://i.imgur.com/iI7lrr4.gif
+.. image:: https://i.imgur.com/jUjXu0J.gif
   :alt: GIF for graceful upgrade
   :align: center
 
