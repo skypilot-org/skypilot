@@ -590,25 +590,24 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
     # `submit_at`, which represents the time the managed task is submitted.
     logger.info('Launching the spot cluster...')
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.PENDING.value,
-                    spot_table.c.end_at.is_(None),
-                )).values(
-                    resources=resources_str,
-                    submitted_at=submit_time,
-                    status=ManagedJobStatus.STARTING.value,
-                    run_timestamp=run_timestamp,
-                    specs=json.dumps(specs),
-                ))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                spot_table.c.end_at.is_(None),
+            )).update({
+                spot_table.c.resources: resources_str,
+                spot_table.c.submitted_at: submit_time,
+                spot_table.c.status: ManagedJobStatus.STARTING.value,
+                spot_table.c.run_timestamp: run_timestamp,
+                spot_table.c.specs: json.dumps(specs),
+            })
         session.commit()
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 'Failed to set the task to starting. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     # SUBMITTED is no longer used, but we keep it for backward compatibility.
     # TODO(cooperc): remove this in v0.12.0
     callback_func('SUBMITTED')
@@ -624,23 +623,22 @@ def set_backoff_pending(job_id: int, task_id: int):
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status.in_([
-                        ManagedJobStatus.STARTING.value,
-                        ManagedJobStatus.RECOVERING.value
-                    ]),
-                    spot_table.c.end_at.is_(None),
-                )).values(status=ManagedJobStatus.PENDING.value))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status.in_([
+                    ManagedJobStatus.STARTING.value,
+                    ManagedJobStatus.RECOVERING.value
+                ]),
+                spot_table.c.end_at.is_(None),
+            )).update({spot_table.c.status: ManagedJobStatus.PENDING.value})
         session.commit()
         logger.debug('back to PENDING')
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 'Failed to set the task back to pending. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     # Do not call callback_func here, as we don't use the callback for PENDING.
 
 
@@ -658,20 +656,19 @@ def set_restarting(job_id: int, task_id: int, recovering: bool):
     if recovering:
         target_status = ManagedJobStatus.RECOVERING.value
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.PENDING.value,
-                    spot_table.c.end_at.is_(None),
-                )).values(status=target_status))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                spot_table.c.end_at.is_(None),
+            )).update({spot_table.c.status: target_status})
         session.commit()
         logger.debug(f'back to {target_status}')
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task back to {target_status}. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     # Do not call callback_func here, as it should only be invoked for the
     # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
 
@@ -683,28 +680,27 @@ def set_started(job_id: int, task_id: int, start_time: float,
     assert _SQLALCHEMY_ENGINE is not None
     logger.info('Job started.')
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status.in_([
-                        ManagedJobStatus.STARTING.value,
-                        # If the task is empty, we will jump straight
-                        # from PENDING to RUNNING
-                        ManagedJobStatus.PENDING.value
-                    ]),
-                    spot_table.c.end_at.is_(None),
-                )).values(
-                    status=ManagedJobStatus.RUNNING.value,
-                    start_at=start_time,
-                    last_recovered_at=start_time,
-                ))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status.in_([
+                    ManagedJobStatus.STARTING.value,
+                    # If the task is empty, we will jump straight
+                    # from PENDING to RUNNING
+                    ManagedJobStatus.PENDING.value
+                ]),
+                spot_table.c.end_at.is_(None),
+            )).update({
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.start_at: start_time,
+                spot_table.c.last_recovered_at: start_time,
+            })
         session.commit()
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to started. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     callback_func('STARTED')
 
 
@@ -732,29 +728,28 @@ def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
             status_condition = (
                 spot_table.c.status == ManagedJobStatus.RUNNING.value)
 
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    status_condition,
-                    spot_table.c.end_at.is_(None),
-                )).values(
-                    status=ManagedJobStatus.RECOVERING.value,
-                    job_duration=sqlalchemy.case(
-                        (spot_table.c.last_recovered_at >= 0,
-                         spot_table.c.job_duration + current_time -
-                         spot_table.c.last_recovered_at),
-                        else_=spot_table.c.job_duration),
-                    last_recovered_at=sqlalchemy.case(
-                        (spot_table.c.last_recovered_at < 0, current_time),
-                        else_=spot_table.c.last_recovered_at),
-                ))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                status_condition,
+                spot_table.c.end_at.is_(None),
+            )).update({
+                spot_table.c.status: ManagedJobStatus.RECOVERING.value,
+                spot_table.c.job_duration: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at >= 0,
+                     spot_table.c.job_duration + current_time -
+                     spot_table.c.last_recovered_at),
+                    else_=spot_table.c.job_duration),
+                spot_table.c.last_recovered_at: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at < 0, current_time),
+                    else_=spot_table.c.last_recovered_at),
+            })
         session.commit()
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     callback_func('RECOVERING')
 
 
@@ -764,23 +759,22 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
     """Set the task to recovered."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.RECOVERING.value,
-                    spot_table.c.end_at.is_(None),
-                )).values(
-                    status=ManagedJobStatus.RUNNING.value,
-                    last_recovered_at=recovered_time,
-                    recovery_count=spot_table.c.recovery_count + 1,
-                ))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.RECOVERING.value,
+                spot_table.c.end_at.is_(None),
+            )).update({
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.last_recovered_at: recovered_time,
+                spot_table.c.recovery_count: spot_table.c.recovery_count + 1,
+            })
         session.commit()
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovered. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     logger.info('==== Recovered. ====')
     callback_func('RECOVERED')
 
@@ -791,22 +785,21 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
     """Set the task to succeeded, if it is in a non-terminal state."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.RUNNING.value,
-                    spot_table.c.end_at.is_(None),
-                )).values(
-                    status=ManagedJobStatus.SUCCEEDED.value,
-                    end_at=end_time,
-                ))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.RUNNING.value,
+                spot_table.c.end_at.is_(None),
+            )).update({
+                spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
+                spot_table.c.end_at: end_time,
+            })
         session.commit()
-        if result.rowcount != 1:
+        if count != 1:
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to succeeded. '
-                f'({result.rowcount} rows updated)')
+                f'({count} rows updated)')
     callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
@@ -841,8 +834,8 @@ def set_failed(
     end_time = time.time() if end_time is None else end_time
 
     fields_to_set: Dict[str, Any] = {
-        'status': failure_type.value,
-        'failure_reason': failure_reason,
+        spot_table.c.status: failure_type.value,
+        spot_table.c.failure_reason: failure_reason,
     }
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Get previous status
@@ -854,23 +847,22 @@ def set_failed(
             # If the job is recovering, we should set the last_recovered_at to
             # the end_time, so that the end_at - last_recovered_at will not be
             # affect the job duration calculation.
-            fields_to_set['last_recovered_at'] = end_time
+            fields_to_set[spot_table.c.last_recovered_at] = end_time
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
         if override_terminal:
             # Use COALESCE for end_at to avoid overriding the existing end_at if
             # it's already set.
-            fields_to_set['end_at'] = sqlalchemy.func.coalesce(
+            fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
                 spot_table.c.end_at, end_time)
         else:
-            fields_to_set['end_at'] = end_time
+            fields_to_set[spot_table.c.end_at] = end_time
             where_conditions.append(spot_table.c.end_at.is_(None))
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(*where_conditions)).values(**fields_to_set))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(*where_conditions)).update(fields_to_set)
         session.commit()
-        updated = result.rowcount > 0
+        updated = count > 0
     if callback_func and updated:
         callback_func('FAILED')
     logger.info(failure_reason)
@@ -885,14 +877,13 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.end_at.is_(None),
-                )).values(status=ManagedJobStatus.CANCELLING.value))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.end_at.is_(None),
+            )).update({spot_table.c.status: ManagedJobStatus.CANCELLING.value})
         session.commit()
-        updated = result.rowcount > 0
+        updated = count > 0
     if updated:
         logger.info('Cancelling the job...')
         callback_func('CANCELLING')
@@ -908,17 +899,16 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.status == ManagedJobStatus.CANCELLING.value,
-                )).values(
-                    status=ManagedJobStatus.CANCELLED.value,
-                    end_at=time.time(),
-                ))
+        count = session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.status == ManagedJobStatus.CANCELLING.value,
+            )).update({
+                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                spot_table.c.end_at: time.time(),
+            })
         session.commit()
-        updated = result.rowcount > 0
+        updated = count > 0
     if updated:
         logger.info('Job cancelled.')
         callback_func('CANCELLED')
@@ -935,10 +925,9 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
-        session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(*where_conditions)).values(
-                    local_log_file=local_log_file))
+        session.query(spot_table).filter(
+            sqlalchemy.and_(*where_conditions)).update(
+                {spot_table.c.local_log_file: local_log_file})
         session.commit()
 
 
@@ -1303,22 +1292,22 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.INACTIVE.value,
-                )).values(
-                    schedule_state=ManagedJobScheduleState.WAITING.value,
-                    dag_yaml_path=dag_yaml_path,
-                    original_user_yaml_path=original_user_yaml_path,
-                    env_file_path=env_file_path,
-                    user_hash=user_hash,
-                    priority=priority,
-                ))
+        updated_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.INACTIVE.value,
+            )
+        ).update({
+            job_info_table.c.schedule_state:
+                ManagedJobScheduleState.WAITING.value,
+            job_info_table.c.dag_yaml_path: dag_yaml_path,
+            job_info_table.c.original_user_yaml_path: original_user_yaml_path,
+            job_info_table.c.env_file_path: env_file_path,
+            job_info_table.c.user_hash: user_hash,
+            job_info_table.c.priority: priority,
+        })
         session.commit()
-        updated_count = result.rowcount
         # For a recovery run, the job may already be in the WAITING state.
         assert updated_count <= 1, (job_id, updated_count)
         return updated_count == 0
@@ -1330,15 +1319,15 @@ def scheduler_set_launching(job_id: int,
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state == current_state.value,
-                )).values(
-                    schedule_state=ManagedJobScheduleState.LAUNCHING.value))
+        updated_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state == current_state.value,
+            )).update({
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.LAUNCHING.value
+            })
         session.commit()
-        updated_count = result.rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1347,15 +1336,16 @@ def scheduler_set_alive(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.LAUNCHING.value,
-                )).values(schedule_state=ManagedJobScheduleState.ALIVE.value))
+        updated_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.LAUNCHING.value,
+            )).update({
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.ALIVE.value
+            })
         session.commit()
-        updated_count = result.rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1364,16 +1354,16 @@ def scheduler_set_alive_backoff(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.LAUNCHING.value,
-                )).values(
-                    schedule_state=ManagedJobScheduleState.ALIVE_BACKOFF.value))
+        updated_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
+                ManagedJobScheduleState.LAUNCHING.value,
+            )).update({
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.ALIVE_BACKOFF.value
+            })
         session.commit()
-        updated_count = result.rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1382,17 +1372,17 @@ def scheduler_set_alive_waiting(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state.in_([
-                        ManagedJobScheduleState.ALIVE.value,
-                        ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                    ]))).values(schedule_state=ManagedJobScheduleState.
-                                ALIVE_WAITING.value))
+        updated_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state.in_([
+                    ManagedJobScheduleState.ALIVE.value,
+                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                ]))).update({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.ALIVE_WAITING.value
+                })
         session.commit()
-        updated_count = result.rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
@@ -1401,15 +1391,16 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state !=
-                    ManagedJobScheduleState.DONE.value,
-                )).values(schedule_state=ManagedJobScheduleState.DONE.value))
+        updated_count = session.query(job_info_table).filter(
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state !=
+                ManagedJobScheduleState.DONE.value,
+            )).update({
+                job_info_table.c.schedule_state:
+                    ManagedJobScheduleState.DONE.value
+            })
         session.commit()
-        updated_count = result.rowcount
         if not idempotent:
             assert updated_count == 1, (job_id, updated_count)
 
@@ -1418,12 +1409,9 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
 def set_job_controller_pid(job_id: int, pid: int):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.update(job_info_table).where(
-                job_info_table.c.spot_job_id == job_id).values(
-                    controller_pid=pid))
+        updated_count = session.query(job_info_table).filter_by(
+            spot_job_id=job_id).update({job_info_table.c.controller_pid: pid})
         session.commit()
-        updated_count = result.rowcount
         assert updated_count == 1, (job_id, updated_count)
 
 
