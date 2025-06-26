@@ -464,7 +464,15 @@ function ActiveTab({
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
-                <div className="text-base mt-1">{clusterData.user}</div>
+                <div className="text-base mt-1 flex items-center gap-1">
+                  {clusterData.user}
+                  {clusterData.user_hash &&
+                    clusterData.user_hash.startsWith('sa-') && (
+                      <span className="px-1 py-0.5 text-xs bg-gray-100 text-gray-700 rounded font-medium ml-2">
+                        SA
+                      </span>
+                    )}
+                </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">

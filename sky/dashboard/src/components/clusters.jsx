@@ -396,7 +396,7 @@ export function Clusters() {
                 />
               </div>
               <span className="ml-2 text-sm text-gray-700">
-                Show history (Last 30 days)
+                Show history (In 30 days)
               </span>
             </label>
           </div>
@@ -789,7 +789,7 @@ export function ClusterTable({
                           </Link>
                           {item.user_hash &&
                             item.user_hash.startsWith('sa-') && (
-                              <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
+                              <span className="px-1 py-0.5 text-xs bg-gray-100 text-gray-700 rounded font-medium ml-2">
                                 SA
                               </span>
                             )}
