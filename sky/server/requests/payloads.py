@@ -500,6 +500,7 @@ class ServeLogsBody(RequestBody):
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
+    tail: int = 0
 
 
 class ServeDownloadLogsBody(RequestBody):
@@ -509,6 +510,7 @@ class ServeDownloadLogsBody(RequestBody):
     targets: Optional[Union[str, serve.ServiceComponent,
                             List[Union[str, serve.ServiceComponent]]]]
     replica_ids: Optional[List[int]] = None
+    tail: int = 0
 
 
 class ServeStatusBody(RequestBody):

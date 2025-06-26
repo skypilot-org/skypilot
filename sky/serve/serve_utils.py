@@ -857,8 +857,8 @@ def _follow_logs_with_provision_expanding(
                                  idle_timeout_seconds=idle_timeout_seconds)
 
 
-def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
+                        tail: int) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -868,7 +868,14 @@ def stream_replica_logs(service_name: str, replica_id: int,
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
         with open(log_file_name, 'r', encoding='utf-8') as f:
-            print(f.read(), flush=True)
+            if tail > 0:
+                # Read the last N lines from the file
+                lines = f.readlines()
+                for line in lines[-tail:]:
+                    print(line, end='', flush=True)
+            else:
+                # Print all lines
+                print(f.read(), flush=True)
         return ''
 
     launch_log_file_name = generate_replica_launch_log_file_name(
@@ -891,14 +898,26 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
-    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_logs_with_provision_expanding(
-                f,
-                replica_cluster_name,
-                should_stop=replica_provisioned,
-                stop_on_eof=not follow,
-        ):
-            print(line, end='', flush=True)
+
+    # Handle launch logs based on tail parameter
+    if tail > 0 and replica_provisioned():
+        # If tail is specified and replica is already provisioned,
+        # just show the last N lines of launch logs without following
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines[-tail:]:
+                print(line, end='', flush=True)
+    elif tail == 0 or not replica_provisioned():
+        # If tail is 0 (show all) or replica is still provisioning,
+        # stream the launch logs normally
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
+            for line in _follow_logs_with_provision_expanding(
+                    f,
+                    replica_cluster_name,
+                    should_stop=replica_provisioned,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
 
     if (not follow and
             _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
@@ -917,7 +936,10 @@ def stream_replica_logs(service_name: str, replica_id: int,
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
-    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
+    returncode = backend.tail_logs(handle,
+                                   job_id=None,
+                                   follow=follow,
+                                   tail=tail)
     if returncode != 0:
         return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                 f'{replica_id}.{colorama.Style.RESET_ALL}')
@@ -925,7 +947,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool) -> str:
+                              follow: bool, tail: int) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -942,12 +964,27 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 
     with open(os.path.expanduser(log_file), 'r', newline='',
               encoding='utf-8') as f:
-        for line in log_utils.follow_logs(
-                f,
-                should_stop=_service_is_terminal,
-                stop_on_eof=not follow,
-        ):
-            print(line, end='', flush=True)
+        if tail > 0:
+            # Read the last N lines from the file
+            lines = f.readlines()
+            for line in lines[-tail:]:
+                print(line, end='', flush=True)
+            if follow:
+                # If following, continue from the end of file
+                for line in log_utils.follow_logs(
+                        f,
+                        should_stop=_service_is_terminal,
+                        stop_on_eof=not follow,
+                ):
+                    print(line, end='', flush=True)
+        else:
+            # Print all lines
+            for line in log_utils.follow_logs(
+                    f,
+                    should_stop=_service_is_terminal,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
     return ''
 
 
@@ -1140,20 +1177,22 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            follow: bool, tail: int) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
-                                  stream_controller: bool, follow: bool) -> str:
+                                  stream_controller: bool, follow: bool,
+                                  tail: int) -> str:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
+            f'{stream_controller}, follow={follow}, tail={tail})',
+            'print(msg, flush=True)'
         ]
         return cls._build(code)
 
