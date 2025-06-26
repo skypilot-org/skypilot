@@ -780,12 +780,19 @@ export function ClusterTable({
                         </Link>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        <Link
-                          href={getUserLink(item.user_hash)}
-                          className="text-blue-600 hover:underline"
-                        >
-                          {item.user}
-                        </Link>
+                        <div className="flex items-center gap-1">
+                          <Link
+                            href={getUserLink(item.user_hash)}
+                            className="text-blue-600 hover:underline"
+                          >
+                            {item.user}
+                          </Link>
+                          {item.user_hash && item.user_hash.startsWith('sa-') && (
+                            <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
+                              SA
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <Link
