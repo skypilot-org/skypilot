@@ -25,19 +25,15 @@ def get_service_account_token() -> Optional[str]:
         return token
 
     # Check config file
-    try:
-        config = skypilot_config.get_user_config()
-        token = config.get_nested(('api_server', 'service_account_token'),
-                                  default_value=None)
-        if token:
-            if not token.startswith('sky_'):
-                raise ValueError(
-                    'Invalid service account token format in config file. '
-                    'Token must start with "sky_"')
-            return token
-    except Exception:  # pylint: disable=broad-except
-        # If config file doesn't exist or is malformed, continue
-        pass
+    config = skypilot_config.get_user_config()
+    token = config.get_nested(('api_server', 'service_account_token'),
+                              default_value=None)
+    if token:
+        if not token.startswith('sky_'):
+            raise ValueError(
+                'Invalid service account token format in config file. '
+                'Token must start with "sky_"')
+        return token
 
     return None
 

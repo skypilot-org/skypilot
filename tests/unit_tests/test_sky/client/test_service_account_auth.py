@@ -63,14 +63,6 @@ class TestServiceAccountAuth:
             ):
                 service_account_auth.get_service_account_token()
 
-    @mock.patch('sky.skypilot_config.get_user_config')
-    def test_get_service_account_token_config_exception(self, mock_get_config):
-        """Test handling config file exceptions."""
-        mock_get_config.side_effect = Exception("Config error")
-
-        token = service_account_auth.get_service_account_token()
-        assert token is None
-
     def test_get_service_account_headers_with_token(self):
         """Test getting service account headers when token is available."""
         with mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'sky_test_token'}):

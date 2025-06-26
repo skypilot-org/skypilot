@@ -64,8 +64,9 @@ class TestBearerTokenMiddleware:
     async def test_service_accounts_disabled(self, middleware, mock_request,
                                              mock_call_next):
         """Test middleware when service accounts are disabled."""
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'false'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'false'}):
             response = await middleware.dispatch(mock_request, mock_call_next)
 
             assert response.status_code == 401
@@ -76,8 +77,9 @@ class TestBearerTokenMiddleware:
     async def test_missing_authorization_header(self, middleware, mock_request,
                                                 mock_call_next):
         """Test middleware with missing Authorization header."""
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             response = await middleware.dispatch(mock_request, mock_call_next)
 
             assert response.status_code == 401
@@ -90,8 +92,9 @@ class TestBearerTokenMiddleware:
         """Test middleware with invalid Authorization header format."""
         mock_request.headers = {'authorization': 'Basic username:password'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             response = await middleware.dispatch(mock_request, mock_call_next)
 
             assert response.status_code == 401
@@ -103,8 +106,9 @@ class TestBearerTokenMiddleware:
         """Test middleware with invalid token format (not starting with sky_)."""
         mock_request.headers = {'authorization': 'Bearer invalid_token_format'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             response = await middleware.dispatch(mock_request, mock_call_next)
 
             assert response.status_code == 401
@@ -117,8 +121,9 @@ class TestBearerTokenMiddleware:
         """Test middleware when token verification fails."""
         mock_request.headers = {'authorization': 'Bearer sky_invalid_token'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 mock_token_service.verify_token.return_value = None
@@ -136,8 +141,9 @@ class TestBearerTokenMiddleware:
         """Test middleware when token payload is missing user_id."""
         mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 mock_token_service.verify_token.return_value = {
@@ -157,8 +163,9 @@ class TestBearerTokenMiddleware:
         """Test middleware when service account user no longer exists."""
         mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 with mock.patch(
@@ -182,8 +189,9 @@ class TestBearerTokenMiddleware:
         """Test successful service account authentication."""
         mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 with mock.patch(
@@ -220,8 +228,9 @@ class TestBearerTokenMiddleware:
         """Test that failure to update last_used timestamp doesn't block authentication."""
         mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 with mock.patch(
@@ -255,8 +264,9 @@ class TestBearerTokenMiddleware:
         """Test middleware when token service raises an exception."""
         mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 mock_token_service.verify_token.side_effect = Exception(
@@ -286,8 +296,9 @@ class TestBearerTokenMiddleware:
             request.state = mock.Mock()
             request.scope = {'path': original_path}
 
-            with mock.patch.dict(os.environ,
-                                 {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+            with mock.patch.dict(
+                    os.environ,
+                {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
                 with mock.patch('sky.users.token_service.token_service'
                                ) as mock_token_service:
                     with mock.patch(
@@ -318,8 +329,9 @@ class TestBearerTokenMiddleware:
             'authorization': 'bearer sky_valid_token'
         }  # lowercase 'bearer'
 
-        with mock.patch.dict(os.environ,
-                             {'ENV_VAR_ENABLE_SERVICE_ACCOUNTS': 'true'}):
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}):
             with mock.patch('sky.users.token_service.token_service'
                            ) as mock_token_service:
                 with mock.patch(

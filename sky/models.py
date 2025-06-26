@@ -22,9 +22,12 @@ class User:
     password: Optional[str] = None
     created_at: Optional[int] = None
 
-    def __init__(self, id: str, name: Optional[str] = None,
-                 password: Optional[str] = None,
-                 created_at: Optional[int] = None):
+    def __init__(
+            self,
+            id: str,  # pylint: disable=redefined-builtin
+            name: Optional[str] = None,
+            password: Optional[str] = None,
+            created_at: Optional[int] = None):
         self.id = id.strip().lower()
         self.name = name
         self.password = password
