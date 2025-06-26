@@ -5373,21 +5373,21 @@ def api_login(endpoint: Optional[str], get_token: bool,
     """Logs into a SkyPilot API server.
 
     Authentication methods (in priority order):
-    1. Service account token via --service-account-token flag
-    2. Service account token via SKYPILOT_TOKEN environment variable
-    3. Service account token in ~/.sky/config.yaml
-    4. OAuth2 browser-based authentication (default)
+
+    1. Service account token via --sa-token flag
+    2. Service account token in ~/.sky/config.yaml
+    3. OAuth2 browser-based authentication (default)
 
     Examples:
+
+    .. code-block:: bash
+
         # OAuth2 browser login
         sky api login -e https://api.example.com
 
         # Service account token login
-        sky api login -e https://api.example.com --token sky_abc123...
+        sky api login -e https://api.example.com --sa-token sky_abc123...
 
-        # Using environment variable
-        export SKYPILOT_TOKEN=sky_abc123...
-        sky api login -e https://api.example.com
     """
     sdk.api_login(endpoint, get_token, service_account_token)
 
