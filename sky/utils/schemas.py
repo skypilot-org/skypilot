@@ -1242,7 +1242,7 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'per_context_config': {
+                'context_config': {
                     'type': 'object',
                     'required': [],
                     'properties': {},

@@ -2611,7 +2611,7 @@ def get_custom_config_k8s_contexts() -> List[str]:
     contexts = cloud_config_utils.get_cloud_config_value(
         cloud='kubernetes',
         region=None,
-        keys=('per_context_config',),
+        keys=('context_config',),
         default_value={})
     return [*contexts] or []
 
