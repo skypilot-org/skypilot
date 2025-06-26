@@ -23,6 +23,7 @@ import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 function JobDetails() {
   const router = useRouter();
@@ -963,7 +964,12 @@ function JobDetailsContent({
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">User</div>
-        <div className="text-base mt-1">{jobData.user}</div>
+        <div className="text-base mt-1">
+          <UserDisplay 
+            username={jobData.user}
+            userHash={jobData.user_hash}
+          />
+        </div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Submitted</div>
