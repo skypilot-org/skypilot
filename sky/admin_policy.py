@@ -44,6 +44,8 @@ class RequestOptions(pydantic.BaseModel):
 
 class _UserRequestBody(pydantic.BaseModel):
     """Auxiliary model to validate and serialize a user request."""
+    # We have to use serialized YAML string, instead of a dict, because dict
+    # will be converted to JSON string, which will lose the None key.
     task: str
     skypilot_config: str
     request_options: Optional[RequestOptions] = None
