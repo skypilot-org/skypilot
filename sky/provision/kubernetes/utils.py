@@ -2450,17 +2450,24 @@ def combine_pod_config_fields(
     if isinstance(cloud, clouds.SSH):
         kubernetes_config = cloud_config_utils.get_cloud_config_value(
             cloud='ssh', region=None, keys=('pod_config',), default_value={})
-        override_pod_config = (cluster_config_overrides.get('ssh', {}).get(
-            'pod_config', {}))
-        # TODO (syang): use cloud_config_utils.get_cloud_config_value instead
+
+        override_pod_config = cloud_config_utils.get_cloud_config_value_from_dict(
+            dict_config=override_pod_config,
+            cloud='ssh',
+            keys=('pod_config',),
+            default_value={})
     else:
         kubernetes_config = cloud_config_utils.get_cloud_config_value(
             cloud='kubernetes',
             region=context,
             keys=('pod_config',),
             default_value={})
-        override_pod_config = (cluster_config_overrides.get(
-            'kubernetes', {}).get('pod_config', {}))
+        override_pod_config = cloud_config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='kubernetes',
+            region=context,
+            keys=('pod_config',),
+            default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
