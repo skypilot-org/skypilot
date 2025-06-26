@@ -2099,6 +2099,27 @@ def api_login(endpoint: Optional[str] = None,
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
+    def _show_logged_in_message(endpoint: str, dashboard_url: str,
+                                user: Optional[Dict[str, Any]]) -> None:
+        """Show the logged in message."""
+        identity_info = f'\n{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}User: '
+        if user:
+            user_name = user.get('name')
+            user_id = user.get('id')
+            if user_name and user_id:
+                identity_info += f'{user_name} ({user_id})'
+            elif user_id:
+                identity_info += user_id
+        else:
+            identity_info = ''
+        dashboard_msg = f'Dashboard: {dashboard_url}'
+        click.secho(
+            f'Logged into SkyPilot API server at: {endpoint}'
+            f'{identity_info}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
+            f'{dashboard_msg}',
+            fg='green')
+
     # Handle service account token authentication
     if service_account_token:
         if not service_account_token.startswith('sky_'):
@@ -2114,12 +2135,9 @@ def api_login(endpoint: Optional[str] = None,
             server_status, api_server_info = server_common.check_server_healthy(
                 endpoint)
             dashboard_url = server_common.get_dashboard_url(endpoint)
-            click.secho(
-                f'Successfully authenticated with service account token'
-                f'\nAPI server: {endpoint}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
-                f'Dashboard: {dashboard_url}',
-                fg='green')
+            _show_logged_in_message(endpoint, dashboard_url,
+                                    api_server_info.user)
+
             return
         except exceptions.ApiServerConnectionError as e:
             with ux_utils.print_exception_no_traceback():
@@ -2287,9 +2305,7 @@ def api_login(endpoint: Optional[str] = None,
     # Set the endpoint in the config file
     _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
-    dashboard_msg = f'Dashboard: {dashboard_url}'
-    click.secho(
-        f'Logged into SkyPilot API server at: {endpoint}'
-        f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
-        f'{dashboard_msg}',
-        fg='green')
+
+    # After successful authentication, check server health again to get user
+    # identity
+    _show_logged_in_message(endpoint, dashboard_url, api_server_info.user)
