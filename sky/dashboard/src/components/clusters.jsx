@@ -787,11 +787,12 @@ export function ClusterTable({
                           >
                             {item.user}
                           </Link>
-                          {item.user_hash && item.user_hash.startsWith('sa-') && (
-                            <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
-                              SA
-                            </span>
-                          )}
+                          {item.user_hash &&
+                            item.user_hash.startsWith('sa-') && (
+                              <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
+                                SA
+                              </span>
+                            )}
                         </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
