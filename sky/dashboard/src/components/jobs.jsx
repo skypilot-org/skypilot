@@ -1051,7 +1051,7 @@ export function ManagedJobsTable({
                           </Link>
                           {item.user_hash &&
                             item.user_hash.startsWith('sa-') && (
-                              <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
+                              <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-2">
                                 SA
                               </span>
                             )}
@@ -1583,7 +1583,7 @@ export function ClusterJobs({
                           {item.user}
                         </Link>
                         {item.user_hash && item.user_hash.startsWith('sa-') && (
-                          <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
+                          <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-2">
                             SA
                           </span>
                         )}
@@ -1776,7 +1776,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? '... show less' : '... show more'}
+          {isExpanded ? 'show less' : 'show more'}
         </button>
       )}
     </div>

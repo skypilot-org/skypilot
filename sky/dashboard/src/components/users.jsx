@@ -1799,11 +1799,6 @@ function ServiceAccountTokensView({
                     <TableCell className="truncate">
                       <div className="flex items-center">
                         <span>{token.creator_name || 'Unknown'}</span>
-                        {token.creator_user_hash !== userRoleCache?.id && (
-                          <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
-                            Other
-                          </span>
-                        )}
                       </div>
                     </TableCell>
                     <TableCell className="truncate">
