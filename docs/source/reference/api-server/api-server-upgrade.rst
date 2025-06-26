@@ -121,7 +121,7 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
     pip install -U skypilot-nightly==${VERSION}
 
-.. note:: 
+.. note::
 
     After upgrading the clients, they should not be used until the API server is upgraded to the new version.
 
@@ -165,11 +165,11 @@ A server can be gracefully upgraded when the following conditions are met:
 
 Behavior when the API server is being upgraded:
 
-* For critical on-going requests (e.g. launching a cluster), it waits them to finish with a timeout;
-* For non-critical on-going requests (e.g. log tailing), it cancels them and return an error to ask client retry;
-* For new requests, it returns an error to ask client retry;
+* For critical ongoing requests (e.g., launching a cluster), it waits for them to finish with a timeout.
+* For non-critical ongoing requests (e.g., log tailing), it cancels them and returns an error to ask the client to retry.
+* For new requests, it returns an error to ask the client to retry.
 
-SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., tailing logs) will automatically resume:
+SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., log tailing) will automatically resume:
 
 .. image:: https://i.imgur.com/jUjXu0J.gif
   :alt: GIF for graceful upgrade
