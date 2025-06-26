@@ -1251,6 +1251,52 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
                     raise exceptions.ResourcesUnavailableError(msg)
             logger.warning(
                 f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
+        else:
+            _check_specified_regions(task)
+
+
+def _check_specified_regions(task: task_lib.Task) -> None:
+    """Check if specified regions (Kubernetes contexts) are enabled.
+
+    Args:
+        task: The task to check.
+    """
+    # Only check for Kubernetes now
+    if not all(
+            isinstance(resources.cloud, clouds.Kubernetes)
+            for resources in task.resources):
+        return
+    # Kubernetes region is a context if set
+    for resources in task.resources:
+        if resources.region is None:
+            continue
+        existing_contexts = clouds.Kubernetes.existing_allowed_contexts()
+        region = resources.region
+        task_name = f' {task.name!r}' if task.name is not None else ''
+        msg = f'Task{task_name} requires '
+        if region not in existing_contexts:
+            infra_str = f'Kubernetes/{region}'
+            logger.warning(f'{infra_str} is not enabled.')
+            volume_mounts_str = ''
+            if task.volume_mounts:
+                if len(task.volume_mounts) > 1:
+                    volume_mounts_str += 'volumes '
+                else:
+                    volume_mounts_str += 'volume '
+                volume_mounts_str += ', '.join(
+                    [f'{v.volume_name}' for v in task.volume_mounts])
+                volume_mounts_str += f' with infra {infra_str}'
+            if volume_mounts_str:
+                msg += volume_mounts_str
+            else:
+                msg += f'infra {infra_str}'
+            msg += (
+                f' which is not enabled. To enable access, change '
+                f'the task infra requirement or run: {colorama.Style.BRIGHT}'
+                f'sky check {colorama.Style.RESET_ALL}'
+                f'to ensure the infra is enabled.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(msg)
 
 
 def _fill_in_launchable_resources(

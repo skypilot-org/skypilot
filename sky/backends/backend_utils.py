@@ -751,6 +751,7 @@ def write_cluster_config(
         dict(
             resources_vars,
             **{
+                'cluster_name': cluster_name,
                 'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,

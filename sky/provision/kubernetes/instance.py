@@ -12,6 +12,7 @@ from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
@@ -30,14 +31,13 @@ _MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
 TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 
 
 def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
-    return {TAG_RAY_CLUSTER_NAME: cluster_name}
+    return {k8s_constants.TAG_RAY_CLUSTER_NAME: cluster_name}
 
 
 def _is_head(pod) -> bool:

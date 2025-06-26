@@ -3981,7 +3981,7 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                                 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
-                         f'{common_utils.format_exception(e, use_bracket=True)}'
+                         f'{str(e)}'
                          f'{colorama.Style.RESET_ALL}')
 
 

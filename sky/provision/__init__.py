@@ -6,7 +6,7 @@ providers supported by SkyPilot need to follow.
 import functools
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from sky import models
 from sky import sky_logging
@@ -123,8 +123,9 @@ def delete_volume(provider_name: str,
 
 
 @_route_to_cloud_impl
-def get_volume_usedby(provider_name: str,
-                      config: models.VolumeConfig) -> List[str]:
+def get_volume_usedby(
+        provider_name: str,
+        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Get the usedby of a volume."""
     raise NotImplementedError
 

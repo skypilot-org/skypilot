@@ -33,14 +33,14 @@ def volume_refresh():
                            'Skipping status refresh...')
             continue
         cloud = config.cloud
-        usedby = provision.get_volume_usedby(cloud, config)
+        usedby_pods, _ = provision.get_volume_usedby(cloud, config)
         with _volume_lock(volume_name):
             latest_volume = global_user_state.get_volume_by_name(volume_name)
             if latest_volume is None:
                 logger.warning(f'Volume {volume_name} not found.')
                 continue
             status = latest_volume.get('status')
-            if not usedby:
+            if not usedby_pods:
                 if status != status_lib.VolumeStatus.READY:
                     logger.info(f'Update volume {volume_name} '
                                 f'status to READY')
@@ -49,7 +49,7 @@ def volume_refresh():
             else:
                 if status != status_lib.VolumeStatus.IN_USE:
                     logger.info(f'Update volume {volume_name} '
-                                f'status to IN_USE, usedby: {usedby}')
+                                f'status to IN_USE, usedby: {usedby_pods}')
                     global_user_state.update_volume_status(
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
 
@@ -126,13 +126,24 @@ def volume_delete(names: List[str]) -> None:
         volume = global_user_state.get_volume_by_name(name)
         if volume is None:
             raise ValueError(f'Volume {name} not found.')
-        if volume.get('status') == status_lib.VolumeStatus.IN_USE:
-            raise ValueError(f'Volume {name} is in use.')
         config = volume.get('handle')
         if config is None:
             raise ValueError(f'Volume {name} has no handle.')
-        logger.debug(f'Deleting volume {name} with config {config}')
         cloud = config.cloud
+        usedby_pods, usedby_clusters = provision.get_volume_usedby(
+            cloud, config)
+        if usedby_clusters:
+            usedby_clusters_str = ', '.join(usedby_clusters)
+            cluster_str = 'clusters' if len(usedby_clusters) > 1 else 'cluster'
+            raise ValueError(
+                f'Volume {name} is used by {cluster_str} {usedby_clusters_str}.'
+            )
+        if usedby_pods:
+            usedby_pods_str = ', '.join(usedby_pods)
+            pod_str = 'pods' if len(usedby_pods) > 1 else 'pod'
+            raise ValueError(
+                f'Volume {name} is used by {pod_str} {usedby_pods_str}.')
+        logger.debug(f'Deleting volume {name} with config {config}')
         with _volume_lock(name):
             provision.delete_volume(cloud, config)
             global_user_state.delete_volume(name)
