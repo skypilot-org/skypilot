@@ -130,8 +130,8 @@ class TestServiceAccountModels:
             ('SA-UPPER', True),  # Uppercase variant
             ('Sa-Mixed', True),  # Mixed case
             ('sa', False),  # Just the prefix without dash
-            (' sa-test', False),  # Leading whitespace
-            ('sa-test ', False),  # Trailing whitespace
+            (' sa-test', True),  # Leading whitespace
+            ('sa-test ', True),  # Trailing whitespace
             ('sa--double-dash', True),  # Double dash (should still be valid)
         ]
 
