@@ -61,7 +61,7 @@ _DEFAULT_HOST_VM_FAMILY = (
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
-_DEFAULT_GPU_MEMORY_CPU_RATIO = 4
+_DEFAULT_GPU_MEMORY_CPU_RATIO = 3.75
 
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
@@ -137,10 +137,10 @@ _NUM_ACC_TO_NUM_CPU = {
     },
     # Based on p3 on AWS.
     'V100': {
-        1: 8,
-        2: 16,
-        4: 32,
-        8: 64
+        1: 4,
+        2: 8,
+        4: 16,
+        8: 32,
     },
     # Based on g4dn on AWS.
     'T4': {
