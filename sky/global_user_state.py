@@ -134,6 +134,12 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
     sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
     sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('last_creation_yaml',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_creation_command',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -308,6 +314,21 @@ def create_table():
             'password',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'last_creation_yaml',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'cluster_history',
+            'last_creation_command',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+
         session.commit()
 
 
@@ -597,6 +618,14 @@ def add_or_update_cluster(cluster_name: str,
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+        creation_info = {}
+        if conditional_values.get('last_creation_yaml') is not None:
+            creation_info = {
+                'last_creation_yaml':
+                    conditional_values.get('last_creation_yaml'),
+                'last_creation_command':
+                    conditional_values.get('last_creation_command'),
+            }
 
         insert_stmnt = insert_func(cluster_history_table).values(
             cluster_hash=cluster_hash,
@@ -605,7 +634,9 @@ def add_or_update_cluster(cluster_name: str,
             requested_resources=pickle.dumps(requested_resources),
             launched_resources=pickle.dumps(launched_resources),
             usage_intervals=pickle.dumps(usage_intervals),
-            user_hash=user_hash)
+            user_hash=user_hash,
+            **creation_info,
+        )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
             index_elements=[cluster_history_table.c.cluster_hash],
             set_={
@@ -617,7 +648,8 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(launched_resources),
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.user_hash: user_hash
+                cluster_history_table.c.user_hash: user_hash,
+                **creation_info,
             })
         session.execute(do_update_stmt)
 
@@ -1027,40 +1059,122 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 @_init_db
-def get_clusters_from_history() -> List[Dict[str, Any]]:
+def get_clusters_from_history(
+        days: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get cluster reports from history.
+
+    Args:
+        days: If specified, only include historical clusters (those not
+              currently active) that were last used within the past 'days'
+              days. Active clusters are always included regardless of this
+              parameter.
+
+    Returns:
+        List of cluster records with history information.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(
-            cluster_history_table.join(cluster_table,
-                                       cluster_history_table.c.cluster_hash ==
-                                       cluster_table.c.cluster_hash,
-                                       isouter=True)).all()
+        # Explicitly select columns from both tables to avoid ambiguity
+        query = session.query(
+            cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.requested_resources,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.last_creation_yaml,
+            cluster_history_table.c.last_creation_command,
+            cluster_table.c.status, cluster_table.c.workspace,
+            cluster_table.c.status_updated_at).select_from(
+                cluster_history_table.join(cluster_table,
+                                           cluster_history_table.c.cluster_hash
+                                           == cluster_table.c.cluster_hash,
+                                           isouter=True))
 
-    # '(cluster_hash, name, num_nodes, requested_resources, '
-    #         'launched_resources, usage_intervals) '
+        rows = query.all()
+
+    # Prepare filtering parameters
+    cutoff_time = None
+    if days is not None:
+        cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
+
     records = []
     for row in rows:
-        # TODO: use namedtuple instead of dict
         user_hash = _get_user_hash_or_current_user(row.user_hash)
-        status = row.status
-        if status is not None:
-            status = status_lib.ClusterStatus[status]
+        launched_at = _get_cluster_launch_time(row.cluster_hash)
+        duration = _get_cluster_duration(row.cluster_hash)
+
+        # Parse status
+        status = None
+        if row.status:
+            status = status_lib.ClusterStatus[row.status]
+
+        # Apply filtering: always include active clusters, filter historical
+        # ones by time
+        if cutoff_time is not None and status is None:  # Historical cluster
+            # For historical clusters, check if they were used recently
+            # Use the most recent activity from usage_intervals to determine
+            # last use
+            usage_intervals = []
+            if row.usage_intervals:
+                try:
+                    usage_intervals = pickle.loads(row.usage_intervals)
+                except (pickle.PickleError, AttributeError):
+                    usage_intervals = []
+
+            # Find the most recent activity time from usage_intervals
+            last_activity_time = None
+            if usage_intervals:
+                # Get the end time of the last interval (or start time if
+                # still running)
+                last_interval = usage_intervals[-1]
+                last_activity_time = (last_interval[1] if last_interval[1]
+                                      is not None else last_interval[0])
+
+            # Skip historical clusters that haven't been used recently
+            if last_activity_time is None or last_activity_time < cutoff_time:
+                continue
+
+        # Parse launched resources safely
+        launched_resources = None
+        if row.launched_resources:
+            try:
+                launched_resources = pickle.loads(row.launched_resources)
+            except (pickle.PickleError, AttributeError):
+                launched_resources = None
+
+        # Parse usage intervals safely
+        usage_intervals = []
+        if row.usage_intervals:
+            try:
+                usage_intervals = pickle.loads(row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                usage_intervals = []
+
+        # Get user name from user hash
+        user = get_user(user_hash)
+        user_name = user.name if user is not None else None
+
         record = {
             'name': row.name,
-            'launched_at': _get_cluster_launch_time(row.cluster_hash),
-            'duration': _get_cluster_duration(row.cluster_hash),
+            'launched_at': launched_at,
+            'duration': duration,
             'num_nodes': row.num_nodes,
-            'resources': pickle.loads(row.launched_resources),
+            'resources': launched_resources,
             'cluster_hash': row.cluster_hash,
-            'usage_intervals': pickle.loads(row.usage_intervals),
+            'usage_intervals': usage_intervals,
             'status': status,
             'user_hash': user_hash,
+            'user_name': user_name,
+            'workspace': row.workspace,
+            'last_creation_yaml': row.last_creation_yaml,
+            'last_creation_command': row.last_creation_command,
         }
 
         records.append(record)
 
     # sort by launch time, descending in recency
-    records = sorted(records, key=lambda record: -record['launched_at'])
+    records = sorted(records, key=lambda record: -(record['launched_at'] or 0))
     return records
 
 

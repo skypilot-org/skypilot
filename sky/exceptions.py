@@ -191,6 +191,12 @@ class InconsistentHighAvailabilityError(Exception):
     pass
 
 
+class InconsistentConsolidationModeError(Exception):
+    """Raised when the consolidation mode property in the user config
+    is inconsistent with the actual cluster."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
@@ -605,4 +611,9 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class RestfulPolicyError(Exception):
+    """Raised when failed to call a RESTful policy."""
     pass

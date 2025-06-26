@@ -132,7 +132,6 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         total_duration: total_duration,
         workspace: job.workspace,
         status: job.status,
-        priority: job.priority,
         requested_resources: job.resources,
         resources_str: cluster_resources,
         resources_str_full: job.cluster_resources_full || cluster_resources,
