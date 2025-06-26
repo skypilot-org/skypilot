@@ -894,7 +894,7 @@ def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
     with open(tmp_path / 'context_config.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
         kubernetes:
-            contexts:
+            per_context_config:
                 contextA:
                     autoscaler: gke
                 contextB:
