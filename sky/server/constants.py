@@ -38,4 +38,4 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
                              'out')
 
 # The interval (seconds) for the event to be restarted in the background.
-EVENT_RESTART_INTERVAL_SECONDS = 20
+DAEMON_RESTART_INTERVAL_SECONDS = 20

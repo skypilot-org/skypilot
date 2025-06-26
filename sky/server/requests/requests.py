@@ -394,9 +394,9 @@ class InternalRequestDaemon:
                     logger.exception(
                         f'Error running {self.name} event. '
                         f'Restarting in '
-                        f'{server_constants.EVENT_RESTART_INTERVAL_SECONDS} '
+                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
                         'seconds...')
-                    time.sleep(server_constants.EVENT_RESTART_INTERVAL_SECONDS)
+                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.
