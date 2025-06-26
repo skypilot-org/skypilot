@@ -71,19 +71,19 @@ def _read_last_n_lines(file_handle: typing.TextIO, n: int) -> List[str]:
     file_handle.seek(0, 2)  # Seek to end
     if n <= 0:
         return []
-    
+
     # Get file size
     file_size = file_handle.tell()
-    
+
     if file_size == 0:
         return []
-    
+
     # Read backwards to find n newlines
     buffer_size = min(8192, file_size)
     lines_found = 0
     pos = file_size
     chunks = []
-    
+
     while pos > 0 and lines_found < n:
         # Read chunk
         read_size = min(buffer_size, pos)
@@ -91,34 +91,36 @@ def _read_last_n_lines(file_handle: typing.TextIO, n: int) -> List[str]:
         file_handle.seek(pos)
         chunk = file_handle.read(read_size)
         chunks.append(chunk)
-        
+
         # Count newlines in this chunk
         lines_found += chunk.count('\n')
-    
+
     # Combine all chunks and split into lines
     full_text = ''.join(reversed(chunks))
     all_lines = full_text.split('\n')
-    
+
     # Get the last n lines, handling end-of-file properly
     if all_lines and all_lines[-1] == '':
         # File ends with newline, so last element is empty
-        result_lines = all_lines[-n-1:-1]
+        result_lines = all_lines[-n - 1:-1]
     else:
         # File doesn't end with newline
         result_lines = all_lines[-n:]
-    
+
     # Add newlines back (except for the very last line if file doesn't end with newline)
     result = []
     for i, line in enumerate(result_lines):
-        if i == len(result_lines) - 1 and (not all_lines or all_lines[-1] != ''):
+        if i == len(result_lines) - 1 and (not all_lines or
+                                           all_lines[-1] != ''):
             # Last line and file doesn't end with newline
             result.append(line)
         else:
             result.append(line + '\n')
-    
+
     # Position file pointer at end
     file_handle.seek(0, 2)
     return result
+
 
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
@@ -995,9 +997,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
-    returncode = backend.tail_logs(handle,
-                                   job_id=None,
-                                   follow=follow)
+    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
     if returncode != 0:
         return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                 f'{replica_id}.{colorama.Style.RESET_ALL}')
