@@ -33,6 +33,7 @@ from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky import core
 
 if typing.TYPE_CHECKING:
     import sky
