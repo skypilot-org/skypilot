@@ -14,6 +14,8 @@ from typing import Optional, Tuple
 
 import filelock
 
+# pylint: disable=unused-import
+from sky import core
 from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
