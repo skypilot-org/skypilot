@@ -1032,7 +1032,14 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.user}</TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/users?user=${encodeURIComponent(item.user_hash || item.user)}`}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.user}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <Link
                           href="/workspaces"
@@ -1550,7 +1557,14 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/users?user=${encodeURIComponent(item.user_hash || item.user)}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.user}
+                      </Link>
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
@@ -1738,7 +1752,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? '... show less' : '... show more'}
+          {isExpanded ? 'show less' : 'show more'}
         </button>
       )}
     </div>

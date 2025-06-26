@@ -387,7 +387,7 @@ export function Clusters() {
                 />
               </div>
               <span className="ml-2 text-sm text-gray-700">
-                Show history (Last 30 days)
+                Show history (In)
               </span>
             </label>
           </div>
@@ -771,7 +771,12 @@ export function ClusterTable({
                         </Link>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        {item.user}
+                        <Link
+                          href={`/users?user=${encodeURIComponent(item.user_hash || item.user)}`}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.user}
+                        </Link>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <Link

@@ -464,7 +464,14 @@ function ActiveTab({
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
-                <div className="text-base mt-1">{clusterData.user}</div>
+                <div className="text-base mt-1">
+                  <Link
+                    href={`/users?user=${encodeURIComponent(clusterData.user_hash || clusterData.user)}`}
+                    className="text-blue-600 hover:underline"
+                  >
+                    {clusterData.user}
+                  </Link>
+                </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">

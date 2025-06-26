@@ -135,6 +135,73 @@ const SuccessDisplay = ({ message, onDismiss }) => {
   );
 };
 
+// Helper function to determine if a user is a service account
+const isServiceAccount = (userId) => {
+  return userId && userId.startsWith('sa-');
+};
+
+// Component to render user role badges with proper Service Account handling
+const UserRoleBadge = ({ user, editingUserId, currentEditingRole, setCurrentEditingRole, handleSaveEdit, handleCancelEdit, currentUserRole, handleEditClick }) => {
+  const isServiceAcct = isServiceAccount(user.userId);
+  
+  if (editingUserId === user.userId) {
+    return (
+      <>
+        <select
+          value={currentEditingRole}
+          onChange={(e) => setCurrentEditingRole(e.target.value)}
+          className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+        >
+          <option value="admin">Admin</option>
+          <option value="user">User</option>
+        </select>
+        <button
+          onClick={() => handleSaveEdit(user.userId)}
+          className="text-green-600 hover:text-green-800 p-1 ml-2"
+          title="Save"
+        >
+          <CheckIcon className="h-4 w-4" />
+        </button>
+        <button
+          onClick={handleCancelEdit}
+          className="text-gray-500 hover:text-gray-700 p-1"
+          title="Cancel"
+        >
+          <XIcon className="h-4 w-4" />
+        </button>
+      </>
+    );
+  }
+
+  if (isServiceAcct) {
+    // Service Account badge with proper spacing and no yellow/grey colors
+    return (
+      <div className="flex items-center gap-3">
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-300">
+          Service Account
+        </span>
+      </div>
+    );
+  }
+
+  // Regular user role display
+  return (
+    <>
+      <span className="capitalize">{user.role}</span>
+      {/* Only show edit role button if admin */}
+      {currentUserRole === 'admin' && (
+        <button
+          onClick={() => handleEditClick(user.userId, user.role)}
+          className="text-sky-blue hover:text-sky-blue-bright p-1 ml-2"
+          title="Edit role"
+        >
+          <PenIcon className="h-3 w-3" />
+        </button>
+      )}
+    </>
+  );
+};
+
 export function Users() {
   const [loading, setLoading] = useState(false);
   const refreshDataRef = useRef(null);
@@ -1126,50 +1193,16 @@ function UsersTable({
                 {user.fullEmailID}
               </TableCell>
               <TableCell className="truncate" title={user.role}>
-                <div className="flex items-center gap-2">
-                  {editingUserId === user.userId ? (
-                    <>
-                      <select
-                        value={currentEditingRole}
-                        onChange={(e) => setCurrentEditingRole(e.target.value)}
-                        className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                      >
-                        <option value="admin">Admin</option>
-                        <option value="user">User</option>
-                      </select>
-                      <button
-                        onClick={() => handleSaveEdit(user.userId)}
-                        className="text-green-600 hover:text-green-800 p-1"
-                        title="Save"
-                      >
-                        <CheckIcon className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="text-gray-500 hover:text-gray-700 p-1"
-                        title="Cancel"
-                      >
-                        <XIcon className="h-4 w-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="capitalize">{user.role}</span>
-                      {/* Only show edit role button if admin */}
-                      {currentUserRole === 'admin' && (
-                        <button
-                          onClick={() =>
-                            handleEditClick(user.userId, user.role)
-                          }
-                          className="text-sky-blue hover:text-sky-blue-bright p-1"
-                          title="Edit role"
-                        >
-                          <PenIcon className="h-3 w-3" />
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
+                <UserRoleBadge
+                  user={user}
+                  editingUserId={editingUserId}
+                  currentEditingRole={currentEditingRole}
+                  setCurrentEditingRole={setCurrentEditingRole}
+                  handleSaveEdit={handleSaveEdit}
+                  handleCancelEdit={handleCancelEdit}
+                  currentUserRole={currentUserRole}
+                  handleEditClick={handleEditClick}
+                />
               </TableCell>
               <TableCell>
                 {user.clusterCount === -1 ? (

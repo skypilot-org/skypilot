@@ -963,7 +963,14 @@ function JobDetailsContent({
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">User</div>
-        <div className="text-base mt-1">{jobData.user}</div>
+        <div className="text-base mt-1">
+          <Link
+            href={`/users?user=${encodeURIComponent(jobData.user_hash || jobData.user)}`}
+            className="text-blue-600 hover:underline"
+          >
+            {jobData.user}
+          </Link>
+        </div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Submitted</div>
