@@ -1255,37 +1255,43 @@ function UsersTable({
           <TableRow>
             <TableHead
               onClick={() => requestSort('usernameDisplay')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
             >
               Name{getSortDirection('usernameDisplay')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('fullEmailID')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
             >
               User ID{getSortDirection('fullEmailID')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('role')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
             >
               Role{getSortDirection('role')}
             </TableHead>
             <TableHead
+              onClick={() => requestSort('created_at')}
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+            >
+              Joined{getSortDirection('created_at')}
+            </TableHead>
+            <TableHead
               onClick={() => requestSort('clusterCount')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
             >
               Clusters{getSortDirection('clusterCount')}
             </TableHead>
             <TableHead
               onClick={() => requestSort('jobCount')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/5"
+              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
             >
               Jobs{getSortDirection('jobCount')}
             </TableHead>
             {/* Show Actions column if basicAuthEnabled */}
             {basicAuthEnabled && (
-              <TableHead className="whitespace-nowrap w-1/6">Actions</TableHead>
+              <TableHead className="whitespace-nowrap w-1/7">Actions</TableHead>
             )}
           </TableRow>
         </TableHeader>
@@ -1343,6 +1349,15 @@ function UsersTable({
                     </>
                   )}
                 </div>
+              </TableCell>
+              <TableCell className="truncate">
+                {user.created_at ? (
+                  <TimestampWithTooltip
+                    date={new Date(user.created_at * 1000)}
+                  />
+                ) : (
+                  '-'
+                )}
               </TableCell>
               <TableCell>
                 {user.clusterCount === -1 ? (
@@ -2036,7 +2051,7 @@ function ServiceAccountTokensView({
                   <input
                     type="number"
                     className="border rounded px-3 py-2 w-full"
-                    placeholder="30"
+                    placeholder="e.g., 30"
                     min="0"
                     max="365"
                     value={newToken.expires_in_days || ''}
