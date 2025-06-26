@@ -330,7 +330,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
                 request_id=event.id,
                 request_name=event.name,
                 request_body=payloads.RequestBody(),
-                func=event.event_fn,
+                func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
             )
