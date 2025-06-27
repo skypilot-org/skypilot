@@ -680,6 +680,11 @@ def test_private_docker_registry(generic_cloud,
 # kubernetes and gcp setup. This is not standard practice.
 @pytest.mark.kubernetes
 def test_helm_deploy_gke(request):
+    if not request.config.getoption('--helm-package'):
+        # Test pulls image from dockerhub, unrelated to codebase. Package name
+        # indicates intentional testing - without it, test is meaningless.
+        pytest.skip('Skipping test as helm package is not set')
+
     helm_version = request.config.getoption('--helm-version')
     package_name = request.config.getoption('--helm-package')
     test = smoke_tests_utils.Test('helm_deploy_gke', [
@@ -690,6 +695,11 @@ def test_helm_deploy_gke(request):
 
 @pytest.mark.kubernetes
 def test_helm_deploy_okta(request):
+    if not request.config.getoption('--helm-package'):
+        # Test pulls image from dockerhub, unrelated to codebase. Package name
+        # indicates intentional testing - without it, test is meaningless.
+        pytest.skip('Skipping test as helm package is not set')
+
     helm_version = request.config.getoption('--helm-version')
     package_name = request.config.getoption('--helm-package')
     test = smoke_tests_utils.Test('helm_deploy_okta', [
