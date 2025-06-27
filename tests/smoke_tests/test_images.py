@@ -686,8 +686,10 @@ def test_helm_deploy_gke(request):
 
 
 @pytest.mark.kubernetes
-def test_helm_deploy_okta():
+def test_helm_deploy_okta(request):
+    helm_version = request.config.getoption('--helm-version')
+    package_name = request.config.getoption('--helm-package')
     test = smoke_tests_utils.Test('helm_deploy_okta', [
-        f'bash tests/kubernetes/scripts/helm_okta.sh',
+        f'bash tests/kubernetes/scripts/helm_okta.sh {package_name} {helm_version}',
     ])
     smoke_tests_utils.run_one_test(test)
