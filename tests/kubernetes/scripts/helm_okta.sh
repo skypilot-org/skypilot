@@ -26,7 +26,24 @@
 
 NAMESPACE=skypilot
 NODEPORT=30082
-HTTPS_NODEPORT=30443
+HTTPS_NODEPORT=30100
+
+# Cleanup function to delete namespace and resources
+cleanup() {
+    echo ""
+    echo "🧹 Cleaning up resources..."
+    if kubectl get namespace $NAMESPACE >/dev/null 2>&1; then
+        echo "Deleting namespace $NAMESPACE..."
+        kubectl delete namespace $NAMESPACE --ignore-not-found=true
+        echo "✅ Namespace $NAMESPACE deleted"
+    else
+        echo "Namespace $NAMESPACE does not exist, skipping deletion"
+    fi
+    echo "🧹 Cleanup complete"
+}
+
+# Set up trap to call cleanup function on script exit
+trap cleanup EXIT
 
 # Assert all required environment variables are provided
 if [[ -z "$OKTA_CLIENT_ID" ]]; then
@@ -149,9 +166,35 @@ ENDPOINT=http://localhost:${NODEPORT}
 
 echo "API server endpoint: $ENDPOINT"
 
-# Test the API server with retry logic30082
-echo "Testing API server health endpoint..."
-echo "Endpoint: $ENDPOINT/api/health"
+# Test the API server with retry logic
+echo "Testing API server endpoint..."
+echo "Endpoint: $ENDPOINT"
+MAX_RETRIES=10  # 5 minutes with 30 second intervals
+RETRY_INTERVAL=30
+RETRY_COUNT=0
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing endpoint..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${ENDPOINT})
+    echo "HTTP response code: $HTTP_CODE"
+
+    # Check if response is not a 4xx error (nginx error page)
+    if [ "$HTTP_CODE" -lt 400 ]; then
+        echo "API server is responding successfully (HTTP $HTTP_CODE)!"
+        break
+    else
+        echo "API server not ready yet (HTTP $HTTP_CODE - nginx error). Waiting ${RETRY_INTERVAL} seconds..."
+        if [ $RETRY_COUNT -lt $((MAX_RETRIES - 1)) ]; then
+            sleep $RETRY_INTERVAL
+        fi
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    fi
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "Error: API server failed to become ready after $((MAX_RETRIES * RETRY_INTERVAL)) seconds"
+    exit 1
+fi
 
 echo "SkyPilot API server is ready and accessible!"
 echo ""
@@ -171,8 +214,12 @@ echo ""
 echo ""
 echo "🔄 Performing automated login..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python3 "$SCRIPT_DIR/okta_auto_login.py" "$ENDPOINT" "$OKTA_TEST_USERNAME" "$OKTA_TEST_PASSWORD" "$OKTA_CLIENT_ID" || exit 1
+LOGIN_OUTPUT=$(python3 "$SCRIPT_DIR/okta_auto_login.py" "$ENDPOINT" "$OKTA_TEST_USERNAME" "$OKTA_TEST_PASSWORD" "$OKTA_CLIENT_ID")
 
-echo ""
-echo "🎉 Automated setup complete!"
-echo "SkyPilot API server is ready with OAuth2 authentication."
+if [[ $? -eq 0 ]] && [[ "$LOGIN_OUTPUT" == SUCCESS* ]]; then
+    echo "✅ Automated test complete"
+else
+    echo "❌ Error happened during automated login test"
+    echo "Login output: $LOGIN_OUTPUT"
+    exit 1
+fi

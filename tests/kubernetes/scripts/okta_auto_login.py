@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Automated Okta OAuth2 Login Script for SkyPilot Testing
+Automated Okta OAuth2 Login Script for SkyPilot Testing using Selenium
 
 This script automates the OAuth2 login flow for test users with MFA disabled.
-It simulates the browser-based OAuth flow to obtain authentication cookies
-that can be used with SkyPilot CLI.
+It uses Selenium WebDriver to simulate the browser-based OAuth flow and verify
+successful authentication by checking for the SkyPilot dashboard.
 
 Usage:
     python3 okta_auto_login.py <endpoint> <username> <password> <client_id>
@@ -13,15 +13,18 @@ Example:
     python3 okta_auto_login.py http://localhost:30082 test-user@example.com password123 client_id_here
 """
 
-import base64
-import json
 import logging
-import re
 import sys
-from typing import Dict, Optional
-from urllib.parse import urlparse
 
-import requests
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -29,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class OktaAutoLogin:
-    """Handles automated Okta OAuth2 login flow"""
+    """Handles automated Okta OAuth2 login flow using Selenium"""
 
     def __init__(self, endpoint: str, username: str, password: str,
                  client_id: str):
@@ -37,201 +40,90 @@ class OktaAutoLogin:
         self.username = username
         self.password = password
         self.client_id = client_id
-        self.session = requests.Session()
+        self.driver = None
 
-        # Set user agent to avoid bot detection
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        })
+    def get_chrome_driver(self, headless: bool) -> webdriver.Chrome:
+        """Create and return a Chrome driver with appropriate options."""
+        chrome_options = Options()
 
-    def get_auth_cookies(self) -> Optional[Dict[str, str]]:
+        if headless:
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-plugins')
+
+        # Additional options for better compatibility
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+
+        # Use ChromeDriverManager to automatically handle driver installation
+        service = Service(ChromeDriverManager().install())
+        return webdriver.Chrome(service=service, options=chrome_options)
+
+    def perform_login(self) -> bool:
         """
-        Perform the complete OAuth2 flow to get authentication cookies
+        Perform the complete OAuth2 login flow and verify success
 
         Returns:
-            Dictionary of authentication cookies if successful, None otherwise
+            True if login and verification successful, False otherwise
         """
         try:
-            # Step 1: Initiate OAuth flow
-            logger.info("Step 1: Initiating OAuth flow...")
-            okta_auth_url = self._start_oauth_flow()
-            if not okta_auth_url:
-                return None
+            self.driver = self.get_chrome_driver(headless=True)
+            logger.info("✅ Chrome driver initialized")
 
-            # Step 2: Get login form from Okta
-            logger.info("Step 2: Getting Okta login form...")
-            form_data = self._get_login_form(okta_auth_url)
-            if not form_data:
-                return None
+            # Step 1: Navigate to the endpoint
+            logger.info(f"Step 1: Navigating to endpoint: {self.endpoint}")
+            self.driver.get(self.endpoint)
 
-            # Step 3: Submit credentials
-            logger.info("Step 3: Submitting credentials...")
-            if not self._submit_credentials(form_data):
-                return None
+            # Step 2: Wait for and fill username field
+            logger.info("Step 2: Filling username field...")
+            username_field = WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.NAME, "identifier")))
+            username_field.clear()
+            username_field.send_keys(self.username)
+            username_field.send_keys(Keys.RETURN)
+            logger.info("✅ Username entered and submitted")
 
-            # Step 4: Complete OAuth flow and extract cookies
-            logger.info("Step 4: Completing OAuth flow...")
-            auth_cookies = self._extract_auth_cookies()
+            # Step 3: Wait for and fill password field
+            logger.info("Step 3: Filling password field...")
+            password_field = WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located(
+                    (By.NAME, "credentials.passcode")))
+            password_field.clear()
+            password_field.send_keys(self.password)
+            password_field.send_keys(Keys.RETURN)
+            logger.info("✅ Password entered and submitted")
 
-            if auth_cookies:
-                logger.info("✅ Successfully obtained authentication cookies")
-                return auth_cookies
-            else:
-                logger.error("❌ No authentication cookies found")
-                return None
+            # Step 4: Wait for redirect to dashboard
+            logger.info("Step 4: Waiting for redirect to dashboard...")
+            WebDriverWait(self.driver,
+                          60).until(EC.url_contains("/dashboard/clusters"))
+            logger.info("✅ Successfully redirected to dashboard")
 
+            # Step 5: Verify SkyPilot logo is present
+            logger.info("Step 5: Verifying SkyPilot logo...")
+            logo_element = WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "img[alt='SkyPilot Logo']")))
+            logger.info("✅ SkyPilot logo found on page")
+
+            logger.info("🎉 Login verification completed successfully!")
+            return True
+
+        except TimeoutException as e:
+            logger.error(f"❌ Timeout during login process: {str(e)}")
+            return False
         except Exception as e:
             logger.error(f"❌ Authentication failed: {str(e)}")
-            return None
-
-    def _start_oauth_flow(self) -> Optional[str]:
-        """Start the OAuth flow and get Okta authorization URL"""
-        try:
-            auth_url = f"{self.endpoint}/oauth2/start"
-            response = self.session.get(auth_url,
-                                        allow_redirects=False,
-                                        timeout=30)
-
-            if response.status_code == 302:
-                okta_auth_url = response.headers.get('Location')
-                if okta_auth_url and 'okta.com' in okta_auth_url:
-                    logger.info(f"Got Okta auth URL: {okta_auth_url[:100]}...")
-                    return okta_auth_url
-                else:
-                    logger.error("Invalid redirect URL from OAuth start")
-                    return None
-            else:
-                logger.error(
-                    f"Unexpected response from OAuth start: {response.status_code}"
-                )
-                return None
-
-        except requests.RequestException as e:
-            logger.error(f"Network error during OAuth start: {e}")
-            return None
-
-    def _get_login_form(self, okta_auth_url: str) -> Optional[Dict[str, str]]:
-        """Get the Okta login form and extract necessary parameters"""
-        try:
-            response = self.session.get(okta_auth_url, timeout=30)
-            if response.status_code != 200:
-                logger.error(
-                    f"Could not access Okta login page: {response.status_code}")
-                return None
-
-            html = response.text
-
-            # Extract form action URL
-            action_match = re.search(r'<form[^>]+action="([^"]*)"[^>]*>', html,
-                                     re.IGNORECASE)
-            if action_match:
-                action_url = action_match.group(1)
-                if action_url.startswith('/'):
-                    parsed = urlparse(okta_auth_url)
-                    action_url = f"{parsed.scheme}://{parsed.netloc}{action_url}"
-            else:
-                # Fallback: construct URL from current page
-                parsed = urlparse(okta_auth_url)
-                action_url = f"{parsed.scheme}://{parsed.netloc}/api/v1/authn"
-
-            # Extract hidden form fields
-            form_data = {'username': self.username, 'password': self.password}
-
-            # Extract common hidden fields
-            hidden_fields = [
-                'state', 'nonce', '_xsrfToken', 'fromURI', 'okta-signin-submit',
-                'relayState', 'sessionToken', 'SAMLRequest'
-            ]
-
-            for field in hidden_fields:
-                match = re.search(rf'name="{field}"[^>]*value="([^"]*)"', html,
-                                  re.IGNORECASE)
-                if match:
-                    form_data[field] = match.group(1)
-
-            form_data['action_url'] = action_url
-            logger.info(f"Extracted form data with {len(form_data)} fields")
-            return form_data
-
-        except requests.RequestException as e:
-            logger.error(f"Network error getting login form: {e}")
-            return None
-
-    def _submit_credentials(self, form_data: Dict[str, str]) -> bool:
-        """Submit login credentials to Okta"""
-        try:
-            action_url = form_data.pop('action_url')
-
-            # Add form headers
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate'
-            }
-
-            response = self.session.post(action_url,
-                                         data=form_data,
-                                         headers=headers,
-                                         allow_redirects=True,
-                                         timeout=30)
-
-            # Check if login was successful
-            if response.status_code == 200:
-                # Look for error messages in the response
-                if 'error' in response.text.lower(
-                ) or 'invalid' in response.text.lower():
-                    if 'password' in response.text.lower():
-                        logger.error("❌ Invalid username or password")
-                    else:
-                        logger.error("❌ Login failed - check credentials")
-                    return False
-                else:
-                    logger.info("✅ Credentials submitted successfully")
-                    return True
-            else:
-                logger.error(
-                    f"Login submission failed with status: {response.status_code}"
-                )
-                return False
-
-        except requests.RequestException as e:
-            logger.error(f"Network error submitting credentials: {e}")
             return False
-
-    def _extract_auth_cookies(self) -> Optional[Dict[str, str]]:
-        """Extract authentication cookies from the session"""
-        try:
-            # Try to access the callback to ensure we have proper cookies
-            callback_url = f"{self.endpoint}/oauth2/callback"
-            response = self.session.get(callback_url,
-                                        allow_redirects=True,
-                                        timeout=30)
-
-            # Extract OAuth2 proxy cookies
-            auth_cookies = {}
-            cookie_names = [
-                '_oauth2_proxy', '_oauth2_proxy_csrf', 'oauth2_proxy_1',
-                '_oauth2_proxy_session', 'oauth2-proxy', 'session'
-            ]
-
-            for cookie in self.session.cookies:
-                if any(name in cookie.name.lower() for name in cookie_names):
-                    auth_cookies[cookie.name] = cookie.value
-                    logger.info(f"Found auth cookie: {cookie.name}")
-
-            return auth_cookies if auth_cookies else None
-
-        except requests.RequestException as e:
-            logger.error(f"Network error extracting cookies: {e}")
-            return None
-
-    def create_token(self, cookies: Dict[str, str]) -> str:
-        """Create a base64-encoded token from authentication cookies"""
-        token_data = {'v': 1, 'user': self.username, 'cookies': cookies}
-        token_json = json.dumps(token_data)
-        token_bytes = token_json.encode('utf-8')
-        return base64.b64encode(token_bytes).decode('utf-8')
+        finally:
+            if self.driver:
+                self.driver.quit()
+                logger.info("✅ Chrome driver closed")
 
 
 def main():
@@ -261,11 +153,10 @@ def main():
 
     # Perform login
     login_handler = OktaAutoLogin(endpoint, username, password, client_id)
-    cookies = login_handler.get_auth_cookies()
+    success = login_handler.perform_login()
 
-    if cookies:
-        token = login_handler.create_token(cookies)
-        print(f"SUCCESS:{token}")
+    if success:
+        print("SUCCESS:Login verification completed")
         logger.info("🎉 Login completed successfully!")
     else:
         print("FAILED:Could not authenticate")
