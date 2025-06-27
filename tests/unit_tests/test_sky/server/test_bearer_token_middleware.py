@@ -70,8 +70,11 @@ class TestBearerTokenMiddleware:
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'false'}):
             response = await middleware.dispatch(mock_request, mock_call_next)
 
-            # Should call next middleware without processing (might be OAuth token)
-            assert response.status_code == 200
+            # Should return 401 when service accounts are disabled and
+            # a SkyPilot token is provided
+            assert response.status_code == 401
+            assert "Service account authentication disabled" in response.body.decode(
+            )
 
     @pytest.mark.asyncio
     async def test_non_skypilot_bearer_token_bypass(self, middleware,
