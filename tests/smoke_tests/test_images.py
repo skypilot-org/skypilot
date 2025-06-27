@@ -675,6 +675,9 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
+# This test requires gcp credentials, but in order to trigger together with
+# test_helm_deploy_okta, we mark it as kubernetes, since our test env have both
+# kubernetes and gcp setup. This is not standard practice.
 @pytest.mark.kubernetes
 def test_helm_deploy_gke(request):
     helm_version = request.config.getoption('--helm-version')
