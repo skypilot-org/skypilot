@@ -2154,8 +2154,7 @@ def api_login(endpoint: Optional[str] = None,
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}Service account token authentication '
-                    f'failed:{colorama.Style.RESET_ALL} {e}'
-                ) from None
+                    f'failed:{colorama.Style.RESET_ALL} {e}') from None
 
     # OAuth2/cookie-based authentication flow
     # TODO(zhwu): this SDK sets global endpoint, which may not be the best
