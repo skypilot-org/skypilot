@@ -671,8 +671,8 @@ export function Users() {
       )}
 
       {/* Create User Dialog */}
-      <Dialog 
-        open={showCreateUser} 
+      <Dialog
+        open={showCreateUser}
         onOpenChange={(open) => {
           setShowCreateUser(open);
           if (!open) {
@@ -1017,8 +1017,8 @@ export function Users() {
       </Dialog>
 
       {/* Delete User Confirmation Dialog */}
-      <Dialog 
-        open={showDeleteConfirmDialog} 
+      <Dialog
+        open={showDeleteConfirmDialog}
         onOpenChange={(open) => {
           if (open) return;
           handleCancelDelete();
