@@ -18,7 +18,7 @@ from typing_extensions import assert_never
 
 from sky import catalog
 from sky import exceptions
-from sky.utils import cloud_config_utils
+from sky import skypilot_config
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import timeline
@@ -673,7 +673,7 @@ class Cloud:
             region_name = resources.region.lower()
 
         # Docker image is not compatible with ssh proxy command.
-        if cloud_config_utils.get_cloud_config_value(
+        if skypilot_config.get_cloud_config_value(
                 cloud=str(cls).lower(),
                 region=region_name,
                 keys=('ssh_proxy_command',),

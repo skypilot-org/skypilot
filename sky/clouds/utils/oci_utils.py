@@ -17,7 +17,6 @@ import os
 
 from sky import sky_logging
 from sky import skypilot_config
-from sky.utils import cloud_config_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 
@@ -106,7 +105,7 @@ class OCIConfig:
     @classmethod
     def get_compartment(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
-        default_compartment_ocid = cloud_config_utils.get_cloud_config_value(
+        default_compartment_ocid = skypilot_config.get_cloud_config_value(
             cloud='oci',
             region=None,
             keys=(
@@ -114,7 +113,7 @@ class OCIConfig:
                 'compartment_ocid',
             ),
             default_value=None)
-        compartment = cloud_config_utils.get_cloud_config_value(
+        compartment = skypilot_config.get_cloud_config_value(
             cloud='oci',
             region=None,
             keys=(
@@ -127,25 +126,25 @@ class OCIConfig:
     @classmethod
     def get_vcn_ocid(cls, region):
         # Will reuse the regional VCN if specified.
-        vcn = cloud_config_utils.get_cloud_config_value(cloud='oci',
-                                                        region=None,
-                                                        keys=(
-                                                            region,
-                                                            'vcn_ocid',
-                                                        ),
-                                                        default_value=None)
+        vcn = skypilot_config.get_cloud_config_value(cloud='oci',
+                                                     region=None,
+                                                     keys=(
+                                                         region,
+                                                         'vcn_ocid',
+                                                     ),
+                                                     default_value=None)
         return vcn
 
     @classmethod
     def get_vcn_subnet(cls, region):
         # Will reuse the subnet if specified.
-        vcn = cloud_config_utils.get_cloud_config_value(cloud='oci',
-                                                        region=None,
-                                                        keys=(
-                                                            region,
-                                                            'vcn_subnet',
-                                                        ),
-                                                        default_value=None)
+        vcn = skypilot_config.get_cloud_config_value(cloud='oci',
+                                                     region=None,
+                                                     keys=(
+                                                         region,
+                                                         'vcn_subnet',
+                                                     ),
+                                                     default_value=None)
         return vcn
 
     @classmethod
@@ -154,7 +153,7 @@ class OCIConfig:
         # we give a choice to set the default image tag (for gpu instances) in
         # the sky's user-config file (if not specified, use the hardcode one at
         # last)
-        return cloud_config_utils.get_cloud_config_value(
+        return skypilot_config.get_cloud_config_value(
             cloud='oci',
             region=None,
             keys=(
@@ -168,7 +167,7 @@ class OCIConfig:
         # Get the default image tag. Instead of hardcoding, we give a choice to
         # set the default image tag in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
-        return cloud_config_utils.get_cloud_config_value(
+        return skypilot_config.get_cloud_config_value(
             cloud='oci',
             region=None,
             keys=(
@@ -189,27 +188,26 @@ class OCIConfig:
 
     @classmethod
     def get_profile(cls) -> str:
-        return cloud_config_utils.get_cloud_config_value(
-            cloud='oci',
-            region=None,
-            keys=(
-                'default',
-                'oci_config_profile',
-            ),
-            default_value='DEFAULT')
+        return skypilot_config.get_cloud_config_value(cloud='oci',
+                                                      region=None,
+                                                      keys=(
+                                                          'default',
+                                                          'oci_config_profile',
+                                                      ),
+                                                      default_value='DEFAULT')
 
     @classmethod
     def get_default_image_os(cls) -> str:
         # Get the default image OS. Instead of hardcoding, we give a choice to
         # set the default image OS type in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
-        return cloud_config_utils.get_cloud_config_value(cloud='oci',
-                                                         region=None,
-                                                         keys=(
-                                                             'default',
-                                                             'image_os_type',
-                                                         ),
-                                                         default_value='ubuntu')
+        return skypilot_config.get_cloud_config_value(cloud='oci',
+                                                      region=None,
+                                                      keys=(
+                                                          'default',
+                                                          'image_os_type',
+                                                      ),
+                                                      default_value='ubuntu')
 
 
 oci_config = OCIConfig()

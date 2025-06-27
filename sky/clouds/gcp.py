@@ -20,7 +20,6 @@ from sky.clouds.utils import gcp_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
 from sky.utils import annotations
-from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -230,7 +229,7 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): We probably need to store the MIG requirement in resources
         # because `skypilot_config` may change for an existing cluster.
         # Clusters created with MIG (only GPU clusters) cannot be stopped.
-        if (cloud_config_utils.get_cloud_config_value(
+        if (skypilot_config.get_cloud_config_value(
                 cloud='gcp',
                 region=resources.region,
                 keys=('managed_instance_group',),
@@ -506,7 +505,7 @@ class GCP(clouds.Cloud):
                 r.instance_type,
                 GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
         }
-        enable_gpu_direct = cloud_config_utils.get_cloud_config_value(
+        enable_gpu_direct = skypilot_config.get_cloud_config_value(
             cloud='gcp',
             region=region_name,
             keys=('enable_gpu_direct',),
@@ -595,7 +594,7 @@ class GCP(clouds.Cloud):
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
-        managed_instance_group_config = cloud_config_utils.get_cloud_config_value(
+        managed_instance_group_config = skypilot_config.get_cloud_config_value(
             cloud='gcp',
             region=region_name,
             keys=('managed_instance_group',),
@@ -610,7 +609,7 @@ class GCP(clouds.Cloud):
         if use_mig:
             resources_vars.update(managed_instance_group_config)
         resources_vars[
-            'force_enable_external_ips'] = cloud_config_utils.get_cloud_config_value(
+            'force_enable_external_ips'] = skypilot_config.get_cloud_config_value(
                 cloud='gcp',
                 region=region_name,
                 keys=('force_enable_external_ips',),
@@ -638,14 +637,13 @@ class GCP(clouds.Cloud):
                 device_mounts=device_mounts_str)
 
         # Add gVNIC from config
-        resources_vars[
-            'enable_gvnic'] = cloud_config_utils.get_cloud_config_value(
-                cloud='gcp',
-                region=region_name,
-                keys=('enable_gvnic',),
-                default_value=False,
-                override_configs=resources.cluster_config_overrides)
-        placement_policy = cloud_config_utils.get_cloud_config_value(
+        resources_vars['enable_gvnic'] = skypilot_config.get_cloud_config_value(
+            cloud='gcp',
+            region=region_name,
+            keys=('enable_gvnic',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides)
+        placement_policy = skypilot_config.get_cloud_config_value(
             cloud='gcp',
             region=region_name,
             keys=('placement_policy',),

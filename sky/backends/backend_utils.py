@@ -38,7 +38,6 @@ from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import cloud_config_utils
 from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
@@ -528,7 +527,7 @@ def get_expirable_clouds(
             # add remote_identity of each context if it exists
             remote_identities = None
             for context in contexts:
-                context_remote_identity = cloud_config_utils.get_cloud_config_value(
+                context_remote_identity = skypilot_config.get_cloud_config_value(
                     cloud='kubernetes',
                     region=context,
                     keys=('remote_identity',),
@@ -542,7 +541,7 @@ def get_expirable_clouds(
                     elif isinstance(context_remote_identity, list):
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
-            global_remote_identity = cloud_config_utils.get_cloud_config_value(
+            global_remote_identity = skypilot_config.get_cloud_config_value(
                 cloud='kubernetes',
                 region=None,
                 keys=('remote_identity',),
@@ -558,7 +557,7 @@ def get_expirable_clouds(
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
         else:
-            remote_identities = cloud_config_utils.get_cloud_config_value(
+            remote_identities = skypilot_config.get_cloud_config_value(
                 cloud=str(cloud).lower(),
                 region=None,
                 keys=('remote_identity',),
@@ -646,11 +645,11 @@ def write_cluster_config(
     config_dict = {}
 
     specific_reservations = set(
-        cloud_config_utils.get_cloud_config_value(
-            cloud=str(to_provision.cloud).lower(),
-            region=to_provision.region,
-            keys=('specific_reservations',),
-            default_value=set()))
+        skypilot_config.get_cloud_config_value(cloud=str(
+            to_provision.cloud).lower(),
+                                               region=to_provision.region,
+                                               keys=('specific_reservations',),
+                                               default_value=set()))
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
@@ -663,7 +662,7 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = cloud_config_utils.get_cloud_config_value(
+    remote_identity_config = skypilot_config.get_cloud_config_value(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('remote_identity',),
@@ -696,7 +695,7 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if cloud_config_utils.get_cloud_config_value(
+            if skypilot_config.get_cloud_config_value(
                     cloud='kubernetes',
                     region=None,
                     keys=('allowed_contexts',),
@@ -706,7 +705,7 @@ def write_cluster_config(
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = cloud_config_utils.get_cloud_config_value(
+        remote_identity_config = skypilot_config.get_cloud_config_value(
             cloud=cloud_str.lower(),
             region=region.name,
             keys=('remote_identity',),
@@ -731,7 +730,7 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Retrieve the ssh_proxy_command for the given cloud / region.
-    ssh_proxy_command_config = cloud_config_utils.get_cloud_config_value(
+    ssh_proxy_command_config = skypilot_config.get_cloud_config_value(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('ssh_proxy_command',),
@@ -761,10 +760,10 @@ def write_cluster_config(
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
-    labels = cloud_config_utils.get_cloud_config_value(cloud=str(cloud).lower(),
-                                                       region=region.name,
-                                                       keys=('labels',),
-                                                       default_value={})
+    labels = skypilot_config.get_cloud_config_value(cloud=str(cloud).lower(),
+                                                    region=region.name,
+                                                    keys=('labels',),
+                                                    default_value={})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
@@ -821,13 +820,13 @@ def write_cluster_config(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # Networking configs
-                'use_internal_ips': cloud_config_utils.get_cloud_config_value(
+                'use_internal_ips': skypilot_config.get_cloud_config_value(
                     cloud=str(cloud).lower(),
                     region=region.name,
                     keys=('use_internal_ips',),
                     default_value=False),
                 'ssh_proxy_command': ssh_proxy_command,
-                'vpc_name': cloud_config_utils.get_cloud_config_value(
+                'vpc_name': skypilot_config.get_cloud_config_value(
                     cloud=str(cloud).lower(),
                     region=region.name,
                     keys=('vpc_name',),

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
@@ -14,7 +15,6 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
-from sky.utils import cloud_config_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -1147,7 +1147,7 @@ def get_cluster_info(
     head_pod_name = None
 
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = cloud_config_utils.get_cloud_config_value(
+    network_mode_str = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('networking_mode',),

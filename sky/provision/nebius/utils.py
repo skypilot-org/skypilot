@@ -4,9 +4,9 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.provision.nebius import constants as nebius_constants
-from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
@@ -40,11 +40,11 @@ def get_project_by_region(region: str) -> str:
         parent_id=nebius.get_tenant_id())).wait()
 
     #  Check is there project if in config
-    project_id = cloud_config_utils.get_cloud_config_value(cloud='nebius',
-                                                           region=None,
-                                                           keys=(region,
-                                                                 'project_id'),
-                                                           default_value=None)
+    project_id = skypilot_config.get_cloud_config_value(cloud='nebius',
+                                                        region=None,
+                                                        keys=(region,
+                                                              'project_id'),
+                                                        default_value=None)
     if project_id is not None:
         return project_id
     for project in projects.items:
@@ -187,11 +187,11 @@ def launch(cluster_name_on_cloud: str,
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS:
         if preset == '8gpu-128vcpu-1600gb':
-            fabric = cloud_config_utils.get_cloud_config_value(
-                cloud='nebius',
-                region=None,
-                keys=(region, 'fabric'),
-                default_value=None)
+            fabric = skypilot_config.get_cloud_config_value(cloud='nebius',
+                                                            region=None,
+                                                            keys=(region,
+                                                                  'fabric'),
+                                                            default_value=None)
 
             # Auto-select fabric if network_tier=best and no fabric configured
             if (fabric is None and

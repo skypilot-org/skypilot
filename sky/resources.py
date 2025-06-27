@@ -21,7 +21,6 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
-from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import infra_utils
@@ -1065,7 +1064,7 @@ class Resources:
             regions = [r for r in regions if r.name in self._image_id]
 
         # Filter the regions by the skypilot_config
-        ssh_proxy_command_config = cloud_config_utils.get_cloud_config_value(
+        ssh_proxy_command_config = skypilot_config.get_cloud_config_value(
             cloud=str(self._cloud).lower(),
             region=None,
             keys=('ssh_proxy_command',),
@@ -1554,7 +1553,7 @@ class Resources:
             # to each cloud if any cloud supports reservations for spot.
             return {}
         specific_reservations = set(
-            cloud_config_utils.get_cloud_config_value(
+            skypilot_config.get_cloud_config_value(
                 cloud=str(self.cloud).lower(),
                 region=self.region,
                 keys=('specific_reservations',),

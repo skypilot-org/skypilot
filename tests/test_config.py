@@ -14,7 +14,6 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
@@ -888,13 +887,13 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-project-config'), None) is None
 
 
-def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
+def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     """Test that the nested config works."""
     from sky.provision.kubernetes import utils as kubernetes_utils
-    with open(tmp_path / 'context_config.yaml', 'w', encoding='utf-8') as f:
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
         kubernetes:
-            context_config:
+            context_configs:
                 contextA:
                     autoscaler: gke
                 contextB:
@@ -902,25 +901,25 @@ def test_kubernetes_context_config(monkeypatch, tmp_path) -> None:
             autoscaler: generic
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
-                        tmp_path / 'context_config.yaml')
+                        tmp_path / 'context_configs.yaml')
     skypilot_config._reload_config()
 
     # test autoscaler property
-    context_a_autoscaler = cloud_config_utils.get_cloud_config_value(
+    context_a_autoscaler = skypilot_config.get_cloud_config_value(
         cloud='kubernetes', region='contextA', keys=('autoscaler',))
     assert context_a_autoscaler == 'gke'
-    context_b_autoscaler = cloud_config_utils.get_cloud_config_value(
+    context_b_autoscaler = skypilot_config.get_cloud_config_value(
         cloud='kubernetes', region='contextB', keys=('autoscaler',))
     assert context_b_autoscaler == 'generic'
 
     # test provision_timeout property
-    context_a_provision_timeout = cloud_config_utils.get_cloud_config_value(
+    context_a_provision_timeout = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region='contextA',
         keys=('provision_timeout',),
         default_value=10)
     assert context_a_provision_timeout == 10
-    context_b_provision_timeout = cloud_config_utils.get_cloud_config_value(
+    context_b_provision_timeout = skypilot_config.get_cloud_config_value(
         cloud='kubernetes', region='contextB', keys=('provision_timeout',))
     assert context_b_provision_timeout == 60
 

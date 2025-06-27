@@ -6,8 +6,8 @@ from typing import List
 
 import cachetools
 
+from sky import skypilot_config
 from sky.adaptors import aws
-from sky.utils import cloud_config_utils
 
 
 class ReservationType(str, enum.Enum):
@@ -28,12 +28,12 @@ class AWSReservation:
 
 
 def use_reservations() -> bool:
-    prioritize_reservations = cloud_config_utils.get_cloud_config_value(
+    prioritize_reservations = skypilot_config.get_cloud_config_value(
         cloud='aws',
         region=None,
         keys=('prioritize_reservations',),
         default_value=False)
-    specific_reservations = cloud_config_utils.get_cloud_config_value(
+    specific_reservations = skypilot_config.get_cloud_config_value(
         cloud='aws',
         region=None,
         keys=('specific_reservations',),

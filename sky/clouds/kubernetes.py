@@ -21,7 +21,6 @@ from sky.provision.kubernetes.utils import is_tpu_on_gke
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -169,7 +168,7 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_workspace_cloud(
             'kubernetes').get('allowed_contexts', None)
         if allowed_contexts is None:
-            allowed_contexts = cloud_config_utils.get_cloud_config_value(
+            allowed_contexts = skypilot_config.get_cloud_config_value(
                 cloud='kubernetes',
                 region=None,
                 keys=('allowed_contexts',),
@@ -275,7 +274,7 @@ class Kubernetes(clouds.Cloud):
                          'with context: '
                          f'{context}. Reason: {reason}')
 
-            autoscaler_type = cloud_config_utils.get_cloud_config_value(
+            autoscaler_type = skypilot_config.get_cloud_config_value(
                 cloud='kubernetes',
                 region=context,
                 keys=('autoscaler',),
@@ -545,7 +544,7 @@ class Kubernetes(clouds.Cloud):
                 avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None, context)
 
-        remote_identity = cloud_config_utils.get_cloud_config_value(
+        remote_identity = skypilot_config.get_cloud_config_value(
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
@@ -593,7 +592,7 @@ class Kubernetes(clouds.Cloud):
         # number of nodes.
 
         timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
-        timeout = cloud_config_utils.get_cloud_config_value(
+        timeout = skypilot_config.get_cloud_config_value(
             cloud='kubernetes',
             region=context,
             keys=('provision_timeout',),
@@ -629,13 +628,13 @@ class Kubernetes(clouds.Cloud):
         }
 
         # Get the storage class name for high availability controller's PVC
-        k8s_ha_storage_class_name = cloud_config_utils.get_cloud_config_value(
+        k8s_ha_storage_class_name = skypilot_config.get_cloud_config_value(
             cloud='kubernetes',
             region=context,
             keys=('high_availability', 'storage_class_name'),
             default_value=None)
 
-        k8s_kueue_local_queue_name = cloud_config_utils.get_cloud_config_value(
+        k8s_kueue_local_queue_name = skypilot_config.get_cloud_config_value(
             cloud='kubernetes',
             region=context,
             keys=('kueue', 'local_queue_name'),

@@ -7,10 +7,10 @@ from typing import Dict, List, Optional, Tuple, Union
 import sky
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import cloud_config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
@@ -39,7 +39,7 @@ def get_port_mode(
         # If running in kind (`sky local up`), use ingress mode
         return kubernetes_enums.KubernetesPortMode.INGRESS
 
-    mode_str = mode_str or cloud_config_utils.get_cloud_config_value(
+    mode_str = mode_str or skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('ports',),
@@ -61,7 +61,7 @@ def get_networking_mode(
     context: Optional[str],
 ) -> kubernetes_enums.KubernetesNetworkingMode:
     """Get the networking mode from the provider config."""
-    mode_str = mode_str or cloud_config_utils.get_cloud_config_value(
+    mode_str = mode_str or skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('networking_mode',),
@@ -88,16 +88,16 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
-    annotations = cloud_config_utils.get_cloud_config_value(
+    annotations = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata', 'annotations'),
         default_value={})
-    labels = cloud_config_utils.get_cloud_config_value(cloud='kubernetes',
-                                                       region=context,
-                                                       keys=('custom_metadata',
-                                                             'labels'),
-                                                       default_value={})
+    labels = skypilot_config.get_cloud_config_value(cloud='kubernetes',
+                                                    region=context,
+                                                    keys=('custom_metadata',
+                                                          'labels'),
+                                                    default_value={})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -123,16 +123,16 @@ def fill_ingress_template(namespace: str, context: Optional[str],
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
-    annotations = cloud_config_utils.get_cloud_config_value(
+    annotations = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata', 'annotations'),
         default_value={})
-    labels = cloud_config_utils.get_cloud_config_value(cloud='kubernetes',
-                                                       region=context,
-                                                       keys=('custom_metadata',
-                                                             'labels'),
-                                                       default_value={})
+    labels = skypilot_config.get_cloud_config_value(cloud='kubernetes',
+                                                    region=context,
+                                                    keys=('custom_metadata',
+                                                          'labels'),
+                                                    default_value={})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,

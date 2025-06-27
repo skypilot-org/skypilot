@@ -369,6 +369,30 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
+def get_cloud_config_value(
+        cloud: str,
+        keys: Tuple[str, ...],
+        region: Optional[str] = None,
+        default_value: Optional[Any] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns the nested key value by reading from config
+    Order to get the property_name value:
+    1. if region is specified,
+       try to get the value from <cloud>/<region_key>/<region>/keys
+    2. if no region or no override,
+       try to get it at the cloud level <cloud>/keys
+    3. if not found at cloud level,
+       return either default_value if specified or None
+    """
+    return config_utils.get_cloud_config_value_from_dict(
+        dict_config=_get_loaded_config(),
+        cloud=cloud,
+        keys=keys,
+        region=region,
+        default_value=default_value,
+        override_configs=override_configs)
+
+
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace config."""

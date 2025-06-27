@@ -15,9 +15,9 @@ from typing import List, Optional, Set
 import cachetools
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.provision.gcp import constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import cloud_config_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -137,12 +137,12 @@ def _list_reservations_for_instance_type(
     For example, if we have a specific reservation with n1-highmem-8
     in us-central1-c. `sky launch --gpus V100` will fail.
     """
-    prioritize_reservations = cloud_config_utils.get_cloud_config_value(
+    prioritize_reservations = skypilot_config.get_cloud_config_value(
         cloud='gcp',
         region=None,
         keys=('prioritize_reservations',),
         default_value=False)
-    specific_reservations = cloud_config_utils.get_cloud_config_value(
+    specific_reservations = skypilot_config.get_cloud_config_value(
         cloud='gcp',
         region=None,
         keys=('specific_reservations',),
@@ -176,7 +176,7 @@ def _list_reservations_for_instance_type(
 
 def get_minimal_compute_permissions() -> List[str]:
     permissions = copy.copy(constants.VM_MINIMAL_PERMISSIONS)
-    if cloud_config_utils.get_cloud_config_value(
+    if skypilot_config.get_cloud_config_value(
             cloud='gcp', region=None, keys=('vpc_name',),
             default_value=None) is None:
         # If custom VPC is not specified, permissions to modify network are
@@ -184,11 +184,11 @@ def get_minimal_compute_permissions() -> List[str]:
         # allow opening ports (e.g., via `resources.ports`).
         permissions += constants.FIREWALL_PERMISSIONS
 
-    if (cloud_config_utils.get_cloud_config_value(
+    if (skypilot_config.get_cloud_config_value(
             cloud='gcp',
             region=None,
             keys=('prioritize_reservations',),
-            default_value=False) or cloud_config_utils.get_cloud_config_value(
+            default_value=False) or skypilot_config.get_cloud_config_value(
                 cloud='gcp',
                 region=None,
                 keys=('specific_reservations',),

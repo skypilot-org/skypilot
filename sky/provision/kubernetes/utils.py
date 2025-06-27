@@ -19,6 +19,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
@@ -27,7 +28,6 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import cloud_config_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
@@ -1190,7 +1190,7 @@ def get_accelerator_label_key_values(
     context_display_name = common_utils.removeprefix(
         context, 'ssh-') if (context and is_ssh_node_pool) else context
 
-    autoscaler_type = cloud_config_utils.get_cloud_config_value(
+    autoscaler_type = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('autoscaler',),
@@ -1599,7 +1599,7 @@ def is_kubeconfig_exec_auth(
     user_details = next(
         user for user in user_details if user['name'] == target_username)
 
-    remote_identity = cloud_config_utils.get_cloud_config_value(
+    remote_identity = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('remote_identity',),
@@ -2448,20 +2448,20 @@ def combine_pod_config_fields(
     # We don't use override_configs in `get_cloud_config_value`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
-        kubernetes_config = cloud_config_utils.get_cloud_config_value(
+        kubernetes_config = skypilot_config.get_cloud_config_value(
             cloud='ssh', region=None, keys=('pod_config',), default_value={})
-        override_pod_config = cloud_config_utils.get_cloud_config_value_from_dict(
+        override_pod_config = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
             cloud='ssh',
             keys=('pod_config',),
             default_value={})
     else:
-        kubernetes_config = cloud_config_utils.get_cloud_config_value(
+        kubernetes_config = skypilot_config.get_cloud_config_value(
             cloud='kubernetes',
             region=context,
             keys=('pod_config',),
             default_value={})
-        override_pod_config = cloud_config_utils.get_cloud_config_value_from_dict(
+        override_pod_config = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
             cloud='kubernetes',
             region=context,
@@ -2489,7 +2489,7 @@ def combine_metadata_fields(cluster_yaml_path: str,
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    custom_metadata = cloud_config_utils.get_cloud_config_value(
+    custom_metadata = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
@@ -2522,7 +2522,7 @@ def merge_custom_metadata(original_metadata: Dict[str, Any],
 
     Merge is done in-place, so return is not required
     """
-    custom_metadata = cloud_config_utils.get_cloud_config_value(
+    custom_metadata = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
@@ -2608,11 +2608,10 @@ def get_head_pod_name(cluster_name_on_cloud: str):
 
 def get_custom_config_k8s_contexts() -> List[str]:
     """Returns the list of context names from the config"""
-    contexts = cloud_config_utils.get_cloud_config_value(
-        cloud='kubernetes',
-        region=None,
-        keys=('context_config',),
-        default_value={})
+    contexts = skypilot_config.get_cloud_config_value(cloud='kubernetes',
+                                                      region=None,
+                                                      keys=('context_configs',),
+                                                      default_value={})
     return [*contexts] or []
 
 
@@ -2629,7 +2628,7 @@ def get_autoscaler_type(
     context: Optional[str] = None
 ) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
-    autoscaler_type = cloud_config_utils.get_cloud_config_value(
+    autoscaler_type = skypilot_config.get_cloud_config_value(
         cloud='kubernetes',
         region=context,
         keys=('autoscaler',),

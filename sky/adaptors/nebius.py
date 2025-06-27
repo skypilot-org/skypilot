@@ -7,7 +7,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
-from sky.utils import cloud_config_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -121,7 +120,7 @@ def get_tenant_id():
         'tenant_id', None)
     if tenant_id_in_ws_config is not None:
         return tenant_id_in_ws_config
-    tenant_id_in_config = cloud_config_utils.get_cloud_config_value(
+    tenant_id_in_config = skypilot_config.get_cloud_config_value(
         cloud='nebius', region=None, keys=('tenant_id',), default_value=None)
     if tenant_id_in_config is not None:
         return tenant_id_in_config
