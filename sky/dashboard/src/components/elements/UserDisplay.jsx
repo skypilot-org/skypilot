@@ -7,7 +7,7 @@ import { getUserLink, isServiceAccount } from '@/utils/userUtils';
  * ServiceAccountBadge component - A reusable badge for service accounts
  */
 const ServiceAccountBadge = () => (
-  <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-2">
+  <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium ml-1">
     SA
   </span>
 );

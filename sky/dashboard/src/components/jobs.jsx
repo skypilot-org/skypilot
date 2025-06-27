@@ -40,6 +40,7 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import {
   Select,
@@ -140,15 +141,6 @@ const formatUserDisplay = (username, userId) => {
   }
 
   return usernameBase;
-};
-
-// Helper function to generate user link based on whether it's a service account
-const getUserLink = (userHash) => {
-  // Service accounts have user_hash starting with 'sa-'
-  if (userHash && userHash.startsWith('sa-')) {
-    return '/users?tab=service-accounts';
-  }
-  return '/users';
 };
 
 // Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
@@ -1042,20 +1034,10 @@ export function ManagedJobsTable({
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Link
-                            href={getUserLink(item.user_hash)}
-                            className="text-blue-600 hover:underline"
-                          >
-                            {item.user}
-                          </Link>
-                          {item.user_hash &&
-                            item.user_hash.startsWith('sa-') && (
-                              <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
-                                SA
-                              </span>
-                            )}
-                        </div>
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
                       </TableCell>
                       <TableCell>
                         <Link
@@ -1575,19 +1557,10 @@ export function ClusterJobs({
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Link
-                          href={getUserLink(item.user_hash)}
-                          className="text-blue-600 hover:underline"
-                        >
-                          {item.user}
-                        </Link>
-                        {item.user_hash && item.user_hash.startsWith('sa-') && (
-                          <span className="px-1 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded font-medium">
-                            SA
-                          </span>
-                        )}
-                      </div>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
                     </TableCell>
                     <TableCell>
                       <Link
