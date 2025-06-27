@@ -152,7 +152,9 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
         """Test that only existing contexts are returned."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2']
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_cloud_config_value.return_value = ['ctx1', 'ctx2', 'nonexistent-ctx']
+        mock_get_cloud_config_value.return_value = [
+            'ctx1', 'ctx2', 'nonexistent-ctx'
+        ]
 
         result = kubernetes.Kubernetes.existing_allowed_contexts()
 
@@ -161,13 +163,16 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_cloud_config_value')
-    def test_skips_ssh_contexts_in_allowed_list(self, mock_get_cloud_config_value,
+    def test_skips_ssh_contexts_in_allowed_list(self,
+                                                mock_get_cloud_config_value,
                                                 mock_get_workspace_cloud,
                                                 mock_get_all_contexts):
         """Test that SSH contexts in allowed list are skipped."""
         mock_get_all_contexts.return_value = ['ctx1', 'ctx2']
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_cloud_config_value.return_value = ['ctx1', 'ssh-cluster', 'ctx2']
+        mock_get_cloud_config_value.return_value = [
+            'ctx1', 'ssh-cluster', 'ctx2'
+        ]
 
         result = kubernetes.Kubernetes.existing_allowed_contexts()
 
@@ -176,7 +181,8 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_cloud_config_value')
-    def test_logs_skipped_contexts_when_not_silent(self, mock_get_cloud_config_value,
+    def test_logs_skipped_contexts_when_not_silent(self,
+                                                   mock_get_cloud_config_value,
                                                    mock_get_workspace_cloud,
                                                    mock_get_all_contexts):
         """Test that skipped contexts are logged when not silent."""
@@ -195,9 +201,9 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_cloud_config_value')
-    def test_does_not_log_skipped_contexts_when_silent(self, mock_get_cloud_config_value,
-                                                       mock_get_workspace_cloud,
-                                                       mock_get_all_contexts):
+    def test_does_not_log_skipped_contexts_when_silent(
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
+            mock_get_all_contexts):
         """Test that skipped contexts are not logged when silent=True."""
         mock_get_all_contexts.return_value = ['ctx1']
         mock_get_workspace_cloud.return_value.get.return_value = None
@@ -234,7 +240,8 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_cloud_config_value')
-    def test_complex_scenario_with_mixed_contexts(self, mock_get_cloud_config_value,
+    def test_complex_scenario_with_mixed_contexts(self,
+                                                  mock_get_cloud_config_value,
                                                   mock_get_workspace_cloud,
                                                   mock_get_all_contexts):
         """Test complex scenario with various context types."""
@@ -304,9 +311,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_enabled_with_user_security_context(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_cloud_config_value, mock_is_exec_auth,
-            mock_get_accelerator_label_keys, mock_get_namespace,
-            mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
         """Test that IPC_LOCK capability is enabled when network tier is BEST and cluster supports it."""
 
@@ -374,9 +381,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_disabled_when_no_high_perf_networking(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_cloud_config_value, mock_is_exec_auth,
-            mock_get_accelerator_label_keys, mock_get_namespace,
-            mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
         """Test that IPC_LOCK capability is disabled when cluster doesn't support high performance networking."""
 
@@ -443,9 +450,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     def test_ipc_lock_capability_disabled_when_network_tier_not_best(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_cloud_config_value, mock_is_exec_auth,
-            mock_get_accelerator_label_keys, mock_get_namespace,
-            mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
         """Test that IPC_LOCK capability is disabled when network tier is not BEST."""
 
@@ -513,8 +520,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     def test_nebius_network_tier_with_gpu_environment_variables(
             self, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
-            mock_get_workspace_cloud, mock_get_cloud_config_value, mock_is_exec_auth,
-            mock_get_gpu_resource_key, mock_get_accelerator_label_key_values,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes,
             mock_cluster_supports_high_perf):
