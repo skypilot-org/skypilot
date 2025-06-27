@@ -99,7 +99,7 @@ def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
 
     with _DB_INIT_LOCK:
         if _SQLALCHEMY_ENGINE is None:
-            db_path = os.path.expanduser(constants.SSHNP_DB_PATH)
+            db_path = os.path.expanduser(constants.SKYSSH_DB_PATH)
             pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
             _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' + db_path)
             _create_table()
