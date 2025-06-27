@@ -556,7 +556,7 @@ export function Users() {
             placeholder={
               activeMainTab === 'users'
                 ? 'Search users by name, email, or role'
-                : 'Search by token name, owner, or service account'
+                : 'Search by token name, created by, or service account'
             }
             value={
               activeMainTab === 'users'
@@ -1812,12 +1812,12 @@ function ServiceAccountTokensView({
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Owner</TableHead>
+                  <TableHead>Created by</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Clusters</TableHead>
                   <TableHead>Jobs</TableHead>
                   <TableHead>Created</TableHead>
-                  <TableHead>Last Used</TableHead>
+                  <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
