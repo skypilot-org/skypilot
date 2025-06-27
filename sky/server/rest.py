@@ -30,7 +30,6 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
 
-# Global session for client-server communication.
 _session = requests.Session()
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
 _session.headers[constants.VERSION_HEADER] = \

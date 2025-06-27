@@ -24,6 +24,9 @@ from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server import rest
+from sky.server import versions
 from sky.server.requests import executor
 from sky.server.requests import requests as api_requests
 from sky.server.server import app
@@ -116,22 +119,16 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
                 # Add iter_content method to response
                 response.iter_content = iter_content
 
+            response.headers[server_constants.API_VERSION_HEADER] = str(
+                server_constants.API_VERSION)
+            response.headers[server_constants.VERSION_HEADER] = \
+                versions.get_local_readable_version()
             return response
         else:
             return original_func(url, *args, **kwargs)
 
-    # Mock `requests.post` to use TestClient.post
-    def mock_post(url, *args, **kwargs):
-        # Convert full URL to path for TestClient
-        return mock_http_request('POST', url, *args, **kwargs)
-
-    # Mock `requests.get` to use TestClient.get
-    def mock_get(url, *args, **kwargs):
-        return mock_http_request('GET', url, *args, **kwargs)
-
-    # Use monkeypatch to replace `requests.post` and `requests.get`
-    monkeypatch.setattr(requests, "post", mock_post)
-    monkeypatch.setattr(requests, "get", mock_get)
+    # pylint: disable=protected-access
+    monkeypatch.setattr(rest._session, "request", mock_http_request)
 
 
 # Define helper functions at module level for pickleability
