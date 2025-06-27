@@ -1108,8 +1108,6 @@ Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`
 ``kubernetes.context_configs``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-(available on nightly version 20250628 and later)
-
 Context-specific configuration for Kubernetes resources (optional).
 
 When using multiple Kubernetes contexts, you can specify context-specific configuration for Kubernetes resources.
