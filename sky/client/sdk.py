@@ -2099,9 +2099,14 @@ def api_login(endpoint: Optional[str] = None,
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
-    def _show_logged_in_message(endpoint: str, dashboard_url: str,
-                                user: Optional[Dict[str, Any]]) -> None:
+    def _show_logged_in_message(
+            endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
+            server_status: server_common.ApiServerStatus) -> None:
         """Show the logged in message."""
+        if server_status != server_common.ApiServerStatus.HEALTHY:
+            raise ValueError(f'Failed to authenticate with API server at '
+                             f'{endpoint} (status: {server_status.value})')
+
         identity_info = f'\n{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}User: '
         if user:
             user_name = user.get('name')
@@ -2136,7 +2141,7 @@ def api_login(endpoint: Optional[str] = None,
                 endpoint)
             dashboard_url = server_common.get_dashboard_url(endpoint)
             _show_logged_in_message(endpoint, dashboard_url,
-                                    api_server_info.user)
+                                    api_server_info.user, server_status)
 
             return
         except exceptions.ApiServerConnectionError as e:
@@ -2308,4 +2313,7 @@ def api_login(endpoint: Optional[str] = None,
 
     # After successful authentication, check server health again to get user
     # identity
-    _show_logged_in_message(endpoint, dashboard_url, api_server_info.user)
+    server_status, final_api_server_info = server_common.check_server_healthy(
+        endpoint)
+    _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
+                            server_status)
