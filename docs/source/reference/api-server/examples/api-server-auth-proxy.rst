@@ -111,6 +111,7 @@ Authenticate with the service account token:
 
     $ sky api login -e <ENDPOINT> --token <SERVICE_ACCOUNT_TOKEN>
 
+
 **Security Best Practices:**
 
 * Rotate tokens regularly
@@ -129,6 +130,13 @@ Example: GitHub actions
         
     - name: Launch training job
       run: sky launch training.yaml
+
+Alternatively, you can use the ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` environment variable to set the service account token:
+
+.. code-block:: console
+
+    $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=<SERVICE_ACCOUNT_TOKEN>
+    $ sky status
 
 .. _oauth2-proxy-okta:
 

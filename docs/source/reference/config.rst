@@ -27,6 +27,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
+    :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -187,6 +188,14 @@ Example:
 
   api_server:
     endpoint: http://xx.xx.xx.xx:8000
+
+.. _config-yaml-api-server-service-account-token:
+
+``api_server.service_account_token``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
+
 
 
 .. _config-yaml-jobs:
