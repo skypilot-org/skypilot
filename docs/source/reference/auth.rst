@@ -87,10 +87,10 @@ SkyPilot will automatically use the user email from the auth proxy to create a u
 
 .. _service-accounts:
 
-Service accounts
-~~~~~~~~~~~~~~~~
+Optional: Service accounts
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Service accounts provide secure programmatic access to the SkyPilot API server without browser authentication. Perfect for CI/CD pipelines and automation.
+You can also use service accounts to access SkyPilot API server programmatically without browser authentication, which is good for CI/CD pipelines, Airflow integration, etc.
 
 
 Creating service accounts
@@ -108,10 +108,10 @@ Creating service accounts
 .. image:: ../images/client-server/service-account.png
     :alt: Service account
     :align: center
-    :width: 80%
+    :width: 90%
 
-Usage
-^^^^^
+Accessing the API server
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 Authenticate with the service account token:
 
@@ -119,9 +119,15 @@ Authenticate with the service account token:
 
     $ sky api login -e <ENDPOINT> --token <SERVICE_ACCOUNT_TOKEN>
 
+Or, use the ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` environment variable:
 
-Example: GitHub actions
-^^^^^^^^^^^^^^^^^^^^^^^
+.. code-block:: console
+
+    $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=<SERVICE_ACCOUNT_TOKEN>
+    $ sky api info
+
+Example: GitHub actions (CI/CD)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: yaml
 
@@ -132,12 +138,6 @@ Example: GitHub actions
     - name: Launch training job
       run: sky launch training.yaml
 
-Alternatively, you can use the ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` environment variable to set the service account token:
-
-.. code-block:: console
-
-    $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=<SERVICE_ACCOUNT_TOKEN>
-    $ sky status
 
 .. _oauth2-proxy-okta:
 
