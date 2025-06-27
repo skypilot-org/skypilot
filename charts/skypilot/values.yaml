@@ -123,7 +123,7 @@ ingress:
   authCredentials: "username:$apr1$encrypted_password"
   # Host to exclusively accept traffic from (optional) - will respond to all host requests if not set
   host: null
-  # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
+  # The base path of API server, you may use different path to expose multiple API server through a unified ingress-controller
   path: '/'
   # Ingress class name (for newer Kubernetes versions)
   ingressClassName: nginx
@@ -135,7 +135,7 @@ ingress:
   # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
   # - Ask users to set ingress.nodePortEnabled explicitly
   # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
-  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and swtich to ingress-nginx.controller.service.type
+  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and switch to ingress-nginx.controller.service.type
   # if you are upgrading from 0.8.0 nightly.
   # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
   # TODO(aylei): remove these fields in v0.10.0
