@@ -274,7 +274,8 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_cloud_config_value')
-    def test_complex_scenario_with_mixed_filtering(self, mock_get_cloud_config_value,
+    def test_complex_scenario_with_mixed_filtering(self,
+                                                   mock_get_cloud_config_value,
                                                    mock_get_workspace_cloud,
                                                    mock_get_all_contexts):
         """Test complex scenario with node pools and allowed filtering."""
@@ -283,7 +284,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             'regular-ctx', 'ssh-prod', 'ssh-dev', 'ssh-staging', 'ssh-test'
         ]
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_cloud_config_value.return_value = ['prod', 'staging', 'nonexistent']
+        mock_get_cloud_config_value.return_value = [
+            'prod', 'staging', 'nonexistent'
+        ]
 
         # Node pools file has some contexts
         with patch.object(ssh.SSH,
