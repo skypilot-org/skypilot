@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import resource
 from typing import Optional
 
 from fastapi import FastAPI
@@ -29,6 +30,15 @@ async def startup_event():
 
     # Will loop forever, do it in the background
     asyncio.create_task(controller.cancel_job())
+
+    # Increase number of files we can open
+    soft = None
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+    except OSError as e:
+        logger.warning(f'Failed to increase number of files we can open: {e}\n'
+                       f'Current soft limit: {soft}, hard limit: {hard}')
 
 
 class JobRequest(BaseModel):
