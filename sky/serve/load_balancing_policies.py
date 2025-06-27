@@ -3,7 +3,7 @@ import collections
 import random
 import threading
 import typing
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from sky import sky_logging
 
@@ -134,6 +134,85 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         with self.lock:
             return min(self.ready_replicas,
                        key=lambda replica: self.load_map.get(replica, 0))
+
+    def pre_execute_hook(self, replica_url: str,
+                         request: 'fastapi.Request') -> None:
+        del request  # Unused.
+        with self.lock:
+            self.load_map[replica_url] += 1
+
+    def post_execute_hook(self, replica_url: str,
+                          request: 'fastapi.Request') -> None:
+        del request  # Unused.
+        with self.lock:
+            self.load_map[replica_url] -= 1
+
+
+class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy, name='instance_aware_least_load'):
+    """Instance-aware least load load balancing policy.
+    
+    This policy considers the accelerator type and its QPS capabilities
+    when distributing load. It normalizes the load by dividing the current
+    load by the target QPS for that accelerator type.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.load_map: Dict[str, int] = collections.defaultdict(int)
+        self.replica_info: Dict[str, Dict[str, Any]] = {}  # replica_url -> info
+        self.accelerator_qps: Dict[str, float] = {}  # accelerator_type -> target_qps
+        self.lock = threading.Lock()
+
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        with self.lock:
+            self.ready_replicas = ready_replicas
+            # Clean up load map for removed replicas
+            for r in list(self.load_map.keys()):
+                if r not in ready_replicas:
+                    del self.load_map[r]
+            # Initialize load for new replicas
+            for replica in ready_replicas:
+                if replica not in self.load_map:
+                    self.load_map[replica] = 0
+
+    def set_replica_info(self, replica_info: List[Dict[str, Any]]) -> None:
+        """Set replica information including accelerator types."""
+        with self.lock:
+            self.replica_info = {
+                info['url']: info for info in replica_info
+            }
+
+    def set_accelerator_qps(self, accelerator_qps: Dict[str, float]) -> None:
+        """Set target QPS for each accelerator type."""
+        with self.lock:
+            self.accelerator_qps = accelerator_qps
+
+    def _get_normalized_load(self, replica_url: str) -> float:
+        """Get normalized load for a replica based on its accelerator type."""
+        current_load = self.load_map.get(replica_url, 0)
+        
+        # Get accelerator type for this replica
+        replica_data = self.replica_info.get(replica_url, {})
+        accelerator_type = replica_data.get('gpu_type', 'unknown')
+        
+        # Get target QPS for this accelerator type
+        target_qps = self.accelerator_qps.get(accelerator_type, 1.0)
+        
+        # Normalize load: current_load / target_qps
+        # This means H100 with target_qps=2.5 will have normalized_load = current_load/2.5
+        # and A100 with target_qps=1.25 will have normalized_load = current_load/1.25
+        return current_load / target_qps if target_qps > 0 else float('inf')
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        del request  # Unused.
+        if not self.ready_replicas:
+            return None
+        with self.lock:
+            # Select replica with minimum normalized load
+            return min(self.ready_replicas,
+                       key=lambda replica: self._get_normalized_load(replica))
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
