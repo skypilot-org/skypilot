@@ -55,7 +55,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.utils.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_cloud_config_value')
     def test_global_allowed_contexts_when_no_workspace_config(
             self, get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -297,7 +297,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.utils.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -367,7 +367,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.utils.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -436,7 +436,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.utils.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -506,7 +506,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
     @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.utils.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_cloud_config_value')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
