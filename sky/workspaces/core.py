@@ -79,33 +79,7 @@ def _update_workspaces_config(
             f'file if you believe it is stale.') from e
 
 
-def _check_workspace_has_no_active_resources(workspace_name: str,
-                                             operation: str) -> None:
-    """Check if a workspace has active clusters or managed jobs.
 
-    Args:
-        workspace_name: The name of the workspace to check.
-        operation: The operation being performed ('update' or 'delete').
-
-    Raises:
-        ValueError: If the workspace has active clusters or managed jobs.
-    """
-    resource_checker.check_no_active_resources_for_workspace(workspace_name, operation)
-
-
-def _check_workspaces_have_no_active_resources(
-        workspace_operations: list) -> None:
-    """Check if workspaces have active clusters or managed jobs.
-
-    Args:
-        workspace_operations: List of tuples (workspace_name, operation) where
-            operation is 'update' or 'delete'.
-
-    Raises:
-        ValueError: If any workspace has active clusters or managed jobs.
-            The error message will include all workspaces with issues.
-    """
-    resource_checker.check_no_active_resources_for_workspaces(workspace_operations)
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -148,7 +122,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
     # Check for active clusters and managed jobs in the workspace
     # TODO(zhwu): we should allow the edits that only contain changes to
     # allowed_users or private.
-    _check_workspace_has_no_active_resources(workspace_name, 'update')
+    resource_checker.check_no_active_resources_for_workspaces([(workspace_name, 'update')])
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
@@ -246,7 +220,7 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
         raise ValueError(f'Workspace {workspace_name!r} does not exist.')
 
     # Check for active clusters and managed jobs in the workspace
-    _check_workspace_has_no_active_resources(workspace_name, 'delete')
+    resource_checker.check_no_active_resources_for_workspaces([(workspace_name, 'delete')])
 
     def delete_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to delete workspace inside the lock."""
@@ -349,7 +323,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             workspaces_to_check_policy['delete'][workspace_name] = ['*']
 
     # Check all workspaces for active resources in one efficient call
-    _check_workspaces_have_no_active_resources(workspaces_to_check)
+    resource_checker.check_no_active_resources_for_workspaces(workspaces_to_check)
 
     # Use file locking to prevent race conditions
     lock_path = skypilot_config.get_skypilot_config_lock_path()

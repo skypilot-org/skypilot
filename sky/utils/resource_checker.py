@@ -152,27 +152,3 @@ def _check_active_resources(
         raise ValueError(full_message)
 
 
-def check_no_active_resources_for_user(user_id: str, operation: str) -> None:
-    """Check if a user has active clusters or managed jobs.
-
-    Args:
-        user_id: The ID of the user to check.
-        operation: The operation being performed ('update' or 'delete').
-
-    Raises:
-        ValueError: If the user has active clusters or managed jobs.
-    """
-    check_no_active_resources_for_users([(user_id, operation)])
-
-
-def check_no_active_resources_for_workspace(workspace_name: str, operation: str) -> None:
-    """Check if a workspace has active clusters or managed jobs.
-
-    Args:
-        workspace_name: The name of the workspace to check.
-        operation: The operation being performed ('update' or 'delete').
-
-    Raises:
-        ValueError: If the workspace has active clusters or managed jobs.
-    """
-    check_no_active_resources_for_workspaces([(workspace_name, operation)])

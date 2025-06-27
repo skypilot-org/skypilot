@@ -10,12 +10,12 @@ from sky.skylet import constants
 class TestResourceChecker(unittest.TestCase):
     """Test cases for resource checker utilities."""
 
-    def test_check_no_active_resources_for_user_empty(self):
-        """Test resource check with no active resources for user."""
+    def test_check_no_active_resources_for_users_empty(self):
+        """Test resource check with no active resources for users."""
         with mock.patch.object(
             resource_checker, '_check_active_resources'
         ) as mock_check:
-            resource_checker.check_no_active_resources_for_user('user-123', 'delete')
+            resource_checker.check_no_active_resources_for_users([('user-123', 'delete')])
             mock_check.assert_called_once()
             
             # Verify the filter function works correctly
@@ -33,12 +33,12 @@ class TestResourceChecker(unittest.TestCase):
             self.assertFalse(user_filter({'user_hash': 'other-user'}))
             self.assertFalse(user_filter({}))
 
-    def test_check_no_active_resources_for_workspace_empty(self):
-        """Test resource check with no active resources for workspace."""
+    def test_check_no_active_resources_for_workspaces_empty(self):
+        """Test resource check with no active resources for workspaces."""
         with mock.patch.object(
             resource_checker, '_check_active_resources'
         ) as mock_check:
-            resource_checker.check_no_active_resources_for_workspace('my-workspace', 'delete')
+            resource_checker.check_no_active_resources_for_workspaces([('my-workspace', 'delete')])
             mock_check.assert_called_once()
             
             # Verify the filter function works correctly
@@ -69,7 +69,7 @@ class TestResourceChecker(unittest.TestCase):
              mock.patch('sky.jobs.server.core.queue', return_value=mock_jobs):
             
             with self.assertRaises(ValueError) as exc_info:
-                resource_checker.check_no_active_resources_for_user('user-123', 'delete')
+                resource_checker.check_no_active_resources_for_users([('user-123', 'delete')])
             
             error_msg = str(exc_info.exception)
             self.assertIn('Cannot delete user \'user-123\'', error_msg)
@@ -88,7 +88,7 @@ class TestResourceChecker(unittest.TestCase):
              mock.patch('sky.jobs.server.core.queue', return_value=mock_jobs):
             
             with self.assertRaises(ValueError) as exc_info:
-                resource_checker.check_no_active_resources_for_user('user-123', 'delete')
+                resource_checker.check_no_active_resources_for_users([('user-123', 'delete')])
             
             error_msg = str(exc_info.exception)
             self.assertIn('Cannot delete user \'user-123\'', error_msg)
@@ -109,7 +109,7 @@ class TestResourceChecker(unittest.TestCase):
              mock.patch('sky.jobs.server.core.queue', return_value=mock_jobs):
             
             with self.assertRaises(ValueError) as exc_info:
-                resource_checker.check_no_active_resources_for_user('user-123', 'delete')
+                resource_checker.check_no_active_resources_for_users([('user-123', 'delete')])
             
             error_msg = str(exc_info.exception)
             self.assertIn('Cannot delete user \'user-123\'', error_msg)
@@ -132,8 +132,8 @@ class TestResourceChecker(unittest.TestCase):
              mock.patch('sky.jobs.server.core.queue', return_value=mock_jobs):
             
             with self.assertRaises(ValueError) as exc_info:
-                resource_checker.check_no_active_resources_for_workspace(
-                    constants.SKYPILOT_DEFAULT_WORKSPACE, 'delete')
+                resource_checker.check_no_active_resources_for_workspaces([
+                    (constants.SKYPILOT_DEFAULT_WORKSPACE, 'delete')])
             
             error_msg = str(exc_info.exception)
             self.assertIn(f'Cannot delete workspace \'{constants.SKYPILOT_DEFAULT_WORKSPACE}\'', error_msg)
@@ -176,8 +176,8 @@ class TestResourceChecker(unittest.TestCase):
              mock.patch('sky.jobs.server.core.queue', return_value=mock_jobs):
             
             # Should not raise any exception
-            resource_checker.check_no_active_resources_for_user('user-123', 'delete')
-            resource_checker.check_no_active_resources_for_workspace('my-workspace', 'delete')
+            resource_checker.check_no_active_resources_for_users([('user-123', 'delete')])
+            resource_checker.check_no_active_resources_for_workspaces([('my-workspace', 'delete')])
 
     def test_check_empty_operations_list(self):
         """Test that empty operations list does nothing."""
@@ -205,7 +205,7 @@ class TestResourceChecker(unittest.TestCase):
             
             # Should still raise error due to cluster, but handle the jobs error gracefully
             with self.assertRaises(ValueError) as exc_info:
-                resource_checker.check_no_active_resources_for_user('user-123', 'delete')
+                resource_checker.check_no_active_resources_for_users([('user-123', 'delete')])
             
             error_msg = str(exc_info.exception)
             self.assertIn('1 active cluster(s): cluster1', error_msg)

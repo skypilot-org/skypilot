@@ -167,7 +167,7 @@ def _delete_user(user_id: str) -> None:
 
     # Check for active clusters and managed jobs owned by the user
     try:
-        resource_checker.check_no_active_resources_for_user(user_id, 'delete')
+        resource_checker.check_no_active_resources_for_users([(user_id, 'delete')])
     except ValueError as e:
         raise fastapi.HTTPException(status_code=400, detail=str(e))
 
