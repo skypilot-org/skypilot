@@ -1401,9 +1401,13 @@ def get_config_schema():
                 'pattern': r'^https?://.*$',
             },
             'service_account_token': {
-                'type': 'string',
-                # Validate that token starts with sky_ prefix
-                'pattern': r'^sky_.+$',
+                'anyOf': [{
+                    'type': 'string',
+                    # Validate that token starts with sky_ prefix
+                    'pattern': r'^sky_.+$',
+                }, {
+                    'type': 'null',
+                }]
             },
         }
     }

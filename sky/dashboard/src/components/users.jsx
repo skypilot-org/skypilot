@@ -384,7 +384,7 @@ export function Users() {
 
   const handleResetPasswordSubmit = async () => {
     if (!resetPassword) {
-      setResetError(new Error('Please enter a new password.'));
+      setCreateError(new Error('Please enter a new password.'));
       return;
     }
     setResetLoading(true);
@@ -405,7 +405,12 @@ export function Users() {
       setResetPasswordUser(null);
       setResetPassword('');
     } catch (error) {
-      setResetError(error);
+      // Show error at top level for better visibility
+      setShowResetPasswordDialog(false);
+      setResetPasswordUser(null);
+      setResetPassword('');
+      setResetError(null);
+      setCreateError(error);
     } finally {
       setResetLoading(false);
     }
@@ -437,7 +442,11 @@ export function Users() {
       setUserToDelete(null);
       handleRefresh();
     } catch (error) {
-      setDeleteError(error);
+      // Show error at top level for better visibility
+      setShowDeleteConfirmDialog(false);
+      setUserToDelete(null);
+      setDeleteError(null);
+      setCreateError(error);
     } finally {
       setDeleteLoading(false);
     }
@@ -446,14 +455,12 @@ export function Users() {
   const handleCancelDelete = () => {
     setShowDeleteConfirmDialog(false);
     setUserToDelete(null);
-    setDeleteError(null);
   };
 
   const handleCancelResetPassword = () => {
     setShowResetPasswordDialog(false);
     setResetPasswordUser(null);
     setResetPassword('');
-    setResetError(null);
   };
 
   return (
@@ -548,8 +555,8 @@ export function Users() {
             type="text"
             placeholder={
               activeMainTab === 'users'
-                ? 'Search users by name, email, or role...'
-                : 'Search by token name, owner, or service account...'
+                ? 'Search users by name, email, or role'
+                : 'Search by token name, owner, or service account'
             }
             value={
               activeMainTab === 'users'
@@ -616,15 +623,18 @@ export function Users() {
         )}
       </div>
 
-      <SuccessDisplay
-        message={createSuccess}
-        onDismiss={() => setCreateSuccess(null)}
-      />
-      <ErrorDisplay
-        error={createError}
-        title="Error"
-        onDismiss={() => setCreateError(null)}
-      />
+      {/* Error/Success messages positioned at top right, above all dialogs */}
+      <div className="fixed top-4 right-4 z-[9999] max-w-md">
+        <SuccessDisplay
+          message={createSuccess}
+          onDismiss={() => setCreateSuccess(null)}
+        />
+        <ErrorDisplay
+          error={createError}
+          title="Error"
+          onDismiss={() => setCreateError(null)}
+        />
+      </div>
 
       {activeMainTab === 'users' ? (
         <UsersTable
@@ -661,7 +671,15 @@ export function Users() {
       )}
 
       {/* Create User Dialog */}
-      <Dialog open={showCreateUser} onOpenChange={setShowCreateUser}>
+      <Dialog 
+        open={showCreateUser} 
+        onOpenChange={(open) => {
+          setShowCreateUser(open);
+          if (!open) {
+            setCreateError(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Create User</DialogTitle>
@@ -742,9 +760,12 @@ export function Users() {
 
       <Dialog
         open={permissionDenialState.open}
-        onOpenChange={(open) =>
-          setPermissionDenialState((prev) => ({ ...prev, open }))
-        }
+        onOpenChange={(open) => {
+          setPermissionDenialState((prev) => ({ ...prev, open }));
+          if (!open) {
+            setCreateError(null);
+          }
+        }}
       >
         <DialogContent className="sm:max-w-md transition-all duration-200 ease-in-out">
           <DialogHeader>
@@ -786,7 +807,12 @@ export function Users() {
       {/* Import/Export Users Dialog */}
       <Dialog
         open={showImportExportDialog}
-        onOpenChange={setShowImportExportDialog}
+        onOpenChange={(open) => {
+          setShowImportExportDialog(open);
+          if (!open) {
+            setCreateError(null);
+          }
+        }}
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -939,7 +965,11 @@ export function Users() {
       {/* Reset Password Dialog */}
       <Dialog
         open={showResetPasswordDialog}
-        onOpenChange={handleCancelResetPassword}
+        onOpenChange={(open) => {
+          if (open) return;
+          handleCancelResetPassword();
+          setCreateError(null);
+        }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -966,12 +996,6 @@ export function Users() {
             </div>
           </div>
 
-          <ErrorDisplay
-            error={resetError}
-            title="Reset Failed"
-            onDismiss={() => setResetError(null)}
-          />
-
           <DialogFooter>
             <Button
               variant="outline"
@@ -993,7 +1017,14 @@ export function Users() {
       </Dialog>
 
       {/* Delete User Confirmation Dialog */}
-      <Dialog open={showDeleteConfirmDialog} onOpenChange={handleCancelDelete}>
+      <Dialog 
+        open={showDeleteConfirmDialog} 
+        onOpenChange={(open) => {
+          if (open) return;
+          handleCancelDelete();
+          setCreateError(null);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete User</DialogTitle>
@@ -1003,12 +1034,6 @@ export function Users() {
               cannot be undone.
             </DialogDescription>
           </DialogHeader>
-
-          <ErrorDisplay
-            error={deleteError}
-            title="Deletion Failed"
-            onDismiss={() => setDeleteError(null)}
-          />
 
           <DialogFooter>
             <Button
@@ -1699,7 +1724,11 @@ function ServiceAccountTokensView({
         throw new Error(errorData.detail || 'Failed to delete token');
       }
     } catch (error) {
-      setDeleteError(error);
+      // Show error at top level for better visibility
+      setShowDeleteDialog(false);
+      setTokenToDelete(null);
+      setDeleteError(null);
+      setCreateError(error);
     } finally {
       setDeleting(false);
     }
@@ -1984,6 +2013,7 @@ function ServiceAccountTokensView({
           setShowCreateDialog(open);
           if (!open) {
             setCreatedTokenInDialog(null);
+            setCreateError(null);
           }
         }}
       >
@@ -2117,7 +2147,7 @@ function ServiceAccountTokensView({
           setShowDeleteDialog(open);
           if (!open) {
             setTokenToDelete(null);
-            setDeleteError(null);
+            setCreateError(null);
           }
         }}
       >
@@ -2136,19 +2166,12 @@ function ServiceAccountTokensView({
             </DialogDescription>
           </DialogHeader>
 
-          <ErrorDisplay
-            error={deleteError}
-            title="Deletion Failed"
-            onDismiss={() => setDeleteError(null)}
-          />
-
           <DialogFooter>
             <button
               className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
               onClick={() => {
                 setShowDeleteDialog(false);
                 setTokenToDelete(null);
-                setDeleteError(null);
               }}
               disabled={deleting}
             >
@@ -2174,6 +2197,7 @@ function ServiceAccountTokensView({
             setTokenToRotate(null);
             setRotateExpiration('');
             setRotatedTokenInDialog(null);
+            setCreateError(null);
           }
         }}
       >
