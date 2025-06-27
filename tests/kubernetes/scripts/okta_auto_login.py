@@ -7,15 +7,16 @@ It uses Selenium WebDriver to simulate the browser-based OAuth flow and verify
 successful authentication by checking for the SkyPilot dashboard.
 
 Usage:
-    python3 okta_auto_login.py <endpoint> <username> <password> <client_id>
+    python3 okta_auto_login.py --endpoint <endpoint> --username <username> --password <password> --client-id <client_id>
 
 Example:
-    python3 okta_auto_login.py http://localhost:30082 test-user@example.com password123 client_id_here
+    python3 okta_auto_login.py --endpoint http://localhost:30082 --username test-user@example.com --password password123 --client-id client_id_here
 """
 
 import logging
 import sys
 
+import click
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
@@ -126,27 +127,44 @@ class OktaAutoLogin:
                 logger.info("✅ Chrome driver closed")
 
 
-def main():
-    """Main function to handle command line arguments and perform login"""
-    if len(sys.argv) != 5:
-        print(
-            "Usage: python3 okta_auto_login.py <endpoint> <username> <password> <client_id>"
-        )
-        print(
-            "Example: python3 okta_auto_login.py http://localhost:30082 test@example.com password123 client_id"
-        )
-        sys.exit(1)
+def validate_endpoint(ctx, param, value):
+    """Validate that the endpoint starts with http:// or https://"""
+    if not value.startswith(('http://', 'https://')):
+        raise click.BadParameter('Endpoint must start with http:// or https://')
+    return value
 
-    endpoint, username, password, client_id = sys.argv[1:5]
 
-    # Validate inputs
-    if not all([endpoint, username, password, client_id]):
-        logger.error("All parameters are required")
-        sys.exit(1)
+@click.command()
+@click.option(
+    '--endpoint',
+    '-e',
+    required=True,
+    help='SkyPilot API server endpoint (e.g., http://localhost:30082)',
+    callback=validate_endpoint)
+@click.option('--username',
+              '-u',
+              required=True,
+              help='Okta username/email for authentication')
+@click.option('--password',
+              '-p',
+              required=True,
+              help='Okta password for authentication',
+              hide_input=True)
+@click.option('--client-id', '-c', required=True, help='OAuth2 client ID')
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
+def main(endpoint, username, password, client_id, verbose):
+    """
+    Automated Okta OAuth2 Login Script for SkyPilot Testing
 
-    if not endpoint.startswith(('http://', 'https://')):
-        logger.error("Endpoint must start with http:// or https://")
-        sys.exit(1)
+    This script automates the OAuth2 login flow for test users with MFA disabled.
+    It uses Selenium WebDriver to simulate the browser-based OAuth flow and verify
+    successful authentication by checking for the SkyPilot dashboard.
+
+    Example:
+        python3 okta_auto_login.py --endpoint http://localhost:30082 --username test@example.com --password password123 --client-id client_id_here
+    """
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     logger.info(f"Starting automated login for user: {username}")
     logger.info(f"Endpoint: {endpoint}")
