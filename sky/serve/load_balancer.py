@@ -16,6 +16,7 @@ from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
 from sky.utils import common_utils
+from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
 
@@ -33,7 +34,8 @@ class SkyServeLoadBalancer:
             controller_url: str,
             load_balancer_port: int,
             load_balancing_policy_name: Optional[str] = None,
-            tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
+            tls_credential: Optional[serve_utils.TLSCredential] = None,
+            service_spec: Optional['service_spec.SkyServiceSpec'] = None) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -43,6 +45,8 @@ class SkyServeLoadBalancer:
                 to use. Defaults to None.
             tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
                 to None.
+            service_spec: The service specification containing accelerator QPS
+                information. Defaults to None.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
@@ -50,6 +54,13 @@ class SkyServeLoadBalancer:
         # Use the registry to create the load balancing policy
         self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
             load_balancing_policy_name)
+        
+        # Set accelerator QPS for instance-aware policies
+        if (service_spec and service_spec.accelerator_qps and 
+            hasattr(self._load_balancing_policy, 'set_accelerator_qps')):
+            self._load_balancing_policy.set_accelerator_qps(
+                service_spec.accelerator_qps)
+        
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
@@ -89,6 +100,7 @@ class SkyServeLoadBalancer:
                     response_json = await response.json()
                     ready_replica_urls = response_json.get(
                         'ready_replica_urls', [])
+                    replica_info = response_json.get('replica_info', [])
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'
@@ -98,6 +110,9 @@ class SkyServeLoadBalancer:
                 with self._client_pool_lock:
                     self._load_balancing_policy.set_ready_replicas(
                         ready_replica_urls)
+                    # Set replica info for instance-aware policies
+                    if hasattr(self._load_balancing_policy, 'set_replica_info'):
+                        self._load_balancing_policy.set_replica_info(replica_info)
                     for replica_url in ready_replica_urls:
                         if replica_url not in self._client_pool:
                             self._client_pool[replica_url] = httpx.AsyncClient(
@@ -266,7 +281,8 @@ def run_load_balancer(
         controller_addr: str,
         load_balancer_port: int,
         load_balancing_policy_name: Optional[str] = None,
-        tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
+        tls_credential: Optional[serve_utils.TLSCredential] = None,
+        service_spec: Optional['service_spec.SkyServiceSpec'] = None) -> None:
     """ Run the load balancer.
 
     Args:
@@ -274,12 +290,16 @@ def run_load_balancer(
         load_balancer_port: The port where the load balancer listens to.
         policy_name: The name of the load balancing policy to use. Defaults to
             None.
+        tls_credential: The TLS credentials for HTTPS endpoint. Defaults to None.
+        service_spec: The service specification containing accelerator QPS
+            information. Defaults to None.
     """
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
         load_balancing_policy_name=load_balancing_policy_name,
-        tls_credential=tls_credential)
+        tls_credential=tls_credential,
+        service_spec=service_spec)
     load_balancer.run()
 
 
