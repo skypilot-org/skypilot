@@ -2,6 +2,7 @@
 
 import os
 import unittest.mock as mock
+
 import pytest
 
 from sky.client import service_account_auth
