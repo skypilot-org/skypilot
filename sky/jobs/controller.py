@@ -16,7 +16,8 @@ from sky import exceptions
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
-from sky.jobs import controller_server, recovery_strategy
+from sky.jobs import controller_server
+from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -845,7 +846,7 @@ async def cancel_job():
         for cancel in cancels:
             if int(cancel) in job_tasks:
                 job_id = int(cancel)
-                
+
                 logger.info(f'Cancelling job {job_id}')
 
                 async with _job_tasks_lock:
@@ -855,26 +856,29 @@ async def cancel_job():
 
                     task = job_tasks[job_id]
 
-                async def _cancel_task(task: asyncio.Task):
+                async def _cancel_task(task: asyncio.Task, job_id: int):
                     logger.debug(f'Cancelling task for job {job_id}')
                     task.cancel()
                     try:
                         await task  # Wait for the task to be cancelled
                     except asyncio.CancelledError:
-                        logger.debug(f'Task for job {job_id} was successfully cancelled')
+                        logger.debug(
+                            f'Task for job {job_id} was successfully cancelled')
                         pass  # Expected when task is cancelled
 
                     async with _job_tasks_lock:
                         if job_id in job_tasks:
                             del job_tasks[job_id]
-                            logger.debug(f'Removed task for job {job_id} from job_tasks')
+                            logger.debug(
+                                f'Removed task for job {job_id} from job_tasks')
 
-                # Run the cancellation in the background, so we can return immediately.
-                asyncio.create_task(_cancel_task(task))
+                # Run the cancellation in the background, so we can return
+                # immediately.
+                asyncio.create_task(_cancel_task(task, job_id))
                 logger.info(f'Job {job_id} cancelled successfully')
-                
+
                 os.remove(f'{controller_server.SIGNAL_PATH}/{job_id}')
-        await asyncio.sleep(5)
+        await asyncio.sleep(1)
 
 
 if __name__ == '__main__':

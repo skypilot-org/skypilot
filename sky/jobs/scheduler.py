@@ -75,13 +75,17 @@ _JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
     '~/.sky/locks/job_controller_pid.lock')
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
+JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
+
 # Based on testing, assume a running job uses 350MB memory.
 JOB_MEMORY_MB = 350
-# Past 2000 simultaneous jobs, we become unstable.
-# See https://github.com/skypilot-org/skypilot/issues/4649.
-MAX_JOB_LIMIT = 2000
 # Number of ongoing launches launches allowed per CPU.
 LAUNCHES_PER_CPU = 4
+
+# os.cpu_count gives us an Optional[int], ignoring type since mypy has issues
+# if I don't
+WORKERS = int(os.cpu_count()) if os.cpu_count() else 2  # type: ignore
+JOBS_PER_WORKER = 200
 
 
 @lru_cache(maxsize=1)
@@ -99,7 +103,6 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
-    pid_path = os.path.expanduser('~/.sky/job_controller_pid')
     to_start = False
     # TODO(luca): add an unlocked path first as a short circuit to ignore this
     try:
@@ -107,8 +110,9 @@ def _start_controller(job_id: int, dag_yaml_path: str,
                                blocking=False,
                                timeout=1):
             try:
-                if os.path.exists(pid_path):
-                    with open(pid_path, 'r', encoding='utf-8') as f:
+                if os.path.exists(JOB_CONTROLLER_PID_PATH):
+                    with open(JOB_CONTROLLER_PID_PATH, 'r',
+                              encoding='utf-8') as f:
                         pid = int(f.read())
                         if subprocess_utils.is_process_alive(pid):
                             logger.debug(
@@ -148,7 +152,7 @@ def _start_controller(job_id: int, dag_yaml_path: str,
 
         pid = subprocess_utils.launch_new_process_tree(run_cmd,
                                                        log_output=log_path)
-        with open(pid_path, 'w', encoding='utf-8') as f:
+        with open(JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
             f.write(str(pid))
 
     max_retries = 5
@@ -362,8 +366,7 @@ def _set_alive_waiting(job_id: int) -> None:
 
 
 def _get_job_parallelism() -> int:
-    # TODO(luca): Tune this value.
-    return 1000
+    return WORKERS * JOBS_PER_WORKER
 
 
 def _get_launch_parallelism() -> int:

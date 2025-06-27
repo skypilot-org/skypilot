@@ -1,8 +1,8 @@
 """Controller server for managing jobs."""
 
 import asyncio
-import os
 import logging
+import os
 from typing import Optional
 
 from fastapi import FastAPI
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from sky.jobs import controller
+from sky.jobs import scheduler
 from sky.jobs import state
 
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +22,7 @@ SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
 app = FastAPI()
 
 
-@app.on_event("startup")
+@app.on_event('startup')
 async def startup_event():
     # Will happen multiple times, who cares though
     os.makedirs(SIGNAL_PATH, exist_ok=True)
@@ -56,7 +57,7 @@ async def cancel_job(job_id: int):
     """Cancel an existing job."""
     logger.info(f'Cancelling job {job_id}')
     try:
-        with open(f'{SIGNAL_PATH}/{job_id}', 'w') as f:
+        with open(f'{SIGNAL_PATH}/{job_id}', 'w', encoding='utf-8') as f:
             f.write('')
         return {'status': 'success', 'message': f'Job {job_id} cancelled'}
     except ValueError as e:
@@ -82,10 +83,10 @@ async def get_job_status(job_id: int):
 
 def start_server(host: str = 'localhost', port: int = 8000):
     """Start the controller server."""
-    # num_workers = multiprocessing.cpu_count()
-    # uvicorn.run('sky.jobs.controller_server:app',
-    # host=host, port=port, workers=2 * num_workers)
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run('sky.jobs.controller_server:app',
+                host=host,
+                port=port,
+                workers=scheduler.WORKERS)
 
 
 if __name__ == '__main__':
