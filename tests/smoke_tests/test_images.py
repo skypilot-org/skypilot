@@ -675,7 +675,7 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.gcp
+@pytest.mark.kubernetes
 def test_helm_deploy_gke(request):
     helm_version = request.config.getoption('--helm-version')
     package_name = request.config.getoption('--helm-package')
