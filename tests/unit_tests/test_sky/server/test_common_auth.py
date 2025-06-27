@@ -1,246 +1,214 @@
-"""Unit tests for authenticated request functionality in server/common.py."""
+"""Unit tests for server common authentication functionality."""
 
-from unittest import mock
+import unittest.mock as mock
 
-import pytest
-import requests
-
-from sky.server import common as server_common
+from sky.server import common
 
 
-class TestMakeAuthenticatedRequest:
-    """Test cases for make_authenticated_request function."""
+class TestServerCommonAuth:
+    """Test cases for server common authentication functions."""
 
-    @mock.patch('sky.server.common.get_server_url')
     @mock.patch('sky.client.service_account_auth.get_service_account_headers')
     @mock.patch(
-        'sky.client.service_account_auth.get_api_url_with_service_account_path')
-    @mock.patch('sky.server.rest.request')
+        'sky.client.service_account_auth.get_api_url')
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.server.common.rest.request')
     def test_make_authenticated_request_with_service_account(
-            self, mock_rest_request, mock_get_url, mock_get_headers,
-            mock_get_server_url):
+            self, mock_request, mock_get_cookie_jar, mock_get_url,
+            mock_get_headers):
         """Test authenticated request with service account token."""
-        mock_get_server_url.return_value = 'https://api.example.com'
+        # Mock service account authentication
         mock_get_headers.return_value = {
             'Authorization': 'Bearer sky_test_token',
-            'X-Service-Account-Auth': 'true'
         }
-        mock_get_url.return_value = 'https://api.example.com/sa/api/v1/status'
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
+        mock_get_url.return_value = 'https://api.example.com/api/v1/status'
 
-        result = server_common.make_authenticated_request(
-            'GET', '/api/v1/status')
+        # Call the function
+        result = common.make_authenticated_request('GET', '/api/v1/status')
 
-        assert result == mock_response
-        mock_rest_request.assert_called_once_with(
+        # Verify the correct URL and headers were used
+        mock_get_url.assert_called_once_with('http://127.0.0.1:46580',
+                                             '/api/v1/status')
+        mock_request.assert_called_once_with(
             'GET',
-            'https://api.example.com/sa/api/v1/status',
-            headers={
-                'Authorization': 'Bearer sky_test_token',
-                'X-Service-Account-Auth': 'true'
-            })
+            'https://api.example.com/api/v1/status',
+            headers={'Authorization': 'Bearer sky_test_token'})
 
-    @mock.patch('sky.server.common.get_server_url')
+        # Verify cookie jar was not used (service account doesn't need cookies)
+        mock_get_cookie_jar.assert_not_called()
+
+        assert result == mock_request.return_value
+
     @mock.patch('sky.client.service_account_auth.get_service_account_headers')
     @mock.patch('sky.server.common.get_api_cookie_jar')
-    @mock.patch('sky.server.rest.request')
-    def test_make_authenticated_request_with_cookies(self, mock_rest_request,
-                                                     mock_get_cookies,
-                                                     mock_get_headers,
-                                                     mock_get_server_url):
-        """Test authenticated request with cookie authentication."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {}  # No service account token
-        mock_cookies = requests.cookies.RequestsCookieJar()
-        mock_get_cookies.return_value = mock_cookies
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
+    @mock.patch('sky.server.common.rest.request')
+    def test_make_authenticated_request_without_service_account(
+            self, mock_request, mock_get_cookie_jar, mock_get_headers):
+        """Test authenticated request without service account token."""
+        # Mock no service account token
+        mock_get_headers.return_value = {}
+        mock_get_cookie_jar.return_value = 'mock_cookies'
 
-        result = server_common.make_authenticated_request(
-            'POST', '/api/v1/launch')
+        # Call the function
+        with mock.patch(
+                'sky.client.service_account_auth.get_api_url'
+        ) as mock_get_url:
+            mock_get_url.return_value = 'http://127.0.0.1:46580/api/v1/status'
+            result = common.make_authenticated_request('GET', '/api/v1/status')
 
-        assert result == mock_response
-        mock_rest_request.assert_called_once_with(
-            'POST',
-            'https://api.example.com/api/v1/launch',
+        # Verify cookie authentication was used
+        mock_get_cookie_jar.assert_called_once()
+        mock_request.assert_called_once_with(
+            'GET',
+            'http://127.0.0.1:46580/api/v1/status',
             headers={},
-            cookies=mock_cookies)
+            cookies='mock_cookies')
 
-    @mock.patch('sky.server.common.get_server_url')
+        assert result == mock_request.return_value
+
     @mock.patch('sky.client.service_account_auth.get_service_account_headers')
-    @mock.patch(
-        'sky.client.service_account_auth.get_api_url_with_service_account_path')
-    @mock.patch('sky.server.rest.request')
-    def test_make_authenticated_request_custom_server_url(
-            self, mock_rest_request, mock_get_url, mock_get_headers,
-            mock_get_server_url):
-        """Test authenticated request with custom server URL."""
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.server.common.rest.request')
+    def test_make_authenticated_request_with_custom_headers(
+            self, mock_request, mock_get_cookie_jar, mock_get_headers):
+        """Test authenticated request with custom headers merged."""
+        # Mock service account authentication
         mock_get_headers.return_value = {
             'Authorization': 'Bearer sky_test_token',
-            'X-Service-Account-Auth': 'true'
         }
-        mock_get_url.return_value = 'https://custom.api.com/sa/api/v1/status'
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
 
-        result = server_common.make_authenticated_request(
-            'GET', '/api/v1/status', server_url='https://custom.api.com')
+        # Call with custom headers
+        custom_headers = {'X-Custom-Header': 'custom_value'}
+        with mock.patch(
+                'sky.client.service_account_auth.get_api_url'
+        ) as mock_get_url:
+            mock_get_url.return_value = 'http://127.0.0.1:46580/api/v1/status'
+            result = common.make_authenticated_request('GET',
+                                                       '/api/v1/status',
+                                                       headers=custom_headers)
 
-        assert result == mock_response
-        # Should not call get_server_url when custom server_url is provided
-        mock_get_server_url.assert_not_called()
-        mock_get_url.assert_called_once_with('https://custom.api.com',
-                                             '/api/v1/status')
-
-    @mock.patch('sky.server.common.get_server_url')
-    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
-    @mock.patch('sky.server.rest.request')
-    def test_make_authenticated_request_with_existing_headers(
-            self, mock_rest_request, mock_get_headers, mock_get_server_url):
-        """Test authenticated request merging with existing headers."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {
-            'Authorization': 'Bearer sky_test_token'
-        }
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
-
-        existing_headers = {'Content-Type': 'application/json'}
-
-        result = server_common.make_authenticated_request(
-            'POST',
-            '/api/v1/launch',
-            headers=existing_headers,
-            json={'cluster_name': 'test'})
-
-        assert result == mock_response
-        # Headers should be merged
+        # Verify headers were merged
         expected_headers = {
             'Authorization': 'Bearer sky_test_token',
-            'Content-Type': 'application/json'
+            'X-Custom-Header': 'custom_value',
         }
-        mock_rest_request.assert_called_once()
-        call_args = mock_rest_request.call_args
-        assert call_args[1]['headers'] == expected_headers
-        assert call_args[1]['json'] == {'cluster_name': 'test'}
-
-    @mock.patch('sky.server.common.get_server_url')
-    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
-    @mock.patch('sky.server.rest.request_without_retry')
-    def test_make_authenticated_request_without_retry(
-            self, mock_rest_request_no_retry, mock_get_headers,
-            mock_get_server_url):
-        """Test authenticated request without retry."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {}
-        mock_response = mock.Mock()
-        mock_rest_request_no_retry.return_value = mock_response
-
-        result = server_common.make_authenticated_request('GET',
-                                                          '/api/v1/status',
-                                                          retry=False)
-
-        assert result == mock_response
-        mock_rest_request_no_retry.assert_called_once()
-        # Should only allow GET requests without retry
-        assert mock_rest_request_no_retry.call_args[0][0] == 'GET'
-
-    @mock.patch('sky.server.common.get_server_url')
-    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
-    def test_make_authenticated_request_non_get_without_retry_assertion(
-            self, mock_get_headers, mock_get_server_url):
-        """Test that non-GET requests without retry raise assertion error."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {}
-
-        with pytest.raises(AssertionError,
-                           match='Only GET requests can be done without retry'):
-            server_common.make_authenticated_request('POST',
-                                                     '/api/v1/launch',
-                                                     retry=False)
-
-    @mock.patch('sky.server.common.get_server_url')
-    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
-    @mock.patch('sky.server.rest.request')
-    def test_make_authenticated_request_path_variations(self, mock_rest_request,
-                                                        mock_get_headers,
-                                                        mock_get_server_url):
-        """Test authenticated request with various path formats."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {}
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
-
-        # Test path with leading slash
-        server_common.make_authenticated_request('GET', '/api/v1/status')
-        mock_rest_request.assert_called_with(
+        mock_request.assert_called_once_with(
             'GET',
-            'https://api.example.com/api/v1/status',
-            headers={},
-            cookies=mock.ANY)
+            'http://127.0.0.1:46580/api/v1/status',
+            headers=expected_headers)
 
-        # Test path without leading slash
-        mock_rest_request.reset_mock()
-        server_common.make_authenticated_request('GET', 'api/v1/status')
-        mock_rest_request.assert_called_with(
-            'GET',
-            'https://api.example.com/api/v1/status',
-            headers={},
-            cookies=mock.ANY)
+        assert result == mock_request.return_value
 
-    @mock.patch('sky.server.common.get_server_url')
-    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
-    @mock.patch(
-        'sky.client.service_account_auth.get_api_url_with_service_account_path')
-    @mock.patch('sky.server.rest.request')
-    def test_make_authenticated_request_service_account_overrides_cookies(
-            self, mock_rest_request, mock_get_url, mock_get_headers,
-            mock_get_server_url):
-        """Test that service account auth takes priority over cookies."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {
-            'Authorization': 'Bearer sky_test_token'
-        }
-        mock_get_url.return_value = 'https://api.example.com/sa/api/v1/status'
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
-
-        # Pass cookies parameter, but it should be ignored when using service account
-        custom_cookies = requests.cookies.RequestsCookieJar()
-
-        result = server_common.make_authenticated_request(
-            'GET', '/api/v1/status', cookies=custom_cookies)
-
-        assert result == mock_response
-        # Should use service account path and not include cookies
-        mock_rest_request.assert_called_once_with(
-            'GET',
-            'https://api.example.com/sa/api/v1/status',
-            headers={'Authorization': 'Bearer sky_test_token'},
-            cookies=custom_cookies)
-
-    @mock.patch('sky.server.common.get_server_url')
     @mock.patch('sky.client.service_account_auth.get_service_account_headers')
     @mock.patch('sky.server.common.get_api_cookie_jar')
-    @mock.patch('sky.server.rest.request')
-    def test_make_authenticated_request_no_cookies_param_uses_default(
-            self, mock_rest_request, mock_get_cookies, mock_get_headers,
-            mock_get_server_url):
-        """Test that default cookies are used when no cookies param provided."""
-        mock_get_server_url.return_value = 'https://api.example.com'
-        mock_get_headers.return_value = {}  # No service account token
-        mock_default_cookies = requests.cookies.RequestsCookieJar()
-        mock_get_cookies.return_value = mock_default_cookies
-        mock_response = mock.Mock()
-        mock_rest_request.return_value = mock_response
+    @mock.patch('sky.server.common.rest.request_without_retry')
+    def test_make_authenticated_request_without_retry(self, mock_request,
+                                                      mock_get_cookie_jar,
+                                                      mock_get_headers):
+        """Test authenticated request without retry."""
+        # Mock no service account token
+        mock_get_headers.return_value = {}
 
-        result = server_common.make_authenticated_request(
-            'GET', '/api/v1/status')
+        # Call without retry
+        with mock.patch(
+                'sky.client.service_account_auth.get_api_url'
+        ) as mock_get_url:
+            mock_get_url.return_value = 'http://127.0.0.1:46580/api/v1/status'
+            result = common.make_authenticated_request('GET',
+                                                       '/api/v1/status',
+                                                       retry=False)
 
-        assert result == mock_response
-        mock_rest_request.assert_called_once_with(
+        # Verify request_without_retry was used
+        mock_request.assert_called_once()
+        assert result == mock_request.return_value
+
+    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.server.common.rest.request')
+    def test_make_authenticated_request_with_existing_cookies(
+            self, mock_request, mock_get_cookie_jar, mock_get_headers):
+        """Test authenticated request with existing cookies provided."""
+        # Mock no service account token
+        mock_get_headers.return_value = {}
+
+        # Call with existing cookies
+        existing_cookies = 'existing_cookies'
+        with mock.patch(
+                'sky.client.service_account_auth.get_api_url'
+        ) as mock_get_url:
+            mock_get_url.return_value = 'http://127.0.0.1:46580/api/v1/status'
+            result = common.make_authenticated_request('GET',
+                                                       '/api/v1/status',
+                                                       cookies=existing_cookies)
+
+        # Verify existing cookies were used, not cookie jar
+        mock_get_cookie_jar.assert_not_called()
+        mock_request.assert_called_once_with(
+            'GET',
+            'http://127.0.0.1:46580/api/v1/status',
+            headers={},
+            cookies=existing_cookies)
+
+        assert result == mock_request.return_value
+
+    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.server.common.rest.request')
+    def test_make_authenticated_request_custom_server_url(
+            self, mock_request, mock_get_cookie_jar, mock_get_headers):
+        """Test authenticated request with custom server URL."""
+        # Mock service account authentication
+        mock_get_headers.return_value = {
+            'Authorization': 'Bearer sky_test_token',
+        }
+
+        custom_server_url = 'https://custom.api.com'
+        with mock.patch(
+                'sky.client.service_account_auth.get_api_url'
+        ) as mock_get_url:
+            mock_get_url.return_value = 'https://custom.api.com/api/v1/status'
+            result = common.make_authenticated_request('GET',
+                                                       '/api/v1/status',
+                                                       server_url=custom_server_url)
+
+        # Verify custom server URL was used
+        mock_get_url.assert_called_once_with(custom_server_url,
+                                             '/api/v1/status')
+        mock_request.assert_called_once_with(
+            'GET',
+            'https://custom.api.com/api/v1/status',
+            headers={'Authorization': 'Bearer sky_test_token'})
+
+        assert result == mock_request.return_value
+
+    @mock.patch('sky.client.service_account_auth.get_service_account_headers')
+    @mock.patch(
+        'sky.client.service_account_auth.get_api_url')
+    @mock.patch('sky.server.common.get_api_cookie_jar')
+    @mock.patch('sky.server.common.rest.request')
+    def test_make_authenticated_request_service_account_with_mixed_auth(
+            self, mock_request, mock_get_cookie_jar, mock_get_url,
+            mock_get_headers):
+        """Test service account request doesn't use cookies even when available."""
+        # Mock service account authentication
+        mock_get_headers.return_value = {
+            'Authorization': 'Bearer sky_test_token',
+        }
+        mock_get_url.return_value = 'https://api.example.com/api/v1/status'
+        mock_get_cookie_jar.return_value = 'mock_cookies'
+
+        # Call the function
+        result = common.make_authenticated_request('GET', '/api/v1/status')
+
+        # Verify service account auth was used, not cookies
+        mock_get_url.assert_called_once_with('http://127.0.0.1:46580',
+                                             '/api/v1/status')
+        mock_request.assert_called_once_with(
             'GET',
             'https://api.example.com/api/v1/status',
-            headers={},
-            cookies=mock_default_cookies)
+            headers={'Authorization': 'Bearer sky_test_token'})
+
+        # Cookie jar should not be called since Authorization header is present
+        mock_get_cookie_jar.assert_not_called()
+
+        assert result == mock_request.return_value

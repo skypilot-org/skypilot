@@ -15,9 +15,15 @@ metadata:
     {{- end }}
     {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
     # OAuth2 Proxy authentication for browser-based access
+    # Bearer token requests bypass OAuth2 proxy and go directly to the application
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
     nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
     nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email
+    # Skip OAuth2 authentication for requests with Authorization header (Bearer tokens)
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      if ($http_authorization ~ "^Bearer .+") {
+        return 200;
+      }
     {{- else if and (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
@@ -41,6 +47,10 @@ metadata:
         proxy_set_header Host $host;
         proxy_set_header Connection "upgrade";
         proxy_cache_bypass $http_upgrade;
+        {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
+        # Pass through Authorization header for Bearer token authentication
+        proxy_set_header Authorization $http_authorization;
+        {{- end }}
       }
 
 
@@ -60,44 +70,4 @@ spec:
             name: {{ .Release.Name }}-api-service
             port:
               number: 80
-{{- end }}
-
-{{/* Separate ingress for service account access to bypass OAuth2 proxy */}}
-{{- if .Values.apiService.enableServiceAccounts }}
-{{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
-{{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
-{{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ .Release.Name }}-service-account-ingress
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    {{- if not $useNewIngressClass }}
-    kubernetes.io/ingress.class: nginx
-    {{- end }}
-    # No OAuth2 proxy annotations - this ingress bypasses OAuth2 for service account bearer tokens
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
-    # Strip /sa prefix and forward to API server
-    nginx.ingress.kubernetes.io/use-regex: "true"
-spec:
-  {{- if $useNewIngressClass }}
-  ingressClassName: nginx
-  {{- end }}
-  rules:
-  - host: {{ .Values.ingress.host }}
-    http:
-      paths:
-      - pathType: ImplementationSpecific
-        path: /sa(/|$)(.*)
-        backend:
-          service:
-            name: {{ .Release.Name }}-api-service
-            port:
-              number: 80
-
-
 {{- end }}

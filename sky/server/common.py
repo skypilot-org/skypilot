@@ -216,16 +216,13 @@ def make_authenticated_request(method: str,
         headers.update(kwargs['headers'])
     kwargs['headers'] = headers
 
-    # Use service account path if using bearer token
-    if headers.get('Authorization'):
-        url = service_account_auth.get_api_url_with_service_account_path(
-            server_url, path)
-    else:
-        url = f'{server_url}/{path}' if not path.startswith(
-            '/') else f'{server_url}{path}'
-        # Use cookie authentication
-        if 'cookies' not in kwargs:
-            kwargs['cookies'] = get_api_cookie_jar()
+    # Always use the same URL regardless of authentication type
+    # OAuth2 proxy will handle authentication based on headers
+    url = service_account_auth.get_api_url(server_url, path)
+    
+    # Use cookie authentication if no Bearer token present
+    if not headers.get('Authorization') and 'cookies' not in kwargs:
+        kwargs['cookies'] = get_api_cookie_jar()
 
     # Make the request
     if retry:
