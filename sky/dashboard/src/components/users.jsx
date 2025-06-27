@@ -1489,6 +1489,7 @@ function ServiceAccountTokensView({
   const [loading, setLoading] = useState(true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [tokenToDelete, setTokenToDelete] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
   const [newToken, setNewToken] = useState({
     token_name: '',
     expires_in_days: 30,
@@ -1676,6 +1677,7 @@ function ServiceAccountTokensView({
     if (!tokenToDelete) return;
 
     setDeleting(true);
+    setDeleteError(null);
     try {
       const response = await apiClient.post(
         '/users/service-account-tokens/delete',
@@ -1690,13 +1692,14 @@ function ServiceAccountTokensView({
         );
         setShowDeleteDialog(false);
         setTokenToDelete(null);
+        setDeleteError(null);
         await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to delete token');
       }
     } catch (error) {
-      setCreateError(error);
+      setDeleteError(error);
     } finally {
       setDeleting(false);
     }
@@ -2108,7 +2111,16 @@ function ServiceAccountTokensView({
       </Dialog>
 
       {/* Delete Token Dialog */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+      <Dialog
+        open={showDeleteDialog}
+        onOpenChange={(open) => {
+          setShowDeleteDialog(open);
+          if (!open) {
+            setTokenToDelete(null);
+            setDeleteError(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Service Account Token</DialogTitle>
@@ -2123,12 +2135,20 @@ function ServiceAccountTokensView({
               for any systems using this token.
             </DialogDescription>
           </DialogHeader>
+
+          <ErrorDisplay
+            error={deleteError}
+            title="Deletion Failed"
+            onDismiss={() => setDeleteError(null)}
+          />
+
           <DialogFooter>
             <button
               className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
               onClick={() => {
                 setShowDeleteDialog(false);
                 setTokenToDelete(null);
+                setDeleteError(null);
               }}
               disabled={deleting}
             >

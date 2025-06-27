@@ -414,7 +414,8 @@ def _init_db(func):
 
 
 @_init_db
-def add_or_update_user(user: models.User) -> bool:
+def add_or_update_user(user: models.User,
+                       allow_duplicate_name: bool = True) -> bool:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
@@ -430,6 +431,13 @@ def add_or_update_user(user: models.User) -> bool:
     if created_at is None:
         created_at = int(time.time())
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Check for duplicate names if not allowed (within the same transaction)
+        if not allow_duplicate_name:
+            existing_user = session.query(user_table).filter(
+                user_table.c.name == user.name).first()
+            if existing_user is not None:
+                return False
+
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new

@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import secrets
+import time
 from typing import Any, Dict, Generator, List
 
 import fastapi
@@ -18,6 +19,7 @@ from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import permission
 from sky.users import rbac
+from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
@@ -402,21 +404,10 @@ async def get_service_account_tokens(
     return result
 
 
-def _generate_service_account_user_id(token_name: str,
-                                      creator_user_id: str) -> str:
+def _generate_service_account_user_id() -> str:
     """Generate a unique user ID for a service account."""
-    # Create a deterministic yet unique ID based on creator and token name
-    # but add some randomness to avoid collisions
-    random_suffix = secrets.token_hex(8)  # 16 character hex string
-    # Use sa- prefix followed by first 8 chars of creator ID, token name, and
-    # random suffix.
-    # Limit total length to keep it manageable.
-    safe_token_name = re.sub(
-        r'[^a-zA-Z0-9]', '',
-        token_name)[:8]  # Remove special chars, limit length
-    creator_prefix = creator_user_id[:8]  # First 8 chars of creator ID
-    service_account_id = (f'sa-{creator_prefix}-{safe_token_name}-'
-                          f'{random_suffix}')
+    random_suffix = secrets.token_hex(16)  # 16 character hex string
+    service_account_id = (f'sa-{random_suffix}')
     return service_account_id
 
 
@@ -430,9 +421,14 @@ async def create_service_account_token(
         raise fastapi.HTTPException(status_code=401,
                                     detail='Authentication required')
 
-    if not token_body.token_name or not token_body.token_name.strip():
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='Token name is required')
+    token_name = token_body.token_name.strip()
+
+    # Check if token follows a valid format
+    if not re.match(constants.CLUSTER_NAME_VALID_REGEX, token_name):
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='Token name must contain only letters, numbers, and '
+                   'underscores. Please use a different name.')
 
     # Validate expiration (allow 0 as special value for "never expire")
     if (token_body.expires_in_days is not None and
@@ -442,18 +438,21 @@ async def create_service_account_token(
             detail='Expiration days must be positive or 0 for never expire')
 
     try:
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.token_service import token_service
-
         # Generate a unique service account user ID
-        service_account_user_id = _generate_service_account_user_id(
-            token_body.token_name.strip(), auth_user.id)
+        service_account_user_id = _generate_service_account_user_id()
 
         # Create a user entry for the service account
         service_account_user = models.User(id=service_account_user_id,
-                                           name=token_body.token_name.strip())
-        global_user_state.add_or_update_user(service_account_user)
+                                           name=token_name)
+        is_new_user = global_user_state.add_or_update_user(
+            service_account_user, allow_duplicate_name=False)
+
+        if not is_new_user:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Service account with name {token_name!r} '
+                f'already exists ({service_account_user_id}). '
+                'Please use a different name.')
 
         # Add service account to permission system with default role
         # Import here to avoid circular imports
@@ -467,16 +466,16 @@ async def create_service_account_token(
             expires_in_days = None
 
         # Create JWT-based token with service account user ID
-        token_data = token_service.create_token(
+        token_data = token_service.token_service.create_token(
             creator_user_id=auth_user.id,
             service_account_user_id=service_account_user_id,
-            token_name=token_body.token_name.strip(),
+            token_name=token_name,
             expires_in_days=expires_in_days)
 
         # Store token metadata in database
         global_user_state.add_service_account_token(
             token_id=token_data['token_id'],
-            token_name=token_body.token_name.strip(),
+            token_name=token_name,
             token_hash=token_data['token_hash'],
             creator_user_hash=auth_user.id,
             service_account_user_id=service_account_user_id,
@@ -485,7 +484,7 @@ async def create_service_account_token(
         # Return the JWT token only once (never stored in plain text)
         return {
             'token_id': token_data['token_id'],
-            'token_name': token_body.token_name.strip(),
+            'token_name': token_name,
             'token': token_data['token'],  # Full JWT token with sky_ prefix
             'expires_at': token_data['expires_at'],
             'service_account_user_id': service_account_user_id,
@@ -496,7 +495,8 @@ async def create_service_account_token(
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to create service account token: {e}')
         raise fastapi.HTTPException(
-            status_code=500, detail='Failed to create service account token')
+            status_code=500,
+            detail=f'Failed to create service account token: {e}')
 
 
 @router.post('/service-account-tokens/delete')
@@ -656,10 +656,6 @@ async def rotate_service_account_token(
             detail='Expiration days must be positive or 0 for never expire')
 
     try:
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.token_service import token_service
-
         # Use provided expiration or preserve original expiration logic
         expires_in_days = token_body.expires_in_days
         if expires_in_days == 0:
@@ -668,7 +664,6 @@ async def rotate_service_account_token(
         elif expires_in_days is None:
             # No expiration specified, try to preserve original expiration
             if token_info['expires_at']:
-                import time
                 current_time = time.time()
                 remaining_seconds = token_info['expires_at'] - current_time
                 if remaining_seconds > 0:
@@ -679,7 +674,7 @@ async def rotate_service_account_token(
                     expires_in_days = 30
 
         # Generate new JWT token with same service account user ID
-        token_data = token_service.create_token(
+        token_data = token_service.token_service.create_token(
             creator_user_id=token_info['creator_user_hash'],
             service_account_user_id=token_info['service_account_user_id'],
             token_name=token_info['token_name'],
