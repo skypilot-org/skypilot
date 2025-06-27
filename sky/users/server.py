@@ -20,6 +20,7 @@ from sky.users import permission
 from sky.users import rbac
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import resource_checker
 
 logger = sky_logging.init_logger(__name__)
 
@@ -152,6 +153,7 @@ async def user_update(request: fastapi.Request,
             # Update user role in casbin policy
             permission.permission_service.update_role(user_info.id, role)
 
+
 def _delete_user(user_id: str) -> None:
     """Delete a user."""
     user_info = global_user_state.get_user(user_id)
@@ -164,12 +166,17 @@ def _delete_user(user_id: str) -> None:
                                     detail=f'Cannot delete internal '
                                     f'API server user {user_info.name}')
 
-    # TODO(zhwu): Check that there is no active resources owned by the user,
-    # similar to how we delete/modify workspace configurations.
+    # Check for active clusters and managed jobs owned by the user
+    try:
+        resource_checker.check_no_active_resources_for_users([(user_id,
+                                                               'delete')])
+    except ValueError as e:
+        raise fastapi.HTTPException(status_code=400, detail=str(e))
 
     with _user_lock(user_id):
         global_user_state.delete_user(user_id)
         permission.permission_service.delete_user(user_id)
+
 
 @router.post('/delete')
 async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
