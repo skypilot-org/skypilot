@@ -11,7 +11,8 @@ from sky.skylet import constants
 class TestServiceAccountAuth:
     """Test cases for service account authentication."""
 
-    @mock.patch.dict(os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
+    @mock.patch.dict(
+        os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
     def test_get_service_account_token_from_env(self):
         """Test getting service account token from environment variable."""
         token = service_account_auth._get_service_account_token()
@@ -25,7 +26,7 @@ class TestServiceAccountAuth:
 
         token = service_account_auth._get_service_account_token()
         assert token == 'sky_config_token'
-        
+
         # Verify the correct config path is used
         mock_get_nested.assert_called_once_with(
             ('api_server', 'service_account_token'), default_value=None)
@@ -39,12 +40,13 @@ class TestServiceAccountAuth:
         token = service_account_auth._get_service_account_token()
         assert token is None
 
-    @mock.patch.dict(os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'invalid_token'})
+    @mock.patch.dict(os.environ,
+                     {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'invalid_token'})
     def test_invalid_token_format_env(self):
         """Test validation of token format from environment."""
         with pytest.raises(ValueError) as exc_info:
             service_account_auth._get_service_account_token()
-        
+
         assert 'Invalid service account token format' in str(exc_info.value)
         assert 'Token must start with "sky_"' in str(exc_info.value)
 
@@ -56,12 +58,13 @@ class TestServiceAccountAuth:
 
         with pytest.raises(ValueError) as exc_info:
             service_account_auth._get_service_account_token()
-        
+
         assert 'Invalid service account token format in config' in str(
             exc_info.value)
         assert 'Token must start with "sky_"' in str(exc_info.value)
 
-    @mock.patch.dict(os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
+    @mock.patch.dict(
+        os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
     def test_get_service_account_headers_with_token(self):
         """Test getting headers when token is available."""
         headers = service_account_auth.get_service_account_headers()
@@ -76,7 +79,8 @@ class TestServiceAccountAuth:
         headers = service_account_auth.get_service_account_headers()
         assert headers == {}
 
-    @mock.patch.dict(os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
+    @mock.patch.dict(
+        os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_test_token'})
     @mock.patch('sky.skypilot_config.get_nested')
     def test_env_variable_priority(self, mock_get_nested):
         """Test that environment variable takes priority over config."""
@@ -85,22 +89,25 @@ class TestServiceAccountAuth:
         token = service_account_auth._get_service_account_token()
         # Should get env token, not config token
         assert token == 'sky_test_token'
-        
+
         # Config should not be called when env var is present
         mock_get_nested.assert_not_called()
 
-    @mock.patch.dict(os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_valid_token'})
+    @mock.patch.dict(
+        os.environ,
+        {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'sky_valid_token'})
     def test_headers_with_valid_env_token(self):
         """Test headers generation with valid environment token."""
         headers = service_account_auth.get_service_account_headers()
         assert headers == {'Authorization': 'Bearer sky_valid_token'}
 
-    @mock.patch.dict(os.environ, {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'invalid_token'})
+    @mock.patch.dict(os.environ,
+                     {constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR: 'invalid_token'})
     def test_headers_with_invalid_env_token(self):
         """Test headers generation fails with invalid environment token."""
         with pytest.raises(ValueError) as exc_info:
             service_account_auth.get_service_account_headers()
-        
+
         assert 'Invalid service account token format' in str(exc_info.value)
 
     @mock.patch.dict(os.environ, {}, clear=True)
@@ -111,7 +118,7 @@ class TestServiceAccountAuth:
 
         with pytest.raises(ValueError) as exc_info:
             service_account_auth.get_service_account_headers()
-        
+
         assert 'Invalid service account token format in config' in str(
             exc_info.value)
 
@@ -138,10 +145,10 @@ class TestServiceAccountAuth:
         """Test empty environment token falls back to config."""
         with mock.patch('sky.skypilot_config.get_nested') as mock_get_nested:
             mock_get_nested.return_value = 'sky_config_fallback'
-            
+
             token = service_account_auth._get_service_account_token()
             assert token == 'sky_config_fallback'
-            
+
             # Should check config since env token is empty
             mock_get_nested.assert_called_once_with(
                 ('api_server', 'service_account_token'), default_value=None)
