@@ -195,7 +195,7 @@ async def get_metrics_for_context(context: str) -> Tuple[str, str]:
         Exception: If metrics collection fails for any reason
     """
     # query GPU utilization metrics
-    match_patterns = ['{__name__="DCGM_FI_DEV_GPU_UTIL"}']
+    match_patterns = ['{__name__=~"DCGM_.*"}']
     metrics_text = await send_metrics_request_with_port_forward(
         context=context,
         namespace='skypilot', 
