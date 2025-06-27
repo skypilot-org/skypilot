@@ -78,7 +78,9 @@ class TestBearerTokenMiddleware:
                                                     mock_call_next):
         """Test that non-SkyPilot Bearer tokens bypass the middleware."""
         request = mock.Mock(spec=fastapi.Request)
-        request.headers = {'authorization': 'Bearer oauth_token_123'}  # Not sky_ prefix
+        request.headers = {
+            'authorization': 'Bearer oauth_token_123'
+        }  # Not sky_ prefix
 
         with mock.patch.dict(
                 os.environ,
@@ -89,7 +91,8 @@ class TestBearerTokenMiddleware:
             assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_invalid_service_account_token(self, middleware, mock_call_next):
+    async def test_invalid_service_account_token(self, middleware,
+                                                 mock_call_next):
         """Test middleware with invalid service account token."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_invalid_token'}
@@ -98,13 +101,14 @@ class TestBearerTokenMiddleware:
                 os.environ,
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service:
-            
+
             mock_token_service.verify_token.return_value = None
 
             response = await middleware.dispatch(request, mock_call_next)
 
             assert response.status_code == 401
-            assert "Invalid or expired service account token" in response.body.decode()
+            assert "Invalid or expired service account token" in response.body.decode(
+            )
 
     @pytest.mark.asyncio
     async def test_valid_service_account_token_success(self, middleware,
@@ -130,7 +134,7 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
                 mock.patch('sky.server.server._override_user_info_in_request_body') as mock_override_user_info:
-            
+
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
 
@@ -161,7 +165,7 @@ class TestBearerTokenMiddleware:
                 os.environ,
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service:
-            
+
             mock_token_service.verify_token.return_value = mock_payload
 
             response = await middleware.dispatch(request, mock_call_next)
@@ -185,7 +189,7 @@ class TestBearerTokenMiddleware:
                 os.environ,
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service:
-            
+
             mock_token_service.verify_token.return_value = mock_payload
 
             response = await middleware.dispatch(request, mock_call_next)
@@ -210,17 +214,19 @@ class TestBearerTokenMiddleware:
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user:
-            
+
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = None  # User no longer exists
 
             response = await middleware.dispatch(request, mock_call_next)
 
             assert response.status_code == 401
-            assert "Service account user no longer exists" in response.body.decode()
+            assert "Service account user no longer exists" in response.body.decode(
+            )
 
     @pytest.mark.asyncio
-    async def test_update_last_used_failure_not_fatal(self, middleware, mock_call_next):
+    async def test_update_last_used_failure_not_fatal(self, middleware,
+                                                      mock_call_next):
         """Test that failure to update last used timestamp doesn't fail authentication."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_valid_token'}
@@ -242,7 +248,7 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
                 mock.patch('sky.server.server._override_user_info_in_request_body') as mock_override_user_info:
-            
+
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
             mock_update_last_used.side_effect = Exception("Database error")
@@ -254,7 +260,8 @@ class TestBearerTokenMiddleware:
             assert request.state.auth_user.id == 'sa-123456'
 
     @pytest.mark.asyncio
-    async def test_token_verification_exception(self, middleware, mock_call_next):
+    async def test_token_verification_exception(self, middleware,
+                                                mock_call_next):
         """Test middleware when token verification raises an exception."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_problematic_token'}
@@ -263,19 +270,24 @@ class TestBearerTokenMiddleware:
                 os.environ,
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service:
-            
-            mock_token_service.verify_token.side_effect = Exception("Token verification failed")
+
+            mock_token_service.verify_token.side_effect = Exception(
+                "Token verification failed")
 
             response = await middleware.dispatch(request, mock_call_next)
 
             assert response.status_code == 401
-            assert "Service account authentication failed" in response.body.decode()
+            assert "Service account authentication failed" in response.body.decode(
+            )
 
     @pytest.mark.asyncio
-    async def test_case_insensitive_bearer_check(self, middleware, mock_call_next):
+    async def test_case_insensitive_bearer_check(self, middleware,
+                                                 mock_call_next):
         """Test that Bearer token check is case insensitive."""
         request = mock.Mock(spec=fastapi.Request)
-        request.headers = {'authorization': 'bearer sky_test_token'}  # lowercase
+        request.headers = {
+            'authorization': 'bearer sky_test_token'
+        }  # lowercase
         request.state = mock.Mock()
 
         mock_payload = {
@@ -294,7 +306,7 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used'), \
                 mock.patch('sky.server.server._override_user_info_in_request_body'):
-            
+
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
 

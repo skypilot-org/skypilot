@@ -31,18 +31,18 @@ class TestServiceAccountTokens:
     def test_api_url_generation(self):
         """Test API URL generation is consistent regardless of auth type."""
         # Test consistent URL generation
-        url = service_account_auth.get_api_url(
-            'http://server.com', 'api/status')
+        url = service_account_auth.get_api_url('http://server.com',
+                                               'api/status')
         assert url == 'http://server.com/api/status'
 
         # Test with leading slash in path
-        url = service_account_auth.get_api_url(
-            'http://server.com', '/api/status')
+        url = service_account_auth.get_api_url('http://server.com',
+                                               '/api/status')
         assert url == 'http://server.com/api/status'
 
         # Test with base URL ending in slash
-        url = service_account_auth.get_api_url(
-            'http://server.com/', 'api/status')
+        url = service_account_auth.get_api_url('http://server.com/',
+                                               'api/status')
         assert url == 'http://server.com//api/status'
 
     @mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'sky_valid_token'})
