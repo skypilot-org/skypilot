@@ -3301,8 +3301,18 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     if os.path.isfile(path):
         return path
 
-    format_kubeconfig_exec_auth(config, path)
-    return path
+    try:
+        format_kubeconfig_exec_auth(config, path)
+        return path
+    except Exception as e:  # pylint: disable=broad-except
+        # There may be problems with kubeconfig, but the user is not actually
+        # using Kubernetes (or SSH Node Pools)
+        logger.warning(
+            f'Failed to format kubeconfig at {kubeconfig_path}. '
+            'Please check if the kubeconfig is valid. This may cause '
+            'problems when Kubernetes infra is used. '
+            f'Reason: {common_utils.format_exception(e)}')
+        return kubeconfig_path
 
 
 def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,

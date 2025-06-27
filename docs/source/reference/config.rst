@@ -1297,6 +1297,12 @@ even if ``db`` is specified.
 
 .. note::
 
+  (available on nightly version 20250626 and later)
+
+  ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+
+.. note::
+
   If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
 
   Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
