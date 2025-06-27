@@ -334,6 +334,17 @@ prometheus:
     persistentVolume:
       enabled: true
       size: 10Gi
+  # Configure additional scrape configs using extraScrapeConfigs
+  extraScrapeConfigs: |
+    # Static scrape target for SkyPilot API server GPU metrics
+    - job_name: 'skypilot-api-server-gpu-metrics'
+      static_configs:
+        # Use the API service created by this Helm chart
+        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:80']
+      metrics_path: '/gpu-metrics'
+      scrape_interval: 15s
+      scrape_timeout: 10s
+      # Add labels to identify these metrics
   kube-state-metrics:
     enabled: true
     metricLabelsAllowlist:
