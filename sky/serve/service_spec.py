@@ -43,6 +43,8 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        use_instance_type_aware: Optional[bool] = None,
+        accelerator_qps: Optional[Dict[str, float]] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -96,6 +98,8 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._use_instance_type_aware: Optional[bool] = use_instance_type_aware
+        self._accelerator_qps: Optional[Dict[str, float]] = accelerator_qps
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -193,6 +197,12 @@ class SkyServiceSpec:
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
 
+        # Parse instance type aware settings
+        service_config['use_instance_type_aware'] = config.get(
+            'use_instance_type_aware', None)
+        service_config['accelerator_qps'] = config.get(
+            'accelerator_qps', None)
+
         tls_section = config.get('tls', None)
         if tls_section is not None:
             service_config['tls_credential'] = serve_utils.TLSCredential(
@@ -263,6 +273,10 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('use_instance_type_aware', None,
+                        self._use_instance_type_aware)
+        add_if_not_none('accelerator_qps', None,
+                        self._accelerator_qps)
         add_if_not_none('ports', None, int(self.ports) if self.ports else None)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
@@ -340,6 +354,8 @@ class SkyServiceSpec:
             TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
             Load Balancing Policy:            {self.load_balancing_policy}
+            Instance Type Aware:              {self.use_instance_type_aware}
+            Accelerator QPS:                  {self.accelerator_qps}
         """)
 
     @property
@@ -420,3 +436,11 @@ class SkyServiceSpec:
     def load_balancing_policy(self) -> str:
         return lb_policies.LoadBalancingPolicy.make_policy_name(
             self._load_balancing_policy)
+
+    @property
+    def use_instance_type_aware(self) -> Optional[bool]:
+        return self._use_instance_type_aware
+
+    @property
+    def accelerator_qps(self) -> Optional[Dict[str, float]]:
+        return self._accelerator_qps
