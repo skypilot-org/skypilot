@@ -81,46 +81,47 @@ def volume_list() -> List[Dict[str, Any]]:
             }
         ]
     """
-    volumes = global_user_state.get_volumes()
-    all_users = global_user_state.get_all_users()
-    user_map = {user.id: user.name for user in all_users}
-    records = []
-    for volume in volumes:
-        volume_name = volume.get('name')
-        record = {
-            'name': volume_name,
-            'launched_at': volume.get('launched_at'),
-            'user_hash': volume.get('user_hash'),
-            'user_name': user_map.get(volume.get('user_hash'), ''),
-            'workspace': volume.get('workspace'),
-            'last_attached_at': volume.get('last_attached_at'),
-            'last_use': volume.get('last_use'),
-            'usedby_pods': [],
-            'usedby_clusters': [],
-        }
-        status = volume.get('status')
-        if status is not None:
-            record['status'] = status.value
-        else:
-            record['status'] = ''
-        config = volume.get('handle')
-        if config is None:
-            logger.warning(f'Volume {volume_name} has no handle.')
-            continue
-        cloud = config.cloud
-        usedby_pods, usedby_clusters = provision.get_volume_usedby(
-            cloud, config)
-        record['type'] = config.type
-        record['cloud'] = config.cloud
-        record['region'] = config.region
-        record['zone'] = config.zone
-        record['size'] = config.size
-        record['config'] = config.config
-        record['name_on_cloud'] = config.name_on_cloud
-        record['usedby_pods'] = usedby_pods
-        record['usedby_clusters'] = usedby_clusters
-        records.append(record)
-    return records
+    with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
+        volumes = global_user_state.get_volumes()
+        all_users = global_user_state.get_all_users()
+        user_map = {user.id: user.name for user in all_users}
+        records = []
+        for volume in volumes:
+            volume_name = volume.get('name')
+            record = {
+                'name': volume_name,
+                'launched_at': volume.get('launched_at'),
+                'user_hash': volume.get('user_hash'),
+                'user_name': user_map.get(volume.get('user_hash'), ''),
+                'workspace': volume.get('workspace'),
+                'last_attached_at': volume.get('last_attached_at'),
+                'last_use': volume.get('last_use'),
+                'usedby_pods': [],
+                'usedby_clusters': [],
+            }
+            status = volume.get('status')
+            if status is not None:
+                record['status'] = status.value
+            else:
+                record['status'] = ''
+            config = volume.get('handle')
+            if config is None:
+                logger.warning(f'Volume {volume_name} has no handle.')
+                continue
+            cloud = config.cloud
+            usedby_pods, usedby_clusters = provision.get_volume_usedby(
+                cloud, config)
+            record['type'] = config.type
+            record['cloud'] = config.cloud
+            record['region'] = config.region
+            record['zone'] = config.zone
+            record['size'] = config.size
+            record['config'] = config.config
+            record['name_on_cloud'] = config.name_on_cloud
+            record['usedby_pods'] = usedby_pods
+            record['usedby_clusters'] = usedby_clusters
+            records.append(record)
+        return records
 
 
 def volume_delete(names: List[str]) -> None:
