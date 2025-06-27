@@ -4970,7 +4970,7 @@ def serve_down(
     default=None,
     type=int,
     help='The number of lines to display from the end of the log file. '
-    'Default is 0, which means print all lines.')
+    'Default is None, which means print all lines.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
@@ -4983,7 +4983,7 @@ def serve_logs(
     load_balancer: bool,
     replica_ids: Tuple[int, ...],
     sync_down: bool,
-    tail: int,
+    tail: Optional[int],
 ):
     """Tail or sync down logs of a service.
 
@@ -5012,10 +5012,11 @@ def serve_logs(
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
-    if tail is None:
-        tail = -1
-    else:
-        tail = max(tail, 0)
+    if tail is not None and tail < 0:
+        raise click.UsageError('--tail must be a non-negative integer.')
+    if tail is not None and follow:
+        raise click.UsageError('--tail and --follow cannot be used together.')
+
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)

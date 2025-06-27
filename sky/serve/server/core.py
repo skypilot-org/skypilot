@@ -740,7 +740,7 @@ def tail_logs(
     target: ServiceComponentOrStr,
     replica_id: Optional[int] = None,
     follow: bool = True,
-    tail: int = -1,
+    tail: Optional[int] = None,
 ) -> None:
     """Tails logs for a service.
 
@@ -838,7 +838,7 @@ def sync_down_logs(
     targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
                    None] = None,
     replica_ids: Optional[List[int]] = None,
-    tail: int = -1,
+    tail: Optional[int] = None,
 ) -> str:
     """Sync down logs from the controller for the given service.
 
