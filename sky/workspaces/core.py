@@ -1,6 +1,5 @@
 """Workspace management core."""
 
-import concurrent.futures
 from typing import Any, Callable, Dict, List
 
 import filelock
@@ -17,6 +16,7 @@ from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import resource_checker
 from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils
 
@@ -90,7 +90,7 @@ def _check_workspace_has_no_active_resources(workspace_name: str,
     Raises:
         ValueError: If the workspace has active clusters or managed jobs.
     """
-    _check_workspaces_have_no_active_resources([(workspace_name, operation)])
+    resource_checker.check_no_active_resources_for_workspace(workspace_name, operation)
 
 
 def _check_workspaces_have_no_active_resources(
@@ -105,88 +105,7 @@ def _check_workspaces_have_no_active_resources(
         ValueError: If any workspace has active clusters or managed jobs.
             The error message will include all workspaces with issues.
     """
-    if not workspace_operations:
-        return
-
-    def get_all_clusters():
-        return global_user_state.get_clusters()
-
-    def get_all_managed_jobs():
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs.server import core as managed_jobs_core
-        try:
-            return managed_jobs_core.queue(refresh=False,
-                                           skip_finished=True,
-                                           all_users=True)
-        except exceptions.ClusterNotUpError:
-            logger.warning('All jobs should be finished in workspace.')
-            return []
-
-    # Fetch both clusters and jobs in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        clusters_future = executor.submit(get_all_clusters)
-        jobs_future = executor.submit(get_all_managed_jobs)
-
-        all_clusters = clusters_future.result()
-        all_managed_jobs = jobs_future.result()
-
-    # Collect all error messages instead of raising immediately
-    error_messages = []
-
-    # Check each workspace against the fetched data
-    for workspace_name, operation in workspace_operations:
-        # Filter clusters for this workspace
-        workspace_clusters = [
-            cluster for cluster in all_clusters
-            if (cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-                == workspace_name)
-        ]
-
-        # Filter managed jobs for this workspace
-        workspace_active_jobs = [
-            job for job in all_managed_jobs
-            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) ==
-            workspace_name
-        ]
-
-        # Collect error messages for this workspace
-        workspace_errors = []
-
-        if workspace_clusters:
-            active_cluster_names = [
-                cluster['name'] for cluster in workspace_clusters
-            ]
-            cluster_list = ', '.join(active_cluster_names)
-            workspace_errors.append(
-                f'{len(workspace_clusters)} active cluster(s): {cluster_list}')
-
-        if workspace_active_jobs:
-            job_names = [str(job['job_id']) for job in workspace_active_jobs]
-            job_list = ', '.join(job_names)
-            workspace_errors.append(
-                f'{len(workspace_active_jobs)} active managed job(s): '
-                f'{job_list}')
-
-        # If this workspace has issues, add to overall error messages
-        if workspace_errors:
-            workspace_error_summary = ' and '.join(workspace_errors)
-            error_messages.append(
-                f'Cannot {operation} workspace {workspace_name!r} because it '
-                f'has {workspace_error_summary}.')
-
-    # If we collected any errors, raise them all together
-    if error_messages:
-        if len(error_messages) == 1:
-            # Single workspace error
-            full_message = error_messages[
-                0] + ' Please terminate these resources first.'
-        else:
-            # Multiple workspace errors
-            full_message = (f'Cannot proceed due to active resources in '
-                            f'{len(error_messages)} workspace(s):\n' +
-                            '\n'.join(f'• {msg}' for msg in error_messages) +
-                            '\nPlease terminate these resources first.')
-        raise ValueError(full_message)
+    resource_checker.check_no_active_resources_for_workspaces(workspace_operations)
 
 
 def _validate_workspace_config(workspace_name: str,
