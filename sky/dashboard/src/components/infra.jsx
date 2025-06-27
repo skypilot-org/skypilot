@@ -369,52 +369,54 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     }
   }, []);
 
-  // Function to fetch available hosts from Prometheus
+  // Function to fetch available hosts from Prometheus for the specific cluster
   const fetchAvailableHosts = useCallback(async () => {
     if (!isGrafanaAvailable) return;
 
     setIsLoadingHosts(true);
     try {
       const grafanaUrl = getGrafanaUrl();
+      const clusterParam = contextName === "in-cluster" ? '^$' : contextName;
+      
+      // Build query to get nodes for specific cluster
+      const query = 'query=' + encodeURIComponent(`group by (node) (DCGM_FI_DEV_GPU_TEMP{cluster=~"${clusterParam}"})`);
 
-      const endpoints = ['/api/datasources/proxy/1/api/v1/label/node/values'];
+      const endpoint = `/api/datasources/proxy/1/api/v1/query?${query}`;
 
-      for (const endpoint of endpoints) {
-        try {
-          const response = await fetch(`${grafanaUrl}${endpoint}`, {
-            method: 'GET',
-            credentials: 'include', // Include cookies and basic auth credentials
-            headers: {
-              Accept: 'application/json',
-            },
-          });
+      try {
+        const response = await fetch(`${grafanaUrl}${endpoint}`, {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
 
-          if (response.ok) {
-            const data = await response.json();
-            if (data.data && data.data.length > 0) {
-              setAvailableHosts(data.data.sort());
-              console.log(
-                `Successfully fetched hosts from ${endpoint}:`,
-                data.data
-              );
-              break;
-            }
+        if (response.ok) {
+          const data = await response.json();
+          if (data.data && data.data.result && data.data.result.length > 0) {
+            const nodes = data.data.result.map(result => result.metric.node).filter(Boolean).sort();
+            setAvailableHosts(nodes);
+            console.log(`Successfully fetched hosts for cluster ${clusterParam || 'in-cluster'}:`, nodes);
           } else {
-            console.log(
-              `HTTP ${response.status} from ${endpoint}: ${response.statusText}`
-            );
+            console.log('No nodes found for this cluster');
+            setAvailableHosts([]);
           }
-        } catch (error) {
-          console.log(`Failed to fetch from ${endpoint}:`, error);
-          continue;
+        } else {
+          console.log(`HTTP ${response.status} from ${endpoint}: ${response.statusText}`);
+          setAvailableHosts([]);
         }
+      } catch (error) {
+        console.log(`Failed to fetch from ${endpoint}:`, error);
+        setAvailableHosts([]);
       }
     } catch (error) {
       console.error('Error fetching available hosts:', error);
+      setAvailableHosts([]);
     } finally {
       setIsLoadingHosts(false);
     }
-  }, [isGrafanaAvailable]);
+  }, [isGrafanaAvailable, contextName]);
 
   // Fetch hosts when component mounts and Grafana is available
   useEffect(() => {
@@ -427,8 +429,13 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   const buildGrafanaUrlForContext = (panelId) => {
     const grafanaUrl = getGrafanaUrl();
     const hostParam = selectedHosts === '$__all' ? '$__all' : selectedHosts;
+    
+    // Cluster parameter logic for k8s contexts only
+    // For in-cluster: regex to match only missing/empty cluster labels
+    // For external clusters: exact cluster name  
+    const clusterParam = contextName === "in-cluster" ? '^$' : contextName;
 
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // Handle host selection change
@@ -549,44 +556,47 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
             </>
           )}
 
-          {/* GPU Metrics Section */}
+          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools */}
           {isGrafanaAvailable &&
-            nodesInContext &&
-            nodesInContext.length > 0 && (
+            gpusInContext &&
+            gpusInContext.length > 0 && 
+            !isSSHContext && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
 
                 {/* Filtering Controls */}
                 <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
                   <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-                    {/* Host Selection */}
-                    <div className="flex items-center gap-2">
-                      <label
-                        htmlFor="host-select"
-                        className="text-sm font-medium text-gray-700 whitespace-nowrap"
-                      >
-                        Node:
-                      </label>
-                      <select
-                        id="host-select"
-                        value={selectedHosts}
-                        onChange={handleHostChange}
-                        disabled={isLoadingHosts}
-                        className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
-                      >
-                        <option value="$__all">All Nodes</option>
-                        {availableHosts.map((host) => (
-                          <option key={host} value={host}>
-                            {host}
-                          </option>
-                        ))}
-                      </select>
-                      {isLoadingHosts && (
-                        <div className="ml-2">
-                          <CircularProgress size={16} />
-                        </div>
-                      )}
-                    </div>
+                    {/* Host Selection - only show if we have node info */}
+                    {nodesInContext && nodesInContext.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <label
+                          htmlFor="host-select"
+                          className="text-sm font-medium text-gray-700 whitespace-nowrap"
+                        >
+                          Node:
+                        </label>
+                        <select
+                          id="host-select"
+                          value={selectedHosts}
+                          onChange={handleHostChange}
+                          disabled={isLoadingHosts}
+                          className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+                        >
+                          <option value="$__all">All Nodes</option>
+                          {availableHosts.map((host) => (
+                            <option key={host} value={host}>
+                              {host}
+                            </option>
+                          ))}
+                        </select>
+                        {isLoadingHosts && (
+                          <div className="ml-2">
+                            <CircularProgress size={16} />
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Time Range Selection */}
                     <div className="flex items-center gap-2">
@@ -620,11 +630,21 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
 
                   {/* Show current selection info */}
                   <div className="mt-2 text-xs text-gray-500">
-                    Showing:{' '}
-                    {selectedHosts === '$__all' ? 'All nodes' : selectedHosts} •
-                    Time: {timeRange.from} to {timeRange.to}
-                    {availableHosts.length > 0 && (
-                      <span> • {availableHosts.length} nodes available</span>
+                    {nodesInContext && nodesInContext.length > 0 ? (
+                      <>
+                        Showing:{' '}
+                        {selectedHosts === '$__all' ? 'All nodes' : selectedHosts} •
+                        Time: {timeRange.from} to {timeRange.to}
+                        {availableHosts.length > 0 && (
+                          <span> • {availableHosts.length} nodes available</span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        Cluster: {isSSHContext ? contextName.replace(/^ssh-/, '') : contextName} •
+                        Time: {timeRange.from} to {timeRange.to} •
+                        Showing metrics for all nodes in cluster
+                      </>
                     )}
                   </div>
                 </div>
