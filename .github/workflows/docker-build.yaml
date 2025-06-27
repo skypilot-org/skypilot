@@ -18,8 +18,8 @@ on:
         required: true
         type: string
       version:
-        description: 'SkyPilot version to build (optional, uses latest from PyPI if not specified)'
-        required: false
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
+        required: true
         type: string
     outputs:
       version:
@@ -83,22 +83,13 @@ jobs:
       - name: Find and verify version
         id: version
         run: |
-          if [ "${{ steps.install_method.outputs.install_from_source }}" == "false" ]; then
-            if [ -n "${{ inputs.version }}" ]; then
-              # Use the provided version
-              echo "Using provided version: ${{ inputs.version }}"
-              echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-            else
-              # Fetch package info from PyPI
-              echo "Fetching package info for ${{ inputs.package_name }}"
-              PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
-              # Parse JSON and get the latest version
-              LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
-              echo "Latest version found: $LATEST_VERSION"
-              echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-            fi
+          if [ -n "${{ inputs.version }}" ]; then
+            # Use the provided version, manual trigger must specify the version
+            echo "Using provided version: ${{ inputs.version }}"
+            echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            sed -i "s/__version__ = '.*'/__version__ = '${{ inputs.version }}'/g" sky/__init__.py
           else
-            # For workflow_dispatch, extract version from sky/__init__.py
+            # Extract version from sky/__init__.py
             VERSION=$(grep "__version__ = " sky/__init__.py | cut -d"'" -f2)
             echo "Using version from source: $VERSION"
             echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
@@ -111,11 +102,6 @@ jobs:
             exit 1
           fi
           cat $GITHUB_OUTPUT
-
-      - name: Update version in source code
-        if: steps.install_method.outputs.install_from_source == 'false'
-        run: |
-          sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${{ steps.version.outputs.latest_version }}'/g" sky/__init__.py
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
