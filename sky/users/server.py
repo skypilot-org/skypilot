@@ -152,11 +152,8 @@ async def user_update(request: fastapi.Request,
             # Update user role in casbin policy
             permission.permission_service.update_role(user_info.id, role)
 
-
-@router.post('/delete')
-async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
-    user_id = user_delete_body.user_id
-
+def _delete_user(user_id: str) -> None:
+    """Delete a user."""
     user_info = global_user_state.get_user(user_id)
     if user_info is None:
         raise fastapi.HTTPException(status_code=400,
@@ -166,9 +163,18 @@ async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot delete internal '
                                     f'API server user {user_info.name}')
+
+    # TODO(zhwu): Check that there is no active resources owned by the user,
+    # similar to how we delete/modify workspace configurations.
+
     with _user_lock(user_id):
         global_user_state.delete_user(user_id)
         permission.permission_service.delete_user(user_id)
+
+@router.post('/delete')
+async def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
+    user_id = user_delete_body.user_id
+    _delete_user(user_id)
 
 
 @router.post('/import')
@@ -512,6 +518,11 @@ async def delete_service_account_token(
             status_code=403,
             detail='You can only delete your own tokens. Only admins can '
             'delete tokens owned by other users.')
+
+    # Try to delete the service account user first to make sure there is no
+    # active resources owned by the service account.
+    service_account_user_id = token_info['service_account_user_id']
+    _delete_user(service_account_user_id)
 
     # Delete the token
     deleted = global_user_state.delete_service_account_token(
