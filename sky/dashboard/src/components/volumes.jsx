@@ -36,6 +36,8 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { TimestampWithTooltip } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
@@ -49,6 +51,7 @@ export function Volumes() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const handleRefresh = () => {
+    dashboardCache.invalidate(getVolumes);
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -86,6 +89,10 @@ export function Volumes() {
     setVolumeToDelete(null);
     setDeleteError(null);
   };
+
+  useEffect(() => {
+    cachePreloader.preloadForPage('volumes');
+  }, []);
 
   return (
     <>
@@ -184,7 +191,7 @@ function VolumesTable({
     setLoading(true);
     setLocalLoading(true);
     try {
-      const volumesData = await getVolumes();
+      const volumesData = await dashboardCache.get(getVolumes);
       setData(volumesData);
     } catch (error) {
       console.error('Failed to fetch volumes:', error);
