@@ -2104,8 +2104,9 @@ def api_login(endpoint: Optional[str] = None,
             server_status: server_common.ApiServerStatus) -> None:
         """Show the logged in message."""
         if server_status != server_common.ApiServerStatus.HEALTHY:
-            raise ValueError(f'Failed to authenticate with API server at '
-                             f'{endpoint} (status: {server_status.value})')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cannot log in API server at '
+                                 f'{endpoint} (status: {server_status.value})')
 
         identity_info = f'\n{ux_utils.INDENT_SYMBOL}{colorama.Fore.GREEN}User: '
         if user:
@@ -2152,7 +2153,9 @@ def api_login(endpoint: Optional[str] = None,
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Service account token authentication failed: {e}') from e
+                    f'{colorama.Fore.RED}Service account token authentication '
+                    f'failed:{colorama.Style.RESET_ALL} {e}'
+                ) from None
 
     # OAuth2/cookie-based authentication flow
     # TODO(zhwu): this SDK sets global endpoint, which may not be the best
