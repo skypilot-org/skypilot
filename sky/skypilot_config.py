@@ -477,10 +477,10 @@ def overlay_skypilot_config(
 def safe_reload_config() -> None:
     """Reloads the config, safe to be called concurrently."""
     with filelock.FileLock(get_skypilot_config_lock_path()):
-        _reload_config()
+        reload_config()
 
 
-def _reload_config() -> None:
+def reload_config() -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
@@ -638,7 +638,7 @@ def loaded_config_path_serialized() -> Optional[str]:
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
-_reload_config()
+reload_config()
 
 
 def loaded() -> bool:
@@ -861,4 +861,4 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             config_map_utils.patch_configmap_with_config(
                 config, global_config_path)
 
-    _reload_config()
+    reload_config()

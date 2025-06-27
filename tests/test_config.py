@@ -30,7 +30,7 @@ PROVISION_TIMEOUT = 600
 
 def _reload_config() -> None:
     skypilot_config._global_config_context = skypilot_config.ConfigContext()
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
 
 def _check_empty_config() -> None:
@@ -155,7 +155,7 @@ def test_no_config(monkeypatch) -> None:
                         '/tmp/does_not_exist')
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         '/tmp/does_not_exist')
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     _check_empty_config()
 
 
@@ -167,7 +167,7 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
                         tmp_path / 'empty.yaml')
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         tmp_path / 'empty.yaml')
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     _check_empty_config()
 
 
@@ -191,7 +191,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'valid.yaml')
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     proxy_config = skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command', 'eu-west-1'), 'default')
     assert proxy_config is None, proxy_config
@@ -209,7 +209,7 @@ def test_invalid_field_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
-        skypilot_config._reload_config()
+        skypilot_config.reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -229,7 +229,7 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
-        skypilot_config._reload_config()
+        skypilot_config.reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -246,7 +246,7 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
-        skypilot_config._reload_config()
+        skypilot_config.reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -266,7 +266,7 @@ def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
             """))
         monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         # Should not raise an exception
-        skypilot_config._reload_config()
+        skypilot_config.reload_config()
         assert skypilot_config.get_nested(('gcp', 'vpc_name'),
                                           None) == valid_vpc
 
@@ -283,7 +283,7 @@ def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
             """))
         monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         with pytest.raises(ValueError) as e:
-            skypilot_config._reload_config()
+            skypilot_config.reload_config()
         assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -299,7 +299,7 @@ def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
         """))
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'valid.yaml')
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
 
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
@@ -309,7 +309,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     # Check that the config is loaded with the expected values
     assert skypilot_config.loaded()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -335,7 +335,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     new_config_path = tmp_path / 'new_config.yaml'
     common_utils.dump_yaml(new_config_path, new_config2)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(
@@ -350,7 +350,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     new_config_path = tmp_path / 'new_config3.yaml'
     common_utils.dump_yaml(new_config_path, new_config3)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None) is None
     assert skypilot_config.get_nested(
@@ -370,7 +370,7 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'does_not_exist')
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.loaded()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
@@ -395,7 +395,7 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     task_path = tmp_path / 'task.yaml'
     _create_task_yaml_file(task_path)
     task = sky.Task.from_yaml(task_path)
@@ -453,7 +453,7 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     task_path = tmp_path / 'task.yaml'
     _create_task_yaml_file(task_path)
     task = sky.Task.from_yaml(task_path)
@@ -489,7 +489,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
 
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     task_config_yaml = textwrap.dedent(f"""\
         experimental:
@@ -551,7 +551,7 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     # Store original values
     original_vpc = skypilot_config.get_nested(('aws', 'vpc_name'), None)
@@ -595,7 +595,7 @@ def test_override_skypilot_config_without_original_config(
     config_path = tmp_path / 'non_existent.yaml'
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH', config_path)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert not skypilot_config._get_loaded_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
 
@@ -657,7 +657,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
                     source: default-project-config
             """))
 
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     # Check the two configs are merged correctly with
     # project config overriding user config
@@ -689,7 +689,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
                     env-project-config: present
                     source: env-project-config
             """))
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(('gcp', 'labels', 'env-user-config'),
                                       None) == 'present'
     assert skypilot_config.get_nested(('gcp', 'labels', 'env-project-config'),
@@ -699,7 +699,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
     monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
 
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(('gcp', 'labels', 'source'),
                                       None) == 'default-project-config'
 
@@ -709,7 +709,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
                         non_existent_config_path)
     monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
                         non_existent_config_path)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert not skypilot_config._get_loaded_config()
 
     # if config files specified by env vars are missing,
@@ -717,16 +717,16 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
     monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
                        str(non_existent_config_path))
     with pytest.raises(FileNotFoundError):
-        skypilot_config._reload_config()
+        skypilot_config.reload_config()
     monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
                        str(non_existent_config_path))
     with pytest.raises(FileNotFoundError):
-        skypilot_config._reload_config()
+        skypilot_config.reload_config()
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     # test merging lists
     # this test is to document the existing behavior, not
@@ -749,7 +749,7 @@ def test_hierarchical_client_config(monkeypatch, tmp_path):
                 - azure
                 - kubernetes
             """))
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     # latest wins, no merging two lists
     assert skypilot_config.get_nested(('allowed_clouds',),
                                       None) == ['azure', 'kubernetes']
@@ -847,7 +847,7 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
                 labels:
                     default-server-config: present
             """))
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(
         ('aws', 'labels', 'default-server-config'), None) == 'present'
 
@@ -861,12 +861,12 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
                 labels:
                     env-server-config: present
             """))
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'labels', 'env-server-config'),
                                       None) == 'present'
     monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG)
 
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(
         ('aws', 'labels', 'default-server-config'), None) == 'present'
 
@@ -880,7 +880,7 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
                 labels:
                     env-project-config: present
             """))
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
     assert skypilot_config.get_nested(
         ('gcp', 'labels', 'env-user-config'), None) is None
     assert skypilot_config.get_nested(

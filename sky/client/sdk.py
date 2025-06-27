@@ -2061,6 +2061,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
                 'service_account_token'] = service_account_token
 
         common_utils.dump_yaml(str(config_path), config)
+        skypilot_config.reload_config()
 
 
 def _validate_endpoint(endpoint: Optional[str]) -> str:
