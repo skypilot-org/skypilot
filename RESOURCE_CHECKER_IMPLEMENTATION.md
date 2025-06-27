@@ -47,11 +47,18 @@ This new module provides:
 
 **Test Coverage:**
 - Filter function validation for both users and workspaces
-- Single and multiple resource checking scenarios
+- Batch resource checking scenarios
 - Error cases with active clusters and managed jobs
 - Edge cases like empty operations lists and missing workspaces
 - Error handling for jobs controller unavailability
 - Mixed scenarios with some users/workspaces having resources and others not
+
+### 5. Updated Existing Tests
+
+**File:** `tests/unit_tests/test_sky/workspaces/test_workspace_management.py`
+
+**Changes:**
+- Updated mocks to target the new `resource_checker` functions instead of the removed workspace wrapper functions
 
 ## Resource Checking Logic
 
@@ -121,6 +128,14 @@ All functions raise `ValueError` with descriptive messages when active resources
 
 - **CLI/Direct API**: Can show the error message directly to users
 - **REST API**: Should convert to appropriate HTTP status codes (e.g., 400 Bad Request)
+
+## Removed Unused Code
+
+As part of the cleanup, the following unused imports and references were removed:
+
+1. **`Optional` import** from `sky/utils/resource_checker.py` - no longer needed after removing single-item functions
+2. **`global_user_state` import** from `sky/workspaces/core.py` - moved to resource_checker module
+3. **Test mocks** in `tests/unit_tests/test_sky/workspaces/test_workspace_management.py` - updated to mock the correct functions
 
 ## Future Enhancements
 

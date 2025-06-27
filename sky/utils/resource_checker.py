@@ -1,7 +1,7 @@
 """Resource checking utilities for validating active clusters and managed jobs."""
 
 import concurrent.futures
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from sky import exceptions
 from sky import global_user_state
