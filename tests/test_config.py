@@ -893,8 +893,16 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
         kubernetes:
+            pod_config:
+                metadata:
+                    labels:
+                        label1: value1
             context_configs:
                 contextA:
+                    pod_config:
+                        metadata:
+                            labels:
+                                label2: value2
                     autoscaler: gke
                 contextB:
                     provision_timeout: 60
@@ -922,6 +930,27 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     context_b_provision_timeout = skypilot_config.get_cloud_config_value(
         cloud='kubernetes', region='contextB', keys=('provision_timeout',))
     assert context_b_provision_timeout == 60
+
+    # test pod_config property
+    context_a_pod_config = skypilot_config.get_cloud_config_value(
+        cloud='kubernetes', region='contextA', keys=('pod_config',))
+    assert context_a_pod_config == {
+        'metadata': {
+            'labels': {
+                'label1': 'value1',
+                'label2': 'value2'
+            }
+        }
+    }
+    context_b_pod_config = skypilot_config.get_cloud_config_value(
+        cloud='kubernetes', region='contextB', keys=('pod_config',))
+    assert context_b_pod_config == {
+        'metadata': {
+            'labels': {
+                'label1': 'value1'
+            }
+        }
+    }
 
     contexts = kubernetes_utils.get_custom_config_k8s_contexts()
     assert len(contexts) == 2

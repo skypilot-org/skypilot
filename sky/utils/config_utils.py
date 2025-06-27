@@ -245,20 +245,25 @@ def get_cloud_config_value_from_dict(
        return either default_value if specified or None
     """
     input_config = Config(dict_config)
-    property_value = None
     region_key = None
     if cloud == 'kubernetes':
         region_key = 'context_configs'
 
+    per_context_config = None
     if region is not None and region_key is not None:
-        property_value = input_config.get_nested(
+        per_context_config = input_config.get_nested(
             keys=(cloud, region_key, region) + keys,
             default_value=None,
             override_configs=override_configs)
     # if no override found for specified region
-    if property_value is None:
-        property_value = input_config.get_nested(
-            keys=(cloud,) + keys,
-            default_value=default_value,
-            override_configs=override_configs)
-    return property_value
+    general_config = input_config.get_nested(keys=(cloud,) + keys,
+                                             default_value=default_value,
+                                             override_configs=override_configs)
+
+    if (cloud == 'kubernetes' and isinstance(general_config, dict) and
+            isinstance(per_context_config, dict)):
+        merge_k8s_configs(general_config, per_context_config)
+        return general_config
+    else:
+        return (general_config
+                if per_context_config is None else per_context_config)
