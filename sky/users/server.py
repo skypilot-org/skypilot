@@ -359,12 +359,14 @@ def _user_lock(user_id: str) -> Generator[None, None, None]:
                            'Please try again or manually remove the lock '
                            f'file if you believe it is stale.') from e
 
+
 # ===============================
 # Service account tokens
 # ===============================
 # SkyPilot currently does not distinguish between service accounts and service
 # account tokens, i.e. service accounts have a 1-1 mapping to service account
 # tokens.
+
 
 @router.get('/service-account-tokens')
 async def get_service_account_tokens(
