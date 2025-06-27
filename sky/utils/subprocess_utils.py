@@ -6,6 +6,7 @@ import random
 import resource
 import shlex
 import subprocess
+import sys
 import threading
 import time
 import typing
@@ -322,12 +323,8 @@ def kill_process_daemon(process_pid: int) -> None:
     daemon_script = os.path.join(
         os.path.dirname(os.path.abspath(log_lib.__file__)),
         'subprocess_daemon.py')
-    python_path = subprocess.check_output(constants.SKY_GET_PYTHON_PATH_CMD,
-                                          shell=True,
-                                          stderr=subprocess.DEVNULL,
-                                          encoding='utf-8').strip()
     daemon_cmd = [
-        python_path,
+        sys.executable,
         daemon_script,
         '--parent-pid',
         str(parent_pid),
