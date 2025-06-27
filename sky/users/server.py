@@ -428,7 +428,7 @@ async def create_service_account_token(
         raise fastapi.HTTPException(
             status_code=400,
             detail='Token name must contain only letters, numbers, and '
-                   'underscores. Please use a different name.')
+            'underscores. Please use a different name.')
 
     # Validate expiration (allow 0 as special value for "never expire")
     if (token_body.expires_in_days is not None and
