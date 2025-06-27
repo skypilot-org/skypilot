@@ -30,6 +30,7 @@ import sky
 from sky import admin_policy
 from sky import skypilot_config
 from sky.utils import admin_policy_utils
+from sky.utils import common_utils
 from sky.utils import config_utils
 
 
@@ -54,15 +55,6 @@ def _load_task_and_apply_policy(
             down=False,
             dryrun=False,
         ))
-
-
-def find_free_port() -> int:
-    """Find a free port for the test server."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
 
 
 # Global registry to track active servers for cleanup
@@ -152,7 +144,7 @@ class PolicyServer:
     """Test policy server that runs in a background thread with automatic port assignment."""
 
     def __init__(self, port=None):
-        self.port = port or find_free_port()
+        self.port = port or common_utils.find_free_port(50000)
         self.server = None
         self.thread = None
         self._started = False
