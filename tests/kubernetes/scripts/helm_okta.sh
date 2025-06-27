@@ -7,12 +7,50 @@
 # 1. Disables ingress-nginx subchart to avoid conflicts with the existing nginx from 'sky local up'
 # 2. Patches OAuth2 proxy ingress annotations to use internal cluster service URLs
 # 3. Uses localhost with NodePort for accessing the API server
+# 4. Supports automated login for testing (when test credentials are provided)
 #
-# Prerequisites: Run 'sky local up' first to create the kind cluster with nginx ingress
+# Prerequisites:
+# - Run 'sky local up' first to create the kind cluster with nginx ingress
+# - Set required environment variables: OKTA_CLIENT_ID, OKTA_CLIENT_SECRET, OKTA_TEST_USERNAME, OKTA_TEST_PASSWORD
+#
+# Usage:
+#   OKTA_CLIENT_ID=your_client_id OKTA_CLIENT_SECRET=your_secret \
+#   OKTA_TEST_USERNAME=test@example.com OKTA_TEST_PASSWORD=pass \
+#   ./helm_okta.sh
+#
+#   All four environment variables are required:
+#   - OKTA_CLIENT_ID: OAuth application client ID
+#   - OKTA_CLIENT_SECRET: OAuth application client secret
+#   - OKTA_TEST_USERNAME: Test user email/username
+#   - OKTA_TEST_PASSWORD: Test user password
 
 NAMESPACE=skypilot
 NODEPORT=30082
 HTTPS_NODEPORT=30443
+
+# Assert all required environment variables are provided
+if [[ -z "$OKTA_CLIENT_ID" ]]; then
+    echo "❌ OKTA_CLIENT_ID is required"
+    exit 1
+fi
+
+if [[ -z "$OKTA_CLIENT_SECRET" ]]; then
+    echo "❌ OKTA_CLIENT_SECRET is required"
+    exit 1
+fi
+
+if [[ -z "$OKTA_TEST_USERNAME" ]]; then
+    echo "❌ OKTA_TEST_USERNAME is required"
+    exit 1
+fi
+
+if [[ -z "$OKTA_TEST_PASSWORD" ]]; then
+    echo "❌ OKTA_TEST_PASSWORD is required"
+    exit 1
+fi
+
+echo "Using OAuth client ID: $OKTA_CLIENT_ID"
+echo "Using test credentials for user: $OKTA_TEST_USERNAME"
 
 
 helm repo add skypilot https://helm.skypilot.co
@@ -125,3 +163,16 @@ echo "2. You'll be redirected to Okta for authentication"
 echo "3. After successful login, you'll have access to the SkyPilot API"
 echo ""
 echo "For CLI access, use: sky api login -e $ENDPOINT"
+echo ""
+
+
+
+# Perform automated login
+echo ""
+echo "🔄 Performing automated login..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$SCRIPT_DIR/okta_auto_login.py" "$ENDPOINT" "$OKTA_TEST_USERNAME" "$OKTA_TEST_PASSWORD" "$OKTA_CLIENT_ID" || exit 1
+
+echo ""
+echo "🎉 Automated setup complete!"
+echo "SkyPilot API server is ready with OAuth2 authentication."
