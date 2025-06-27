@@ -1251,8 +1251,8 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
                     raise exceptions.ResourcesUnavailableError(msg)
             logger.warning(
                 f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
-        else:
-            _check_specified_regions(task)
+
+        _check_specified_regions(task)
 
 
 def _check_specified_regions(task: task_lib.Task) -> None:

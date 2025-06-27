@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import prettytable
 
 from sky import sky_logging
+from sky.utils import duration_utils
 from sky.utils import log_utils
 from sky.volumes import volume
 
@@ -49,7 +50,7 @@ class PVCVolumeTable(VolumeTable):
         #   AGE, LAST_USE, STATUS
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, LAST_USE, STATUS, NAME_ON_CLOUD,
+        #   AGE, LAST_USE, STATUS, NAME_ON_CLOUD, USED_BY
         #   STORAGE_CLASS, ACCESS_MODE
 
         if show_all:
@@ -64,6 +65,7 @@ class PVCVolumeTable(VolumeTable):
                 'STATUS',
                 'LAST_USE',
                 'NAME_ON_CLOUD',
+                'USED_BY',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
             ]
@@ -107,14 +109,20 @@ class PVCVolumeTable(VolumeTable):
                 size,
                 row.get('user_name', '-'),
                 row.get('workspace', '-'),
-                log_utils.readable_time_duration(start=row.get(
-                    'launched_at', 0),
-                                                 absolute=True),
+                duration_utils.human_duration_since(row.get('launched_at', 0)),
                 row.get('status', ''),
                 last_attached_at_str,
             ]
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
+                usedby_clusters = row.get('usedby_clusters')
+                usedby_pods = row.get('usedby_pods')
+                if usedby_clusters:
+                    table_row.append(f'{", ".join(usedby_clusters)}')
+                elif usedby_pods:
+                    table_row.append(f'{", ".join(usedby_pods)}')
+                else:
+                    table_row.append('-')
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))

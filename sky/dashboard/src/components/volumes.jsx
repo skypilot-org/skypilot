@@ -35,6 +35,7 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { TimestampWithTooltip } from '@/components/utils';
+import { StatusBadge } from '@/components/elements/StatusBadge';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
@@ -116,6 +117,7 @@ export function Volumes() {
       </div>
 
       <VolumesTable
+        key="volumes"
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
@@ -271,7 +273,7 @@ function VolumesTable({
   };
 
   const formatTimestamp = (timestamp) => {
-    if (!timestamp) return '-';
+    if (!timestamp) return 'N/A';
     try {
       const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
       return <TimestampWithTooltip date={date} />;
@@ -328,6 +330,12 @@ function VolumesTable({
               >
                 Type{getSortDirection('type')}
               </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                onClick={() => requestSort('usedby_clusters')}
+              >
+                Used By{getSortDirection('usedby_clusters')}
+              </TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -350,17 +358,7 @@ function VolumesTable({
                   <TableCell className="font-medium">{volume.name}</TableCell>
                   <TableCell>{volume.infra || 'N/A'}</TableCell>
                   <TableCell>
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${
-                        volume.status === 'READY'
-                          ? 'bg-green-100 text-green-800'
-                          : volume.status === 'IN_USE'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {volume.status || 'UNKNOWN'}
-                    </span>
+                    <StatusBadge status={volume.status} />
                   </TableCell>
                   <TableCell>{formatSize(volume.size)}</TableCell>
                   <TableCell>{volume.user_name || 'N/A'}</TableCell>
@@ -368,6 +366,27 @@ function VolumesTable({
                     {formatTimestamp(volume.last_attached_at)}
                   </TableCell>
                   <TableCell>{volume.type || 'N/A'}</TableCell>
+                  <TableCell>
+                    {Array.isArray(volume.usedby_clusters) &&
+                    volume.usedby_clusters.length > 0
+                      ? volume.usedby_clusters.map((cluster, idx) => (
+                          <span key={cluster}>
+                            <Link
+                              href={`/clusters/${encodeURIComponent(cluster)}`}
+                              className="text-sky-blue hover:underline"
+                            >
+                              {cluster}
+                            </Link>
+                            {idx < volume.usedby_clusters.length - 1
+                              ? ', '
+                              : ''}
+                          </span>
+                        ))
+                      : Array.isArray(volume.usedby_pods) &&
+                          volume.usedby_pods.length > 0
+                        ? volume.usedby_pods.join(', ')
+                        : 'N/A'}
+                  </TableCell>
                   <TableCell>
                     <Button
                       variant="ghost"

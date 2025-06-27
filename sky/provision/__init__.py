@@ -123,9 +123,9 @@ def delete_volume(provider_name: str,
 
 
 @_route_to_cloud_impl
-def get_volume_usedby(
-        provider_name: str,
-        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
+def get_volume_usedby(provider_name: str,
+                      config: models.VolumeConfig,
+                      pod_only: bool = False) -> Tuple[List[str], List[str]]:
     """Get the usedby of a volume."""
     raise NotImplementedError
 

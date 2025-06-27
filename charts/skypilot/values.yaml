@@ -264,6 +264,10 @@ rbac:
     - apiGroups: [""]
       resources: ["services"]
       verbs: ["list", "get"]
+    # Required for accessing storage classes.
+    - apiGroups: ["storage.k8s.io"]
+      resources: ["storageclasses"]
+      verbs: ["get", "list", "watch"]
   # This allows the API server to grant permissions to SkyPilot Pods and system components.
   # `kubernetes.remote_identity` must be specified in the sky config if this is disabled.
   manageRbacPolicies: true
