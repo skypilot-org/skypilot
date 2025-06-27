@@ -364,7 +364,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Override user info in request body for service account requests
             await _override_user_info_in_request_body(request, auth_user)
 
-            logger.info(f'Authenticated service account: {user_id}')
+            logger.debug(f'Authenticated service account: {user_id}')
 
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
