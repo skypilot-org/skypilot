@@ -26,44 +26,24 @@ def get_service_account_token() -> Optional[str]:
 
     # Check config file
     config = skypilot_config.get_user_config()
-    token = config.get_nested(('api_server', 'service_account_token'),
-                              default_value=None)
-    if token:
-        if not token.startswith('sky_'):
-            raise ValueError(
-                'Invalid service account token format in config file. '
-                'Token must start with "sky_"')
+    if config is not None:
+        token = config.get_nested(('service_account_token',), None)
+        if token and not token.startswith('sky_'):
+            raise ValueError('Invalid service account token format in config. '
+                             'Token must start with "sky_"')
         return token
 
     return None
 
 
 def get_service_account_headers() -> dict:
-    """Get HTTP headers for service account authentication.
+    """Get headers for service account authentication.
 
     Returns:
-        Dictionary with Authorization header if service account token
-        is available, empty dict otherwise.
+        Dictionary with Authorization header if token is available,
+        empty dict otherwise.
     """
     token = get_service_account_token()
     if token:
-        return {
-            'Authorization': f'Bearer {token}',
-        }
+        return {'Authorization': f'Bearer {token}'}
     return {}
-
-
-def get_api_url(base_url: str, path: str) -> str:
-    """Get API URL for requests.
-
-    Args:
-        base_url: Base URL of the API server (e.g., http://server.com)
-        path: API path (e.g., /api/v1/status)
-
-    Returns:
-        Full URL. Always uses the same path regardless of authentication type.
-    """
-    # Always use the same URL - no special handling for service accounts
-    # OAuth2 proxy will handle authentication based on headers
-    return f'{base_url}/{path}' if not path.startswith(
-        '/') else f'{base_url}{path}'

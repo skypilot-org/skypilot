@@ -218,7 +218,8 @@ def make_authenticated_request(method: str,
 
     # Always use the same URL regardless of authentication type
     # OAuth2 proxy will handle authentication based on headers
-    url = service_account_auth.get_api_url(server_url, path)
+    url = f'{server_url}/{path}' if not path.startswith(
+        '/') else f'{server_url}{path}'
 
     # Use cookie authentication if no Bearer token present
     if not headers.get('Authorization') and 'cookies' not in kwargs:

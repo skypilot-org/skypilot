@@ -28,8 +28,8 @@ class TestServiceAccountAuth:
 
     @mock.patch.dict(os.environ, {}, clear=True)
     @mock.patch('sky.skypilot_config.get_user_config')
-    def test_get_service_account_token_none(self, mock_get_config):
-        """Test getting service account token when none available."""
+    def test_no_service_account_token(self, mock_get_config):
+        """Test no token returned when none available."""
         mock_config = mock.Mock()
         mock_config.get_nested.return_value = None
         mock_get_config.return_value = mock_config
@@ -38,8 +38,8 @@ class TestServiceAccountAuth:
         assert token is None
 
     @mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'invalid_token'})
-    def test_get_service_account_token_invalid_format_env(self):
-        """Test invalid token format from environment variable."""
+    def test_invalid_token_format_env(self):
+        """Test validation of token format from environment."""
         try:
             service_account_auth.get_service_account_token()
             assert False, "Should have raised ValueError"
@@ -48,9 +48,8 @@ class TestServiceAccountAuth:
 
     @mock.patch.dict(os.environ, {}, clear=True)
     @mock.patch('sky.skypilot_config.get_user_config')
-    def test_get_service_account_token_invalid_format_config(
-            self, mock_get_config):
-        """Test invalid token format from config file."""
+    def test_invalid_token_format_config(self, mock_get_config):
+        """Test validation of token format from config."""
         mock_config = mock.Mock()
         mock_config.get_nested.return_value = 'invalid_token'
         mock_get_config.return_value = mock_config
@@ -59,43 +58,24 @@ class TestServiceAccountAuth:
             service_account_auth.get_service_account_token()
             assert False, "Should have raised ValueError"
         except ValueError as e:
-            assert 'Invalid service account token format in config file' in str(
-                e)
+            assert 'Invalid service account token format' in str(e)
 
-    @mock.patch('sky.client.service_account_auth.get_service_account_token')
-    def test_get_service_account_headers_with_token(self, mock_get_token):
+    @mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'sky_test_token'})
+    def test_get_service_account_headers_with_token(self):
         """Test getting headers when token is available."""
-        mock_get_token.return_value = 'sky_test_token'
-
         headers = service_account_auth.get_service_account_headers()
-        assert headers == {
-            'Authorization': 'Bearer sky_test_token',
-        }
+        assert headers == {'Authorization': 'Bearer sky_test_token'}
 
-    @mock.patch('sky.client.service_account_auth.get_service_account_token')
-    def test_get_service_account_headers_no_token(self, mock_get_token):
+    @mock.patch.dict(os.environ, {}, clear=True)
+    @mock.patch('sky.skypilot_config.get_user_config')
+    def test_get_service_account_headers_no_token(self, mock_get_config):
         """Test getting headers when no token is available."""
-        mock_get_token.return_value = None
+        mock_config = mock.Mock()
+        mock_config.get_nested.return_value = None
+        mock_get_config.return_value = mock_config
 
         headers = service_account_auth.get_service_account_headers()
         assert headers == {}
-
-    def test_get_api_url(self):
-        """Test getting API URL (same for all authentication types)."""
-        # Test with path starting with slash
-        url = service_account_auth.get_api_url('https://api.example.com',
-                                               '/api/v1/status')
-        assert url == 'https://api.example.com/api/v1/status'
-
-        # Test with path not starting with slash
-        url = service_account_auth.get_api_url('https://api.example.com',
-                                               'api/v1/status')
-        assert url == 'https://api.example.com/api/v1/status'
-
-        # Test with base URL ending with slash
-        url = service_account_auth.get_api_url('https://api.example.com/',
-                                               'api/v1/status')
-        assert url == 'https://api.example.com//api/v1/status'
 
     @mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'sky_test_token'})
     def test_env_variable_priority(self):

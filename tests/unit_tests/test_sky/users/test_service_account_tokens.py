@@ -28,22 +28,17 @@ class TestServiceAccountTokens:
         headers = service_account_auth.get_service_account_headers()
         assert headers == {}
 
-    def test_api_url_generation(self):
-        """Test API URL generation is consistent regardless of auth type."""
-        # Test consistent URL generation
-        url = service_account_auth.get_api_url('http://server.com',
-                                               'api/status')
-        assert url == 'http://server.com/api/status'
+    @mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'sky_test_token'})
+    def test_config_integration(self):
+        """Test service account integration with configuration."""
+        # Environment variable should take precedence
+        token = service_account_auth.get_service_account_token()
+        assert token == 'sky_test_token'
 
-        # Test with leading slash in path
-        url = service_account_auth.get_api_url('http://server.com',
-                                               '/api/status')
-        assert url == 'http://server.com/api/status'
-
-        # Test with base URL ending in slash
-        url = service_account_auth.get_api_url('http://server.com/',
-                                               'api/status')
-        assert url == 'http://server.com//api/status'
+        # Headers should be properly formatted
+        headers = service_account_auth.get_service_account_headers()
+        assert 'Authorization' in headers
+        assert headers['Authorization'].startswith('Bearer ')
 
     @mock.patch.dict(os.environ, {'SKYPILOT_TOKEN': 'sky_valid_token'})
     def test_token_validation_success(self):
