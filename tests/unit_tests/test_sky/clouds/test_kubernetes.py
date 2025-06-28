@@ -55,7 +55,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_global_allowed_contexts_when_no_workspace_config(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -145,7 +145,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_filters_existing_contexts_only(self, mock_get_cloud_config_value,
                                             mock_get_workspace_cloud,
                                             mock_get_all_contexts):
@@ -162,7 +162,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_skips_ssh_contexts_in_allowed_list(self,
                                                 mock_get_cloud_config_value,
                                                 mock_get_workspace_cloud,
@@ -180,7 +180,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_logs_skipped_contexts_when_not_silent(self,
                                                    mock_get_cloud_config_value,
                                                    mock_get_workspace_cloud,
@@ -200,7 +200,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_does_not_log_skipped_contexts_when_silent(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -239,7 +239,7 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_complex_scenario_with_mixed_contexts(self,
                                                   mock_get_cloud_config_value,
                                                   mock_get_workspace_cloud,
@@ -304,7 +304,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -374,7 +374,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -443,7 +443,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -513,7 +513,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
     @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
     @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.provision.kubernetes.network_utils.get_networking_mode')
@@ -615,7 +615,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
     @patch('yaml.safe_load')
     @patch('sky.utils.common_utils.dump_yaml')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
             self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
         """Test that user-specified securityContext is correctly merged with IPC_LOCK capability."""
@@ -704,7 +704,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
     @patch('yaml.safe_load')
     @patch('sky.utils.common_utils.dump_yaml')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_without_ipc_lock_capability(
             self, mock_get_cloud_config_value, mock_dump_yaml, mock_safe_load):
         """Test that user-specified securityContext works when IPC_LOCK capability is not needed."""

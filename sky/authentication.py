@@ -425,7 +425,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # ClusterIP service.
     nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_cloud_config_value(
+    network_mode_str = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('networking',),
@@ -458,7 +458,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'parent': 'skypilot'
             }
         }
-        custom_metadata = skypilot_config.get_cloud_config_value(
+        custom_metadata = skypilot_config.get_effective_region_config(
             cloud='kubernetes',
             region=context,
             keys=('custom_metadata',),

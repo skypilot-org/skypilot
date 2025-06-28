@@ -669,7 +669,7 @@ class Cloud:
             resources)
 
         # Docker image is not compatible with ssh proxy command.
-        if skypilot_config.get_cloud_config_value(
+        if skypilot_config.get_effective_region_config(
                 cloud=str(cls).lower(),
                 region=None,
                 keys=('ssh_proxy_command',),

@@ -1126,7 +1126,7 @@ Example:
       context2:
         remote_identity: my-k8s-service-account
 
-When a config field is specified for both the ``kubernetes`` cloud and specific context,
+When a config field is specified for both the ``kubernetes`` and specific context ``kubernetes.context_configs.context-name``,
 the context-specific config overrides the general config according to the :ref:`config-overrides` rules.
 
 .. _config-yaml-ssh:

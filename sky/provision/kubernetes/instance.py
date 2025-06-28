@@ -1147,7 +1147,7 @@ def get_cluster_info(
     head_pod_name = None
 
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_cloud_config_value(
+    network_mode_str = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('networking_mode',),

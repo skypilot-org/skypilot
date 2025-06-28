@@ -3176,7 +3176,7 @@ def show_gpus(
         cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
-    kubernetes_autoscaling = skypilot_config.get_cloud_config_value(
+    kubernetes_autoscaling = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=region,
         keys=('autoscaler',),

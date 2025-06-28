@@ -913,26 +913,26 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     skypilot_config._reload_config()
 
     # test autoscaler property
-    context_a_autoscaler = skypilot_config.get_cloud_config_value(
+    context_a_autoscaler = skypilot_config.get_effective_region_config(
         cloud='kubernetes', region='contextA', keys=('autoscaler',))
     assert context_a_autoscaler == 'gke'
-    context_b_autoscaler = skypilot_config.get_cloud_config_value(
+    context_b_autoscaler = skypilot_config.get_effective_region_config(
         cloud='kubernetes', region='contextB', keys=('autoscaler',))
     assert context_b_autoscaler == 'generic'
 
     # test provision_timeout property
-    context_a_provision_timeout = skypilot_config.get_cloud_config_value(
+    context_a_provision_timeout = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region='contextA',
         keys=('provision_timeout',),
         default_value=10)
     assert context_a_provision_timeout == 10
-    context_b_provision_timeout = skypilot_config.get_cloud_config_value(
+    context_b_provision_timeout = skypilot_config.get_effective_region_config(
         cloud='kubernetes', region='contextB', keys=('provision_timeout',))
     assert context_b_provision_timeout == 60
 
     # test pod_config property
-    context_a_pod_config = skypilot_config.get_cloud_config_value(
+    context_a_pod_config = skypilot_config.get_effective_region_config(
         cloud='kubernetes', region='contextA', keys=('pod_config',))
     assert context_a_pod_config == {
         'metadata': {
@@ -942,7 +942,7 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
             }
         }
     }
-    context_b_pod_config = skypilot_config.get_cloud_config_value(
+    context_b_pod_config = skypilot_config.get_effective_region_config(
         cloud='kubernetes', region='contextB', keys=('pod_config',))
     assert context_b_pod_config == {
         'metadata': {

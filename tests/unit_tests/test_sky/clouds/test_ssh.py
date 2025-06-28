@@ -79,7 +79,7 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_global_allowed_node_pools_when_no_workspace_config(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -184,7 +184,7 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_allowed_node_pools_filtering_with_fallback(
             self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
@@ -273,7 +273,7 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_cloud_config_value')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_complex_scenario_with_mixed_filtering(self,
                                                    mock_get_cloud_config_value,
                                                    mock_get_workspace_cloud,

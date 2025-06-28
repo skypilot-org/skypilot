@@ -458,12 +458,12 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
-        disk_encrypted = skypilot_config.get_cloud_config_value(
+        disk_encrypted = skypilot_config.get_effective_region_config(
             cloud='aws',
             region=region_name,
             keys=('disk_encrypted',),
             default_value=False)
-        user_security_group_config = skypilot_config.get_cloud_config_value(
+        user_security_group_config = skypilot_config.get_effective_region_config(
             cloud='aws',
             region=region_name,
             keys=('security_group_name',),

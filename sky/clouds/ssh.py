@@ -143,7 +143,7 @@ class SSH(kubernetes.Kubernetes):
         allowed_node_pools = skypilot_config.get_workspace_cloud('ssh').get(
             'allowed_node_pools', None)
         if allowed_node_pools is None:
-            allowed_node_pools = skypilot_config.get_cloud_config_value(
+            allowed_node_pools = skypilot_config.get_effective_region_config(
                 cloud='ssh',
                 region=None,
                 keys=('allowed_node_pools',),

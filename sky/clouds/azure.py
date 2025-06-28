@@ -380,7 +380,7 @@ class Azure(clouds.Cloud):
             }
 
         # Determine resource group for deploying the instance.
-        resource_group_name = skypilot_config.get_cloud_config_value(
+        resource_group_name = skypilot_config.get_effective_region_config(
             cloud='azure',
             region=region_name,
             keys=('resource_group_vm',),

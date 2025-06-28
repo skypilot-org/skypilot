@@ -369,7 +369,7 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
-def get_cloud_config_value(
+def get_effective_region_config(
         cloud: str,
         keys: Tuple[str, ...],
         region: Optional[str] = None,
@@ -383,6 +383,10 @@ def get_cloud_config_value(
        try to get it at the cloud level <cloud>/keys
     3. if not found at cloud level,
        return either default_value if specified or None
+
+    Note: This function currently only supports getting region-specific
+    config from "kubernetes" cloud. For other clouds, this function behaves
+    identically to get_nested().
     """
     return config_utils.get_cloud_config_value_from_dict(
         dict_config=_get_loaded_config(),
