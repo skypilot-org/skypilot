@@ -505,8 +505,7 @@ def check_server_healthy(
         if is_api_server_local():
             # For local server, just hint user to restart the server to get
             # a consistent version.
-            pass
-            #msg = _LOCAL_API_SERVER_RESTART_HINT
+            msg = _LOCAL_API_SERVER_RESTART_HINT
         with ux_utils.print_exception_no_traceback():
             raise exceptions.APIVersionMismatchError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
