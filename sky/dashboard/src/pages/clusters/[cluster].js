@@ -666,9 +666,12 @@ function ActiveTab({
         </div>
       </div>
 
-      {/* GPU Metrics Section - Only show for Kubernetes in-cluster */}
+      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
-        clusterData.full_infra === 'Kubernetes (in-cluster)' &&
+        clusterData.full_infra &&
+        clusterData.full_infra.includes('Kubernetes') &&
+        !clusterData.full_infra.includes('SSH') &&
+        !clusterData.full_infra.includes('ssh') &&
         isGrafanaAvailable && (
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
