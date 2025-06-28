@@ -910,7 +910,7 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'context_configs.yaml')
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     # test autoscaler property
     context_a_autoscaler = skypilot_config.get_effective_region_config(
