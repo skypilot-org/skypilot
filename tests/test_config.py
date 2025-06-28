@@ -885,3 +885,74 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-user-config'), None) is None
     assert skypilot_config.get_nested(
         ('gcp', 'labels', 'env-project-config'), None) is None
+
+
+def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            pod_config:
+                metadata:
+                    labels:
+                        label1: value1
+            context_configs:
+                contextA:
+                    pod_config:
+                        metadata:
+                            labels:
+                                label2: value2
+                    autoscaler: gke
+                contextB:
+                    provision_timeout: 60
+            autoscaler: generic
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_configs.yaml')
+    skypilot_config._reload_config()
+
+    # test autoscaler property
+    context_a_autoscaler = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextA', keys=('autoscaler',))
+    assert context_a_autoscaler == 'gke'
+    context_b_autoscaler = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextB', keys=('autoscaler',))
+    assert context_b_autoscaler == 'generic'
+
+    # test provision_timeout property
+    context_a_provision_timeout = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('provision_timeout',),
+        default_value=10)
+    assert context_a_provision_timeout == 10
+    context_b_provision_timeout = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextB', keys=('provision_timeout',))
+    assert context_b_provision_timeout == 60
+
+    # test pod_config property
+    context_a_pod_config = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextA', keys=('pod_config',))
+    assert context_a_pod_config == {
+        'metadata': {
+            'labels': {
+                'label1': 'value1',
+                'label2': 'value2'
+            }
+        }
+    }
+    context_b_pod_config = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextB', keys=('pod_config',))
+    assert context_b_pod_config == {
+        'metadata': {
+            'labels': {
+                'label1': 'value1'
+            }
+        }
+    }
+
+    contexts = kubernetes_utils.get_custom_config_k8s_contexts()
+    assert len(contexts) == 2
+    assert contexts[0] == 'contextA'
+    assert contexts[1] == 'contextB'

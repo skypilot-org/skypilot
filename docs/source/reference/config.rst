@@ -79,6 +79,14 @@ Below is the configuration syntax and some example values. See detailed explanat
         runtimeClassName: nvidia
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
@@ -1103,6 +1111,32 @@ Kueue configuration (optional).
 
 Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
 
+
+.. _config-yaml-kubernetes-context-configs:
+
+``kubernetes.context_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Context-specific configuration for Kubernetes resources (optional).
+
+When using multiple Kubernetes contexts, you can specify context-specific configuration for Kubernetes resources.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
+
+When a config field is specified for both the ``kubernetes`` and specific context ``kubernetes.context_configs.context-name``,
+the context-specific config overrides the general config according to the :ref:`config-overrides` rules.
 
 .. _config-yaml-ssh:
 
