@@ -182,20 +182,24 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
     
     return '\n'.join(modified_lines)
 
-async def get_metrics_for_context(context: str) -> Tuple[str, str]:
+async def get_metrics_for_context(context: str) -> str:
     """Get GPU metrics for a single Kubernetes context.
     
     Args:
         context: Kubernetes context name
         
     Returns:
-        Tuple of (context, metrics_text)
+        metrics_text: String containing the metrics
         
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    # query GPU utilization metrics
-    match_patterns = ['{__name__=~"DCGM_.*"}']
+    # Query both DCGM metrics and kube_pod_labels metrics
+    # This ensures the dashboard can perform joins to filter by skypilot cluster
+    match_patterns = [
+        '{__name__=~"DCGM_.*"}',
+        'kube_pod_labels'
+    ]
     metrics_text = await send_metrics_request_with_port_forward(
         context=context,
         namespace='skypilot', 
