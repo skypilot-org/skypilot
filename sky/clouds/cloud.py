@@ -668,10 +668,6 @@ class Cloud:
         unsupported_features2reason = cls._unsupported_features_for_resources(
             resources)
 
-        region_name = None
-        if resources.region is not None:
-            region_name = resources.region.lower()
-
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_cloud_config_value(
                 cloud=str(cls).lower(),
