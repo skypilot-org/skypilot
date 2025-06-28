@@ -672,8 +672,8 @@ export function Workspaces() {
 
   return (
     <div>
-      {/* Error/Success messages positioned at top right, above all dialogs */}
-      <div className="fixed top-4 right-4 z-[9999] max-w-md">
+      {/* Error/Success messages positioned at top right, below navigation bar */}
+      <div className="fixed top-20 right-4 z-[9999] max-w-md">
         {topLevelSuccess && (
           <div className="bg-green-50 border border-green-200 rounded p-4 mb-4">
             <div className="flex items-center justify-between">

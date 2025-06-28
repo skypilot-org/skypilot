@@ -556,7 +556,7 @@ export function Users() {
             placeholder={
               activeMainTab === 'users'
                 ? 'Search users by name, email, or role'
-                : 'Search by token name, created by, or service account'
+                : 'Search by service account name, or created by'
             }
             value={
               activeMainTab === 'users'
@@ -623,8 +623,8 @@ export function Users() {
         )}
       </div>
 
-      {/* Error/Success messages positioned at top right, above all dialogs */}
-      <div className="fixed top-4 right-4 z-[9999] max-w-md">
+      {/* Error/Success messages positioned at top right, below navigation bar */}
+      <div className="fixed top-20 right-4 z-[9999] max-w-md">
         <SuccessDisplay
           message={createSuccess}
           onDismiss={() => setCreateSuccess(null)}
@@ -1713,7 +1713,7 @@ function ServiceAccountTokensView({
 
       if (response.ok) {
         setCreateSuccess(
-          `Token "${tokenToDelete.token_name}" deleted successfully!`
+          `Service account "${tokenToDelete.token_name}" deleted successfully!`
         );
         setShowDeleteDialog(false);
         setTokenToDelete(null);
@@ -1721,7 +1721,7 @@ function ServiceAccountTokensView({
         await fetchTokensAndCounts();
       } else {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to delete token');
+        throw new Error(errorData.detail || 'Failed to delete service account');
       }
     } catch (error) {
       // Show error at top level for better visibility
@@ -2032,7 +2032,7 @@ function ServiceAccountTokensView({
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
                     <h4 className="text-sm font-medium text-green-900">
-                      ⚠️ Token created successfully - save this token now!
+                      ⚠️ Service account created successfully - save this token now!
                     </h4>
                     <CustomTooltip
                       content={copySuccess ? 'Copied!' : 'Copy token'}
@@ -2051,7 +2051,7 @@ function ServiceAccountTokensView({
                     </CustomTooltip>
                   </div>
                   <p className="text-sm text-green-700 mb-3">
-                    This token will not be shown again. Please copy and store it
+                    This service account token will not be shown again. Please copy and store it
                     securely.
                   </p>
                   <div className="bg-white border border-green-300 rounded-md p-3">
@@ -2066,7 +2066,7 @@ function ServiceAccountTokensView({
               <>
                 <div className="grid gap-2">
                   <label className="text-sm font-medium text-gray-700">
-                    Token Name
+                    Service Account Name
                   </label>
                   <input
                     className="border rounded px-3 py-2 w-full"
@@ -2155,7 +2155,7 @@ function ServiceAccountTokensView({
           <DialogHeader>
             <DialogTitle>Delete Service Account Token</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete the token &quot;
+              Are you sure you want to delete the service account &quot;
               {tokenToDelete?.token_name}&quot;
               {tokenToDelete?.creator_user_hash !== userRoleCache?.id &&
               userRoleCache?.role === 'admin'
@@ -2205,7 +2205,7 @@ function ServiceAccountTokensView({
           <DialogHeader>
             <DialogTitle>Rotate Service Account Token</DialogTitle>
             <DialogDescription>
-              Rotate the token &quot;{tokenToRotate?.token_name}&quot;
+              Rotate the service account token &quot;{tokenToRotate?.token_name}&quot;
               {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
               userRoleCache?.role === 'admin'
                 ? ` owned by ${tokenToRotate?.creator_name}`
@@ -2221,7 +2221,7 @@ function ServiceAccountTokensView({
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
                     <h4 className="text-sm font-medium text-green-900">
-                      🔄 Token rotated successfully - save this new token now!
+                      🔄 Service account token rotated successfully - save this new token now!
                     </h4>
                     <CustomTooltip
                       content={copySuccess ? 'Copied!' : 'Copy token'}
