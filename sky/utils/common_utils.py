@@ -71,11 +71,10 @@ def get_usage_run_id() -> str:
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
-    try:
-        int(user_hash, 16)
-    except (TypeError, ValueError):
-        return False
-    return len(user_hash) == USER_HASH_LENGTH
+    # Must start with a letter, followed by alphanumeric characters and hyphens
+    # This covers both old hex format (e.g., "abc123") and new service account
+    # format (e.g., "sa-abc123-token-xyz")
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
 def generate_user_hash() -> str:

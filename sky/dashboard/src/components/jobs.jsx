@@ -40,6 +40,7 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import {
   Select,
@@ -1032,7 +1033,12 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.user}</TableCell>
+                      <TableCell>
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Link
                           href="/workspaces"
@@ -1550,7 +1556,12 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
