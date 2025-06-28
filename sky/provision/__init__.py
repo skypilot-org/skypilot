@@ -123,10 +123,17 @@ def delete_volume(provider_name: str,
 
 
 @_route_to_cloud_impl
-def get_volume_usedby(provider_name: str,
-                      config: models.VolumeConfig,
-                      pod_only: bool = False) -> Tuple[List[str], List[str]]:
-    """Get the usedby of a volume."""
+def get_volume_usedby(
+    provider_name: str,
+    config: models.VolumeConfig,
+) -> Tuple[List[str], List[str]]:
+    """Get the usedby of a volume.
+
+    Returns:
+        usedby_pods: List of pods using the volume. These may include pods
+                     not created by SkyPilot.
+        usedby_clusters: List of clusters using the volume.
+    """
     raise NotImplementedError
 
 

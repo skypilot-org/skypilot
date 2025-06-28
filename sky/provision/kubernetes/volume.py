@@ -47,7 +47,7 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
         access_mode = pvc.spec.access_modes[0]
         if access_mode not in once_modes:
             continue
-        usedby_pods, _ = _get_volume_usedby(context, namespace, pvc_name, True)
+        usedby_pods, _ = _get_volume_usedby(context, namespace, pvc_name)
         if usedby_pods:
             raise config_lib.KubernetesError(f'Volume {pvc_name} with access '
                                              f'mode {access_mode} is already '
@@ -87,10 +87,11 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
-def _get_volume_usedby(context: Optional[str],
-                       namespace: str,
-                       pvc_name: str,
-                       pod_only: bool = False) -> Tuple[List[str], List[str]]:
+def _get_volume_usedby(
+    context: Optional[str],
+    namespace: str,
+    pvc_name: str,
+) -> Tuple[List[str], List[str]]:
     """Gets the usedby resources of a volume.
 
     This function returns the pods and clusters that are using the volume.
@@ -101,12 +102,11 @@ def _get_volume_usedby(context: Optional[str],
         context: Kubernetes context
         namespace: Kubernetes namespace
         pvc_name: PVC name
-        pod_only: Whether to only return the pods that use the PVC.
-                  This is to reduce the effort to lookup db to get the cluster
-                  name.
+
     Returns:
-        usedby_pods: List of pods using the volume
-        usedby_clusters: List of clusters using the volume
+        usedby_pods: List of pods using the volume. These may include pods
+                     not created by SkyPilot.
+        usedby_clusters: List of clusters using the volume.
     """
     usedby_pods = []
     usedby_clusters = []
@@ -114,8 +114,7 @@ def _get_volume_usedby(context: Optional[str],
         f'status.phase!={phase}'
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
     ])
-    if not pod_only:
-        cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
+    cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
     pods = kubernetes.core_api(context).list_namespaced_pod(
         namespace=namespace, field_selector=field_selector)
@@ -127,11 +126,9 @@ def _get_volume_usedby(context: Optional[str],
                 continue
             if volume.persistent_volume_claim.claim_name == pvc_name:
                 usedby_pods.append(pod.metadata.name)
-                if pod_only:
-                    continue
                 # Get the real cluster name
                 cluster_name_on_cloud = pod.metadata.labels.get(
-                    k8s_constants.TAG_RAY_CLUSTER_NAME)
+                    k8s_constants.TAG_SKYPILOT_CLUSTER_NAME)
                 if cluster_name_on_cloud is None:
                     continue
                 cluster_name = cloud_to_name_map.get(cluster_name_on_cloud)
@@ -155,12 +152,12 @@ def _get_cluster_name_on_cloud_to_cluster_name_map() -> Dict[str, str]:
     return cloud_to_name_map
 
 
-def get_volume_usedby(config: models.VolumeConfig,
-                      pod_only: bool = False) -> Tuple[List[str], List[str]]:
+def get_volume_usedby(
+    config: models.VolumeConfig,) -> Tuple[List[str], List[str]]:
     """Gets the usedby resources of a volume."""
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
-    return _get_volume_usedby(context, namespace, pvc_name, pod_only)
+    return _get_volume_usedby(context, namespace, pvc_name)
 
 
 def create_persistent_volume_claim(namespace: str, context: Optional[str],

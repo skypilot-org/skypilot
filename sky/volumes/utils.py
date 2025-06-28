@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional
 import prettytable
 
 from sky import sky_logging
-from sky.utils import duration_utils
+from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.volumes import volume
 
@@ -45,12 +46,12 @@ class PVCVolumeTable(VolumeTable):
 
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
-        #  If show_all is True, show the table with the columns:
-        #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, LAST_USE, STATUS
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, LAST_USE, STATUS, NAME_ON_CLOUD, USED_BY
+        #   AGE, STATUS, LAST_USE, USED_BY
+        #  If show_all is True, show the table with the columns:
+        #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
+        #   AGE, STATUS, LAST_USE, USED_BY, NAME_ON_CLOUD
         #   STORAGE_CLASS, ACCESS_MODE
 
         if show_all:
@@ -64,8 +65,8 @@ class PVCVolumeTable(VolumeTable):
                 'AGE',
                 'STATUS',
                 'LAST_USE',
-                'NAME_ON_CLOUD',
                 'USED_BY',
+                'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
             ]
@@ -80,6 +81,7 @@ class PVCVolumeTable(VolumeTable):
                 'AGE',
                 'STATUS',
                 'LAST_USE',
+                'USED_BY',
             ]
 
         table = log_utils.create_table(columns)
@@ -100,6 +102,18 @@ class PVCVolumeTable(VolumeTable):
             size = row.get('size', '')
             if size:
                 size = f'{size}Gi'
+            usedby_str = '-'
+            usedby_clusters = row.get('usedby_clusters')
+            usedby_pods = row.get('usedby_pods')
+            if usedby_clusters:
+                usedby_str = f'{", ".join(usedby_clusters)}'
+            elif usedby_pods:
+                usedby_str = f'{", ".join(usedby_pods)}'
+            if show_all:
+                usedby = usedby_str
+            else:
+                usedby = common_utils.truncate_long_string(
+                    usedby_str, constants.USED_BY_TRUNC_LENGTH)
             infra = _get_infra_str(row.get('cloud'), row.get('region'),
                                    row.get('zone'))
             table_row = [
@@ -109,20 +123,13 @@ class PVCVolumeTable(VolumeTable):
                 size,
                 row.get('user_name', '-'),
                 row.get('workspace', '-'),
-                duration_utils.human_duration_since(row.get('launched_at', 0)),
+                log_utils.human_duration(row.get('launched_at', 0)),
                 row.get('status', ''),
                 last_attached_at_str,
+                usedby,
             ]
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
-                usedby_clusters = row.get('usedby_clusters')
-                usedby_pods = row.get('usedby_pods')
-                if usedby_clusters:
-                    table_row.append(f'{", ".join(usedby_clusters)}')
-                elif usedby_pods:
-                    table_row.append(f'{", ".join(usedby_pods)}')
-                else:
-                    table_row.append('-')
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))

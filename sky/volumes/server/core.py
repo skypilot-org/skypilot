@@ -35,7 +35,7 @@ def volume_refresh():
                            'Skipping status refresh...')
             continue
         cloud = config.cloud
-        usedby_pods, _ = provision.get_volume_usedby(cloud, config, True)
+        usedby_pods, _ = provision.get_volume_usedby(cloud, config)
         with _volume_lock(volume_name):
             latest_volume = global_user_state.get_volume_by_name(volume_name)
             if latest_volume is None:
