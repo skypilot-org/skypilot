@@ -2032,7 +2032,8 @@ function ServiceAccountTokensView({
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
                     <h4 className="text-sm font-medium text-green-900">
-                      ⚠️ Service account created successfully - save this token now!
+                      ⚠️ Service account created successfully - save this token
+                      now!
                     </h4>
                     <CustomTooltip
                       content={copySuccess ? 'Copied!' : 'Copy token'}
@@ -2051,8 +2052,8 @@ function ServiceAccountTokensView({
                     </CustomTooltip>
                   </div>
                   <p className="text-sm text-green-700 mb-3">
-                    This service account token will not be shown again. Please copy and store it
-                    securely.
+                    This service account token will not be shown again. Please
+                    copy and store it securely.
                   </p>
                   <div className="bg-white border border-green-300 rounded-md p-3">
                     <code className="text-sm text-gray-800 font-mono break-all block">
@@ -2205,7 +2206,8 @@ function ServiceAccountTokensView({
           <DialogHeader>
             <DialogTitle>Rotate Service Account Token</DialogTitle>
             <DialogDescription>
-              Rotate the service account token &quot;{tokenToRotate?.token_name}&quot;
+              Rotate the service account token &quot;{tokenToRotate?.token_name}
+              &quot;
               {tokenToRotate?.creator_user_hash !== userRoleCache?.id &&
               userRoleCache?.role === 'admin'
                 ? ` owned by ${tokenToRotate?.creator_name}`
@@ -2221,7 +2223,8 @@ function ServiceAccountTokensView({
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center mb-3">
                     <h4 className="text-sm font-medium text-green-900">
-                      🔄 Service account token rotated successfully - save this new token now!
+                      🔄 Service account token rotated successfully - save this
+                      new token now!
                     </h4>
                     <CustomTooltip
                       content={copySuccess ? 'Copied!' : 'Copy token'}
