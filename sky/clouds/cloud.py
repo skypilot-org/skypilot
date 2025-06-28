@@ -675,7 +675,7 @@ class Cloud:
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_cloud_config_value(
                 cloud=str(cls).lower(),
-                region=region_name,
+                region=None,
                 keys=('ssh_proxy_command',),
                 default_value=None) is not None:
             unsupported_features2reason.update({

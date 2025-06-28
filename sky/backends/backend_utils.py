@@ -732,7 +732,7 @@ def write_cluster_config(
     # Retrieve the ssh_proxy_command for the given cloud / region.
     ssh_proxy_command_config = skypilot_config.get_cloud_config_value(
         cloud=str(cloud).lower(),
-        region=region.name,
+        region=None,
         keys=('ssh_proxy_command',),
         default_value=None)
     if (isinstance(ssh_proxy_command_config, str) or
