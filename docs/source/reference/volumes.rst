@@ -72,8 +72,8 @@ List all volumes with ``sky volumes ls``:
 .. code-block:: console
 
   $ sky volumes ls
-  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE
-  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  <timestamp>
+  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE     USED_BY
+  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  <timestamp>  <cluster_name>
 
 
 .. tip::
@@ -83,8 +83,8 @@ List all volumes with ``sky volumes ls``:
   .. code-block:: console
 
     $ sky volumes ls -v
-    NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE             NAME_ON_CLOUD            USED_BY   STORAGE_CLASS           ACCESS_MODE
-    new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  2025-06-24 10:18:32  new-pvc-73ec42f2-5c6c4e  training  csi-mounted-fs-path-sc  ReadWriteMany
+    NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE             USED_BY   NAME_ON_CLOUD              STORAGE_CLASS           ACCESS_MODE
+    new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  2025-06-24 10:18:32  training  new-pvc-73ec42f2-5c6c4e    csi-mounted-fs-path-sc  ReadWriteMany
 
 Delete a volume with ``sky volumes delete``:
 

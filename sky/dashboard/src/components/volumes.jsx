@@ -8,7 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import PropTypes from 'prop-types';
-import { CircularProgress } from '@mui/material';
+import { CircularProgress, Popover } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -374,25 +374,10 @@ function VolumesTable({
                   </TableCell>
                   <TableCell>{volume.type || 'N/A'}</TableCell>
                   <TableCell>
-                    {Array.isArray(volume.usedby_clusters) &&
-                    volume.usedby_clusters.length > 0
-                      ? volume.usedby_clusters.map((cluster, idx) => (
-                          <span key={cluster}>
-                            <Link
-                              href={`/clusters/${encodeURIComponent(cluster)}`}
-                              className="text-sky-blue hover:underline"
-                            >
-                              {cluster}
-                            </Link>
-                            {idx < volume.usedby_clusters.length - 1
-                              ? ', '
-                              : ''}
-                          </span>
-                        ))
-                      : Array.isArray(volume.usedby_pods) &&
-                          volume.usedby_pods.length > 0
-                        ? volume.usedby_pods.join(', ')
-                        : 'N/A'}
+                    <UsedByCell
+                      clusters={volume.usedby_clusters}
+                      pods={volume.usedby_pods}
+                    />
                   </TableCell>
                   <TableCell>
                     <Button
@@ -510,6 +495,88 @@ function VolumesTable({
         </div>
       )}
     </div>
+  );
+}
+
+function UsedByCell({ clusters, pods }) {
+  const MAX_DISPLAY = 2;
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  // clusters first
+  let arr =
+    Array.isArray(clusters) && clusters.length > 0
+      ? clusters
+      : Array.isArray(pods) && pods.length > 0
+        ? pods
+        : [];
+  const isCluster = Array.isArray(clusters) && clusters.length > 0;
+
+  if (!arr || arr.length === 0) return 'N/A';
+
+  const displayed = arr.slice(0, MAX_DISPLAY);
+  const hidden = arr.slice(MAX_DISPLAY);
+
+  const handleClick = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  return (
+    <>
+      {displayed.map((item, idx) => (
+        <span key={item}>
+          {isCluster ? (
+            <Link
+              href={`/clusters/${encodeURIComponent(item)}`}
+              className="text-sky-blue hover:underline"
+            >
+              {item}
+            </Link>
+          ) : (
+            <span>{item}</span>
+          )}
+          {idx < displayed.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+      {hidden.length > 0 && (
+        <>
+          ,{' '}
+          <span
+            className="text-sky-blue cursor-pointer underline"
+            onClick={handleClick}
+            style={{ userSelect: 'none' }}
+          >
+            +{hidden.length} more
+          </span>
+          <Popover
+            open={Boolean(anchorEl)}
+            anchorEl={anchorEl}
+            onClose={handleClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          >
+            <div style={{ padding: 12, maxWidth: 300 }}>
+              {hidden.map((item) => (
+                <div key={item} style={{ marginBottom: 4 }}>
+                  {isCluster ? (
+                    <Link
+                      href={`/clusters/${encodeURIComponent(item)}`}
+                      className="text-sky-blue hover:underline"
+                    >
+                      {item}
+                    </Link>
+                  ) : (
+                    <span>{item}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Popover>
+        </>
+      )}
+    </>
   );
 }
 
