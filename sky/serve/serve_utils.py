@@ -55,6 +55,76 @@ def get_num_service_threshold():
     return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
 
 
+def _read_last_n_lines(file_handle: typing.TextIO,
+                       n: int,
+                       chunk_size: int = 8192) -> List[str]:
+    """Read the last N lines from a file without loading the entire file.
+    This reverse reads the file in chunks from the end,
+    which is much more memory-efficient than reading the entire file.
+    Args:
+        file_handle: Open file handle
+        n: Number of lines to read from the end
+    Returns:
+        List of the last N lines (with newlines preserved)
+    """
+    assert n >= 0, 'number of lines must be a non-negative integer.'
+    assert chunk_size > 0, 'chunk size must be a positive integer.'
+    assert file_handle is not None, 'file handle must be provided.'
+
+    file_handle.seek(0, os.SEEK_END)  # Seek to end
+    if n == 0:
+        return []
+
+    # Get file size
+    file_size = file_handle.tell()
+
+    if file_size == 0:
+        return []
+
+    # Read backwards to find n newlines
+    buffer_size = min(chunk_size, file_size)
+    lines_found = 0
+    pos = file_size
+    chunks = []
+
+    while pos > 0 and lines_found < n:
+        # Read chunk
+        read_size = min(buffer_size, pos)
+        pos -= read_size
+        file_handle.seek(pos)
+        chunk = file_handle.read(read_size)
+        chunks.append(chunk)
+
+        # Count newlines in this chunk
+        lines_found += chunk.count('\n')
+
+    # Combine all chunks and split into lines
+    full_text = ''.join(reversed(chunks))
+    all_lines = full_text.split('\n')
+
+    # Get the last n lines, handling end-of-file properly
+    if all_lines and all_lines[-1] == '':
+        # File ends with newline, so last element is empty
+        result_lines = all_lines[-n - 1:-1]
+    else:
+        # File doesn't end with newline
+        result_lines = all_lines[-n:]
+
+    # Add newlines back (except the last line if file doesn't end with newline)
+    result = []
+    for i, line in enumerate(result_lines):
+        if i == len(result_lines) - 1 and (not all_lines or
+                                           all_lines[-1] != ''):
+            # Last line and file doesn't end with newline
+            result.append(line)
+        else:
+            result.append(line + '\n')
+
+    # Position file pointer at end
+    file_handle.seek(0, os.SEEK_END)
+    return result
+
+
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 # NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
@@ -857,18 +927,26 @@ def _follow_logs_with_provision_expanding(
                                  idle_timeout_seconds=idle_timeout_seconds)
 
 
-def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
+                        tail: Optional[int]) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-
+    total_lines_printed = 0
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
         with open(log_file_name, 'r', encoding='utf-8') as f:
-            print(f.read(), flush=True)
+            if tail is not None:
+                # Read only the last tail amount of lines from the file
+                lines = _read_last_n_lines(f, tail)
+                total_lines_printed += len(lines)
+                for line in lines:
+                    print(line, end='', flush=True)
+            else:
+                # Print all lines
+                print(f.read(), flush=True)
         return ''
 
     launch_log_file_name = generate_replica_launch_log_file_name(
@@ -891,14 +969,22 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
+
+    # Handle launch logs based on number parameter
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_logs_with_provision_expanding(
-                f,
-                replica_cluster_name,
-                should_stop=replica_provisioned,
-                stop_on_eof=not follow,
-        ):
-            print(line, end='', flush=True)
+        if tail is not None:
+            lines = _read_last_n_lines(f, tail - total_lines_printed)
+            total_lines_printed += len(lines)
+            for line in lines:
+                print(line, end='', flush=True)
+        else:
+            for line in _follow_logs_with_provision_expanding(
+                    f,
+                    replica_cluster_name,
+                    should_stop=replica_provisioned,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
 
     if (not follow and
             _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
@@ -917,15 +1003,24 @@ def stream_replica_logs(service_name: str, replica_id: int,
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
-    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
-    if returncode != 0:
-        return (f'{colorama.Fore.RED}Failed to stream logs for replica '
-                f'{replica_id}.{colorama.Style.RESET_ALL}')
+    if tail is None:
+        returncode = backend.tail_logs(handle, job_id=None, follow=follow)
+        if returncode != 0:
+            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                    f'{replica_id}.{colorama.Style.RESET_ALL}')
+    elif not follow and total_lines_printed < tail:
+        returncode = backend.tail_logs(handle,
+                                       job_id=None,
+                                       follow=follow,
+                                       tail=tail - total_lines_printed)
+        if returncode != 0:
+            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                    f'{replica_id}.{colorama.Style.RESET_ALL}')
     return ''
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool) -> str:
+                              follow: bool, tail: Optional[int]) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -942,12 +1037,19 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 
     with open(os.path.expanduser(log_file), 'r', newline='',
               encoding='utf-8') as f:
-        for line in log_utils.follow_logs(
-                f,
-                should_stop=_service_is_terminal,
-                stop_on_eof=not follow,
-        ):
-            print(line, end='', flush=True)
+        if tail is not None:
+            # Efficiently read only the last tail amount of lines from the file
+            lines = _read_last_n_lines(f, tail)
+            for line in lines:
+                print(line, end='', flush=True)
+        else:
+            # Print all lines
+            for line in log_utils.follow_logs(
+                    f,
+                    should_stop=_service_is_terminal,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
     return ''
 
 
@@ -1140,20 +1242,22 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            follow: bool, tail: Optional[int]) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
-                                  stream_controller: bool, follow: bool) -> str:
+                                  stream_controller: bool, follow: bool,
+                                  tail: Optional[int]) -> str:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
+            f'{stream_controller}, follow={follow}, tail={tail})',
+            'print(msg, flush=True)'
         ]
         return cls._build(code)
 
