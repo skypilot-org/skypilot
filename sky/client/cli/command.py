@@ -3176,7 +3176,11 @@ def show_gpus(
         cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
-    kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
+    kubernetes_autoscaling = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=region,
+        keys=('autoscaler',),
+        default_value=None) is not None
     kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
     ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
@@ -5358,14 +5362,42 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
-@click.option('--get-token',
+@click.option('--relogin',
               is_flag=True,
               default=False,
-              help='Force token-based login.')
+              help='Force relogin with OAuth2 when enabled.')
+@click.option(
+    '--service-account-token',
+    '--token',
+    '-t',
+    required=False,
+    help='Service account token for authentication (starts with ``sky_``).')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str], get_token: bool):
-    """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint, get_token)
+def api_login(endpoint: Optional[str], relogin: bool,
+              service_account_token: Optional[str]):
+    """Logs into a SkyPilot API server.
+
+    If your remote API server has enabled OAuth2 authentication, you can use
+    one of the following methods to login:
+
+    1. OAuth2 browser-based authentication (default)
+
+    2. Service account token via ``--token`` flag
+
+    3. Service account token in ``~/.sky/config.yaml``
+
+    Examples:
+
+    .. code-block:: bash
+
+      # OAuth2 browser login
+      sky api login -e https://api.example.com
+      \b
+      # Service account token login
+      sky api login -e https://api.example.com --token sky_abc123...
+
+    """
+    sdk.api_login(endpoint, relogin, service_account_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

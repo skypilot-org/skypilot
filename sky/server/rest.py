@@ -136,26 +136,14 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 
 
 @retry_on_server_unavailable()
-def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
-    """Send a POST request to the API server, retry on server temporarily
+def request(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server, retry on server temporarily
     unavailable."""
-    return request('POST', url, data=data, json=json, **kwargs)
+    return request_without_retry(method, url, **kwargs)
 
 
-@retry_on_server_unavailable()
-def get(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server, retry on server temporarily
-    unavailable."""
-    return request('GET', url, params=params, **kwargs)
-
-
-def get_without_retry(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server without retry."""
-    return request('GET', url, params=params, **kwargs)
-
-
-def request(method: str, url: str, **kwargs) -> 'requests.Response':
-    """Send a request to the API server."""
+def request_without_retry(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server without retry."""
     response = _session.request(method, url, **kwargs)
     handle_server_unavailable(response)
     remote_api_version = response.headers.get(constants.API_VERSION_HEADER)

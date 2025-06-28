@@ -26,6 +26,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
@@ -159,6 +160,53 @@ def get_cookies_from_response(
     return cookies
 
 
+def make_authenticated_request(method: str,
+                               path: str,
+                               server_url: Optional[str] = None,
+                               retry: bool = True,
+                               **kwargs) -> 'requests.Response':
+    """Make an authenticated HTTP request to the API server.
+
+    Automatically handles service account token authentication or cookie-based
+    authentication based on what's available.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., '/api/v1/status')
+        server_url: Server URL, defaults to configured server
+        **kwargs: Additional arguments to pass to requests
+
+    Returns:
+        requests.Response object
+    """
+    if server_url is None:
+        server_url = get_server_url()
+
+    # Prepare headers and URL for service account authentication
+    headers = service_account_auth.get_service_account_headers()
+
+    # Merge with existing headers
+    if 'headers' in kwargs:
+        headers.update(kwargs['headers'])
+    kwargs['headers'] = headers
+
+    # Always use the same URL regardless of authentication type
+    # OAuth2 proxy will handle authentication based on headers
+    url = f'{server_url}/{path}' if not path.startswith(
+        '/') else f'{server_url}{path}'
+
+    # Use cookie authentication if no Bearer token present
+    if not headers.get('Authorization') and 'cookies' not in kwargs:
+        kwargs['cookies'] = get_api_cookie_jar()
+
+    # Make the request
+    if retry:
+        return rest.request(method, url, **kwargs)
+    else:
+        assert method == 'GET', 'Only GET requests can be done without retry'
+        return rest.request_without_retry(method, url, **kwargs)
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = DEFAULT_SERVER_URL
@@ -234,9 +282,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            response = rest.get(f'{server_url}/api/health',
-                                timeout=2.5,
-                                cookies=get_api_cookie_jar())
+            response = make_authenticated_request('GET',
+                                                  '/api/health',
+                                                  timeout=2.5)
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)

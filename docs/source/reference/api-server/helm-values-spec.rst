@@ -49,6 +49,7 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`enableServiceAccounts <helm-values-apiService-enableServiceAccounts>`: true
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
@@ -307,6 +308,16 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-enableServiceAccounts:
+
+``apiService.enableServiceAccounts``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable service accounts in the API server.
+
+Default: ``true``
+
 
 .. _helm-values-apiService-sshNodePools:
 

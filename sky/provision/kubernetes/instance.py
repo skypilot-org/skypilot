@@ -941,7 +941,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             head_pod_name = pod.metadata.name
 
     networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'))
+        config.provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         # Adding the jump pod to the new_nodes list as well so it can be
         # checked if it's scheduled and running along with other pods.
@@ -1102,7 +1102,7 @@ def terminate_instances(
 
     # Clean up the SSH jump pod if in use
     networking_mode = network_utils.get_networking_mode(
-        provider_config.get('networking_mode'))
+        provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         pod_name = list(pods.keys())[0]
         try:
@@ -1147,8 +1147,11 @@ def get_cluster_info(
     head_pod_name = None
 
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                  port_forward_mode.value)
+    network_mode_str = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('networking_mode',),
+        default_value=port_forward_mode.value)
     network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
         network_mode_str)
     external_ip = kubernetes_utils.get_external_ip(network_mode, context)

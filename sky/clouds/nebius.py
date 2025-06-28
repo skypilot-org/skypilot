@@ -224,8 +224,14 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        config_fs = skypilot_config.get_nested(
-            ('nebius', region.name, 'filesystems'), [])
+        config_fs = skypilot_config.get_effective_region_config(
+            cloud='nebius',
+            region=None,
+            keys=(
+                region.name,
+                'filesystems',
+            ),
+            default_value=[])
         resources_vars_fs = []
         for i, fs in enumerate(config_fs):
             resources_vars_fs.append({

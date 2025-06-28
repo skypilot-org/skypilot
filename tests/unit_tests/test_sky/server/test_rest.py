@@ -183,8 +183,8 @@ class TestRetryOnServerUnavailableDecorator:
             assert call_count == 3
 
 
-class TestRestWrapperFunctions:
-    """Test cases for REST wrapper functions (post and get)."""
+class TestRestRequestFunctions:
+    """Test cases for REST request functions (request and request_without_retry)."""
 
     @mock.patch('sky.server.rest._session')
     def test_post_successful_request(self, mock_session):
@@ -194,12 +194,11 @@ class TestRestWrapperFunctions:
         mock_response.headers = {}
         mock_session.request.return_value = mock_response
 
-        result = rest.post('http://test.com', json={'key': 'value'})
+        result = rest.request('POST', 'http://test.com', json={'key': 'value'})
 
         assert result == mock_response
         mock_session.request.assert_called_once_with('POST',
                                                      'http://test.com',
-                                                     data=None,
                                                      json={'key': 'value'})
 
     @mock.patch('sky.server.rest._session')
@@ -210,7 +209,9 @@ class TestRestWrapperFunctions:
         mock_response.headers = {}
         mock_session.request.return_value = mock_response
 
-        result = rest.get('http://test.com', params={'param': 'value'})
+        result = rest.request('GET',
+                              'http://test.com',
+                              params={'param': 'value'})
 
         assert result == mock_response
         mock_session.request.assert_called_once_with('GET',
@@ -233,7 +234,9 @@ class TestRestWrapperFunctions:
         ]
 
         with mock.patch('time.sleep'):  # Speed up test
-            result = rest.post('http://test.com', json={'key': 'value'})
+            result = rest.request('POST',
+                                  'http://test.com',
+                                  json={'key': 'value'})
 
         assert result == mock_response_200
         assert mock_session.request.call_count == 2
@@ -253,11 +256,8 @@ class TestRestWrapperFunctions:
             mock_response_503, mock_response_200
         ]
 
-        with mock.patch('time.sleep'):  # Speed up test
-            result = rest.get('http://test.com', params={'param': 'value'})
-
-        assert result == mock_response_200
-        assert mock_session.request.call_count == 2
+        with pytest.raises(exceptions.ServerTemporarilyUnavailableError):
+            rest.request_without_retry('GET', 'http://test.com')
 
     @mock.patch('sky.server.rest._session')
     def test_post_passes_through_kwargs(self, mock_session):
@@ -267,16 +267,16 @@ class TestRestWrapperFunctions:
         mock_response.headers = {}
         mock_session.request.return_value = mock_response
 
-        result = rest.post('http://test.com',
-                           json={'key': 'value'},
-                           headers={'Authorization': 'Bearer token'},
-                           timeout=30)
+        result = rest.request('POST',
+                              'http://test.com',
+                              json={'key': 'value'},
+                              headers={'Authorization': 'Bearer token'},
+                              timeout=30)
 
         assert result == mock_response
         mock_session.request.assert_called_once_with(
             'POST',
             'http://test.com',
-            data=None,
             json={'key': 'value'},
             headers={'Authorization': 'Bearer token'},
             timeout=30)
@@ -289,10 +289,11 @@ class TestRestWrapperFunctions:
         mock_response.headers = {}
         mock_session.request.return_value = mock_response
 
-        result = rest.get('http://test.com',
-                          params={'param': 'value'},
-                          headers={'User-Agent': 'SkyPilot'},
-                          timeout=30)
+        result = rest.request_without_retry('GET',
+                                            'http://test.com',
+                                            params={'param': 'value'},
+                                            headers={'User-Agent': 'SkyPilot'},
+                                            timeout=30)
 
         assert result == mock_response
         mock_session.request.assert_called_once_with(
