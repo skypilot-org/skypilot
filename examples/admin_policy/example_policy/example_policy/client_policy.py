@@ -48,3 +48,19 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
             # consistent identity in the task and the local environment.
             task.file_mounts['~/.config/gcloud'] = '~/.config/gcloud'
         return sky.MutatedUserRequest(task, user_request.skypilot_config)
+
+
+class AddVolumesPolicy(sky.AdminPolicy):
+    """Example policy: add volumes to the task."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        # Only apply the policy at client-side.
+        if not user_request.at_client_side:
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+        task = user_request.task
+        task.set_volumes({'/mnt/data0': 'pvc0'})
+        task.update_volumes({'/mnt/data1': 'pvc1'})
+        return sky.MutatedUserRequest(task, user_request.skypilot_config)

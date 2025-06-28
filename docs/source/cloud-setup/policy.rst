@@ -15,6 +15,7 @@ Example usage:
 - :ref:`enforce-autostop-policy`
 - :ref:`dynamic-kubernetes-contexts-update-policy`
 - :ref:`use-local-gcp-credentials-policy`
+- :ref:`add-volumes-policy`
 
 Overview
 --------
@@ -342,6 +343,24 @@ Use local GCP credentials for all tasks
 .. literalinclude:: ../../../examples/admin_policy/use_local_gcp_credentials.yaml
     :language: yaml
     :caption: `Config YAML for using UseLocalGcpCredentialsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/use_local_gcp_credentials.yaml>`_
+
+.. note::
+
+    This policy only take effects when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` will be a no-op.
+
+.. _add-volumes-policy:
+
+Add volumes to all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/client_policy.py
+    :language: python
+    :pyobject: AddVolumesPolicy
+    :caption: `AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/client_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/add_volumes.yaml
+    :language: yaml
+    :caption: `Config YAML for using AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/add_volumes.yaml>`_
 
 .. note::
 

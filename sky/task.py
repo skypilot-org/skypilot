@@ -884,6 +884,18 @@ class Task:
     def volumes(self) -> Dict[str, str]:
         return self._volumes
 
+    def set_volumes(self, volumes: Dict[str, str]) -> None:
+        """Sets the volumes for this task.
+
+        Args:
+          volumes: a dict of ``{mount_path: volume_name}``.
+        """
+        self._volumes = volumes
+
+    def update_volumes(self, volumes: Dict[str, str]) -> None:
+        """Updates the volumes for this task."""
+        self._volumes.update(volumes)
+
     def update_envs(
             self, envs: Union[None, List[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
