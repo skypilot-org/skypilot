@@ -3,14 +3,12 @@
 import dataclasses
 from typing import List, Optional
 
-# TODO (kyuds): secure storage for ssh passwords.
-# main problem is we can't just hash them with salt.
 
 @dataclasses.dataclass
 class SSHPool:
     """SSH Node Pool"""
     name: str # pk
-    alias: Optional[str]
+    alias: Optional[str] = None
     num_nodes: int
     head_node_name: str
     head_node_id: str # uuid
@@ -18,8 +16,8 @@ class SSHPool:
     default_identity_file: Optional[str]
     default_password: Optional[str]
 
-    nodes: List['SSHNode'] = dataclasses.field(
-        default_factory=list, init=False, repr=False)
+    # nodes: List['SSHNode'] = dataclasses.field(
+    #     default_factory=list, init=False, repr=False)
 
     def __repr__(self):
         return (f'<SSHPool(name={self.name}({self.alias}), '
@@ -40,14 +38,15 @@ class SSHNode:
     user: Optional[str]
     identity_file: Optional[str]
     password: Optional[str]
+    use_ssh_config: bool
 
     pool_name: str
-    pool: Optional['SSHPool'] = dataclasses.field(
-        default=None, init=False, repr=False)
+    # pool: Optional['SSHPool'] = dataclasses.field(
+    #     default=None, init=False, repr=False)
 
     def __repr__(self):
-        pool_name = (self.pool.get_detailed_name() 
-                     if self.pool is not None else self.pool_name)
+        # pool_name = (self.pool.get_detailed_name() 
+        #              if self.pool is not None else self.pool_name)
         return (f'<SSHNode(ip={self.ip}, '
                 f'user={"default" if self.user is None else self.user}, '
-                f'pool={pool_name})>')
+                f'pool={self.pool_name})>')

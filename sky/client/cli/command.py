@@ -5457,24 +5457,44 @@ def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
 @ssh.command('down', cls=_DocumentedCodeCommand)
 @click.option(
     '--infra',
-    help='Name of the cluster to clean up in ~/.sky/ssh_node_pools.yaml. '
-    'If not specified, all clusters in the file will be cleaned up.')
+    help='Name of the cluster to clean up. If not specified, all '
+    'clusters launched will be cleaned up.')
 @click.option('--async',
               'async_call',
               is_flag=True,
               hidden=True,
               help='Run the command asynchronously.')
-def ssh_down(infra, async_call):
+def ssh_down(infra: Optional[str], async_call: bool):
     """Clean up a cluster set up with 'sky ssh up'.
 
-    This command removes the Kubernetes installation from the machines specified
-    in ~/.sky/ssh_node_pools.yaml.
+    This command removes the Kubernetes (k3s) installation from the
+    machines that were specified by target files.
     """
     request_id = sdk.ssh_down(infra=infra)
     if async_call:
         print(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
+
+
+@ssh.command('status', cls=_DocumentedCodeCommand)
+@click.option(
+    '--infra',
+    help='Name of the cluster to show status of. If not specified, all '
+    'cluster statuses will be queried.')
+def ssh_status(infra: Optional[str]):
+    """Show status of SSH Node Pool clusters."""
+    raise NotImplementedError() # TODO(kyuds)
+
+
+@ssh.command('ls', cls=_DocumentedCodeCommand)
+def ssh_list():
+    """List the names of all SSH Node Pools that were launched.
+    
+    This command doesn't check whether the cluster itself is active.
+    For that use case, use `sky ssh status` instead.
+    """
+    raise NotImplementedError() # TODO(kyuds)
 
 
 def main():

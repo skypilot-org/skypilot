@@ -51,6 +51,7 @@ ssh_node_table = sqlalchemy.Table(
     sqlalchemy.Column('user', sqlalchemy.Text),
     sqlalchemy.Column('identity_file', sqlalchemy.Text),
     sqlalchemy.Column('password', sqlalchemy.Text),
+    sqlalchemy.Column('use_ssh_config', sqlalchemy.Boolean),
     sqlalchemy.Column('pool_name', 
                       sqlalchemy.Text, 
                       sqlalchemy.ForeignKey('pools.name'), 

@@ -6,9 +6,53 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from sky import clouds
+from sky.ssh_node_pools import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+
+
+class SSHKeyManager:
+    """Manager for SSH Node Pool Key Files"""
+
+    def __init__(self):
+        self.keys_dir = Path(constants.SKYSSH_KEY_DIR)
+        self.keys_dir.mkdir(parents=True, exist_ok=True)
+
+    def save_ssh_key(self, key_name: str, key_content: str) -> str:
+        """Save SSH private key to ~/.sky/ssh_keys/ directory."""
+        # Validate key name
+        if not key_name or '/' in key_name or key_name.startswith('.'):
+            raise ValueError('Invalid key name')
+
+        key_path = self.keys_dir / key_name
+        try:
+            with open(key_path, 'w', encoding='utf-8') as f:
+                f.write(key_content)
+            os.chmod(key_path, 0o600)  # Set secure permissions
+            return str(key_path)
+        except Exception as e:
+            raise RuntimeError(f'Failed to save SSH key: {e}') from e
+
+    def list_ssh_keys(self) -> List[str]:
+        """List available SSH key files."""
+        if not self.keys_dir.exists():
+            return []
+        try:
+            return [f.name for f in self.keys_dir.iterdir() if f.is_file()]
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    def remove_ssh_key_by_path(self, key_path: str):
+        """Remove SSH key file by path.
+        Will silently proceed if file doesn't exist."""
+        Path(key_path).unlink(missing_ok=True)
+
+    def remove_ssh_key_by_name(self, key_name: str):
+        """Remove SSH key file by name.
+        Will silently proceed if file doesn't exist."""
+        key_path = self.keys_dir / key_name
+        key_path.unlink(missing_ok=True)
 
 
 class SSHNodePoolManager:
@@ -66,30 +110,6 @@ class SSHNodePoolManager:
             return True
         return False
 
-    def save_ssh_key(self, key_name: str, key_content: str) -> str:
-        """Save SSH private key to ~/.sky/ssh_keys/ directory."""
-        # Validate key name
-        if not key_name or '/' in key_name or key_name.startswith('.'):
-            raise ValueError('Invalid key name')
-
-        key_path = self.keys_dir / key_name
-        try:
-            with open(key_path, 'w', encoding='utf-8') as f:
-                f.write(key_content)
-            os.chmod(key_path, 0o600)  # Set secure permissions
-            return str(key_path)
-        except Exception as e:
-            raise RuntimeError(f'Failed to save SSH key: {e}') from e
-
-    def list_ssh_keys(self) -> List[str]:
-        """List available SSH key files."""
-        if not self.keys_dir.exists():
-            return []
-        try:
-            return [f.name for f in self.keys_dir.iterdir() if f.is_file()]
-        except Exception:  # pylint: disable=broad-except
-            return []
-
     def _validate_pool_config(self, config: Dict[str, Any]) -> None:
         """Validate SSH Node Pool configuration."""
         if 'hosts' not in config:
@@ -128,13 +148,13 @@ def delete_pool(pool_name: str) -> bool:
 
 def upload_ssh_key(key_name: str, key_content: str) -> str:
     """Upload SSH private key."""
-    manager = SSHNodePoolManager()
+    manager = SSHKeyManager()
     return manager.save_ssh_key(key_name, key_content)
 
 
 def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
-    manager = SSHNodePoolManager()
+    manager = SSHKeyManager()
     return manager.list_ssh_keys()
 
 
