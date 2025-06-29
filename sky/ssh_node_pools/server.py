@@ -4,7 +4,6 @@ from typing import Any, Dict, List
 
 import fastapi
 
-from sky import core as sky_core
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
@@ -103,7 +102,7 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
             request_id=request.state.request_id,
             request_name='ssh_up',
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,
+            func=ssh_node_pools_core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -128,7 +127,7 @@ async def deploy_ssh_node_pool_general(
             request_id=request.state.request_id,
             request_name='ssh_up',
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,
+            func=ssh_node_pools_core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -154,7 +153,7 @@ async def down_ssh_node_pool(request: fastapi.Request,
             request_id=request.state.request_id,
             request_name='ssh_down',
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            func=ssh_node_pools_core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -182,7 +181,7 @@ async def down_ssh_node_pool_general(
             request_id=request.state.request_id,
             request_name='ssh_down',
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            func=ssh_node_pools_core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -205,7 +204,7 @@ async def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
     try:
         # Call ssh_status to check the context
         context_name = f'ssh-{pool_name}'
-        is_ready, reason = sky_core.ssh_status(context_name)
+        is_ready, reason = ssh_node_pools_core.ssh_status(context_name)
 
         # Strip ANSI escape codes from the reason text
         def strip_ansi_codes(text):
