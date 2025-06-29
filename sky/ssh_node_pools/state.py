@@ -27,8 +27,8 @@ _DB_INIT_LOCK = threading.Lock()
 
 _Metadata = sqlalchemy.MetaData()
 
-ssh_cluster_table = sqlalchemy.Table(
-    'clusters',
+ssh_pool_table = sqlalchemy.Table(
+    'pools',
     _Metadata,
     sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('alias', sqlalchemy.Text),
@@ -51,24 +51,24 @@ ssh_node_table = sqlalchemy.Table(
     sqlalchemy.Column('user', sqlalchemy.Text),
     sqlalchemy.Column('identity_file', sqlalchemy.Text),
     sqlalchemy.Column('password', sqlalchemy.Text),
-    sqlalchemy.Column('cluster_name', 
+    sqlalchemy.Column('pool_name', 
                       sqlalchemy.Text, 
-                      sqlalchemy.ForeignKey('clusters.name'), 
+                      sqlalchemy.ForeignKey('pools.name'), 
                       nullable=False)
 )
 
 mapper_registry = orm.registry(metadata=_Metadata)
 
 mapper_registry.map_imperatively(
-    models.SSHCluster,
-    ssh_cluster_table,
+    models.SSHPool,
+    ssh_pool_table,
     properties={
         'nodes': orm.relationship(
             models.SSHNode,
-            backref='cluster',
+            backref='pool',
             cascade="all, delete-orphan",
             order_by=ssh_node_table.c.id,
-            foreign_keys=[ssh_node_table.c.cluster_name])
+            foreign_keys=[ssh_node_table.c.pool_name])
     }
 )
 
