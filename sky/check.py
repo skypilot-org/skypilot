@@ -619,8 +619,11 @@ def _format_enabled_cloud(cloud_name: str,
             return _green_color(cloud_and_capabilities)
 
         # Check if allowed_contexts is explicitly set in config
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
+        allowed_contexts = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=None,
+            keys=('allowed_contexts',),
+            default_value=None)
 
         # Format the context info with consistent styling
         if allowed_contexts is not None:

@@ -273,10 +273,18 @@ def need_to_query_reservations() -> bool:
     clouds that do not use reservations.
     """
     for cloud_str in registry.CLOUD_REGISTRY.keys():
-        cloud_specific_reservations = skypilot_config.get_nested(
-            (cloud_str, 'specific_reservations'), None)
-        cloud_prioritize_reservations = skypilot_config.get_nested(
-            (cloud_str, 'prioritize_reservations'), False)
+        cloud_specific_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('specific_reservations',),
+                default_value=None))
+        cloud_prioritize_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('prioritize_reservations',),
+                default_value=False))
         if (cloud_specific_reservations is not None or
                 cloud_prioritize_reservations):
             return True

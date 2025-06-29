@@ -33,6 +33,7 @@ import {
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -464,7 +465,12 @@ function ActiveTab({
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
-                <div className="text-base mt-1">{clusterData.user}</div>
+                <div className="text-base mt-1">
+                  <UserDisplay
+                    username={clusterData.user}
+                    userHash={clusterData.user_hash}
+                  />
+                </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">

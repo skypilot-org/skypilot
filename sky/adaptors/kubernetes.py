@@ -213,6 +213,13 @@ def api_client(context: Optional[str] = None):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+def custom_resources_api(context: Optional[str] = None):
+    _load_config(context)
+    return kubernetes.client.CustomObjectsApi()
+
+
+@_api_logging_decorator('urllib3', logging.ERROR)
+@annotations.lru_cache(scope='request')
 def watch(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.watch.Watch()

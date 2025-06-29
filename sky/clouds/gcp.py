@@ -229,9 +229,10 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): We probably need to store the MIG requirement in resources
         # because `skypilot_config` may change for an existing cluster.
         # Clusters created with MIG (only GPU clusters) cannot be stopped.
-        if (skypilot_config.get_nested(
-            ('gcp', 'managed_instance_group'),
-                None,
+        if (skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=resources.region,
+                keys=('managed_instance_group',),
                 override_configs=resources.cluster_config_overrides) is not None
                 and resources.accelerators):
             unsupported[clouds.CloudImplementationFeatures.STOP] = (
@@ -504,9 +505,11 @@ class GCP(clouds.Cloud):
                 r.instance_type,
                 GCP.failover_disk_tier(r.instance_type, r.disk_tier)),
         }
-        enable_gpu_direct = skypilot_config.get_nested(
-            ('gcp', 'enable_gpu_direct'),
-            False,
+        enable_gpu_direct = skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=region_name,
+            keys=('enable_gpu_direct',),
+            default_value=False,
             override_configs=resources.cluster_config_overrides)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
         network_tier = r.network_tier
@@ -591,9 +594,11 @@ class GCP(clouds.Cloud):
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
-        managed_instance_group_config = skypilot_config.get_nested(
-            ('gcp', 'managed_instance_group'),
-            None,
+        managed_instance_group_config = skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=region_name,
+            keys=('managed_instance_group',),
+            default_value=None,
             override_configs=resources.cluster_config_overrides)
         use_mig = managed_instance_group_config is not None
         resources_vars['gcp_use_managed_instance_group'] = use_mig
@@ -604,8 +609,11 @@ class GCP(clouds.Cloud):
         if use_mig:
             resources_vars.update(managed_instance_group_config)
         resources_vars[
-            'force_enable_external_ips'] = skypilot_config.get_nested(
-                ('gcp', 'force_enable_external_ips'), False)
+            'force_enable_external_ips'] = skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=region_name,
+                keys=('force_enable_external_ips',),
+                default_value=False)
 
         volumes, device_mount_points = GCP._get_volumes_specs(
             region, zones, r.instance_type, r.volumes, use_mig,
@@ -629,13 +637,18 @@ class GCP(clouds.Cloud):
                 device_mounts=device_mounts_str)
 
         # Add gVNIC from config
-        resources_vars['enable_gvnic'] = skypilot_config.get_nested(
-            ('gcp', 'enable_gvnic'),
-            False,
-            override_configs=resources.cluster_config_overrides)
-        placement_policy = skypilot_config.get_nested(
-            ('gcp', 'placement_policy'),
-            None,
+        resources_vars[
+            'enable_gvnic'] = skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=region_name,
+                keys=('enable_gvnic',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides)
+        placement_policy = skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=region_name,
+            keys=('placement_policy',),
+            default_value=None,
             override_configs=resources.cluster_config_overrides)
         if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
             user_data += constants.GPU_DIRECT_TCPX_USER_DATA
