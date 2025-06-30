@@ -159,7 +159,8 @@ def launch(
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
 
-    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag,
+                                                        redact_secrets=True)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
