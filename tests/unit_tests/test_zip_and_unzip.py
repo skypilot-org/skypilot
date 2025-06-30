@@ -66,7 +66,7 @@ def test_unzip_file(skyignore_dir, tmp_path):
         # Get list of files in original directory
         # We need to recreate what would be in the zip file
         original_files = []
-        for root, dirs, files in os.walk(skyignore_dir, followlinks=False):
+        for root, dirs, files in os.walk(skyignore_dir):
             rel_root = os.path.relpath(root, skyignore_dir)
             if rel_root == '.':
                 rel_root = ''
