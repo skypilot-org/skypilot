@@ -3,7 +3,7 @@ from abc import ABC
 from abc import abstractmethod
 import functools
 import os
-import pathlib
+from pathlib import Path
 import threading
 from typing import List, Optional, Type, TypeVar
 
@@ -73,7 +73,9 @@ class _SSHStagingOrm(_Base, _BaseOrm):  # type: ignore[valid-type, misc]
 
 
 class _SSHHistoryOrm(_Base, _BaseOrm):  # type: ignore[valid-type, misc]
-    """ORM for SSH Cluster History"""
+    """ORM for SSH Cluster History
+
+    Stores information of SSH Node Pools that are currently active."""
     __tablename__ = 'cluster_history'
 
     name = sqlalchemy.Column(sqlalchemy.Text, primary_key=True)
@@ -124,7 +126,7 @@ def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
     with _DB_INIT_LOCK:
         if _SQLALCHEMY_ENGINE is None:
             db_path = os.path.expanduser(constants.SKYSSH_DB_PATH)
-            pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+            Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
             _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
                                                           db_path)
             _create_table()
