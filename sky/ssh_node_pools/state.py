@@ -1,5 +1,6 @@
 """The database for ssh node pool information."""
 from abc import ABC
+from abc import ABCMeta
 from abc import abstractmethod
 import functools
 import os
@@ -11,6 +12,7 @@ import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.declarative import DeclarativeMeta
 from sqlalchemy_json import mutable_json_type
 
 from sky import sky_logging
@@ -27,7 +29,12 @@ logger = sky_logging.init_logger(__name__)
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _DB_INIT_LOCK = threading.Lock()
 
-_Base = declarative_base()
+
+class _DeclarativeABCMeta(DeclarativeMeta, ABCMeta):
+    pass
+
+
+_Base = declarative_base(metaclass=_DeclarativeABCMeta)
 _T = TypeVar('_T', bound='_BaseOrm')
 
 
@@ -40,8 +47,8 @@ class _BaseOrm(ABC):
     def to_model(self) -> models.SSHCluster:
         pass
 
-    @abstractmethod
     @classmethod
+    @abstractmethod
     def from_model(cls: Type[_T], model: models.SSHCluster) -> _T:
         pass
 
