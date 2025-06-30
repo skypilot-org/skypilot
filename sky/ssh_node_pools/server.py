@@ -158,7 +158,8 @@ async def down_ssh_node_pool(request: fastapi.Request,
             request_id=request.state.request_id,
             request_name='ssh_down',
             request_body=ssh_up_body,
-            func=ssh_node_pools_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            func=ssh_node_pools_core.
+            ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -186,7 +187,8 @@ async def down_ssh_node_pool_general(
             request_id=request.state.request_id,
             request_name='ssh_down',
             request_body=ssh_up_body,
-            func=ssh_node_pools_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            func=ssh_node_pools_core.
+            ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 

@@ -1548,7 +1548,7 @@ def ssh_up(infra: Optional[str] = None,
     """
     # TODO (kyuds): file default is ~/.sky/ssh_node_pools.yaml
     if file is not None:
-        _update_remote_ssh_node_pools(file, infra) # run this regardless.
+        _update_remote_ssh_node_pools(file, infra)  # run this regardless.
         # take output and put it as the infra (as list)
 
     # Use SSH node pools router endpoint
@@ -1601,14 +1601,14 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def ssh_status(infra: Optional[str] = None) -> server_common.RequestId:
-    raise NotImplementedError() # TODO(kyuds)
+    raise NotImplementedError()  # TODO(kyuds)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def ssh_list() -> server_common.RequestId:
-    raise NotImplementedError() # TODO(kyuds)
+    raise NotImplementedError()  # TODO(kyuds)
 
 
 @usage_lib.entrypoint

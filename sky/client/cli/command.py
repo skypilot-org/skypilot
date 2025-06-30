@@ -5455,10 +5455,9 @@ def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
 
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
-@click.option(
-    '--infra',
-    help='Name of the cluster to clean up. If not specified, all '
-    'clusters launched will be cleaned up.')
+@click.option('--infra',
+              help='Name of the cluster to clean up. If not specified, all '
+              'clusters launched will be cleaned up.')
 @click.option('--async',
               'async_call',
               is_flag=True,
@@ -5484,17 +5483,17 @@ def ssh_down(infra: Optional[str], async_call: bool):
     'cluster statuses will be queried.')
 def ssh_status(infra: Optional[str]):
     """Show status of SSH Node Pool clusters."""
-    raise NotImplementedError() # TODO(kyuds)
+    raise NotImplementedError()  # TODO(kyuds)
 
 
 @ssh.command('ls', cls=_DocumentedCodeCommand)
 def ssh_list():
     """List the names of all SSH Node Pools that were launched.
-    
+
     This command doesn't check whether the cluster itself is active.
     For that use case, use `sky ssh status` instead.
     """
-    raise NotImplementedError() # TODO(kyuds)
+    raise NotImplementedError()  # TODO(kyuds)
 
 
 def main():
