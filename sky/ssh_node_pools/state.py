@@ -241,6 +241,16 @@ def remove_cluster_history(name: str):
 
 
 ## ip registry ##
+
+# IpRegistry is meant to be a quicker way of figuring out whether
+# a specific IP is being used in an SSH cluster or not. This is only
+# for actual SSH nodes that have been deployed using `sky ssh up`.
+# Since a single node cannot be used for two ssh clusters, these methods
+# help to quickly find out whether this is the case. Therefore, the
+# underlying model class is transparent.
+
+# TODO(kyuds): currently, we use unresolved IPs. We should use resolved IPs.
+
 @_init_db
 def add_ips_to_registry(cluster_name: str, ips: List[str]):
     """Add ips to cluster on IpRegistry"""
