@@ -41,7 +41,7 @@ MAX_JOB_CHECKING_RETRY = 10
 # Minutes to job cluster autodown. This should be significantly larger than
 # managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
 # cluster before its status can be updated by the job controller.
-_AUTODOWN_MINUTES = 5
+_AUTODOWN_MINUTES = 10
 
 
 class StrategyExecutor:

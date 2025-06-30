@@ -1,5 +1,6 @@
 """SkyPilot API Server exposing RESTful APIs."""
 
+import resource
 import argparse
 import asyncio
 import base64
@@ -550,6 +551,9 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+# increase the resource limit for the server
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
 
 @app.get('/token')

@@ -1659,7 +1659,7 @@ async def async_check_network_connection():
     Uses aiohttp for async HTTP requests.
     """
     # Create a session with retry logic
-    timeout = ClientTimeout(total=3)
+    timeout = ClientTimeout(total=15)
     connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
 
     async with aiohttp.ClientSession(timeout=timeout,
