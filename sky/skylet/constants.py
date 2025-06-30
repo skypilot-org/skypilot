@@ -89,7 +89,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '13'
+SKYLET_VERSION = '14'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -346,6 +346,11 @@ API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
 # API server.
 SKY_API_SERVER_URL_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_ENDPOINT'
 
+# The name for the environment variable that stores the SkyPilot service
+# account token on client side.
+SERVICE_ACCOUNT_TOKEN_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}SERVICE_ACCOUNT_TOKEN')
+
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
@@ -377,8 +382,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
 # we skip the following keys because they are meant to be client-side configs.
-SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
-                                                       ('api_server',),
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
                                                        ('allowed_clouds',),
                                                        ('workspaces',), ('db',)]
 
@@ -397,6 +401,12 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
 # persistent through PVC. See kubernetes-ray.yml.j2.
 PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/.controller_recovery_setup_commands.sh'
 PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/.controller_recovery_task_run'
+# Signal file to indicate that the controller is recovering from a failure.
+# See sky/jobs/utils.py::update_managed_jobs_statuses for more details.
+PERSISTENT_RUN_RESTARTING_SIGNAL_FILE = (
+    '~/.sky/.controller_recovery_restarting_signal')
+
+HA_PERSISTENT_RECOVERY_LOG_PATH = '/tmp/ha_recovery.log'
 
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
@@ -408,6 +418,19 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 # Environment variable that is set to 'true' if this is a skypilot server.
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 
+# Environment variable that is set to 'true' if metrics are enabled.
+ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
+
+# Environment variable that is used as the DB connection string for the
+# skypilot server.
+ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
+
+# Environment variable that is set to 'true' if basic
+# authentication is enabled in the API server.
+ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
+SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
+ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
+
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 
 # BEGIN constants used for service catalog.
@@ -417,8 +440,51 @@ CATALOG_SCHEMA_VERSION = 'v7'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'do', 'nebius', 'ssh')
+              'paperspace', 'do', 'nebius', 'ssh', 'hyperbolic')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
+
+# The directory to store the logging configuration.
+LOGGING_CONFIG_DIR = '~/.sky/logging'
+
+# Resources constants
+TIME_UNITS = {
+    'm': 1,
+    'h': 60,
+    'd': 24 * 60,
+    'w': 7 * 24 * 60,
+}
+
+TIME_PATTERN: str = (
+    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
+
+MEMORY_SIZE_UNITS = {
+    'kb': 2**10,
+    'ki': 2**10,
+    'mb': 2**20,
+    'mi': 2**20,
+    'gb': 2**30,
+    'gi': 2**30,
+    'tb': 2**40,
+    'ti': 2**40,
+    'pb': 2**50,
+    'pi': 2**50,
+}
+
+MEMORY_SIZE_PATTERN = (
+    '^[0-9]+('
+    f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit.upper() for unit in MEMORY_SIZE_UNITS])}|'
+    f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'  # pylint: disable=line-too-long
+    ')?$')
+
+LAST_USE_TRUNC_LENGTH = 25
+
+MIN_PRIORITY = -1000
+MAX_PRIORITY = 1000
+DEFAULT_PRIORITY = 0
+
+GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
+COST_REPORT_DEFAULT_DAYS = 30

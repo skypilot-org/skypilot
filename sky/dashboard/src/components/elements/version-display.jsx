@@ -1,28 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { ENDPOINT } from '@/data/connectors/constants';
 import { NonCapitalizedTooltip } from '@/components/utils';
+import { apiClient } from '@/data/connectors/client';
 
 export function VersionDisplay() {
   const [version, setVersion] = useState(null);
   const [commit, setCommit] = useState(null);
 
+  const getVersion = async () => {
+    const data = await apiClient.get('/api/health');
+    const healthData = await data.json();
+    if (healthData.version) {
+      setVersion(healthData.version);
+    }
+    if (healthData.commit) {
+      setCommit(healthData.commit);
+    }
+  };
+
   useEffect(() => {
-    fetch(`${ENDPOINT}/api/health`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.version) {
-          setVersion(data.version);
-        }
-        if (data.commit) {
-          setCommit(data.commit);
-        }
-      })
-      .catch((error) => {
-        console.error(
-          'Error fetching API server version and commit hash:',
-          error
-        );
-      });
+    getVersion();
   }, []);
 
   if (!version) return null;

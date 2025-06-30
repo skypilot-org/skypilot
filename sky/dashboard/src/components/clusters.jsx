@@ -18,6 +18,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   REFRESH_INTERVAL,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -30,8 +31,9 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getClusters } from '@/data/connectors/clusters';
+import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -53,6 +55,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -64,6 +67,24 @@ import yaml from 'js-yaml';
 // };
 
 const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
+
+// Define constant for "All Users" similar to workspaces
+const ALL_USERS_VALUE = '__ALL_USERS__';
+
+// Helper function to filter clusters by name
+export function filterClustersByName(clusters, nameFilter) {
+  // If no name filter, return all clusters
+  if (!nameFilter || nameFilter.trim() === '') {
+    return clusters;
+  }
+
+  // Filter clusters by the name filter (case-insensitive partial match)
+  const filterLower = nameFilter.toLowerCase().trim();
+  return clusters.filter((cluster) => {
+    const clusterName = cluster.cluster || '';
+    return clusterName.toLowerCase().includes(filterLower);
+  });
+}
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -86,6 +107,61 @@ const formatAutostop = (autostop, toDown) => {
   return autostopStr;
 };
 
+// Helper function to format username for display (reuse from users.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
+
+// Helper function to format duration in a human-readable way
+const formatDuration = (durationSeconds) => {
+  if (!durationSeconds || durationSeconds === 0) {
+    return '-';
+  }
+
+  // Convert to a whole number if it's a float
+  durationSeconds = Math.floor(durationSeconds);
+
+  const units = [
+    { value: 31536000, label: 'y' }, // years (365 days)
+    { value: 2592000, label: 'mo' }, // months (30 days)
+    { value: 86400, label: 'd' }, // days
+    { value: 3600, label: 'h' }, // hours
+    { value: 60, label: 'm' }, // minutes
+    { value: 1, label: 's' }, // seconds
+  ];
+
+  let remaining = durationSeconds;
+  let result = '';
+  let count = 0;
+
+  for (const unit of units) {
+    if (remaining >= unit.value && count < 2) {
+      const value = Math.floor(remaining / unit.value);
+      result += `${value}${unit.label} `;
+      remaining %= unit.value;
+      count++;
+    }
+  }
+
+  return result.trim() || '0s';
+};
+
 export function Clusters() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -94,18 +170,95 @@ export function Clusters() {
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
+  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
+  const [nameFilter, setNameFilter] = useState('');
   const [workspaces, setWorkspaces] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
 
-  // Handle URL query parameters for workspace filtering
+  // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
-    if (router.isReady && router.query.workspace) {
-      const workspaceParam = Array.isArray(router.query.workspace)
-        ? router.query.workspace[0]
-        : router.query.workspace;
-      setWorkspaceFilter(workspaceParam);
+    if (router.isReady) {
+      if (router.query.workspace) {
+        const workspaceParam = Array.isArray(router.query.workspace)
+          ? router.query.workspace[0]
+          : router.query.workspace;
+        setWorkspaceFilter(workspaceParam);
+      }
+      if (router.query.user) {
+        const userParam = Array.isArray(router.query.user)
+          ? router.query.user[0]
+          : router.query.user;
+        setUserFilter(userParam);
+      }
+      if (router.query.name) {
+        const nameParam = Array.isArray(router.query.name)
+          ? router.query.name[0]
+          : router.query.name;
+        setNameFilter(nameParam);
+      }
     }
-  }, [router.isReady, router.query.workspace]);
+  }, [
+    router.isReady,
+    router.query.workspace,
+    router.query.user,
+    router.query.name,
+  ]);
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (newWorkspace, newUser, newName) => {
+    const query = { ...router.query };
+
+    // Update workspace parameter
+    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
+      query.workspace = newWorkspace;
+    } else {
+      delete query.workspace;
+    }
+
+    // Update user parameter
+    if (newUser && newUser !== ALL_USERS_VALUE) {
+      query.user = newUser;
+    } else {
+      delete query.user;
+    }
+
+    // Update name parameter
+    if (newName && newName.trim() !== '') {
+      query.name = newName.trim();
+    } else {
+      delete query.name;
+    }
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Handle workspace filter change
+  const handleWorkspaceFilterChange = (newWorkspace) => {
+    setWorkspaceFilter(newWorkspace);
+    updateURLParams(newWorkspace, userFilter, nameFilter);
+  };
+
+  // Handle user filter change
+  const handleUserFilterChange = (newUser) => {
+    setUserFilter(newUser);
+    updateURLParams(workspaceFilter, newUser, nameFilter);
+  };
+
+  // Handle name filter change
+  const handleNameFilterChange = (newName) => {
+    setNameFilter(newName);
+    updateURLParams(workspaceFilter, userFilter, newName);
+  };
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -142,9 +295,52 @@ export function Clusters() {
         );
 
         setWorkspaces(Array.from(finalWorkspaces).sort());
+
+        // Fetch users for the filter dropdown
+        const fetchedUsers = await dashboardCache.get(getUsers);
+        const uniqueClusterUsers = [
+          ...new Set(
+            allClusters
+              .map((cluster) => ({
+                userId: cluster.user_hash || cluster.user,
+                username: cluster.user,
+              }))
+              .filter((user) => user.userId)
+          ).values(),
+        ];
+
+        // Combine fetched users with unique cluster users
+        const finalUsers = new Map();
+
+        // Add fetched users first
+        fetchedUsers.forEach((user) => {
+          finalUsers.set(user.userId, {
+            userId: user.userId,
+            username: user.username,
+            display: formatUserDisplay(user.username, user.userId),
+          });
+        });
+
+        // Add any cluster users not in the fetched list
+        uniqueClusterUsers.forEach((user) => {
+          if (!finalUsers.has(user.userId)) {
+            finalUsers.set(user.userId, {
+              userId: user.userId,
+              username: user.username,
+              display: formatUserDisplay(user.username, user.userId),
+            });
+          }
+        });
+
+        setUsers(
+          Array.from(finalUsers.values()).sort((a, b) =>
+            a.display.localeCompare(b.display)
+          )
+        );
       } catch (error) {
-        console.error('Error fetching data for workspace filter:', error);
+        console.error('Error fetching data for filters:', error);
         setWorkspaces(['default']); // Fallback or error state
+        setUsers([]); // Fallback or error state
       }
     };
     fetchFilterData();
@@ -153,7 +349,9 @@ export function Clusters() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidate(getClusterHistory);
     dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -161,7 +359,7 @@ export function Clusters() {
   };
 
   return (
-    <Layout highlighted="clusters">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link
@@ -170,8 +368,65 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
-          <Select value={workspaceFilter} onValueChange={setWorkspaceFilter}>
-            <SelectTrigger className="h-8 w-48 ml-4 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+          <div className="flex items-center ml-6 space-x-3">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showHistory}
+                onChange={(e) => setShowHistory(e.target.checked)}
+                className="sr-only"
+              />
+              <div
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                    showHistory ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </div>
+              <span className="ml-2 text-sm text-gray-700">
+                Show history (Last 30 days)
+              </span>
+            </label>
+          </div>
+          <div className="relative ml-4 mr-2">
+            <input
+              type="text"
+              placeholder="Filter by cluster name"
+              value={nameFilter}
+              onChange={(e) => handleNameFilterChange(e.target.value)}
+              className="h-8 w-32 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            />
+            {nameFilter && (
+              <button
+                onClick={() => handleNameFilterChange('')}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear filter"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+          <Select
+            value={workspaceFilter}
+            onValueChange={handleWorkspaceFilterChange}
+          >
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
                   ? 'All Workspaces'
@@ -185,6 +440,24 @@ export function Clusters() {
               {workspaces.map((ws) => (
                 <SelectItem key={ws} value={ws}>
                   {ws}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={userFilter} onValueChange={handleUserFilterChange}>
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by user...">
+                {userFilter === ALL_USERS_VALUE
+                  ? 'All Users'
+                  : users.find((u) => u.userId === userFilter)?.display ||
+                    userFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.userId} value={user.userId}>
+                  {user.display}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -212,6 +485,9 @@ export function Clusters() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         workspaceFilter={workspaceFilter}
+        userFilter={userFilter}
+        nameFilter={nameFilter}
+        showHistory={showHistory}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
           setIsSSHModalOpen(true);
@@ -234,7 +510,7 @@ export function Clusters() {
         onClose={() => setIsVSCodeModalOpen(false)}
         cluster={selectedCluster}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -243,6 +519,9 @@ export function ClusterTable({
   setLoading,
   refreshDataRef,
   workspaceFilter,
+  userFilter,
+  nameFilter,
+  showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -259,25 +538,75 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    const initialData = await dashboardCache.get(getClusters);
-    setData(initialData);
+
+    try {
+      const activeClusters = await dashboardCache.get(getClusters);
+
+      if (showHistory) {
+        const historyClusters = await dashboardCache.get(getClusterHistory);
+        // Mark clusters as active or historical for UI distinction
+        const markedActiveClusters = activeClusters.map((cluster) => ({
+          ...cluster,
+          isHistorical: false,
+        }));
+        const markedHistoryClusters = historyClusters.map((cluster) => ({
+          ...cluster,
+          isHistorical: true,
+        }));
+        // Combine and remove duplicates (prefer active over historical)
+        const combinedData = [...markedActiveClusters];
+        markedHistoryClusters.forEach((histCluster) => {
+          const existsInActive = activeClusters.some(
+            (activeCluster) =>
+              (activeCluster.cluster || activeCluster.name) ===
+              (histCluster.cluster || histCluster.name)
+          );
+          if (!existsInActive) {
+            combinedData.push(histCluster);
+          }
+        });
+        setData(combinedData);
+      } else {
+        // Mark active clusters for consistency
+        const markedActiveClusters = activeClusters.map((cluster) => ({
+          ...cluster,
+          isHistorical: false,
+        }));
+        setData(markedActiveClusters);
+      }
+    } catch (error) {
+      console.error('Error fetching cluster data:', error);
+      setData([]);
+    }
+
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [setLoading]);
+  }, [setLoading, showHistory]);
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
     let filteredData = data;
-    // Filter if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
+    // Filter by workspace if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
     if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
-      filteredData = data.filter((item) => {
+      filteredData = filteredData.filter((item) => {
         const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
         return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
       });
     }
+    // Filter by user if userFilter is set and not 'ALL_USERS_VALUE'
+    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+      filteredData = filteredData.filter((item) => {
+        const itemUserId = item.user_hash || item.user;
+        return itemUserId === userFilter;
+      });
+    }
+    // Filter by name if nameFilter is set
+    if (nameFilter) {
+      filteredData = filterClustersByName(filteredData, nameFilter);
+    }
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, workspaceFilter]);
+  }, [data, sortConfig, workspaceFilter, userFilter, nameFilter]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -348,154 +677,184 @@ export function ClusterTable({
   return (
     <div>
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('cluster')}
-              >
-                Cluster{getSortDirection('cluster')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('workspace')}
-              >
-                Workspace{getSortDirection('workspace')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources_str')}
-              >
-                Resources{getSortDirection('resources_str')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('time')}
-              >
-                Started{getSortDirection('time')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('autostop')}
-              >
-                Autostop{getSortDirection('autostop')}
-              </TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
+        <div className="overflow-x-auto">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('status')}
+                >
+                  Status{getSortDirection('status')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('cluster')}
+                >
+                  Cluster{getSortDirection('cluster')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden sm:table-cell"
+                  onClick={() => requestSort('user')}
+                >
+                  User{getSortDirection('user')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  onClick={() => requestSort('workspace')}
+                >
+                  Workspace{getSortDirection('workspace')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden lg:table-cell"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap hidden xl:table-cell"
+                  onClick={() => requestSort('resources_str')}
+                >
+                  Resources{getSortDirection('resources_str')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('time')}
+                >
+                  Started{getSortDirection('time')}
+                </TableHead>
+                {showHistory && (
+                  <TableHead
+                    className="sortable whitespace-nowrap hidden lg:table-cell"
+                    onClick={() => requestSort('duration')}
+                  >
+                    Duration{getSortDirection('duration')}
+                  </TableHead>
+                )}
+                <TableHead
+                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  onClick={() => requestSort('autostop')}
+                >
+                  Autostop{getSortDirection('autostop')}
+                </TableHead>
+                <TableHead className="sticky right-0 bg-white">
+                  Actions
+                </TableHead>
+              </TableRow>
+            </TableHeader>
 
-          <TableBody>
-            {loading && isInitialLoad ? (
-              <TableRow>
-                <TableCell
-                  colSpan={9}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
-              paginatedData.map((item, index) => {
-                return (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <StatusBadge status={item.status} />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/clusters/${item.cluster}`}
-                        className="text-blue-600"
-                      >
-                        {item.cluster}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{item.user}</TableCell>
-                    <TableCell>
-                      <Link
-                        href="/workspaces"
-                        className="text-blue-600 hover:underline"
-                      >
-                        {item.workspace || 'default'}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <NonCapitalizedTooltip
-                        content={item.full_infra || item.infra}
-                        className="text-sm text-muted-foreground"
-                      >
-                        <span>
-                          <Link
-                            href="/infra"
-                            className="text-blue-600 hover:underline"
-                          >
-                            {item.cloud}
-                          </Link>
-                          {item.infra.includes('(') && (
-                            <span>
-                              {' ' +
-                                item.infra.substring(item.infra.indexOf('('))}
-                            </span>
-                          )}
-                        </span>
-                      </NonCapitalizedTooltip>
-                    </TableCell>
-                    <TableCell>
-                      <NonCapitalizedTooltip
-                        content={item.resources_str_full || item.resources_str}
-                        className="text-sm text-muted-foreground"
-                      >
-                        <span>{item.resources_str}</span>
-                      </NonCapitalizedTooltip>
-                    </TableCell>
-                    <TableCell>{relativeTime(item.time)}</TableCell>
-                    <TableCell>
-                      {formatAutostop(item.autostop, item.to_down)}
-                    </TableCell>
-                    <TableCell className="text-left">
-                      <Status2Actions
-                        cluster={item.cluster}
-                        status={item.status}
-                        onOpenSSHModal={onOpenSSHModal}
-                        onOpenVSCodeModal={onOpenVSCodeModal}
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={9}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No active clusters
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            <TableBody>
+              {loading && isInitialLoad ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : paginatedData.length > 0 ? (
+                paginatedData.map((item, index) => {
+                  return (
+                    <TableRow key={index}>
+                      <TableCell>
+                        <StatusBadge status={item.status} />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
+                          className="text-blue-600"
+                        >
+                          {item.cluster || item.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <Link
+                          href="/workspaces"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.workspace || 'default'}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <NonCapitalizedTooltip
+                          content={item.full_infra || item.infra}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>
+                            <Link
+                              href="/infra"
+                              className="text-blue-600 hover:underline"
+                            >
+                              {item.cloud}
+                            </Link>
+                            {item.infra.includes('(') && (
+                              <span>
+                                {' ' +
+                                  item.infra.substring(item.infra.indexOf('('))}
+                              </span>
+                            )}
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell className="hidden xl:table-cell">
+                        <NonCapitalizedTooltip
+                          content={
+                            item.resources_str_full || item.resources_str
+                          }
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.resources_str}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
+                      <TableCell>
+                        <TimestampWithTooltip date={item.time} />
+                      </TableCell>
+                      {showHistory && (
+                        <TableCell className="hidden lg:table-cell">
+                          {formatDuration(item.duration)}
+                        </TableCell>
+                      )}
+                      <TableCell className="hidden md:table-cell">
+                        {item.isHistorical
+                          ? '-'
+                          : formatAutostop(item.autostop, item.to_down)}
+                      </TableCell>
+                      <TableCell className="text-left sticky right-0 bg-white">
+                        {!item.isHistorical && (
+                          <Status2Actions
+                            cluster={item.cluster}
+                            status={item.status}
+                            onOpenSSHModal={onOpenSSHModal}
+                            onOpenVSCodeModal={onOpenVSCodeModal}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    {showHistory ? 'No clusters found' : 'No active clusters'}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}

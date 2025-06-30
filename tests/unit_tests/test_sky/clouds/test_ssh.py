@@ -79,16 +79,16 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_global_allowed_node_pools_when_no_workspace_config(
-            self, mock_get_nested, mock_get_workspace_cloud,
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
         """Test using global allowed_node_pools when workspace config is None."""
         mock_get_all_contexts.return_value = [
             'ssh-cluster1', 'ssh-cluster2', 'ssh-cluster3'
         ]
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_nested.return_value = ['cluster2', 'cluster3']
+        mock_get_cloud_config_value.return_value = ['cluster2', 'cluster3']
 
         with patch.object(
                 ssh.SSH,
@@ -184,16 +184,16 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.skypilot_config.get_effective_region_config')
     def test_allowed_node_pools_filtering_with_fallback(
-            self, mock_get_nested, mock_get_workspace_cloud,
+            self, mock_get_cloud_config_value, mock_get_workspace_cloud,
             mock_get_all_contexts):
         """Test allowed_node_pools filtering with fallback scenario."""
         mock_get_all_contexts.return_value = [
             'ssh-cluster1', 'ssh-cluster2', 'ssh-cluster3'
         ]
         mock_get_workspace_cloud.return_value.get.return_value = None
-        mock_get_nested.return_value = ['cluster1', 'cluster3']
+        mock_get_cloud_config_value.return_value = ['cluster1', 'cluster3']
 
         # No node pools file, so fallback to all SSH contexts
         with patch.object(ssh.SSH,
@@ -273,8 +273,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_nested')
-    def test_complex_scenario_with_mixed_filtering(self, mock_get_nested,
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_complex_scenario_with_mixed_filtering(self,
+                                                   mock_get_cloud_config_value,
                                                    mock_get_workspace_cloud,
                                                    mock_get_all_contexts):
         """Test complex scenario with node pools and allowed filtering."""
@@ -283,10 +284,9 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             'regular-ctx', 'ssh-prod', 'ssh-dev', 'ssh-staging', 'ssh-test'
         ]
         mock_get_workspace_cloud.return_value.get.return_value = None
-        # Only allow specific node pools - note: lstrip('ssh-') behavior
-        # 'ssh-prod'.lstrip('ssh-') -> 'prod'
-        # 'ssh-staging'.lstrip('ssh-') -> 'taging' (not 'staging'!)
-        mock_get_nested.return_value = ['prod', 'taging', 'nonexistent']
+        mock_get_cloud_config_value.return_value = [
+            'prod', 'staging', 'nonexistent'
+        ]
 
         # Node pools file has some contexts
         with patch.object(ssh.SSH,

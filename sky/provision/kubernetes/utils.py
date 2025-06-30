@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 import sky
@@ -131,6 +131,30 @@ logger = sky_logging.init_logger(__name__)
 # Default retry settings for Kubernetes API calls
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_INTERVAL_SECONDS = 1
+
+
+def normalize_tpu_accelerator_name(accelerator: str) -> Tuple[str, int]:
+    """Normalize TPU names to the k8s-compatible name and extract count."""
+    # Examples:
+    # 'tpu-v6e-8' -> ('tpu-v6e-slice', 8)
+    # 'tpu-v5litepod-4' -> ('tpu-v5-lite-podslice', 4)
+
+    gcp_to_k8s_patterns = [
+        (r'^tpu-v6e-(\d+)$', 'tpu-v6e-slice'),
+        (r'^tpu-v5p-(\d+)$', 'tpu-v5p-slice'),
+        (r'^tpu-v5litepod-(\d+)$', 'tpu-v5-lite-podslice'),
+        (r'^tpu-v5lite-(\d+)$', 'tpu-v5-lite-device'),
+        (r'^tpu-v4-(\d+)$', 'tpu-v4-podslice'),
+    ]
+
+    for pattern, replacement in gcp_to_k8s_patterns:
+        match = re.match(pattern, accelerator)
+        if match:
+            count = int(match.group(1))
+            return replacement, count
+
+    # Default fallback
+    return accelerator, 1
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
@@ -427,6 +451,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
+        acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
         count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
                                                        {}).get(acc_count, None)
         if count_to_topology is None:
@@ -460,6 +485,14 @@ class GKELabelFormatter(GPULabelFormatter):
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        try:
+            _ = cls.get_accelerator_from_label_value(value)
+            return True, ''
+        except ValueError as e:
+            return False, str(e)
 
 
 class GFDLabelFormatter(GPULabelFormatter):
@@ -565,17 +598,29 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
-    label_formatter = None
-
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
+        skip = False
         for _, label_list in node_labels.items():
-            for label, _ in label_list:
+            for label, value in label_list:
                 if lf.match_label_key(label):
-                    label_formatter = lf()
-                    return label_formatter, node_labels
+                    valid, reason = lf.validate_label_value(value)
+                    if valid:
+                        return lf(), node_labels
+                    else:
+                        logger.warning(f'GPU label {label} matched for label '
+                                       f'formatter {lf.__class__.__name__}, '
+                                       f'but has invalid value {value}. '
+                                       f'Reason: {reason}. '
+                                       'Skipping...')
+                        skip = True
+                        break
+            if skip:
+                break
+        if skip:
+            continue
 
-    return label_formatter, node_labels
+    return None, node_labels
 
 
 class Autoscaler:
@@ -754,6 +799,8 @@ class GKEAutoscaler(Autoscaler):
                     f'checking {node_pool_name} for TPU {requested_acc_type}:'
                     f'{requested_acc_count}')
                 if 'resourceLabels' in node_config:
+                    requested_acc_type, requested_acc_count = normalize_tpu_accelerator_name(
+                        requested_acc_type)
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
@@ -993,7 +1040,7 @@ def check_instance_fits(context: Optional[str],
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    def check_tpu_fits(candidate_instance_type: 'KubernetesInstanceType',
+    def check_tpu_fits(acc_type: str, acc_count: int,
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on requested TPU.
 
@@ -1003,8 +1050,6 @@ def check_instance_fits(context: Optional[str],
         node (node_tpu_chip_count) and the total TPU chips across the entire
         podslice (topology_chip_count) are correctly handled.
         """
-        acc_type = candidate_instance_type.accelerator_type
-        acc_count = candidate_instance_type.accelerator_count
         tpu_list_in_cluster = []
         for node in node_list:
             if acc_type == node.metadata.labels[
@@ -1055,7 +1100,8 @@ def check_instance_fits(context: Optional[str],
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
-            fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+            fits, reason = check_tpu_fits(acc_type, acc_count, gpu_nodes)
             if reason is not None:
                 return fits, reason
         else:
@@ -1141,10 +1187,14 @@ def get_accelerator_label_key_values(
 
     is_ssh_node_pool = context.startswith('ssh-') if context else False
     cloud_name = 'SSH Node Pool' if is_ssh_node_pool else 'Kubernetes cluster'
-    context_display_name = context.lstrip('ssh-') if (
-        context and is_ssh_node_pool) else context
+    context_display_name = common_utils.removeprefix(
+        context, 'ssh-') if (context and is_ssh_node_pool) else context
 
-    autoscaler_type = get_autoscaler_type()
+    autoscaler_type = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('autoscaler',),
+        default_value=None)
     if autoscaler_type is not None:
         # If autoscaler is set in config.yaml, override the label key and value
         # to the autoscaler's format and bypass the GPU checks.
@@ -1549,9 +1599,11 @@ def is_kubeconfig_exec_auth(
     user_details = next(
         user for user in user_details if user['name'] == target_username)
 
-    remote_identity = skypilot_config.get_nested(
-        ('kubernetes', 'remote_identity'),
-        schemas.get_default_remote_identity('kubernetes'))
+    remote_identity = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('remote_identity',),
+        default_value=schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = context_obj['name']
@@ -1579,9 +1631,15 @@ def _get_kubeconfig_text_for_context(context: Optional[str] = None) -> str:
     command = 'kubectl config view --minify'
     if context is not None:
         command += f' --context={context}'
+
+    # Ensure subprocess inherits the current environment properly
+    # This fixes the issue where kubectl can't find ~/.kube/config in API server context
+    env = os.environ.copy()
+
     proc = subprocess.run(command,
                           shell=True,
                           check=False,
+                          env=env,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE)
     if proc.returncode != 0:
@@ -2026,7 +2084,7 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
     content = fill_ssh_jump_template('', '', ssh_jump_name, service_type.value)
 
     # Add custom metadata from config
-    merge_custom_metadata(content['service_spec']['metadata'])
+    merge_custom_metadata(content['service_spec']['metadata'], context)
 
     # Create service
     try:
@@ -2106,7 +2164,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
 
     # Add custom metadata to all objects
     for object_type in content.keys():
-        merge_custom_metadata(content[object_type]['metadata'])
+        merge_custom_metadata(content[object_type]['metadata'], context)
 
     # ServiceAccount
     try:
@@ -2318,7 +2376,7 @@ def check_port_forward_mode_dependencies(
     return None
 
 
-def get_endpoint_debug_message() -> str:
+def get_endpoint_debug_message(context: Optional[str] = None) -> str:
     """ Returns a string message for user to debug Kubernetes port opening
 
     Polls the configured ports mode on Kubernetes to produce an
@@ -2326,7 +2384,7 @@ def get_endpoint_debug_message() -> str:
 
     Also checks if the
     """
-    port_mode = network_utils.get_port_mode()
+    port_mode = network_utils.get_port_mode(None, context)
     if port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         endpoint_type = 'Ingress'
         debug_cmd = 'kubectl describe ingress && kubectl describe ingressclass'
@@ -2344,6 +2402,7 @@ def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
     cloud: Optional[clouds.Cloud] = None,
+    context: Optional[str] = None,
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
     ~/.sky/config.yaml's kubernetes.pod_spec dict.
@@ -2386,19 +2445,28 @@ def combine_pod_config_fields(
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    # We don't use override_configs in `skypilot_config.get_nested`, as merging
+    # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
     if isinstance(cloud, clouds.SSH):
-        kubernetes_config = skypilot_config.get_nested(('ssh', 'pod_config'),
-                                                       default_value={},
-                                                       override_configs={})
-        override_pod_config = (cluster_config_overrides.get('ssh', {}).get(
-            'pod_config', {}))
+        kubernetes_config = skypilot_config.get_effective_region_config(
+            cloud='ssh', region=None, keys=('pod_config',), default_value={})
+        override_pod_config = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='ssh',
+            keys=('pod_config',),
+            default_value={})
     else:
-        kubernetes_config = skypilot_config.get_nested(
-            ('kubernetes', 'pod_config'), default_value={}, override_configs={})
-        override_pod_config = (cluster_config_overrides.get(
-            'kubernetes', {}).get('pod_config', {}))
+        kubernetes_config = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('pod_config',),
+            default_value={})
+        override_pod_config = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='kubernetes',
+            region=context,
+            keys=('pod_config',),
+            default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2410,7 +2478,8 @@ def combine_pod_config_fields(
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def combine_metadata_fields(cluster_yaml_path: str) -> None:
+def combine_metadata_fields(cluster_yaml_path: str,
+                            context: Optional[str] = None) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
@@ -2420,8 +2489,11 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    custom_metadata = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata'), {})
+    custom_metadata = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -2444,13 +2516,17 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
+def merge_custom_metadata(original_metadata: Dict[str, Any],
+                          context: Optional[str] = None) -> None:
     """Merges original metadata with custom_metadata from config
 
     Merge is done in-place, so return is not required
     """
-    custom_metadata = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata'), {})
+    custom_metadata = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
@@ -2504,7 +2580,7 @@ def create_namespace(namespace: str, context: Optional[str]) -> None:
         return
 
     ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
-    merge_custom_metadata(ns_metadata)
+    merge_custom_metadata(ns_metadata, context)
     namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
     try:
         kubernetes.core_api(context).create_namespace(namespace_obj)
@@ -2530,15 +2606,14 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     return f'{cluster_name_on_cloud}-head'
 
 
-def get_autoscaler_type(
-) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
-    """Returns the autoscaler type by reading from config"""
-    autoscaler_type = skypilot_config.get_nested(('kubernetes', 'autoscaler'),
-                                                 None)
-    if autoscaler_type is not None:
-        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
-            autoscaler_type)
-    return autoscaler_type
+def get_custom_config_k8s_contexts() -> List[str]:
+    """Returns the list of context names from the config"""
+    contexts = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=None,
+        keys=('context_configs',),
+        default_value={})
+    return [*contexts] or []
 
 
 # Mapping of known spot label keys and values for different cluster types
@@ -2548,6 +2623,21 @@ SPOT_LABEL_MAP = {
     kubernetes_enums.KubernetesAutoscalerType.GKE.value:
         ('cloud.google.com/gke-spot', 'true')
 }
+
+
+def get_autoscaler_type(
+    context: Optional[str] = None
+) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
+    """Returns the autoscaler type by reading from config"""
+    autoscaler_type = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('autoscaler',),
+        default_value=None)
+    if autoscaler_type is not None:
+        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
+            autoscaler_type)
+    return autoscaler_type
 
 
 def get_spot_label(
@@ -2573,7 +2663,7 @@ def get_spot_label(
 
     # Check if autoscaler is configured. Allow spot instances if autoscaler type
     # is known to support spot instances.
-    autoscaler_type = get_autoscaler_type()
+    autoscaler_type = get_autoscaler_type(context=context)
     if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
         return SPOT_LABEL_MAP[autoscaler_type.value]
 
@@ -2688,6 +2778,21 @@ def get_kubernetes_node_info(
                     node.metadata.labels.get(label_key))
                 break
 
+        # Extract IP address from node addresses (prefer external, fallback to internal)
+        node_ip = None
+        if node.status.addresses:
+            # First try to find external IP
+            for address in node.status.addresses:
+                if address.type == 'ExternalIP':
+                    node_ip = address.address
+                    break
+            # If no external IP, try to find internal IP
+            if node_ip is None:
+                for address in node.status.addresses:
+                    if address.type == 'InternalIP':
+                        node_ip = address.address
+                        break
+
         allocated_qty = 0
         accelerator_count = get_node_accelerator_count(node.status.allocatable)
 
@@ -2719,7 +2824,8 @@ def get_kubernetes_node_info(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
-            free={'accelerators_available': int(accelerators_available)})
+            free={'accelerators_available': int(accelerators_available)},
+            ip_address=node_ip)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
@@ -2911,7 +3017,8 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 def is_tpu_on_gke(accelerator: str) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
-    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
+    normalized, _ = normalize_tpu_accelerator_name(accelerator)
+    return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
 def get_node_accelerator_count(attribute_dict: dict) -> int:
@@ -3232,5 +3339,49 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     if os.path.isfile(path):
         return path
 
-    format_kubeconfig_exec_auth(config, path)
-    return path
+    try:
+        format_kubeconfig_exec_auth(config, path)
+        return path
+    except Exception as e:  # pylint: disable=broad-except
+        # There may be problems with kubeconfig, but the user is not actually
+        # using Kubernetes (or SSH Node Pools)
+        logger.warning(
+            f'Failed to format kubeconfig at {kubeconfig_path}. '
+            'Please check if the kubeconfig is valid. This may cause '
+            'problems when Kubernetes infra is used. '
+            f'Reason: {common_utils.format_exception(e)}')
+        return kubeconfig_path
+
+
+def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
+                                   resource_name: str) -> None:
+    """Helper to delete Kubernetes resources with 404 handling and retries.
+
+    Args:
+        delete_func: Function to call to delete the resource
+        resource_type: Type of resource being deleted (e.g. 'service'),
+            used in logging
+        resource_name: Name of the resource being deleted, used in logging
+    """
+    max_retries = 3
+    retry_delay = 5  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            delete_func()
+            return
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                logger.warning(
+                    f'terminate_instances: Tried to delete {resource_type} '
+                    f'{resource_name}, but the {resource_type} was not '
+                    'found (404).')
+                return
+            elif attempt < max_retries - 1:
+                logger.warning(f'terminate_instances: Failed to delete '
+                               f'{resource_type} {resource_name} (attempt '
+                               f'{attempt + 1}/{max_retries}). Error: {e}. '
+                               f'Retrying in {retry_delay} seconds...')
+                time.sleep(retry_delay)
+            else:
+                raise

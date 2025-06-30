@@ -503,17 +503,21 @@ Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth
 Optional: Back the API server with a persistent database
 --------------------------------------------------------
 
-The API server can optionally be configured with a postgresSQL database to persist state.
+The API server can optionally be configured with a PostgreSQL database to persist state. It can be an externally managed database.
 
-If a persistent DB is not specified, API server uses a kubernetes persistent volume to persist state.
+If a persistent DB is not specified, the API server uses a Kubernetes persistent volume to persist state.
 
 .. note::
 
-  Database configuration must be set in the helm deployment.
+  Database configuration must be set in the Helm deployment.
 
-.. dropdown:: Set the config with helm deployment during the first deployment
+.. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
+    **Option 1: Set the DB connection URI via config**
+
+    Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
     To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+
 
     .. code-block:: bash
 
@@ -529,24 +533,59 @@ If a persistent DB is not specified, API server uses a kubernetes persistent vol
         --reuse-values \
         --set-file apiService.config=config.yaml
 
-    You can also directly set config values in the ``values.yaml`` file, e.g.:
+    You can also directly set this config value in the ``values.yaml`` file, e.g.:
 
     .. code-block:: yaml
 
         apiService:
-        config: |
+          config: |
             db: postgresql://<username>:<password>@<host>:<port>/<database>
+
+    See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
+
+    **Option 2: Set the DB connection URI via Kubernetes secret**
+
+    (available on nightly version 20250626 and later)
+    
+    Create a Kubernetes secret that contains the DB connection URI:
+
+    .. code-block:: bash
+
+        kubectl create secret generic skypilot-db-connection-uri \
+          --namespace $NAMESPACE \
+          --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
+    
+
+    When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
+
+    .. code-block:: bash
+
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+          --namespace $NAMESPACE \
+          --reuse-values \
+          --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
+
+    You can also directly set this value in the ``values.yaml`` file, e.g.:
+
+    .. code-block:: yaml
+
+        apiService:
+          dbConnectionSecretName: skypilot-db-connection-uri
 
     .. note::
 
-        If ``db`` is specified in the config, no other configuration parameter can be specified in the helm chart.
+        Once ``db`` is specified in the config, no other SkyPilot configuration
+        parameter can be specified in the helm chart.  This is because, with
+        the ``db`` setting, other configurations are now persistently saved in
+        the database instead. To set any other SkyPilot configuration, see
+        :ref:`sky-api-server-config`.
 
-        See ``Optional: Setting the SkyPilot config`` below for how to set other config values.
+.. _sky-api-server-config:
 
 Optional: Setting the SkyPilot config
 --------------------------------------
 
-To modify your SkyPilot config, you can access the SkyPilot dashboard: ``http://<api-server-url>/dashboard/config``.
+To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server-url>/dashboard/config``.
 
 .. image:: ../../images/workspaces/config.png
 
@@ -590,7 +629,7 @@ To modify your SkyPilot config, you can access the SkyPilot dashboard: ``http://
     .. code-block:: yaml
 
         apiService:
-        config: |
+          config: |
             allowed_clouds:
             - aws
             - kubernetes
@@ -599,6 +638,47 @@ To modify your SkyPilot config, you can access the SkyPilot dashboard: ``http://
     .. note::
 
         ``apiService.config`` will be IGNORED during an ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead.
+
+Optional: Set up GPU monitoring and metrics
+-------------------------------------------
+
+SkyPilot dashboard can be optionally configured to expose GPU metrics and API server metrics.
+
+.. raw:: html
+
+   <div style="display: flex; gap: 20px; margin: 10px auto; justify-content: center; max-width: 1200px; align-items: end;">
+     <div style="flex: 1; text-align: center; display: flex; flex-direction: column; height: 350px;">
+       <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+         <img src="../../_images/api-srv-metrics.jpg" alt="API Server Metrics Dashboard" style="width: 100%; max-width: 600px;">
+       </div>
+       <p style="margin-top: 5px; margin-bottom: 0;">API Server Metrics Dashboard</p>
+     </div>
+     <div style="flex: 1; text-align: center; display: flex; flex-direction: column; height: 350px;">
+       <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+         <img src="../../_images/gpu-metrics.png" alt="GPU Metrics Dashboard" style="width: 100%; max-width: 600px;">
+       </div>
+       <p style="margin-top: 5px; margin-bottom: 0;">GPU Metrics Dashboard</p>
+     </div>
+   </div>
+
+To enable metrics, set ``apiService.metrics.enabled=true``, ``prometheus.enabled=true`` and ``grafana.enabled=true`` in the Helm chart.
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.metrics.enabled=true \
+      --set prometheus.enabled=true \
+      --set grafana.enabled=true
+
+
+For detailed setup instructions (including how to set up external Prometheus and Grafana), see:
+
+* :ref:`API Server Metrics Setup <api-server-metrics-setup>`
+* :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
+
+
 
 Upgrade the API server
 -----------------------
@@ -685,11 +765,7 @@ The steps below are based on the `official documentation <https://docs.aws.amazo
 
 Once the EBS CSI driver is installed, the default ``gp2`` storage class will be backed by EBS volumes.
 
-.. _sky-api-server-config:
-
-
-
-
+.. _sky-api-server-admin-policy:
 
 Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -703,8 +779,8 @@ To do so, set ``apiService.preDeployHook`` to the commands you want to run. For 
     # values.yaml
     apiService:
       preDeployHook: |
-       echo "Installing admin policy"
-       pip install git+https://github.com/michaelvll/admin-policy-examples
+        echo "Installing admin policy"
+        pip install git+https://github.com/michaelvll/admin-policy-examples
 
       config: |
         admin_policy: admin_policy_examples.AddLabelsPolicy
@@ -909,6 +985,7 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. toctree::
    :hidden:
 
+    API server metrics monitoring <examples/api-server-metrics-setup>
+    GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
-    Advanced: Use OAuth/Okta Proxy <examples/api-server-auth-proxy>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>

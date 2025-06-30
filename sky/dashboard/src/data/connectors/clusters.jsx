@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
-import { ENDPOINT } from '@/data/connectors/constants';
+import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
 
 /**
@@ -46,23 +46,11 @@ const clusterStatusMap = {
 
 export async function getClusters({ clusterNames = null } = {}) {
   try {
-    const response = await fetch(`${ENDPOINT}/status`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        cluster_names: clusterNames,
-        all_users: true,
-      }),
+    const clusters = await apiClient.fetch('/status', {
+      cluster_names: clusterNames,
+      all_users: true,
     });
-    // TODO(syang): remove X-Request-ID when v0.10.0 is released.
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('X-Request-ID');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-    const data = await fetchedData.json();
-    const clusters = data.return_value ? JSON.parse(data.return_value) : [];
+
     const clusterData = clusters.map((cluster) => {
       // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
       let region_or_zone = '';
@@ -118,6 +106,71 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getClusterHistory() {
+  try {
+    const history = await apiClient.fetch('/cost_report', {
+      days: 30,
+    });
+
+    console.log('Raw cluster history data:', history); // Debug log
+
+    const historyData = history.map((cluster) => {
+      // Get cloud name from resources if available
+      let cloud = 'Unknown';
+      if (cluster.cloud) {
+        cloud = cluster.cloud;
+      } else if (cluster.resources && cluster.resources.cloud) {
+        cloud = cluster.resources.cloud;
+      }
+
+      // Get user name - need to look up from user_hash if needed
+      let user_name = cluster.user_name || '-';
+
+      // Extract resource info
+
+      return {
+        status: cluster.status
+          ? clusterStatusMap[cluster.status]
+          : 'TERMINATED',
+        cluster: cluster.name,
+        user: user_name,
+        user_hash: cluster.user_hash,
+        cloud: cloud,
+        region: '',
+        infra: cloud,
+        full_infra: cloud,
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
+        num_nodes: cluster.num_nodes || 1,
+        duration: cluster.duration,
+        total_cost: cluster.total_cost,
+        workspace: cluster.workspace || 'default',
+        autostop: -1,
+        to_down: false,
+        cluster_hash: cluster.cluster_hash,
+        usage_intervals: cluster.usage_intervals,
+        command: cluster.last_creation_command || '',
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: cluster.launched_at
+              ? new Date(cluster.launched_at * 1000)
+              : new Date(),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+
+    console.log('Processed cluster history data:', historyData); // Debug log
+    return historyData;
+  } catch (error) {
+    console.error('Error fetching cluster history:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,
@@ -125,31 +178,18 @@ export async function streamClusterJobLogs({
   workspace,
 }) {
   try {
-    const response = await fetch(`${ENDPOINT}/logs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        // TODO(hailong): set follow to true?
-        // - Too much streaming requests may consume too much resources in api server
-        // - Need to stop the api request in different cases
+    await apiClient.stream(
+      '/logs',
+      {
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
-      }),
-    });
-    // Stream the logs
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = new TextDecoder().decode(value);
-      onNewLog(chunk);
-    }
+      },
+      onNewLog
+    );
   } catch (error) {
     console.error('Error in streamClusterJobLogs:', error);
     showToast(`Error in streamClusterJobLogs: ${error.message}`, 'error');
@@ -158,26 +198,14 @@ export async function streamClusterJobLogs({
 
 export async function getClusterJobs({ clusterName, workspace }) {
   try {
-    const response = await fetch(`${ENDPOINT}/queue`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const jobs = await apiClient.fetch('/queue', {
+      cluster_name: clusterName,
+      all_users: true,
+      override_skypilot_config: {
+        active_workspace: workspace,
       },
-      body: JSON.stringify({
-        cluster_name: clusterName,
-        all_users: true,
-        override_skypilot_config: {
-          active_workspace: workspace,
-        },
-      }),
     });
-    // TODO(syang): remove X-Request-ID when v0.10.0 is released.
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('X-Request-ID');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-    const data = await fetchedData.json();
-    const jobs = JSON.parse(data.return_value);
+
     const jobData = jobs.map((job) => {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
       let total_duration = 0;
@@ -194,6 +222,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         status: job.status,
         job: job.job_name,
         user: job.username,
+        user_hash: job.user_hash,
         gpus: job.accelerators || {},
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
