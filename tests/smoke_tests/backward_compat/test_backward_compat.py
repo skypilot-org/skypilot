@@ -153,7 +153,21 @@ class TestBackwardCompatibility:
             check=False,
             text=True,
             capture_output=True)
+        if base_sky_api_version.returncode != 0:
+            raise RuntimeError(
+                f'Failed to get base API version information. '
+                f'Return code: {base_sky_api_version.returncode}, '
+                f'stderr: {base_sky_api_version.stderr}, '
+                f'stdout: {base_sky_api_version.stdout}')
+
         base_versions = base_sky_api_version.stdout.strip().split('\n')
+        base_versions = [v for v in base_versions if v.strip()]
+
+        if len(base_versions) < 2:
+            raise RuntimeError(
+                f'Expected 2 lines of output but got {len(base_versions)}. '
+                f'Output: {base_versions}, '
+                f'stderr: {base_sky_api_version.stderr}')
         TestBackwardCompatibility.BASE_API_VERSION = base_versions[0]
         TestBackwardCompatibility.BASE_MIN_COMPATIBLE_API_VERSION = \
             base_versions[1]
