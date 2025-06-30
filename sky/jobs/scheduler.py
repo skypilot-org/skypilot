@@ -386,6 +386,26 @@ def _can_lauch_in_alive_job() -> bool:
     return launching_jobs < _get_launch_parallelism()
 
 
+# === Async versions of functions called by controller.py ===
+
+async def job_done_async(job_id: int, idempotent: bool = False) -> None:
+    """Async version of job_done. Transition a job to DONE.
+
+    If idempotent is True, this will not raise an error if the job is already
+    DONE.
+
+    The job could be in any terminal ManagedJobStatus. However, once DONE, it
+    should never transition back to another state.
+    """
+    if idempotent and (await state.get_job_schedule_state_aysnc(job_id)
+                       == state.ManagedJobScheduleState.DONE):
+        return
+
+    async with filelock.AsyncFileLock(_get_lock_path()):
+        await state.scheduler_set_done_async(job_id, idempotent)
+    maybe_schedule_next_jobs()
+
+
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('dag_yaml',
