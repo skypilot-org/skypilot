@@ -3,7 +3,7 @@ import json
 import os
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sky import serve
 from sky.adaptors import common as adaptors_common
@@ -33,7 +33,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         num_overprovision: Optional[int] = None,
         ports: Optional[str] = None,
-        target_qps_per_replica: Optional[float] = None,
+        target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
         post_data: Optional[Dict[str, Any]] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
@@ -44,7 +44,6 @@ class SkyServiceSpec:
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
         use_instance_type_aware: Optional[bool] = None,
-        accelerator_qps: Optional[Dict[str, float]] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -85,7 +84,7 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._num_overprovision: Optional[int] = num_overprovision
         self._ports: Optional[str] = ports
-        self._target_qps_per_replica: Optional[float] = target_qps_per_replica
+        self._target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
@@ -99,7 +98,6 @@ class SkyServiceSpec:
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
         self._use_instance_type_aware: Optional[bool] = use_instance_type_aware
-        self._accelerator_qps: Optional[Dict[str, float]] = accelerator_qps
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -174,6 +172,7 @@ class SkyServiceSpec:
             service_config['target_qps_per_replica'] = None
             service_config['upscale_delay_seconds'] = None
             service_config['downscale_delay_seconds'] = None
+            service_config['use_instance_type_aware'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -193,15 +192,29 @@ class SkyServiceSpec:
                 'dynamic_ondemand_fallback', None)
             service_config['spot_placer'] = policy_section.get(
                 'spot_placer', None)
+            service_config['use_instance_type_aware'] = policy_section.get(
+                'use_instance_type_aware', None)
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
 
-        # Parse instance type aware settings
-        service_config['use_instance_type_aware'] = config.get(
-            'use_instance_type_aware', None)
-        service_config['accelerator_qps'] = config.get(
-            'accelerator_qps', None)
+        # Validate instance-aware settings
+        use_instance_type_aware = service_config['use_instance_type_aware']
+        target_qps_per_replica = service_config['target_qps_per_replica']
+        load_balancing_policy = service_config['load_balancing_policy']
+        
+        if use_instance_type_aware:
+            if not isinstance(target_qps_per_replica, dict):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When use_instance_type_aware is True, '
+                        'target_qps_per_replica must be a dictionary mapping '
+                        'accelerator types to QPS values.')
+            if load_balancing_policy != 'instance_aware_least_load':
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'When use_instance_type_aware is True, '
+                        'load_balancing_policy must be "instance_aware_least_load".')
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
@@ -271,12 +284,10 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        add_if_not_none('replica_policy', 'use_instance_type_aware',
+                        self._use_instance_type_aware)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
-        add_if_not_none('use_instance_type_aware', None,
-                        self._use_instance_type_aware)
-        add_if_not_none('accelerator_qps', None,
-                        self._accelerator_qps)
         add_if_not_none('ports', None, int(self.ports) if self.ports else None)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
@@ -355,7 +366,6 @@ class SkyServiceSpec:
             Spot Policy:                      {self.spot_policy_str()}
             Load Balancing Policy:            {self.load_balancing_policy}
             Instance Type Aware:              {self.use_instance_type_aware}
-            Accelerator QPS:                  {self.accelerator_qps}
         """)
 
     @property
@@ -388,7 +398,7 @@ class SkyServiceSpec:
         return self._ports
 
     @property
-    def target_qps_per_replica(self) -> Optional[float]:
+    def target_qps_per_replica(self) -> Optional[Union[float, Dict[str, float]]]:
         return self._target_qps_per_replica
 
     @property
@@ -440,7 +450,3 @@ class SkyServiceSpec:
     @property
     def use_instance_type_aware(self) -> Optional[bool]:
         return self._use_instance_type_aware
-
-    @property
-    def accelerator_qps(self) -> Optional[Dict[str, float]]:
-        return self._accelerator_qps

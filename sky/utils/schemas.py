@@ -656,8 +656,23 @@ def get_service_schema():
                         'minimum': 0,
                     },
                     'target_qps_per_replica': {
-                        'type': 'number',
-                        'minimum': 0,
+                        'anyOf': [{
+                            'type': 'number',
+                            'minimum': 0,
+                        }, {
+                            'type': 'object',
+                            'patternProperties': {
+                                # Pattern for accelerator types like "H100:1", "A100:1"
+                                '^[A-Z0-9]+:[0-9]+$': {
+                                    'type': 'number',
+                                    'minimum': 0,
+                                }
+                            },
+                            'additionalProperties': False,
+                        }]
+                    },
+                    'use_instance_type_aware': {
+                        'type': 'boolean',
                     },
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
@@ -689,20 +704,6 @@ def get_service_schema():
                 'type': 'string',
                 'case_insensitive_enum': list(
                     load_balancing_policies.LB_POLICIES.keys())
-            },
-            'use_instance_type_aware': {
-                'type': 'boolean',
-            },
-            'accelerator_qps': {
-                'type': 'object',
-                'patternProperties': {
-                    # Pattern for accelerator types like "H100:1", "A100:1"
-                    '^[A-Z0-9]+:[0-9]+$': {
-                        'type': 'number',
-                        'minimum': 0,
-                    }
-                },
-                'additionalProperties': False,
             },
             'tls': {
                 'type': 'object',
