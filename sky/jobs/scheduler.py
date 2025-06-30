@@ -54,6 +54,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import controller_server
 from sky.jobs import state
+from sky.jobs import utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -388,6 +389,7 @@ def _can_lauch_in_alive_job() -> bool:
 
 # === Async versions of functions called by controller.py ===
 
+
 async def job_done_async(job_id: int, idempotent: bool = False) -> None:
     """Async version of job_done. Transition a job to DONE.
 
@@ -397,13 +399,16 @@ async def job_done_async(job_id: int, idempotent: bool = False) -> None:
     The job could be in any terminal ManagedJobStatus. However, once DONE, it
     should never transition back to another state.
     """
-    if idempotent and (await state.get_job_schedule_state_aysnc(job_id)
+    if idempotent and (await state.get_job_schedule_state_async(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
 
     async with filelock.AsyncFileLock(_get_lock_path()):
         await state.scheduler_set_done_async(job_id, idempotent)
-    maybe_schedule_next_jobs()
+    # TODO(luca): this is a hack to avoid blocking the asyncio event loop
+    # making maybe_schedule_next_jobs async is far better, it will probably
+    # take a while though.
+    utils.to_thread(maybe_schedule_next_jobs)
 
 
 if __name__ == '__main__':

@@ -210,14 +210,13 @@ def create_table():
         session.commit()
 
 
-def initialize_and_get_db_async(
-    recursive: bool = False) -> asyncio.AsyncEngine:
+def initialize_and_get_db_async(recursive: bool = False) -> asyncio.AsyncEngine:
     global _SQLALCHEMY_ENGINE_ASYNC
     if _SQLALCHEMY_ENGINE_ASYNC is not None or recursive:
         return _SQLALCHEMY_ENGINE_ASYNC
     _SQLALCHEMY_ENGINE_ASYNC = _initialize_and_get_db(
         asyncio.create_async_engine, initialize_and_get_db_async, True)
-    initialize_and_get_db() # this is just to initialize the database
+    initialize_and_get_db()  # this is just to initialize the database
     return _SQLALCHEMY_ENGINE_ASYNC
 
 
@@ -225,32 +224,32 @@ def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
     if _SQLALCHEMY_ENGINE is not None or recursive:
         return _SQLALCHEMY_ENGINE
-    _SQLALCHEMY_ENGINE = _initialize_and_get_db(
-        sqlalchemy.create_engine, initialize_and_get_db, False)
+    _SQLALCHEMY_ENGINE = _initialize_and_get_db(sqlalchemy.create_engine,
+                                                initialize_and_get_db, False)
     create_table()
     return _SQLALCHEMY_ENGINE
 
 
 def _initialize_and_get_db(
     create_engine_func: Callable[[str], sqlalchemy.engine.Engine],
-    get_engine: Callable[[bool], any],
+    get_engine: Callable[[bool], Any],
     async_override: bool,
 ) -> sqlalchemy.engine.Engine:
     with _DB_INIT_LOCK:
         # recursive is used to avoid infinite recursion when initializing the
         # database. we use the get_engine function in order to not reinitalize
         # it in a multithreadded setting.
-        if get_engine(recursive=True) is None:
+        if get_engine(True) is None:
             conn_string = None
             if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
                 if async_override:
-                    conn_string = conn_string.replace(
-                        'sqlite://', 'sqlite+aiosqlite://')
-                    conn_string = conn_string.replace(
-                        'postgresql://', 'postgresql+asyncpg://')
+                    conn_string = conn_string.replace('sqlite://',
+                                                      'sqlite+aiosqlite://')
+                    conn_string = conn_string.replace('postgresql://',
+                                                      'postgresql+asyncpg://')
                     # if we support another async database, add it here
                 engine = create_engine_func(conn_string)
             else:
@@ -285,6 +284,7 @@ def _init_db(func):
         return func(*args, **kwargs)
 
     return wrapper
+
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -1631,6 +1631,7 @@ def remove_ha_recovery_script(job_id: int) -> None:
 
 # === Async versions of functions called by controller.py ===
 
+
 @_init_db_async
 async def set_local_log_file_async(job_id: int, task_id: Optional[int],
                                    local_log_file: str):
@@ -1659,8 +1660,10 @@ async def get_latest_task_id_status_async(
                 spot_table.c.status,
             ).where(spot_table.c.spot_job_id == job_id).order_by(
                 spot_table.c.task_id.asc()))
-        id_statuses = [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
-    
+        id_statuses = [
+            (row[0], ManagedJobStatus(row[1])) for row in result.fetchall()
+        ]
+
     if not id_statuses:
         return None, None
     task_id, status = next(
@@ -1673,7 +1676,7 @@ async def get_latest_task_id_status_async(
 @_init_db_async
 async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
                              submit_time: float, resources_str: str,
-                             specs: Dict[str, Union[str, int]], 
+                             specs: Dict[str, Union[str, int]],
                              callback_func: CallbackType):
     """Set the task to starting state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
@@ -1735,8 +1738,8 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
 
 
 @_init_db_async
-async def get_job_status_with_task_id_async(job_id: int,
-                                            task_id: int) -> Optional[ManagedJobStatus]:
+async def get_job_status_with_task_id_async(
+        job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with asyncio.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -1748,7 +1751,8 @@ async def get_job_status_with_task_id_async(job_id: int,
 
 
 @_init_db_async
-async def set_recovering_async(job_id: int, task_id: int, force_transit_to_recovering: bool,
+async def set_recovering_async(job_id: int, task_id: int,
+                               force_transit_to_recovering: bool,
                                callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
@@ -1806,7 +1810,8 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
                 )).values({
                     spot_table.c.status: ManagedJobStatus.RUNNING.value,
                     spot_table.c.last_recovered_at: recovered_time,
-                    spot_table.c.recovery_count: spot_table.c.recovery_count + 1,
+                    spot_table.c.recovery_count: spot_table.c.recovery_count +
+                                                 1,
                 }))
         count = result.rowcount
         await session.commit()
@@ -1867,8 +1872,8 @@ async def set_failed_async(
     async with asyncio.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         # Get previous status
         result = await session.execute(
-            sqlalchemy.select(spot_table.c.status).where(
-                spot_table.c.spot_job_id == job_id))
+            sqlalchemy.select(
+                spot_table.c.status).where(spot_table.c.spot_job_id == job_id))
         previous_status_row = result.fetchone()
         previous_status = ManagedJobStatus(previous_status_row[0])
         if previous_status == ManagedJobStatus.RECOVERING:
@@ -1895,7 +1900,8 @@ async def set_failed_async(
 
 @_init_db_async
 async def set_cancelling_async(job_id: int, callback_func: CallbackType):
-    """Set tasks in the job as cancelling, if they are in non-terminal states."""
+    """Set tasks in the job as cancelling, if they are in non-terminal
+    states."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with asyncio.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -1903,7 +1909,8 @@ async def set_cancelling_async(job_id: int, callback_func: CallbackType):
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.end_at.is_(None),
-                )).values({spot_table.c.status: ManagedJobStatus.CANCELLING.value}))
+                )).values(
+                    {spot_table.c.status: ManagedJobStatus.CANCELLING.value}))
         count = result.rowcount
         await session.commit()
         updated = count > 0
@@ -1962,3 +1969,24 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
             sqlalchemy.select(job_info_table.c.schedule_state).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()[0]
         return ManagedJobScheduleState(state)
+
+
+@_init_db_async
+async def scheduler_set_done_async(job_id: int,
+                                   idempotent: bool = False) -> None:
+    """Do not call without holding the scheduler lock."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with asyncio.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        updated_count = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state !=
+                    ManagedJobScheduleState.DONE.value,
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.DONE.value
+                }))
+        await session.commit()
+        if not idempotent:
+            assert updated_count.rowcount == 1, (job_id, updated_count)

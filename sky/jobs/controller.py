@@ -140,7 +140,7 @@ class JobsController:
                 # Set the path of the log file for the current task, so it can
                 # be accessed even after the job is finished
                 managed_job_state.set_local_log_file(self._job_id, task_id,
-                                                                 log_file)
+                                                     log_file)
             else:
                 self._logger.warning(
                     f'No log file was downloaded for job {self._job_id}, '
@@ -192,7 +192,8 @@ class JobsController:
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
 
         latest_task_id, last_task_prev_status = (
-            await managed_job_state.get_latest_task_id_status_async(self._job_id))
+            await
+            managed_job_state.get_latest_task_id_status_async(self._job_id))
 
         is_resume = False
         if (latest_task_id is not None and last_task_prev_status !=
@@ -219,14 +220,16 @@ class JobsController:
             # including start_at and last_recovery_at to avoid issues for
             # uninitialized columns.
             start_time = time.time()
-            await managed_job_state.set_started_async(job_id=self._job_id,
-                                                     task_id=task_id,
-                                                     start_time=start_time,
-                                                     callback_func=callback_func)
-            await managed_job_state.set_succeeded_async(job_id=self._job_id,
-                                                       task_id=task_id,
-                                                       end_time=start_time,
-                                                       callback_func=callback_func)
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=start_time,
+                callback_func=callback_func)
+            await managed_job_state.set_succeeded_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                end_time=start_time,
+                callback_func=callback_func)
             self._logger.info(
                 f'Empty task {task_id} marked as succeeded immediately')
             return True
@@ -284,10 +287,11 @@ class JobsController:
             assert remote_job_submitted_at is not None, remote_job_submitted_at
 
         if not is_resume:
-            await managed_job_state.set_started_async(job_id=self._job_id,
-                                                     task_id=task_id,
-                                                     start_time=remote_job_submitted_at,
-                                                     callback_func=callback_func)
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=remote_job_submitted_at,
+                callback_func=callback_func)
 
         monitoring_start_time = time.time()
         status_check_count = 0
@@ -301,8 +305,9 @@ class JobsController:
             # the cluster status is.
             force_transit_to_recovering = False
             if is_resume:
-                prev_status = await managed_job_state.get_job_status_with_task_id_async(
-                    job_id=self._job_id, task_id=task_id)
+                prev_status = await (
+                    managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id))
 
                 if prev_status is not None:
                     if prev_status.is_terminal():
@@ -364,10 +369,11 @@ class JobsController:
                     cluster_name)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
-                await managed_job_state.set_succeeded_async(self._job_id,
-                                                           task_id,
-                                                           end_time=success_end_time,
-                                                           callback_func=callback_func)
+                await managed_job_state.set_succeeded_async(
+                    self._job_id,
+                    task_id,
+                    end_time=success_end_time,
+                    callback_func=callback_func)
                 self._logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
@@ -380,7 +386,8 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await self._download_log_and_stream(task_id, handle)
+                        await managed_job_utils.to_thread(
+                            self._download_log_and_stream, task_id, handle)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     self._logger.warning(
@@ -454,7 +461,11 @@ class JobsController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await self._download_log_and_stream(task_id, handle)
+                    # TODO(luca): this is a hack to avoid blocking the asyncio
+                    # event loop. We should make _download_log_and_stream async
+                    # however that will require a lot of changes to the code.
+                    await managed_job_utils.to_thread(
+                        self._download_log_and_stream, task_id, handle)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -564,10 +575,11 @@ class JobsController:
             self._logger.info(
                 f'Recovery completed for task {task_id} in {recovery_time:.2f}s'
             )
-            await managed_job_state.set_recovered_async(self._job_id,
-                                                       task_id,
-                                                       recovered_time=recovery_time,
-                                                       callback_func=callback_func)
+            await managed_job_state.set_recovered_async(
+                self._job_id,
+                task_id,
+                recovered_time=recovery_time,
+                callback_func=callback_func)
 
     async def run(self):
         """Run controller logic and handle exceptions."""
@@ -636,10 +648,10 @@ class JobsController:
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id])
-            await managed_job_state.set_cancelling_async(job_id=self._job_id,
-                                                         callback_func=callback_func)
-            await managed_job_state.set_cancelled_async(job_id=self._job_id,
-                                                        callback_func=callback_func)
+            await managed_job_state.set_cancelling_async(
+                job_id=self._job_id, callback_func=callback_func)
+            await managed_job_state.set_cancelled_async(
+                job_id=self._job_id, callback_func=callback_func)
 
     async def _update_failed_task_state(
             self, task_id: int,
@@ -724,7 +736,8 @@ async def run_job_loop(job_id: int, dag_yaml: str, job_logger: logging.Logger):
     except asyncio.CancelledError:
         job_logger.info(f'Job {job_id} was cancelled')
         dag, _ = _get_dag_and_name(dag_yaml)
-        task_id, _ = await managed_job_state.get_latest_task_id_status_async(job_id)
+        task_id, _ = await managed_job_state.get_latest_task_id_status_async(
+            job_id)
         assert task_id is not None, job_id
         job_logger.info(f'Cancelling managed job, job_id: {job_id}, '
                         f'task_id: {task_id}')

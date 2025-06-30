@@ -1,6 +1,5 @@
 """SkyPilot API Server exposing RESTful APIs."""
 
-import resource
 import argparse
 import asyncio
 import base64
@@ -15,6 +14,7 @@ import os
 import pathlib
 import posixpath
 import re
+import resource
 import shutil
 import sys
 import threading
