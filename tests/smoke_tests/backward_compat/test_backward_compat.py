@@ -146,7 +146,7 @@ class TestBackwardCompatibility:
             'from sky.server import constants; '
             'print(constants.API_VERSION); '
             # Handle the base that does not have MIN_COMPATIBLE_API_VERSION defined
-            'min_compatible_version = constants.MIN_COMPATIBLE_API_VERSION if hasattr(constants, \"MIN_COMPATIBLE_API_VERSION\") else constants.API_VERSION; '
+            'min_compatible_version = getattr(constants, \'MIN_COMPATIBLE_API_VERSION\', constants.API_VERSION); '
             'print(min_compatible_version);'
             '"',
             shell=True,
