@@ -13,6 +13,16 @@ spec:
       app: {{ .Release.Name }}-api
   template:
     metadata:
+      annotations:
+        {{- if .Values.apiService.metrics.enabled }}
+        # Well-known annotations for Prometheus to scrape the metrics.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
+        {{- if .Values.apiService.annotations }}
+        {{- toYaml .Values.apiService.annotations | nindent 8 }}
+        {{- end }}
       labels:
         app: {{ .Release.Name }}-api
         # This label indicates that the API server is ready to serve requests.
@@ -25,6 +35,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
+      terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
@@ -47,6 +58,10 @@ spec:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
               key: auth
         {{- end }}
+        {{- if .Values.apiService.enableServiceAccounts }}
+        - name: ENABLE_SERVICE_ACCOUNTS
+          value: "true"
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -59,6 +74,15 @@ spec:
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
+        {{- if .Values.apiService.dbConnectionSecretName }}
+        - name: SKYPILOT_DB_CONNECTION_URI
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.apiService.dbConnectionSecretName }}
+              key: connection_string
+        {{- end }}
+        - name: SKYPILOT_GRACE_PERIOD_SECONDS
+          value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -94,9 +118,13 @@ spec:
           fi
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
-          echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
-          # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
-          ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it
+          if [ ! -s /root/.sky/ssh_node_pools.yaml ]; then
+            echo "ssh_node_pools.yaml not found in /root/.sky, copying from ConfigMap \`skypilot-ssh-node-pools\`"
+            cp /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          else
+            echo "ssh_node_pools.yaml already exists in /root/.sky, skipping copy"
+          fi
           # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
           if [ ! -s /root/.kube/config ]; then
             echo "{}" > /root/.kube/config
@@ -153,7 +181,10 @@ spec:
           httpGet:
             path: /api/health
             port: 46580
-          periodSeconds: 30
+          successThreshold: 1
+          failureThreshold: 3
+          periodSeconds: 5
+          initialDelaySeconds: 5
         volumeMounts:
         {{- if .Values.storage.enabled }}
         - name: state-volume

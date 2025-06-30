@@ -46,6 +46,7 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
+    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -67,6 +68,9 @@ Below is the configuration syntax and some example values.  See details under ea
   :ref:`secrets <yaml-spec-secrets>`:
     MY_HF_TOKEN: my-secret-value
     WANDB_API_KEY: my-secret-value-2
+
+  :ref:`volumes <yaml-spec-new-volumes>`:
+    /mnt/data: volume-name
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
@@ -223,6 +227,62 @@ You can also specify a specific region, zone, or Kubernetes context.
     infra: k8s/my-h100-cluster-context
 
 
+.. _yaml-spec-resources-autostop:
+
+``resources.autostop``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Autostop configuration (optional).
+
+Controls whether and when to automatically stop or tear down the cluster after it becomes idle. See :ref:`auto-stop` for more details.
+
+Format:
+
+- ``true``: Use default idle minutes (5)
+- ``false``: Disable autostop
+- ``<num>``: Stop after this many idle minutes
+- ``<num><unit>``: Stop after this much time
+- Object with configuration:
+  - ``idle_minutes``: Number of idle minutes before stopping
+  - ``down``: If true, tear down the cluster instead of stopping it
+
+``<unit>`` can be one of:
+- ``m``: minutes (default if not specified)
+- ``h``: hours
+- ``d``: days
+- ``w``: weeks
+
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    autostop: true  # Stop after default idle minutes (5)
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop: 10  # Stop after 10 minutes
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop: 10h  # Stop after 10 hours
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      down: true  # Use autodown instead of autostop
+
 
 .. _yaml-spec-resources-accelerators:
 
@@ -348,12 +408,20 @@ OR
 ``resources.memory``
 ~~~~~~~~~~~~~~~~~~~~
 
-Memory in GiB per node (optional).
+Memory specification per node (optional).
 
 Format:
 
--  ``<num>``: exactly ``<num>`` GiB
--  ``<num>+``: at least ``<num>`` GiB
+-  ``<num>``: exactly ``<num>`` GB
+-  ``<num>+``: at least ``<num>`` GB
+-  ``<num><unit>``: memory with unit (e.g., ``1024MB``, ``64GB``)
+
+Units supported (case-insensitive):
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes) (default if not specified)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
@@ -367,7 +435,7 @@ OR
 .. code-block:: yaml
 
   resources:
-    memory: 64
+    memory: 64GB
 
 .. _yaml-spec-resources-instance-type:
 
@@ -404,14 +472,34 @@ If unspecified, defaults to ``false`` (on-demand instances).
 ``resources.disk_size``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Disk size in GB to allocate for OS (mounted at ``/``).
+Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+.. warning::
+
+   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
   resources:
     disk_size: 256
+  
+OR
+
+.. code-block:: yaml
+
+  resources:
+    disk_size: 256GB
+
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -820,7 +908,19 @@ Example:
     HF_TOKEN: my-huggingface-token
     WANDB_API_KEY: my-wandb-api-key
 
+.. _yaml-spec-new-volumes:
 
+``volumes``
+~~~~~~~~~~~
+
+SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+
+Example:
+
+.. code-block:: yaml
+
+  volumes:
+    /mnt/data: volume-name
 
 
 .. _yaml-spec-file-mounts:
