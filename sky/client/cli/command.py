@@ -2183,14 +2183,11 @@ def cancel(
     job_identity_str = ''
     job_ids_to_cancel = None
     if not jobs and not all and not all_users:
-        if len(matching_clusters) == 1:
-            click.echo(f'{colorama.Fore.YELLOW}No job IDs or'
-                       ' --all/--all-users provided; '
-                       'cancelling the latest running job.'
-                       f'{colorama.Style.RESET_ALL}')
-            job_identity_str = 'the latest running job'
-        else:
-            job_identity_str = 'the latest running job on each cluster'
+        click.echo(f'{colorama.Fore.YELLOW}No job IDs or'
+                   ' --all/--all-users provided; '
+                   'cancelling the latest running job.'
+                   f'{colorama.Style.RESET_ALL}')
+        job_identity_str = 'the latest running job'
     elif all_users:
         job_identity_str = 'all users\' jobs'
     else:
