@@ -12,9 +12,6 @@ class SSHPool:
     num_nodes: int
     head_node_name: str
     head_node_id: str # uuid
-    default_user: Optional[str]
-    default_identity_file: Optional[str]
-    default_password: Optional[str]
 
     # nodes: List['SSHNode'] = dataclasses.field(
     #     default_factory=list, init=False, repr=False)
