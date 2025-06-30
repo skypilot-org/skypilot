@@ -124,19 +124,38 @@ def test_get_excluded_files_from_skyignore_no_file():
 
 def test_get_excluded_files_from_skyignore(skyignore_dir):
     # Test function
-    excluded_files = storage_utils.get_excluded_files_from_skyignore(
+    excluded_patterns = storage_utils.get_excluded_files_from_skyignore(
         skyignore_dir)
 
-    print(excluded_files)
-    # Validate results
-    expected_excluded_files = [
-        'remove.py', 'remove_dir', 'remove.sh', 'dir/remove.sh', 'dir/remove.b',
-        'remove.a', 'dir/remove.a', 'remove_dir_pattern',
-        'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a'
+    print(excluded_patterns)
+    # Validate results - these are patterns for AWS S3 sync and fnmatch
+    expected_patterns = [
+        # From **/remove_dir_pattern/**
+        '**/remove_dir_pattern/**',
+        'remove_dir_pattern',
+        'remove_dir_pattern/**',
+        # From /*.a (root-anchored)
+        './*.a',
+        # From *.sh
+        '*.sh',
+        '**/*.sh',
+        # From remove.a
+        'remove.a',
+        'remove.a/**',
+        '**/remove.a',
+        '**/remove.a/**',
+        # From /remove.py (root-anchored)
+        './remove.py',
+        './remove.py/**',
+        # From /remove_dir (root-anchored)
+        './remove_dir',
+        './remove_dir/**',
+        # From /dir/*.b (root-anchored)
+        './dir/*.b'
     ]
-    for file_path in expected_excluded_files:
-        assert file_path in excluded_files
-    assert len(excluded_files) == len(expected_excluded_files)
+    for pattern in expected_patterns:
+        assert pattern in excluded_patterns, f"Expected pattern '{pattern}' not found in {excluded_patterns}"
+    assert len(excluded_patterns) == len(expected_patterns)
 
 
 def test_get_excluded_files_from_gitignore(gitignore_dir):
@@ -216,18 +235,18 @@ def test_zip_files_and_folders(ignore_dir_name, request):
 
 def test_zip_files_and_folders_excluded_directories():
     """Test that files inside excluded directories are not included in zip file.
-    
+
     File/directory structure:
         temp_dir/ (temporary directory)
         └── main_dir/
             ├── main_file.txt         # contains "main file content"
             ├── .skyignore            # contains "excluded_dir"
             └── excluded_dir/         # this directory should be excluded
-                ├── excluded_file.txt # contains "excluded file content" 
+                ├── excluded_file.txt # contains "excluded file content"
                 └── nested_dir/
                     └── nested_file.txt # contains "nested file content"
 
-    .skyignore content: 
+    .skyignore content:
         excluded_dir
     """
     with tempfile.TemporaryDirectory() as temp_dir:

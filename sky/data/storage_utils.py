@@ -1,5 +1,5 @@
 """Utility functions for the storage module."""
-import glob
+import fnmatch
 import os
 import pathlib
 import shlex
@@ -67,39 +67,56 @@ def format_storage_table(storages: List[Dict[str, Any]],
 
 
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
-    """List files and patterns ignored by the .skyignore file
-    in the given source directory.
+    """Generate exclude patterns from .skyignore file for both zip and AWS S3.
+
+    Pattern rules:
+    - /foo     → matches only at root (becomes ./foo)
+    - foo      → matches at any depth (becomes foo and **/foo)
+    - *.py     → matches at any depth
+    - dir/*.b  → matches only in that specific path
     """
-    excluded_list: Set[str] = set()
-    expand_src_dir_path = os.path.expanduser(src_dir_path)
-    skyignore_path = os.path.join(expand_src_dir_path,
-                                  constants.SKY_IGNORE_FILE)
+    skyignore_path = os.path.join(os.path.expanduser(src_dir_path),
+                                  '.skyignore')
+    patterns: Set[str] = set()
 
     try:
-        with open(skyignore_path, 'r', encoding='utf-8') as f:
+        with open(skyignore_path, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith('#'):
-                    # Make parsing consistent with rsync.
-                    # Rsync uses '/' as current directory.
-                    if line.startswith('/'):
-                        line = '.' + line
-                    else:
-                        line = '**/' + line
-                    # Find all files matching the pattern.
-                    matching_files = glob.glob(os.path.join(
-                        expand_src_dir_path, line),
-                                               recursive=True)
-                    # Process filenames to comply with cloud rsync format.
-                    for i in range(len(matching_files)):
-                        matching_files[i] = os.path.relpath(
-                            matching_files[i], expand_src_dir_path)
-                    excluded_list.update(matching_files)
-    except IOError as e:
-        logger.warning(f'Error reading {skyignore_path}: '
-                       f'{common_utils.format_exception(e, use_bracket=True)}')
+                if not line or line.startswith(('#', '!')):
+                    continue
 
-    return list(excluded_list)
+                # Handle **/ prefixed patterns
+                if line.startswith('**/'):
+                    patterns.add(line)
+                    patterns.add(line[3:])  # Add root-level match
+                    # Handle recursive directory patterns like **/dir/**
+                    if line.endswith('/**'):
+                        base = line[3:-3]
+                        patterns.add(base)
+                        patterns.add(f'{base}/**')
+                    continue
+
+                # Check if pattern is anchored to root
+                if line.startswith('/'):
+                    pattern = line[1:]
+                    patterns.add(f'./{pattern}')
+                    # Add directory wildcard for non-glob patterns
+                    if not any(c in pattern for c in '*?['):
+                        patterns.add(f'./{pattern}/**')
+                else:
+                    # Unanchored patterns match at any depth
+                    patterns.add(line)
+                    patterns.add(f'**/{line}')
+                    # Add directory wildcards for non-glob patterns
+                    if not any(c in line for c in '*?['):
+                        patterns.add(f'{line}/**')
+                        patterns.add(f'**/{line}/**')
+
+    except OSError:
+        pass  # No .skyignore file
+
+    return sorted(patterns)
 
 
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
@@ -283,28 +300,47 @@ def zip_files_and_folders(items: List[str],
                     # specified by user.
                     zipf.write(item)
                 elif os.path.isdir(item):
-                    excluded_files = set([
-                        os.path.join(item, f.rstrip('/'))
-                        for f in get_excluded_files(item)
-                    ])
+                    excluded_patterns = get_excluded_files(item)
+
+                    def _is_excluded(
+                            abs_path: str,
+                            base_item: str = item,
+                            patterns: List[str] = excluded_patterns) -> bool:
+                        rel = os.path.relpath(abs_path, base_item).replace(
+                            os.path.sep, '/')
+
+                        for pattern in patterns:
+                            pattern = pattern.rstrip('/')
+
+                            # For ./ prefixed patterns, match against
+                            # ./ + relative path
+                            if pattern.startswith('./'):
+                                path = './' + rel
+                            else:
+                                path = rel
+
+                            # Special handling for wildcards without **
+                            if '*' in pattern and '**' not in pattern:
+                                # Ensure path depth matches pattern depth
+                                if pattern.count('/') != path.count('/'):
+                                    continue
+
+                            if fnmatch.fnmatch(path, pattern):
+                                return True
+
+                        return False
+
                     for root, dirs, files in os.walk(item, followlinks=False):
-                        # Modify dirs in-place to control os.walk()'s traversal
-                        # behavior. This filters out excluded directories BEFORE
-                        # os.walk() visits the files and sub-directories under
-                        # them, preventing traversal into any excluded directory
-                        # and its contents.
-                        # Note: dirs[:] = ... is required for in-place
-                        # modification.
+                        # prune dirs we shouldn't enter
                         dirs[:] = [
                             d for d in dirs
-                            if os.path.join(root, d) not in excluded_files
+                            if not _is_excluded(os.path.join(root, d))
                         ]
 
-                        # Store directory entries (important for empty
-                        # directories)
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
-                            # If it's a symlink, store it as a symlink
+                        # record directories
+                        # (important for empty ones & symlinks)
+                        for d in dirs:
+                            dir_path = os.path.join(root, d)
                             if os.path.islink(dir_path):
                                 _store_symlink(zipf, dir_path, is_dir=True)
                             else:
@@ -312,7 +348,7 @@ def zip_files_and_folders(items: List[str],
 
                         for file in files:
                             file_path = os.path.join(root, file)
-                            if file_path in excluded_files:
+                            if _is_excluded(file_path):
                                 continue
                             if os.path.islink(file_path):
                                 _store_symlink(zipf, file_path, is_dir=False)
