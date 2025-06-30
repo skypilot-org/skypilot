@@ -630,9 +630,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             # with the controller server API
             try:
                 requests.post(f'http://localhost:8000/cancel/{job_id}')
+                cancelled_job_ids.append(job_id)
             except requests.exceptions.RequestException as e:
                 logger.error(f'Failed to cancel job {job_id} '
                              f'with controller server: {e}')
+                # don't add it to the to be cancelled job ids, since we don't
+                # know for sure yet.
                 continue
             continue
 
@@ -976,7 +979,7 @@ def stream_logs(job_id: Optional[int],
 
         controller_log_path = os.path.join(
             os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            'controller.log')
+            f'{job_id}.log')
         job_status = None
 
         # Wait for the log file to be written
