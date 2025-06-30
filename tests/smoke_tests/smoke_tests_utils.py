@@ -31,6 +31,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -98,6 +99,19 @@ ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
     '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
     '2> /dev/null || true; '
     'gsutil')
+
+ENDPOINT = 'http://127.0.0.1:46580/api/health'
+
+# Fix the flakyness of the test, server may not ready when we run the command after restart.
+WAIT_FOR_API = (
+    'for i in $(seq 1 30); do '
+    f'if curl -s {ENDPOINT} > /dev/null; then '
+    'echo "API is up and running"; break; fi; '
+    'echo "Waiting for API to be ready... ($i/30)"; '
+    '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
+    'sleep 1; done')
+
+SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
@@ -836,3 +850,8 @@ def server_side_is_consolidation_mode() -> bool:
         original_config=config, override_configs=skypilot_config.to_dict())
     with skypilot_config.replace_skypilot_config(config):
         return managed_job_utils.is_consolidation_mode()
+
+
+def is_in_buildkite_env() -> bool:
+    """Check if the test is running in the Buildkite environment."""
+    return env_options.Options.RUNNING_IN_BUILDKITE.get()
