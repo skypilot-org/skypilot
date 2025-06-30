@@ -12,6 +12,7 @@ from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
@@ -30,14 +31,10 @@ _MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_POD_INITIALIZED = 'skypilot-initialized'
-TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 
 
 def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
-    return {TAG_RAY_CLUSTER_NAME: cluster_name}
+    return {k8s_constants.TAG_RAY_CLUSTER_NAME: cluster_name}
 
 
 def _is_head(pod) -> bool:
@@ -75,7 +72,8 @@ def is_high_availability_cluster_by_kubectl(
         deployment_list = kubernetes.apps_api(
             context).list_namespaced_deployment(
                 namespace,
-                label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
+                label_selector=
+                f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
     except kubernetes.api_exception():
         return False
     # It is a high availability cluster if there is at least one deployment
@@ -280,10 +278,12 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
-        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        cluster_name = new_nodes[0].metadata.labels[
+            k8s_constants.TAG_SKYPILOT_CLUSTER_NAME]
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
+            label_selector=
+            f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in pods}
@@ -361,10 +361,12 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
 
     while True:
         # Get all pods in a single API call
-        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        cluster_name = new_nodes[0].metadata.labels[
+            k8s_constants.TAG_SKYPILOT_CLUSTER_NAME]
         all_pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
+            label_selector=
+            f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in all_pods}
@@ -732,7 +734,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     else:
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
-        {TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+        {k8s_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
@@ -841,7 +843,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'podAffinityTerm': {
                     'labelSelector': {
                         'matchExpressions': [{
-                            'key': TAG_SKYPILOT_CLUSTER_NAME,
+                            'key': k8s_constants.TAG_SKYPILOT_CLUSTER_NAME,
                             'operator': 'In',
                             'values': [cluster_name_on_cloud]
                         }]
@@ -884,7 +886,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # Add the deployment name as a label to the pod spec
             deployment_name = deployment_spec['metadata']['name']
             pod_spec_copy['metadata']['labels'][
-                TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
+                k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
             # Propagate the labels to the deployment for identification.
@@ -1289,7 +1291,8 @@ def get_command_runners(
 
         # Try to get deployment name from label first
         head_instance_info = instances[pod_name][0]
-        deployment = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
+        deployment = head_instance_info.tags.get(
+            k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME)
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
