@@ -12,7 +12,6 @@ from sky import skypilot_config
 
 
 # ---------- Test workspace switching ----------
-@pytest.mark.no_remote_server
 def test_workspace_switching(generic_cloud: str):
     # Test switching between workspaces by modifying .sky.yaml.
     #
