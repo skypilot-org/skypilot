@@ -37,12 +37,12 @@ class _BaseOrm(ABC):
     """
 
     @abstractmethod
-    def to_model(self) -> 'models.SSHCluster':
+    def to_model(self) -> models.SSHCluster:
         pass
 
     @abstractmethod
     @classmethod
-    def from_model(cls: Type[_T], model: 'models.SSHCluster') -> _T:
+    def from_model(cls: Type[_T], model: models.SSHCluster) -> _T:
         pass
 
 
@@ -58,14 +58,14 @@ class _SSHStagingOrm(_Base, _BaseOrm):  # type: ignore[valid-type, misc]
     node_json = sqlalchemy.Column(
         mutable_json_type(dbtype=sqlalchemy.JSON, nested=True))
 
-    def to_model(self) -> 'models.SSHCluster':
+    def to_model(self) -> models.SSHCluster:
         return models.SSHCluster(name=self.name,
                                  head_node_ip=self.head_node_ip,
                                  alias=self.alias,
                                  _node_json=self.node_json)
 
     @classmethod
-    def from_model(cls, model: 'models.SSHCluster') -> '_SSHStagingOrm':
+    def from_model(cls, model: models.SSHCluster) -> '_SSHStagingOrm':
         return cls(name=model.name,
                    head_node_ip=model.head_node_ip,
                    alias=model.alias,
@@ -82,14 +82,14 @@ class _SSHHistoryOrm(_Base, _BaseOrm):  # type: ignore[valid-type, misc]
     node_json = sqlalchemy.Column(
         mutable_json_type(dbtype=sqlalchemy.JSON, nested=True))
 
-    def to_model(self) -> 'models.SSHCluster':
+    def to_model(self) -> models.SSHCluster:
         return models.SSHCluster(name=self.name,
                                  head_node_ip=self.head_node_ip,
                                  alias=self.alias,
                                  _node_json=self.node_json)
 
     @classmethod
-    def from_model(cls, model: 'models.SSHCluster') -> '_SSHHistoryOrm':
+    def from_model(cls, model: models.SSHCluster) -> '_SSHHistoryOrm':
         return cls(name=model.name,
                    head_node_ip=model.head_node_ip,
                    alias=model.alias,
@@ -148,7 +148,7 @@ def _init_db(func):
 
 # generics
 @_init_db
-def _get_all_clusters_generic(orm_class: Type[_T]) -> List['models.SSHCluster']:
+def _get_all_clusters_generic(orm_class: Type[_T]) -> List[models.SSHCluster]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(orm_class).all()
@@ -157,7 +157,7 @@ def _get_all_clusters_generic(orm_class: Type[_T]) -> List['models.SSHCluster']:
 
 @_init_db
 def _get_cluster_generic(name: str,
-                         orm_class: Type[_T]) -> Optional['models.SSHCluster']:
+                         orm_class: Type[_T]) -> Optional[models.SSHCluster]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(orm_class).filter_by(name=name).first()
@@ -185,22 +185,22 @@ def _remove_cluster_generic(name: str, orm_class: Type[_T]):
 
 
 # staging / history
-def get_all_clusters_staging() -> List['models.SSHCluster']:
+def get_all_clusters_staging() -> List[models.SSHCluster]:
     """Get all staged ssh clusters"""
     return _get_all_clusters_generic(_SSHStagingOrm)
 
 
-def get_all_clusters_history() -> List['models.SSHCluster']:
+def get_all_clusters_history() -> List[models.SSHCluster]:
     """Get all deployed ssh clusters"""
     return _get_all_clusters_generic(_SSHHistoryOrm)
 
 
-def get_cluster_staging(name: str) -> Optional['models.SSHCluster']:
+def get_cluster_staging(name: str) -> Optional[models.SSHCluster]:
     """Get specific staged ssh cluster"""
     return _get_cluster_generic(name, _SSHStagingOrm)
 
 
-def get_cluster_history(name: str) -> Optional['models.SSHCluster']:
+def get_cluster_history(name: str) -> Optional[models.SSHCluster]:
     """Get specific ssh cluster history"""
     return _get_cluster_generic(name, _SSHHistoryOrm)
 

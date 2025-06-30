@@ -62,7 +62,7 @@ class SSHCluster:
     def node_json(self) -> List[Dict[str, Any]]:
         return self._node_json
 
-    def set_nodes(self, nodes: List['SSHNode']):
+    def set_nodes(self, nodes: List[SSHNode]):
         self._node_json = []
         found_head = False
         for node in nodes:
@@ -85,13 +85,13 @@ class SSHCluster:
             return self.name
         return f'{self.name}({self.alias})'
 
-    def get_head_node(self) -> 'SSHNode':
+    def get_head_node(self) -> SSHNode:
         for node in self.nodes:
             if node.ip == self.head_node_ip:
                 return node
         raise ValueError(f'head node not found for {self.name}')
 
-    def get_worker_nodes(self) -> List['SSHNode']:
+    def get_worker_nodes(self) -> List[SSHNode]:
         workers = []
         for node in self.nodes:
             if node.ip != self.head_node_ip:
