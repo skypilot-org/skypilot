@@ -362,6 +362,3 @@ Add volumes to all tasks
     :language: yaml
     :caption: `Config YAML for using AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/add_volumes.yaml>`_
 
-.. note::
-
-    This policy only take effects when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` will be a no-op.

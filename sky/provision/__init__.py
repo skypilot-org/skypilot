@@ -106,7 +106,7 @@ def bootstrap_instances(
 
 @_route_to_cloud_impl
 def apply_volume(provider_name: str,
-                 config: models.VolumeConfig) -> models.VolumeConfig:
+                 volume_config: models.VolumeConfig) -> models.VolumeConfig:
     """Create or register a volume.
 
     This function creates or registers a volume with the provided configuration,
@@ -117,7 +117,7 @@ def apply_volume(provider_name: str,
 
 @_route_to_cloud_impl
 def delete_volume(provider_name: str,
-                  config: models.VolumeConfig) -> models.VolumeConfig:
+                  volume_config: models.VolumeConfig) -> models.VolumeConfig:
     """Delete a volume."""
     raise NotImplementedError
 
@@ -125,7 +125,7 @@ def delete_volume(provider_name: str,
 @_route_to_cloud_impl
 def get_volume_usedby(
     provider_name: str,
-    config: models.VolumeConfig,
+    volume_config: models.VolumeConfig,
 ) -> Tuple[List[str], List[str]]:
     """Get the usedby of a volume.
 
