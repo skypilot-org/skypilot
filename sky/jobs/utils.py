@@ -10,6 +10,7 @@ import contextvars
 import datetime
 import enum
 import functools
+import logging
 import os
 import pathlib
 import shlex
@@ -240,8 +241,8 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-def get_job_status(backend: 'backends.CloudVmRayBackend',
-                   cluster_name: str) -> Optional['job_lib.JobStatus']:
+def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                   job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
@@ -251,21 +252,21 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        job_logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
-        logger.info('=== Checking the job status... ===')
+        job_logger.info('=== Checking the job status... ===')
         statuses = backend.get_job_status(handle, stream_logs=False)
         status = list(statuses.values())[0]
         if status is None:
-            logger.info('No job found.')
+            job_logger.info('No job found.')
         else:
-            logger.info(f'Job status: {status}')
+            job_logger.info(f'Job status: {status}')
     except exceptions.CommandError:
-        logger.info('Failed to connect to the cluster.')
-    logger.info('=' * 34)
+        job_logger.info('Failed to connect to the cluster.')
+    job_logger.info('=' * 34)
     return status
 
 

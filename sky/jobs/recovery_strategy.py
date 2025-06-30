@@ -217,7 +217,7 @@ class StrategyExecutor:
 
             try:
                 status = managed_job_utils.get_job_status(
-                    self.backend, self.cluster_name)
+                    self.backend, self.cluster_name, self._logger)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.

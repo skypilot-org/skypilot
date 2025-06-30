@@ -349,7 +349,7 @@ class JobsController:
                 try:
                     job_status = await managed_job_utils.to_thread(
                         managed_job_utils.get_job_status, self._backend,
-                        cluster_name)
+                        cluster_name, self._logger)
                 except exceptions.FetchClusterInfoError as fetch_e:
                     self._logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
