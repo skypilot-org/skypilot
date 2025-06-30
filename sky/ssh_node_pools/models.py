@@ -97,3 +97,6 @@ class SSHCluster:
             if node.ip != self.head_node_ip:
                 workers.append(node)
         return workers
+
+    def get_ips(self) -> List[str]:
+        return [node.ip for node in self.nodes]
