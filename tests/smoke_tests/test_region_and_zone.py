@@ -33,7 +33,6 @@ from smoke_tests import test_mount_and_storage
 import sky
 from sky import skypilot_config
 from sky.data import storage as storage_lib
-from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.utils import controller_utils
 
@@ -80,7 +79,7 @@ def test_aws_with_ssh_proxy_command():
         jobs_controller_proxy_test_cmds_down = ''
         # Disable controller related tests for consolidation mode, as there will
         # not be any controller VM to launch.
-        if not managed_job_utils.is_consolidation_mode():
+        if not smoke_tests_utils.server_side_is_consolidation_mode():
             jobs_controller_proxy_test_cmds = [
                 # Start a small job to make sure the controller is created.
                 f'sky jobs launch -n {name}-0 --infra aws {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot -y echo hi',
