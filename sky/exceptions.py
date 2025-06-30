@@ -614,6 +614,21 @@ class PermissionDeniedError(Exception):
     pass
 
 
+class VolumeNotFoundError(Exception):
+    """Raised when a volume is not found."""
+    pass
+
+
+class VolumeTopologyConflictError(Exception):
+    """Raised when the there is conflict in the volumes and compute topology"""
+    pass
+
+
+class ServerTemporarilyUnavailableError(Exception):
+    """Raised when the server is temporarily unavailable."""
+    pass
+
+
 class RestfulPolicyError(Exception):
     """Raised when failed to call a RESTful policy."""
     pass

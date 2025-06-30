@@ -145,6 +145,7 @@ def launch(
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -154,6 +155,9 @@ def launch(
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
+    # TODO(aylei): use consolidated job controller instead of performing
+    # pre-mount operations when submitting jobs.
+    dag.pre_mount_volumes()
 
     user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
@@ -348,13 +352,8 @@ def launch(
                 # Dump script for high availability recovery.
                 if controller_utils.high_availability_specified(
                         controller_name):
-                    dump_script_path = (
-                        managed_job_utils.get_ha_dump_script_path(
-                            consolidation_mode_job_id))
-                    dump_script_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(dump_script_path, 'w',
-                              encoding='utf-8') as script_f:
-                        script_f.write(run_script)
+                    managed_job_state.set_ha_recovery_script(
+                        consolidation_mode_job_id, run_script)
                 backend.run_on_head(local_handle, run_script)
                 return consolidation_mode_job_id, local_handle
 

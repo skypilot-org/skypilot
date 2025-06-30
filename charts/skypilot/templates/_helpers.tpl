@@ -96,3 +96,5 @@ false
 {{- define "skypilot.apiArgs" -}}
 --deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
 {{- end -}}
+
+

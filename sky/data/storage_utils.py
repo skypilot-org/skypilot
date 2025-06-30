@@ -22,8 +22,6 @@ logger = sky_logging.init_logger(__name__)
 _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
 
-_LAST_USE_TRUNC_LENGTH = 25
-
 
 def format_storage_table(storages: List[Dict[str, Any]],
                          show_all: bool = False) -> str:
@@ -48,8 +46,8 @@ def format_storage_table(storages: List[Dict[str, Any]],
         if show_all:
             command = row['last_use']
         else:
-            command = common_utils.truncate_long_string(row['last_use'],
-                                                        _LAST_USE_TRUNC_LENGTH)
+            command = common_utils.truncate_long_string(
+                row['last_use'], constants.LAST_USE_TRUNC_LENGTH)
         storage_table.add_row([
             # NAME
             row['name'],
