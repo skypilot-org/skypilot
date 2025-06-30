@@ -11,6 +11,10 @@ on:
           - 'skypilot-nightly'
           - 'skypilot'
         default: 'skypilot-nightly'
+      version:
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
+        required: true
+        type: string
   workflow_call:
     inputs:
       package_name:
@@ -19,7 +23,7 @@ on:
         type: string
       version:
         description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
-        required: true
+        required: false
         type: string
     outputs:
       version:
