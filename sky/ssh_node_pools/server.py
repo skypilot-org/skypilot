@@ -13,6 +13,7 @@ from sky.utils import common_utils
 router = fastapi.APIRouter()
 
 
+# TODO(kyuds): change endpoint to get information as dict (as it is right now)
 @router.get('')
 async def get_ssh_node_pools() -> Dict[str, Any]:
     """Get all SSH Node Pool configurations."""
@@ -25,6 +26,7 @@ async def get_ssh_node_pools() -> Dict[str, Any]:
             f'Failed to get SSH Node Pools: {common_utils.format_exception(e)}')
 
 
+# TODO(kyuds): change endpoint to get updates via dict (as it is right now)
 @router.post('')
 async def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
     """Update SSH Node Pool configurations."""
@@ -37,6 +39,7 @@ async def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
                                     f' {common_utils.format_exception(e)}')
 
 
+# TODO(kyuds): ???
 @router.delete('/{pool_name}')
 async def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
     """Delete a SSH Node Pool configuration."""
@@ -92,6 +95,7 @@ async def list_ssh_keys() -> List[str]:
             status_code=500, detail=f'Failed to list SSH keys: {exception_msg}')
 
 
+# TODO(kyuds): remove
 @router.post('/{pool_name}/deploy')
 async def deploy_ssh_node_pool(request: fastapi.Request,
                                pool_name: str) -> Dict[str, str]:
@@ -143,6 +147,7 @@ async def deploy_ssh_node_pool_general(
                                     f'{common_utils.format_exception(e)}')
 
 
+# TODO(kyuds): remove
 @router.post('/{pool_name}/down')
 async def down_ssh_node_pool(request: fastapi.Request,
                              pool_name: str) -> Dict[str, str]:

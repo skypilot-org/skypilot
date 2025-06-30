@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument(
         '--infra', help='Name of the cluster in ssh_node_pools.yaml to use')
     parser.add_argument(
-        '--ssh-node-pools-file',
+        '--ssh-node-pools-file', # TODO(kyuds): change to boolean flag to use db
         dest='ssh_node_pools_file',
         default=ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
         help=
@@ -518,6 +518,8 @@ def main():
         targets = ssh_utils.load_ssh_targets(args.ssh_node_pools_file)
         clusters_config = ssh_utils.get_cluster_config(
             targets, args.infra, file_path=args.ssh_node_pools_file)
+        
+        # TODO(kyuds): change to getting configuration from DB.
 
         # Print information about clusters being processed
         num_clusters = len(clusters_config)

@@ -57,6 +57,7 @@ install_requires = [
     'httpx',
     'setproctitle',
     'sqlalchemy',
+    'sqlalchemy_json',
     'psycopg2-binary',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.

@@ -1,7 +1,7 @@
 """Data Models for SSH Node Pools."""
 
 import dataclasses
-from typing import List, Optional
+from typing import Optional
 
 
 @dataclasses.dataclass

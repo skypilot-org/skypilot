@@ -1546,11 +1546,15 @@ def ssh_up(infra: Optional[str] = None,
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
+    # TODO (kyuds): file default is ~/.sky/ssh_node_pools.yaml
     if file is not None:
-        _update_remote_ssh_node_pools(file, infra)
+        _update_remote_ssh_node_pools(file, infra) # run this regardless.
+        # take output and put it as the infra (as list)
 
     # Use SSH node pools router endpoint
     body = payloads.SSHUpBody(infra=infra, cleanup=False)
+
+    # TODO(kyuds): change to single api call (reduce to single endpoint)
     if infra is not None:
         # Call the specific pool deployment endpoint
         response = server_common.make_authenticated_request(
@@ -1579,6 +1583,7 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     """
     # Use SSH node pools router endpoint
     body = payloads.SSHUpBody(infra=infra, cleanup=True)
+    # TODO(kyuds): change this to single endpoint
     if infra is not None:
         # Call the specific pool down endpoint
         response = server_common.make_authenticated_request(

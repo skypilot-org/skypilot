@@ -594,7 +594,7 @@ class LocalUpBody(RequestBody):
     password: Optional[str] = None
 
 
-class SSHUpBody(RequestBody):
+class SSHUpBody(RequestBody): # TODO(kyuds): Change to Optional Union str list
     """The request body for the SSH up/down endpoints."""
     infra: Optional[str] = None
     cleanup: bool = False
