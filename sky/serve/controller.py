@@ -110,9 +110,33 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
+            
+            # Get replica information for instance-aware load balancing
+            replica_infos = serve_state.get_replica_infos(self._service_name)
+            ready_replica_urls = self._replica_manager.get_active_replica_urls()
+            
+            # Prepare replica info for load balancer
+            replica_info = []
+            for info in replica_infos:
+                if info.url in ready_replica_urls:
+                    # Get GPU type from handle.launched_resources.accelerators
+                    gpu_type = 'unknown'
+                    handle = info.handle()
+                    if handle is not None and hasattr(handle, 'launched_resources'):
+                        accelerators = handle.launched_resources.accelerators
+                        if accelerators and len(accelerators) > 0:
+                            # Get the first accelerator type
+                            gpu_type = list(accelerators.keys())[0]
+                    
+                    replica_info.append({
+                        'url': info.url,
+                        'gpu_type': gpu_type,
+                        'replica_id': info.replica_id
+                    })
+            
             return responses.JSONResponse(content={
-                'ready_replica_urls':
-                    self._replica_manager.get_active_replica_urls()
+                'ready_replica_urls': ready_replica_urls,
+                'replica_info': replica_info
             },
                                           status_code=200)
 
