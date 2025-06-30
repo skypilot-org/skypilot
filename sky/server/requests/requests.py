@@ -375,9 +375,28 @@ def managed_job_status_refresh_event():
 
 @dataclasses.dataclass
 class InternalRequestDaemon:
+    """Internal daemon that runs an event in the background."""
+
     id: str
     name: str
     event_fn: Callable[[], None]
+
+    def run_event(self):
+        """Run the event."""
+        while True:
+            with ux_utils.enable_traceback():
+                try:
+                    self.event_fn()
+                    break
+                except Exception:  # pylint: disable=broad-except
+                    # It is OK to fail to run the event, as the event is not
+                    # critical, but we should log the error.
+                    logger.exception(
+                        f'Error running {self.name} event. '
+                        f'Restarting in '
+                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
+                        'seconds...')
+                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.
