@@ -114,10 +114,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "label_replace(DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
+            "expr": "DCGM_FI_DEV_GPU_UTIL{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -181,7 +181,7 @@
                 }
               ]
             },
-            "unit": "bytes"
+            "unit": "decmbytes"
           },
           "overrides": []
         },
@@ -217,10 +217,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "label_replace(DCGM_FI_DEV_FB_USED{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
+            "expr": "DCGM_FI_DEV_FB_USED{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -320,10 +320,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "label_replace(DCGM_FI_DEV_GPU_TEMP{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
+            "expr": "DCGM_FI_DEV_GPU_TEMP{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -423,10 +423,10 @@
               "uid": "prometheus"
             },
             "editorMode": "code",
-            "expr": "label_replace(DCGM_FI_DEV_POWER_USAGE{instance=~\"$instance\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}, \"InstanceClean\", \"$1\", \"instance\", \"([^:]+):?.*\")",
+            "expr": "DCGM_FI_DEV_POWER_USAGE{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster) kube_pod_labels{label_skypilot_cluster=~\"$cluster\"}",
             "hide": false,
             "instant": false,
-            "legendFormat": "{{InstanceClean}} - {{modelName}} GPU {{gpu}}",
+            "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
             "range": true,
             "refId": "A"
           }
@@ -475,12 +475,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "definition": "label_values(DCGM_FI_DEV_GPU_UTIL, instance)",
+          "definition": "label_values(DCGM_FI_DEV_GPU_UTIL, node)",
           "includeAll": true,
           "multi": true,
-          "name": "instance",
+          "name": "node",
           "options": [],
-          "query": "label_values(DCGM_FI_DEV_GPU_UTIL, instance)",
+          "query": "label_values(DCGM_FI_DEV_GPU_UTIL, node)",
           "refresh": 1,
           "regex": "",
           "type": "query"
@@ -495,12 +495,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "definition": "label_values(DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\"}, gpu)",
+          "definition": "label_values(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, gpu)",
           "includeAll": true,
           "multi": true,
           "name": "gpu",
           "options": [],
-          "query": "label_values(DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\"}, gpu)",
+          "query": "label_values(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, gpu)",
           "refresh": 1,
           "regex": "",
           "sort": 1,
@@ -516,5 +516,5 @@
     "timezone": "browser",
     "title": "SkyPilot DCGM GPU Metrics",
     "uid": "skypilot-dcgm-gpu",
-    "version": 2
+    "version": 3
   } 

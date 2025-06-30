@@ -340,10 +340,14 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
     setIsLoadingHosts(true);
     try {
       const grafanaUrl = getGrafanaUrl();
-      const clusterParam = contextName === "in-cluster" ? '^$' : contextName;
-      
+      const clusterParam = contextName === 'in-cluster' ? '^$' : contextName;
+
       // Build query to get nodes for specific cluster
-      const query = 'query=' + encodeURIComponent(`group by (node) (DCGM_FI_DEV_GPU_TEMP{cluster=~"${clusterParam}"})`);
+      const query =
+        'query=' +
+        encodeURIComponent(
+          `group by (node) (DCGM_FI_DEV_GPU_TEMP{cluster=~"${clusterParam}"})`
+        );
 
       const endpoint = `/api/datasources/proxy/1/api/v1/query?${query}`;
 
@@ -359,15 +363,23 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
         if (response.ok) {
           const data = await response.json();
           if (data.data && data.data.result && data.data.result.length > 0) {
-            const nodes = data.data.result.map(result => result.metric.node).filter(Boolean).sort();
+            const nodes = data.data.result
+              .map((result) => result.metric.node)
+              .filter(Boolean)
+              .sort();
             setAvailableHosts(nodes);
-            console.log(`Successfully fetched hosts for cluster ${clusterParam || 'in-cluster'}:`, nodes);
+            console.log(
+              `Successfully fetched hosts for cluster ${clusterParam || 'in-cluster'}:`,
+              nodes
+            );
           } else {
             console.log('No nodes found for this cluster');
             setAvailableHosts([]);
           }
         } else {
-          console.log(`HTTP ${response.status} from ${endpoint}: ${response.statusText}`);
+          console.log(
+            `HTTP ${response.status} from ${endpoint}: ${response.statusText}`
+          );
           setAvailableHosts([]);
         }
       } catch (error) {
@@ -392,12 +404,13 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   // Function to build Grafana panel URL with filters
   const buildGrafanaUrlForContext = (panelId) => {
     const grafanaUrl = getGrafanaUrl();
-    const hostParam = selectedHosts === '$__all' ? '$__all' : selectedHosts;
-    
+    // When "All Nodes" is selected (.*), pass .* directly to match all nodes
+    const hostParam = selectedHosts;
+
     // Cluster parameter logic for k8s contexts only
     // For in-cluster: regex to match only missing/empty cluster labels
-    // For external clusters: exact cluster name  
-    const clusterParam = contextName === "in-cluster" ? '^$' : contextName;
+    // For external clusters: exact cluster name
+    const clusterParam = contextName === 'in-cluster' ? '^$' : contextName;
 
     return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
@@ -523,7 +536,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
           {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools */}
           {isGrafanaAvailable &&
             gpusInContext &&
-            gpusInContext.length > 0 && 
+            gpusInContext.length > 0 &&
             !isSSHContext && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
@@ -597,17 +610,25 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                     {nodesInContext && nodesInContext.length > 0 ? (
                       <>
                         Showing:{' '}
-                        {selectedHosts === '$__all' ? 'All nodes' : selectedHosts} •
-                        Time: {timeRange.from} to {timeRange.to}
+                        {selectedHosts === '$__all'
+                          ? 'All nodes'
+                          : selectedHosts}{' '}
+                        • Time: {timeRange.from} to {timeRange.to}
                         {availableHosts.length > 0 && (
-                          <span> • {availableHosts.length} nodes available</span>
+                          <span>
+                            {' '}
+                            • {availableHosts.length} nodes available
+                          </span>
                         )}
                       </>
                     ) : (
                       <>
-                        Cluster: {isSSHContext ? contextName.replace(/^ssh-/, '') : contextName} •
-                        Time: {timeRange.from} to {timeRange.to} •
-                        Showing metrics for all nodes in cluster
+                        Cluster:{' '}
+                        {isSSHContext
+                          ? contextName.replace(/^ssh-/, '')
+                          : contextName}{' '}
+                        • Time: {timeRange.from} to {timeRange.to} • Showing
+                        metrics for all nodes in cluster
                       </>
                     )}
                   </div>
@@ -615,7 +636,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   {/* GPU Utilization */}
-                  <div className="bg-white rounded-md">
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('6')}
@@ -630,7 +651,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   </div>
 
                   {/* GPU Memory */}
-                  <div className="bg-white rounded-md">
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('18')}
@@ -645,7 +666,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   </div>
 
                   {/* GPU Power Consumption */}
-                  <div className="bg-white rounded-md">
+                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('10')}
