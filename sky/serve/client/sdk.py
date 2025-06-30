@@ -5,9 +5,9 @@ from typing import List, Optional, Union
 
 import click
 
-from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -17,12 +17,8 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
-    import requests
-
     import sky
     from sky.serve import serve_utils
-else:
-    requests = adaptors_common.LazyImport('requests')
 
 
 @context.contextual
@@ -78,12 +74,11 @@ def up(
             task=dag_str,
             service_name=service_name,
         )
-        response = requests.post(
-            f'{server_common.get_server_url()}/serve/up',
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/serve/up',
             json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -140,12 +135,11 @@ def update(
             mode=mode,
         )
 
-        response = requests.post(
-            f'{server_common.get_server_url()}/serve/update',
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/serve/update',
             json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -182,12 +176,11 @@ def down(
         all=all,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/down',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/down',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
@@ -217,12 +210,11 @@ def terminate_replica(service_name: str, replica_id: int,
         replica_id=replica_id,
         purge=purge,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/terminate-replica',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/terminate-replica',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
@@ -290,17 +282,17 @@ def status(
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
     body = payloads.ServeStatusBody(service_names=service_names,)
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/status',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/status',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_on_server_unavailable()
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
@@ -376,15 +368,17 @@ def tail_logs(service_name: str,
         replica_id=replica_id,
         follow=follow,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
-        stream=True,
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        stream=True)
     request_id = server_common.get_request_id(response)
-    sdk.stream_response(request_id, response, output_stream)
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=True)
 
 
 @usage_lib.entrypoint
@@ -436,11 +430,11 @@ def sync_down_logs(service_name: str,
         targets=targets,
         replica_ids=replica_ids,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/serve/sync-down-logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/sync-down-logs',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-    )
+        timeout=(5, None))
     remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
 
     # Download from API server paths to the client's local_dir

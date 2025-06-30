@@ -35,7 +35,7 @@ def bootstrap_instances(
     _configure_services(namespace, context, config.provider_config)
 
     networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'))
+        config.provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         config = _configure_ssh_jump(namespace, context, config)
 

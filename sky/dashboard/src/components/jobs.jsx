@@ -28,6 +28,7 @@ import {
   NonCapitalizedTooltip,
   relativeTime,
   formatDateTime,
+  TimestampWithTooltip,
 } from '@/components/utils';
 import {
   FileSearchIcon,
@@ -39,6 +40,7 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import {
   Select,
@@ -141,7 +143,7 @@ const formatUserDisplay = (username, userId) => {
   return usernameBase;
 };
 
-// Helper function to format submitted time with abbreviated units
+// Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
 const formatSubmittedTime = (timestamp) => {
   if (!timestamp) return '-';
 
@@ -149,59 +151,7 @@ const formatSubmittedTime = (timestamp) => {
   const date =
     timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
 
-  // Get the original timeString from relativeTime
-  let timeString = relativeTime(date);
-
-  // If relativeTime returns a React element, extract the string from its props
-  if (
-    React.isValidElement(timeString) &&
-    timeString.props &&
-    timeString.props.children
-  ) {
-    // The actual string is nested within the Tooltip
-    if (
-      React.isValidElement(timeString.props.children) &&
-      timeString.props.children.props &&
-      timeString.props.children.props.children
-    ) {
-      timeString = timeString.props.children.props.children;
-    } else {
-      timeString = timeString.props.children;
-    }
-  }
-
-  // Ensure we have a string before proceeding
-  if (typeof timeString !== 'string') {
-    return timeString; // Return as is if not a string after extraction
-  }
-
-  // Apply the same shortening logic
-  const shortenedTime = shortenTimeForJobs(timeString);
-
-  // Return with tooltip functionality like relativeTime does
-  const now = new Date();
-  const differenceInDays =
-    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
-
-  if (Math.abs(differenceInDays) < 7) {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="capitalize text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  } else {
-    return (
-      <Tooltip
-        content={formatDateTime(date)}
-        className="text-sm text-muted-foreground"
-      >
-        {shortenedTime}
-      </Tooltip>
-    );
-  }
+  return <TimestampWithTooltip date={date} />;
 };
 
 // Helper function to shorten time strings for jobs
@@ -217,7 +167,7 @@ function shortenTimeForJobs(timeString) {
 
   // Handle "less than a minute ago" case
   if (timeString.toLowerCase() === 'less than a minute ago') {
-    return 'Less than a minute ago';
+    return 'Less than 1m ago';
   }
 
   // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
@@ -1083,7 +1033,12 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.user}</TableCell>
+                      <TableCell>
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Link
                           href="/workspaces"
@@ -1601,7 +1556,12 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"

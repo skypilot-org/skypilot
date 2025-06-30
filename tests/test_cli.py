@@ -13,10 +13,10 @@ CLOUDS_TO_TEST = [
 
 
 def mock_server_api_version(monkeypatch, version):
-    original_get = requests.get
+    original_request = requests.request
 
-    def mock_get(url, *args, **kwargs):
-        if '/api/health' in url:
+    def mock_request(method, url, *args, **kwargs):
+        if '/api/health' in url and method == 'GET':
             mock_response = mock.MagicMock()
             mock_response.status_code = 200
             mock_response.json.return_value = {
@@ -25,9 +25,9 @@ def mock_server_api_version(monkeypatch, version):
                 'commit': '1234567890'
             }
             return mock_response
-        return original_get(url, *args, **kwargs)
+        return original_request(method, url, *args, **kwargs)
 
-    monkeypatch.setattr(requests, 'get', mock_get)
+    monkeypatch.setattr(requests, 'request', mock_request)
 
 
 class TestWithNoCloudEnabled:

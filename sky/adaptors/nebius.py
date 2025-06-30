@@ -120,8 +120,8 @@ def get_tenant_id():
         'tenant_id', None)
     if tenant_id_in_ws_config is not None:
         return tenant_id_in_ws_config
-    tenant_id_in_config = skypilot_config.get_nested(('nebius', 'tenant_id'),
-                                                     None)
+    tenant_id_in_config = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('tenant_id',), default_value=None)
     if tenant_id_in_config is not None:
         return tenant_id_in_config
     try:

@@ -12,7 +12,10 @@ import {
   CopyIcon,
   CheckIcon,
 } from 'lucide-react';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  formatFullTimestamp,
+} from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
@@ -20,6 +23,7 @@ import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 function JobDetails() {
   const router = useRouter();
@@ -497,6 +501,22 @@ function JobDetailsContent({
     setHasReceivedFirstChunk(false);
   }, [activeTab, jobData.id]);
 
+  // Performance-optimized log update function
+  const updateLogsWithBatching = useCallback(
+    (logType, newChunk) => {
+      const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
+
+      // Simple string append - no batching needed with backend tail
+      setLogsFunction((prevLogs) => prevLogs + newChunk);
+
+      // Auto-scroll after update
+      requestAnimationFrame(() => {
+        scrollToBottom(logType);
+      });
+    },
+    [scrollToBottom]
+  );
+
   // Define a function to handle both log types with simplified logic
   const fetchLogs = useCallback(
     (logType, jobId, setLogs, setIsLoading, isRefreshing = false) => {
@@ -666,7 +686,15 @@ function JobDetailsContent({
         active = false;
       };
     },
-    [isPending, isPreStart, isRecovering, hasReceivedFirstChunk, safeAbort]
+    [
+      isPending,
+      isPreStart,
+      isRecovering,
+      hasReceivedFirstChunk,
+      safeAbort,
+      scrollToBottom,
+      updateLogsWithBatching,
+    ]
   );
 
   // Fetch both logs and controller logs in parallel, regardless of activeTab
@@ -810,7 +838,7 @@ function JobDetailsContent({
       setIsRefreshingLogs(false);
       setIsRefreshingControllerLogs(false);
     };
-  }, [safeAbort]); // Empty dependency array means this runs only on unmount
+  }, [safeAbort, setIsLoadingLogs, setIsLoadingControllerLogs]); // Empty dependency array means this runs only on unmount
 
   // Handle page visibility changes to pause streaming when tab is not active
   useEffect(() => {
@@ -865,35 +893,17 @@ function JobDetailsContent({
     });
   }, [activeTab, logs, controllerLogs, scrollToBottom]);
 
-  // Performance-optimized log update function
-  const updateLogsWithBatching = useCallback(
-    (logType, newChunk) => {
-      const setLogsFunction = logType === 'logs' ? setLogs : setControllerLogs;
-
-      // Simple string append - no batching needed with backend tail
-      setLogsFunction((prevLogs) => prevLogs + newChunk);
-
-      // Auto-scroll after update
-      requestAnimationFrame(() => {
-        scrollToBottom(logType);
-      });
-    },
-    [scrollToBottom]
-  );
-
   if (activeTab === 'logs') {
     return (
       <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
         {isPending ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
-            <span>
-              Waiting for the job to start, please refresh after a while
-            </span>
+            <span>Waiting for the job to start; refresh in a few moments.</span>
           </div>
         ) : isRecovering ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>
-              Waiting for the job to recover, please refresh after a while
+              Waiting for the job to recover; refresh in a few moments.
             </span>
           </div>
         ) : hasReceivedFirstChunk || logs ? (
@@ -919,8 +929,8 @@ function JobDetailsContent({
         {isPreStart ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>
-              Waiting for the job controller process to start, please refresh
-              after a while
+              Waiting for the job controller process to start; refresh in a few
+              moments.
             </span>
           </div>
         ) : hasReceivedFirstChunk || controllerLogs ? (
@@ -954,7 +964,17 @@ function JobDetailsContent({
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">User</div>
-        <div className="text-base mt-1">{jobData.user}</div>
+        <div className="text-base mt-1">
+          <UserDisplay username={jobData.user} userHash={jobData.user_hash} />
+        </div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Submitted</div>
+        <div className="text-base mt-1">
+          {jobData.submitted_at
+            ? formatFullTimestamp(jobData.submitted_at)
+            : 'N/A'}
+        </div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">

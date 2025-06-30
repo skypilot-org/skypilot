@@ -12,8 +12,8 @@ on:
           - 'skypilot'
         default: 'skypilot-nightly'
       version:
-        description: 'SkyPilot version to build (optional, uses latest from PyPI if not specified)'
-        required: false
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
+        required: true
         type: string
   workflow_call:
     inputs:
@@ -22,7 +22,7 @@ on:
         required: true
         type: string
       version:
-        description: 'SkyPilot version to build (optional, uses latest from PyPI if not specified)'
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
         required: false
         type: string
     outputs:
@@ -36,46 +36,89 @@ on:
         required: true
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.latest_version }}
     steps:
+      # For manual trigger: checkout the repository
       - name: Checkout repository
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
 
-      - name: Find the release version
+      - name: Determine installation method
+        id: install_method
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "install_from_source=true" >> $GITHUB_OUTPUT
+            echo "Installing from source (manual trigger)"
+          else
+            echo "install_from_source=false" >> $GITHUB_OUTPUT
+            echo "Installing from wheel (pipeline trigger)"
+          fi
+
+      # For workflow trigger: download all artifacts
+      - name: Download artifacts
+        if: steps.install_method.outputs.install_from_source == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: skypilot-artifacts-${{ inputs.package_name }}
+          path: .
+
+      - name: Extract source tarball
+        if: steps.install_method.outputs.install_from_source == 'false'
+        run: |
+          # Find the tarball in dist directory
+          TARBALL=$(ls dist/skypilot-*.tar.gz)
+          if [ -z "$TARBALL" ]; then
+            echo "Error: No tarball found in dist directory"
+            exit 1
+          fi
+          # Extract to current directory
+          tar -xzf "$TARBALL" --strip-components=1
+
+      - name: Verify source code
+        run: |
+          if [ ! -f "setup.py" ]; then
+            echo "Error: Source code not properly prepared"
+            exit 1
+          fi
+
+      - name: Find and verify version
         id: version
         run: |
           if [ -n "${{ inputs.version }}" ]; then
-            # Use the provided version
+            # Use the provided version, manual trigger must specify the version
             echo "Using provided version: ${{ inputs.version }}"
             echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            sed -i "s/__version__ = '.*'/__version__ = '${{ inputs.version }}'/g" sky/__init__.py
           else
-            # Fetch package info from PyPI
-            echo "Fetching package info for ${{ inputs.package_name }}"
-            PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
-            # Parse JSON and get the latest version
-            LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
-            echo "Latest version found: $LATEST_VERSION"
-            echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            # Extract version from sky/__init__.py
+            VERSION=$(grep "__version__ = " sky/__init__.py | cut -d"'" -f2)
+            echo "Using version from source: $VERSION"
+            echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+
+          # Verify version is not exactly 1.0.0.dev
+          VERSION_TO_CHECK=$(cat $GITHUB_OUTPUT | grep "latest_version=" | cut -d"=" -f2)
+          if [[ "$VERSION_TO_CHECK" == "1.0.0.dev" ]]; then
+            echo "Error: Version cannot be exactly 1.0.0.dev"
+            exit 1
           fi
           cat $GITHUB_OUTPUT
 
-      - name: Update Dockerfile version
-        run: |
-          sed -i 's/skypilot-nightly\[all\]/${{ inputs.package_name }}[all]==${{ steps.version.outputs.latest_version }}/g' Dockerfile
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -83,5 +126,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest,${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ steps.version.outputs.latest_version }}"
+          build-args: |
+            INSTALL_FROM_SOURCE=${{ steps.install_method.outputs.install_from_source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

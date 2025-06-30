@@ -7,10 +7,10 @@ import webbrowser
 import click
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -22,11 +22,7 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
-    import requests
-
     import sky
-else:
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -86,12 +82,11 @@ def launch(
             task=dag_str,
             name=name,
         )
-        response = requests.post(
-            f'{server_common.get_server_url()}/jobs/launch',
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/jobs/launch',
             json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -146,12 +141,11 @@ def queue(refresh: bool,
         all_users=all_users,
         job_ids=job_ids,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/queue',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/queue',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
@@ -186,17 +180,17 @@ def cancel(
         all=all,
         all_users=all_users,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/cancel',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/cancel',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_on_server_unavailable()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,
@@ -236,15 +230,19 @@ def tail_logs(name: Optional[str] = None,
         refresh=refresh,
         tail=tail,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     request_id = server_common.get_request_id(response)
-    return sdk.stream_response(request_id, response, output_stream)
+    # Log request is idempotent when tail is 0, thus can resume previous
+    # streaming point on retry.
+    return sdk.stream_response(request_id=request_id,
+                               response=response,
+                               output_stream=output_stream,
+                               resumable=(tail == 0))
 
 
 @usage_lib.entrypoint
@@ -281,12 +279,11 @@ def download_logs(
         controller=controller,
         local_dir=local_dir,
     )
-    response = requests.post(
-        f'{server_common.get_server_url()}/jobs/download_logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/download_logs',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     job_id_remote_path_dict = sdk.stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(
