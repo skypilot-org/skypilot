@@ -55,74 +55,81 @@ def get_num_service_threshold():
     return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
 
 
-def _read_last_n_lines(file_handle: typing.TextIO,
+def _read_last_n_lines(file_path: str,
                        n: int,
-                       chunk_size: int = 8192) -> List[str]:
-    """Read the last N lines from a file without loading the entire file.
-    This reverse reads the file in chunks from the end,
-    which is much more memory-efficient than reading the entire file.
+                       chunk_size: int = 8192,
+                       encoding: str = 'utf-8',
+                       errors: str = 'replace') -> List[str]:
+    """Read the last N lines of a file.
+
     Args:
-        file_handle: Open file handle
-        n: Number of lines to read from the end
+        file_path: Path to the file to read.
+        n: Number of lines to read from the end of the file.
+        chunk_size: Size of chunks in bytes.
+        encoding: Encoding to use when decoding binary chunks.
+        errors: Error handling for decode errors (e.g., 'replace', 'ignore').
+
     Returns:
-        List of the last N lines (with newlines preserved)
+        A list of the last N lines, preserving newlines where applicable.
     """
-    assert n >= 0, 'number of lines must be a non-negative integer.'
-    assert chunk_size > 0, 'chunk size must be a positive integer.'
-    assert file_handle is not None, 'file handle must be provided.'
-
-    file_handle.seek(0, os.SEEK_END)  # Seek to end
-    if n == 0:
+    if n <= 0:
         return []
 
-    # Get file size
-    file_size = file_handle.tell()
+    if chunk_size <= 0:
+        raise ValueError('chunk_size must be positive.')
 
-    if file_size == 0:
-        return []
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f'File not found: {file_path}')
 
-    # Read backwards to find n newlines
-    buffer_size = min(chunk_size, file_size)
-    lines_found = 0
-    pos = file_size
-    chunks = []
+    try:
+        with open(file_path, 'rb') as f:
+            # Start reading from the end of the file
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            if file_size == 0:
+                return []
 
-    while pos > 0 and lines_found < n:
-        # Read chunk
-        read_size = min(buffer_size, pos)
-        pos -= read_size
-        file_handle.seek(pos)
-        chunk = file_handle.read(read_size)
-        chunks.append(chunk)
+            pos = file_size
+            lines_found = 0
+            chunks = []
 
-        # Count newlines in this chunk
-        lines_found += chunk.count('\n')
+            # Read backwards in chunks until we've found at least n newlines
+            while pos > 0 and lines_found <= n:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                chunk = f.read(read_size)
+                chunks.append(chunk)
+                lines_found += chunk.count(b'\n')
 
-    # Combine all chunks and split into lines
-    full_text = ''.join(reversed(chunks))
-    all_lines = full_text.split('\n')
+            # Combine all chunks in reverse order since we read backwards
+            full_bytes = b''.join(reversed(chunks))
 
-    # Get the last n lines, handling end-of-file properly
-    if all_lines and all_lines[-1] == '':
-        # File ends with newline, so last element is empty
-        result_lines = all_lines[-n - 1:-1]
-    else:
-        # File doesn't end with newline
-        result_lines = all_lines[-n:]
+            # Split by newline byte. Note: this handles '\n' endings.
+            all_lines = full_bytes.split(b'\n')
 
-    # Add newlines back (except the last line if file doesn't end with newline)
-    result = []
-    for i, line in enumerate(result_lines):
-        if i == len(result_lines) - 1 and (not all_lines or
-                                           all_lines[-1] != ''):
-            # Last line and file doesn't end with newline
-            result.append(line)
-        else:
-            result.append(line + '\n')
+            # Handle edge case: if file ends with a newline, last element is b''
+            if all_lines and all_lines[-1] == b'':
+                result_bytes = all_lines[-n - 1:-1]
+            else:
+                result_bytes = all_lines[-n:]
 
-    # Position file pointer at end
-    file_handle.seek(0, os.SEEK_END)
-    return result
+            # Decode each line and normalize CR/LF endings
+            decoded_lines = [
+                line.decode(encoding, errors=errors).rstrip('\r') + '\n'
+                for line in result_bytes[:-1]
+            ]
+
+            # Decode the final line — only add newline if it was present
+            last_line = result_bytes[-1].decode(encoding,
+                                                errors=errors).rstrip('\r')
+            decoded_lines.append(last_line)
+
+            return decoded_lines
+
+    except OSError as e:
+        raise RuntimeError(
+            f'Failed to read last {n} lines from {file_path}: {e}') from e
 
 
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
@@ -937,15 +944,13 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     total_lines_printed = 0
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
-        with open(log_file_name, 'r', encoding='utf-8') as f:
-            if tail is not None:
-                # Read only the last tail amount of lines from the file
-                lines = _read_last_n_lines(f, tail)
-                total_lines_printed += len(lines)
-                for line in lines:
-                    print(line, end='', flush=True)
-            else:
-                # Print all lines
+        if tail is not None:
+            lines = _read_last_n_lines(log_file_name, tail)
+            total_lines_printed += len(lines)
+            for line in lines:
+                print(line, end='', flush=True)
+        else:
+            with open(log_file_name, 'r', encoding='utf-8') as f:
                 print(f.read(), flush=True)
         return ''
 
@@ -971,13 +976,14 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
 
     # Handle launch logs based on number parameter
-    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        if tail is not None:
-            lines = _read_last_n_lines(f, tail - total_lines_printed)
-            total_lines_printed += len(lines)
-            for line in lines:
-                print(line, end='', flush=True)
-        else:
+    if tail is not None:
+        lines = _read_last_n_lines(launch_log_file_name,
+                                   tail - total_lines_printed)
+        total_lines_printed += len(lines)
+        for line in lines:
+            print(line, end='', flush=True)
+    else:
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
             for line in _follow_logs_with_provision_expanding(
                     f,
                     replica_cluster_name,
@@ -1035,15 +1041,15 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
 
-    with open(os.path.expanduser(log_file), 'r', newline='',
-              encoding='utf-8') as f:
-        if tail is not None:
-            # Efficiently read only the last tail amount of lines from the file
-            lines = _read_last_n_lines(f, tail)
-            for line in lines:
-                print(line, end='', flush=True)
-        else:
-            # Print all lines
+    if tail is not None:
+        lines = _read_last_n_lines(os.path.expanduser(log_file), tail)
+        for line in lines:
+            print(line, end='', flush=True)
+    else:
+        with open(os.path.expanduser(log_file),
+                  'r',
+                  newline='',
+                  encoding='utf-8') as f:
             for line in log_utils.follow_logs(
                     f,
                     should_stop=_service_is_terminal,
