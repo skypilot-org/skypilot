@@ -54,7 +54,8 @@ def test_unzip_file(skyignore_dir, tmp_path):
 
     # Create a temporary directory to unzip into
     with tempfile.TemporaryDirectory() as temp_dir:
-        temp_dir_path = pathlib.Path(temp_dir)
+        # Resolve the temp_dir to handle macOS symlinks (/var -> /private/var)
+        temp_dir_path = pathlib.Path(temp_dir).resolve()
 
         # Call server.unzip_file
         server.unzip_file(zip_path, temp_dir_path)
@@ -63,22 +64,31 @@ def test_unzip_file(skyignore_dir, tmp_path):
         assert not zip_path.exists()
 
         # Get list of files in original directory
+        # We need to recreate what would be in the zip file
         original_files = []
-        for root, dirs, files in os.walk(skyignore_dir):
+        for root, dirs, files in os.walk(skyignore_dir, followlinks=False):
             rel_root = os.path.relpath(root, skyignore_dir)
             if rel_root == '.':
                 rel_root = ''
 
+            # Prune dirs we shouldn't enter
+            dirs[:] = [
+                d for d in dirs if not storage_utils.is_path_excluded(
+                    os.path.join(root, d), skyignore_dir, excluded_files)
+            ]
+
             # Add directories
             for d in dirs:
                 path = os.path.join(rel_root, d).rstrip('/')
-                if path and path not in excluded_files:
+                if path:
                     original_files.append(path)
 
             # Add files
             for f in files:
-                path = os.path.join(rel_root, f)
-                if path not in excluded_files:
+                file_path = os.path.join(root, f)
+                if not storage_utils.is_path_excluded(file_path, skyignore_dir,
+                                                      excluded_files):
+                    path = os.path.join(rel_root, f)
                     original_files.append(path)
 
         # Get list of files in unzipped directory
@@ -86,7 +96,6 @@ def test_unzip_file(skyignore_dir, tmp_path):
         unzipped_dir = os.path.join(str(temp_dir_path),
                                     str(skyignore_dir).lstrip('/'))
         unzipped_dir = pathlib.Path(unzipped_dir)
-        print('unzipped_dir', unzipped_dir)
         for root, dirs, files in os.walk(unzipped_dir):
             rel_root = os.path.relpath(root, unzipped_dir)
             if rel_root == '.':

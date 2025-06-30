@@ -267,6 +267,41 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
     return excluded_paths
 
 
+def is_path_excluded(abs_path: str, base_path: str,
+                     patterns: List[str]) -> bool:
+    """Check if a path matches any exclusion pattern.
+
+    Args:
+        abs_path: Absolute path to check
+        base_path: Base directory path to calculate relative paths from
+        patterns: List of exclusion patterns (from skyignore/gitignore)
+
+    Returns:
+        True if the path should be excluded, False otherwise
+    """
+    rel = os.path.relpath(abs_path, base_path).replace(os.path.sep, '/')
+
+    for pattern in patterns:
+        pattern = pattern.rstrip('/')
+
+        # For ./ prefixed patterns, match against ./ + relative path
+        if pattern.startswith('./'):
+            path = './' + rel
+        else:
+            path = rel
+
+        # Special handling for wildcards without **
+        if '*' in pattern and '**' not in pattern:
+            # Ensure path depth matches pattern depth
+            if pattern.count('/') != path.count('/'):
+                continue
+
+        if fnmatch.fnmatch(path, pattern):
+            return True
+
+    return False
+
+
 def zip_files_and_folders(items: List[str],
                           output_file: Union[str, pathlib.Path],
                           log_file: Optional[TextIO] = None):
@@ -302,39 +337,11 @@ def zip_files_and_folders(items: List[str],
                 elif os.path.isdir(item):
                     excluded_patterns = get_excluded_files(item)
 
-                    def _is_excluded(
-                            abs_path: str,
-                            base_item: str = item,
-                            patterns: List[str] = excluded_patterns) -> bool:
-                        rel = os.path.relpath(abs_path, base_item).replace(
-                            os.path.sep, '/')
-
-                        for pattern in patterns:
-                            pattern = pattern.rstrip('/')
-
-                            # For ./ prefixed patterns, match against
-                            # ./ + relative path
-                            if pattern.startswith('./'):
-                                path = './' + rel
-                            else:
-                                path = rel
-
-                            # Special handling for wildcards without **
-                            if '*' in pattern and '**' not in pattern:
-                                # Ensure path depth matches pattern depth
-                                if pattern.count('/') != path.count('/'):
-                                    continue
-
-                            if fnmatch.fnmatch(path, pattern):
-                                return True
-
-                        return False
-
                     for root, dirs, files in os.walk(item, followlinks=False):
                         # prune dirs we shouldn't enter
                         dirs[:] = [
-                            d for d in dirs
-                            if not _is_excluded(os.path.join(root, d))
+                            d for d in dirs if not is_path_excluded(
+                                os.path.join(root, d), item, excluded_patterns)
                         ]
 
                         # record directories
@@ -348,7 +355,8 @@ def zip_files_and_folders(items: List[str],
 
                         for file in files:
                             file_path = os.path.join(root, file)
-                            if _is_excluded(file_path):
+                            if is_path_excluded(file_path, item,
+                                                excluded_patterns):
                                 continue
                             if os.path.islink(file_path):
                                 _store_symlink(zipf, file_path, is_dir=False)
