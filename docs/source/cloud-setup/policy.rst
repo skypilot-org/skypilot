@@ -36,7 +36,7 @@ The order of policy application is demonstrated below:
 
 .. note::
 
-    Client-side policy inherently lacks enforcement capability due to user ability to uninstall or modify them without administrative controls. But it is possible to use a client policy in conjunction with a server policy to enforce certain policies that can only be applied at client-side. Refer to :ref:`use-local-gcp-credentials-policy` for an example.
+    Client-side policy lacks enforcement capability, i.e., end-user may modify them. However, client policy is useful for automation that can only be applied at client-side. Refer to :ref:`use-local-gcp-credentials-policy` as an example.
 
 .. _server-side-admin-policy:
 
@@ -47,9 +47,9 @@ If you have a :ref:`centralized API server <sky-api-server>` deployed, you can e
 
 .. tab-set::
 
-  .. tab-item:: Use a RESTful policy server
+  .. tab-item:: Use a RESTful policy
   
-    Open the server's dashboard, go to :ref:`the server's SkyPilot config <sky-api-server-config>` and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the API URL of the policy server.
+    Open :ref:`SkyPilot dashboard <sky-api-server-config>` https://api.server.com/dashboard/config,  and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the URL of the RESTful policy. To host a RESTful policy, see :ref:`here <host-admin-policy-as-server>`.
 
     .. code-block:: yaml
 
@@ -107,7 +107,7 @@ Optionally, you can also apply different policies in different projects by lever
 
 .. note::
 
-    It is possible to call a RESTful policy at client-side. However, a RESTful policy is executed on the policy server host thus cannot access user's local environment inherently. If you want to apply a RESTful policy, it is recommended to install it at :ref:`server-side<server-side-admin-policy>` for better administrative control.
+    It is possible to call a RESTful policy at client-side. However, a RESTful policy is executed on the policy server host, i.e., cannot access user's local environment, e.g., local files.
 
 .. _host-admin-policy-as-server:
 
@@ -343,4 +343,6 @@ Specify the following config in :ref:`the SkyPilot config <config-yaml>` at the 
 
 Then specify the policy at the server with the same config, or call this policy in the :ref:`RESTful policy server <host-admin-policy-as-server>`.
 
-In the above example, the policy has to access the user's local environment to discover the user's GCP credentials and upload the credentials to the cluster by modifying the ``file_mounts`` field. So the key functionality of this policy must be executed as a client-side policy. In addition, when this policy is called at server-side, it will check whether a policy of the expected version has been applied at client-side and rejects the request if not. So the client-side application of the policy can be enforced on the server for non-malicious users.
+The policy above can access the user's local environment to discover the user's GCP credentials and upload the credentials to the cluster by modifying the ``file_mounts`` field. Note that the key functionality of this policy is executed as a client-side policy to discover the local credentials.
+
+When this policy is called at server-side, it will check whether a policy of the expected version has been applied at client-side and rejects the request if not.
