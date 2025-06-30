@@ -353,10 +353,10 @@ Use local GCP credentials for all tasks
 Add volumes to all tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/client_policy.py
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
     :pyobject: AddVolumesPolicy
-    :caption: `AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/client_policy.py>`_
+    :caption: `AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
 .. literalinclude:: ../../../examples/admin_policy/add_volumes.yaml
     :language: yaml
