@@ -75,15 +75,19 @@ def test_cookie_jar_file(set_api_cookie_jar):
 
 
 def test_api_info():
-    with mock.patch('sky.server.rest.get') as mock_get:
-        mock_get.return_value.json.return_value = {
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {
             "status": "healthy",
             "api_version": "1",
             "commit": "abc1234567890",
             "version": "1.0.0",
         }
-        mock_get.return_value.raise_for_status.return_value = None
-        mock_get.return_value.cookies = requests.cookies.RequestsCookieJar()
+        mock_response.raise_for_status.return_value = None
+        mock_response.cookies = requests.cookies.RequestsCookieJar()
+        mock_make_request.return_value = mock_response
+
         with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
                        ) as mock_server_healthy:
             mock_server_healthy.return_value = None
@@ -93,23 +97,24 @@ def test_api_info():
             assert response["api_version"] == "1"
             assert response["commit"] is not None
             assert response["version"] is not None
-            assert mock_get.call_count == 1
-            assert mock_get.call_args[0][0].endswith("/api/health")
-            assert mock_get.call_args[1]["cookies"] is not None
-            assert isinstance(mock_get.call_args[1]["cookies"],
-                              requests.cookies.RequestsCookieJar)
+            assert mock_make_request.call_count == 1
+            assert mock_make_request.call_args[0] == ('GET', '/api/health')
 
 
 def test_api_info_with_cookie_file(set_api_cookie_jar):
-    with mock.patch('sky.server.rest.get') as mock_get:
-        mock_get.return_value.json.return_value = {
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {
             "status": "healthy",
             "api_version": "1",
             "commit": "abc1234567890",
             "version": "1.0.0",
         }
-        mock_get.return_value.raise_for_status.return_value = None
-        mock_get.return_value.cookies = requests.cookies.RequestsCookieJar()
+        mock_response.raise_for_status.return_value = None
+        mock_response.cookies = requests.cookies.RequestsCookieJar()
+        mock_make_request.return_value = mock_response
+
         with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
                        ) as mock_server_healthy:
             mock_server_healthy.return_value = None
@@ -119,13 +124,8 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
             assert response["api_version"] == "1"
             assert response["commit"] is not None
             assert response["version"] is not None
-            assert mock_get.call_count == 1
-            assert mock_get.call_args[0][0].endswith("/api/health")
-            assert mock_get.call_args[1]["cookies"] is not None
-            assert isinstance(mock_get.call_args[1]["cookies"],
-                              requests.cookies.RequestsCookieJar)
-            assert mock_get.call_args[1]["cookies"].get(
-                "user_name", domain="api.skypilot.co") == "sky-user"
+            assert mock_make_request.call_count == 1
+            assert mock_make_request.call_args[0] == ('GET', '/api/health')
 
 
 def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -147,7 +147,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         assert config_path.exists()
         config = skypilot_config.get_user_config()
         assert config["api_server"]["endpoint"] == test_endpoint
-        mock_check.assert_called_once_with(test_endpoint)
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls(
+            [mock.call(test_endpoint),
+             mock.call(test_endpoint)])
 
     # Test with existing config
     test_endpoint_2 = "http://test2.skypilot.co"
@@ -162,7 +166,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         # Verify the endpoint is updated in config file
         config = skypilot_config.get_user_config()
         assert config["api_server"]["endpoint"] == test_endpoint_2
-        mock_check.assert_called_once_with(test_endpoint_2)
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls(
+            [mock.call(test_endpoint_2),
+             mock.call(test_endpoint_2)])
 
     # Test with invalid endpoint
     with pytest.raises(click.BadParameter):
@@ -180,7 +188,12 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         config = skypilot_config.get_user_config()
         # Endpoint should be stored without the trailing slash
         assert config["api_server"]["endpoint"] == "http://test3.skypilot.co"
-        mock_check.assert_called_once_with("http://test3.skypilot.co")
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls([
+            mock.call("http://test3.skypilot.co"),
+            mock.call("http://test3.skypilot.co")
+        ])
 
     # Test with https endpoint
     test_https_endpoint = "https://secure.skypilot.co"
@@ -193,7 +206,11 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         client_sdk.api_login(test_https_endpoint)
         config = skypilot_config.get_user_config()
         assert config["api_server"]["endpoint"] == test_https_endpoint
-        mock_check.assert_called_once_with(test_https_endpoint)
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls(
+            [mock.call(test_https_endpoint),
+             mock.call(test_https_endpoint)])
 
     # Test with https endpoint ending with a slash
     test_https_endpoint_with_slash = "https://secure.skypilot.co/"
@@ -207,7 +224,12 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         config = skypilot_config.get_user_config()
         # Endpoint should be stored without the trailing slash
         assert config["api_server"]["endpoint"] == "https://secure.skypilot.co"
-        mock_check.assert_called_once_with("https://secure.skypilot.co")
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls([
+            mock.call("https://secure.skypilot.co"),
+            mock.call("https://secure.skypilot.co")
+        ])
 
     # Test with endpoint containing port number
     test_endpoint_with_port = "http://localhost:8080"
@@ -220,7 +242,12 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         client_sdk.api_login(test_endpoint_with_port)
         config = skypilot_config.get_user_config()
         assert config["api_server"]["endpoint"] == test_endpoint_with_port
-        mock_check.assert_called_once_with(test_endpoint_with_port)
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls([
+            mock.call(test_endpoint_with_port),
+            mock.call(test_endpoint_with_port)
+        ])
 
     # Test with endpoint containing port number and trailing slash
     test_endpoint_with_port_slash = "http://localhost:8080/"
@@ -238,7 +265,12 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         config = skypilot_config.get_user_config()
         # Endpoint should be stored without the trailing slash
         assert config["api_server"]["endpoint"] == "http://localhost:8080"
-        mock_check.assert_called_once_with("http://localhost:8080")
+        # Check that server health is called twice: once during auth flow, once for identity
+        assert mock_check.call_count == 2
+        mock_check.assert_has_calls([
+            mock.call("http://localhost:8080"),
+            mock.call("http://localhost:8080")
+        ])
 
 
 class MockRetryContext:

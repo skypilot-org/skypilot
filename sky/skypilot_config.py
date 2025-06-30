@@ -369,6 +369,34 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
+def get_effective_region_config(
+        cloud: str,
+        keys: Tuple[str, ...],
+        region: Optional[str] = None,
+        default_value: Optional[Any] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns the nested key value by reading from config
+    Order to get the property_name value:
+    1. if region is specified,
+       try to get the value from <cloud>/<region_key>/<region>/keys
+    2. if no region or no override,
+       try to get it at the cloud level <cloud>/keys
+    3. if not found at cloud level,
+       return either default_value if specified or None
+
+    Note: This function currently only supports getting region-specific
+    config from "kubernetes" cloud. For other clouds, this function behaves
+    identically to get_nested().
+    """
+    return config_utils.get_cloud_config_value_from_dict(
+        dict_config=_get_loaded_config(),
+        cloud=cloud,
+        keys=keys,
+        region=region,
+        default_value=default_value,
+        override_configs=override_configs)
+
+
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
     """Returns the workspace config."""
@@ -477,10 +505,10 @@ def overlay_skypilot_config(
 def safe_reload_config() -> None:
     """Reloads the config, safe to be called concurrently."""
     with filelock.FileLock(get_skypilot_config_lock_path()):
-        _reload_config()
+        reload_config()
 
 
-def _reload_config() -> None:
+def reload_config() -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
@@ -564,7 +592,10 @@ def _reload_config_as_server() -> None:
     _set_loaded_config_path(None)
 
     server_config_path = _resolve_server_config_path()
+    db_url_from_env = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     server_config = _get_config_from_path(server_config_path)
+    if db_url_from_env:
+        server_config.set_nested(('db',), db_url_from_env)
 
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
@@ -638,7 +669,7 @@ def loaded_config_path_serialized() -> Optional[str]:
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
-_reload_config()
+reload_config()
 
 
 def loaded() -> bool:
@@ -861,4 +892,4 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             config_map_utils.patch_configmap_with_config(
                 config, global_config_path)
 
-    _reload_config()
+    reload_config()

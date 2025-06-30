@@ -15,6 +15,7 @@ Example usage:
 - :ref:`enforce-autostop-policy`
 - :ref:`dynamic-kubernetes-contexts-update-policy`
 - :ref:`use-local-gcp-credentials-policy`
+- :ref:`add-volumes-policy`
 
 Overview
 --------
@@ -343,6 +344,19 @@ Specify the following config in :ref:`the SkyPilot config <config-yaml>` at the 
 
 Then specify the policy at the server with the same config, or call this policy in the :ref:`RESTful policy server <host-admin-policy-as-server>`.
 
-The policy above can access the user's local environment to discover the user's GCP credentials and upload the credentials to the cluster by modifying the ``file_mounts`` field. Note that the key functionality of this policy is executed as a client-side policy to discover the local credentials.
+    This policy only take effects when applied at :ref:`client-side <client-side-admin-policy>`. Use this policy at the :ref:`server-side <server-side-admin-policy>` will be a no-op.
 
-When this policy is called at server-side, it will check whether a policy of the expected version has been applied at client-side and rejects the request if not.
+.. _add-volumes-policy:
+
+Add volumes to all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: AddVolumesPolicy
+    :caption: `AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/add_volumes.yaml
+    :language: yaml
+    :caption: `Config YAML for using AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/add_volumes.yaml>`_
+

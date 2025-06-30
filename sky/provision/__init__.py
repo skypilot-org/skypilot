@@ -6,8 +6,9 @@ providers supported by SkyPilot need to follow.
 import functools
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
+from sky import models
 from sky import sky_logging
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
@@ -99,6 +100,39 @@ def bootstrap_instances(
     configurations etc. These resources tend to be free or very cheap,
     but it takes time to set them up from scratch. So we generally
     cache or reuse them when possible.
+    """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def apply_volume(provider_name: str,
+                 volume_config: models.VolumeConfig) -> models.VolumeConfig:
+    """Create or register a volume.
+
+    This function creates or registers a volume with the provided configuration,
+    and returns a VolumeConfig object with updated configuration.
+    """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def delete_volume(provider_name: str,
+                  volume_config: models.VolumeConfig) -> models.VolumeConfig:
+    """Delete a volume."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def get_volume_usedby(
+    provider_name: str,
+    volume_config: models.VolumeConfig,
+) -> Tuple[List[str], List[str]]:
+    """Get the usedby of a volume.
+
+    Returns:
+        usedby_pods: List of pods using the volume. These may include pods
+                     not created by SkyPilot.
+        usedby_clusters: List of clusters using the volume.
     """
     raise NotImplementedError
 

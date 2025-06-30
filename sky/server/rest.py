@@ -64,8 +64,9 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             msg = (
-                f'{colorama.Fore.YELLOW}API server is temporarily: upgrade in '
-                f'progress. Waiting to resume...{colorama.Style.RESET_ALL}')
+                f'{colorama.Fore.YELLOW}API server is temporarily unavailable: '
+                'upgrade in progress. Waiting to resume...'
+                f'{colorama.Style.RESET_ALL}')
             backoff = common_utils.Backoff(
                 initial_backoff=initial_backoff,
                 max_backoff_factor=max_backoff_factor)
@@ -128,25 +129,16 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 
 
 @retry_on_server_unavailable()
-def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
-    """Send a POST request to the API server, retry on server temporarily
+def request(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server, retry on server temporarily
     unavailable."""
-    response = requests.post(url, data=data, json=json, **kwargs)
+    response = requests.request(method, url, **kwargs)
     handle_server_unavailable(response)
     return response
 
 
-@retry_on_server_unavailable()
-def get(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server, retry on server temporarily
-    unavailable."""
-    response = requests.get(url, params=params, **kwargs)
-    handle_server_unavailable(response)
-    return response
-
-
-def get_without_retry(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server without retry."""
-    response = requests.get(url, params=params, **kwargs)
+def request_without_retry(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server without retry."""
+    response = requests.request(method, url, **kwargs)
     handle_server_unavailable(response)
     return response

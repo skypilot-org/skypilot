@@ -222,6 +222,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         status: job.status,
         job: job.job_name,
         user: job.username,
+        user_hash: job.user_hash,
         gpus: job.accelerators || {},
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)

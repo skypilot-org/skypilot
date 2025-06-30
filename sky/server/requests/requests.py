@@ -335,6 +335,24 @@ def refresh_cluster_status_event():
         time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+def refresh_volume_status_event():
+    """Periodically refresh the volume status."""
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes.server import core
+
+    # Disable logging for periodic refresh to avoid the usage message being
+    # sent multiple times.
+    os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
+
+    while True:
+        logger.info('=== Refreshing volume status ===')
+        core.volume_refresh()
+        logger.info('Volume status refreshed. Sleeping '
+                    f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
+                    ' seconds for the next refresh...\n')
+        time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
+
+
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
@@ -357,9 +375,28 @@ def managed_job_status_refresh_event():
 
 @dataclasses.dataclass
 class InternalRequestDaemon:
+    """Internal daemon that runs an event in the background."""
+
     id: str
     name: str
     event_fn: Callable[[], None]
+
+    def run_event(self):
+        """Run the event."""
+        while True:
+            with ux_utils.enable_traceback():
+                try:
+                    self.event_fn()
+                    break
+                except Exception:  # pylint: disable=broad-except
+                    # It is OK to fail to run the event, as the event is not
+                    # critical, but we should log the error.
+                    logger.exception(
+                        f'Error running {self.name} event. '
+                        f'Restarting in '
+                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
+                        'seconds...')
+                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.
@@ -370,6 +407,10 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
                           event_fn=refresh_cluster_status_event),
+    # Volume status refresh daemon to update the volume status periodically.
+    InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
+                          name='volume',
+                          event_fn=refresh_volume_status_event),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
                           name='managed-job-status',
                           event_fn=managed_job_status_refresh_event),
