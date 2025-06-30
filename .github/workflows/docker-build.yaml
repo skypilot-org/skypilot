@@ -58,7 +58,7 @@ jobs:
         if: steps.install_method.outputs.install_from_source == 'false'
         uses: actions/download-artifact@v4
         with:
-          name: skypilot-artifacts
+          name: skypilot-artifacts-${{ inputs.package_name }}
           path: .
 
       - name: Extract source tarball
