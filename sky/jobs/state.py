@@ -1157,13 +1157,12 @@ def get_latest_task_id_status(
 
 
 def get_job_controller_pid(job_id: int) -> Optional[int]:
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        pid = cursor.execute(
-            """\
-            SELECT controller_pid FROM job_info WHERE spot_job_id=(?)""",
-            (job_id,)).fetchone()
-        return pid[0]
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        pid = session.execute(
+            sqlalchemy.select(job_info_table.c.controller_pid).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        return pid[0] if pid else None
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
