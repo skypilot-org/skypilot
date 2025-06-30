@@ -251,6 +251,6 @@ def command_hint_messages(hint_type: CommandHintType,
                 f'\n{INDENT_SYMBOL}To view all managed jobs:\t\t'
                 f'{BOLD}sky jobs queue{RESET_BOLD}'
                 f'\n{INDENT_LAST_SYMBOL}To view managed job dashboard:\t\t'
-                f'{BOLD}sky jobs dashboard{RESET_BOLD}')
+                f'{BOLD}sky dashboard{RESET_BOLD}')
     else:
         raise ValueError(f'Invalid hint type: {hint_type}')
