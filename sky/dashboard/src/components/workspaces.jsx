@@ -380,6 +380,10 @@ export function Workspaces() {
   const [userRoleCache, setUserRoleCache] = useState(null);
   const [roleLoading, setRoleLoading] = useState(false);
 
+  // Top-level error and success states
+  const [topLevelError, setTopLevelError] = useState(null);
+  const [topLevelSuccess, setTopLevelSuccess] = useState(null);
+
   const router = useRouter();
   const isMobile = useMobile();
 
@@ -593,6 +597,12 @@ export function Workspaces() {
     setDeleteState((prev) => ({ ...prev, deleting: true, error: null }));
     try {
       await deleteWorkspace(deleteState.workspaceToDelete);
+
+      // Show success message at top level
+      setTopLevelSuccess(
+        `Workspace "${deleteState.workspaceToDelete}" deleted successfully!`
+      );
+
       setDeleteState({
         confirmOpen: false,
         workspaceToDelete: null,
@@ -606,11 +616,14 @@ export function Workspaces() {
       await fetchData(true); // Show loading during refresh
     } catch (error) {
       console.error('Error deleting workspace:', error);
+
+      // Keep dialog open and show error at top level for better UX
       setDeleteState((prev) => ({
         ...prev,
         deleting: false,
-        error: error,
+        error: null,
       }));
+      setTopLevelError(error);
     }
   };
 
@@ -659,6 +672,60 @@ export function Workspaces() {
 
   return (
     <div>
+      {/* Error/Success messages positioned at top right, below navigation bar */}
+      <div className="fixed top-20 right-4 z-[9999] max-w-md">
+        {topLevelSuccess && (
+          <div className="bg-green-50 border border-green-200 rounded p-4 mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg
+                    className="h-5 w-5 text-green-400"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-green-800">
+                    {topLevelSuccess}
+                  </p>
+                </div>
+              </div>
+              <div className="ml-auto pl-3">
+                <button
+                  type="button"
+                  onClick={() => setTopLevelSuccess(null)}
+                  className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100"
+                >
+                  <span className="sr-only">Dismiss</span>
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <ErrorDisplay
+          error={topLevelError}
+          title="Error"
+          onDismiss={() => setTopLevelError(null)}
+        />
+      </div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
@@ -766,9 +833,12 @@ export function Workspaces() {
       {/* Permission Denial Dialog */}
       <Dialog
         open={permissionDenialState.open}
-        onOpenChange={(open) =>
-          setPermissionDenialState((prev) => ({ ...prev, open }))
-        }
+        onOpenChange={(open) => {
+          setPermissionDenialState((prev) => ({ ...prev, open }));
+          if (!open) {
+            setTopLevelError(null);
+          }
+        }}
       >
         <DialogContent className="sm:max-w-md transition-all duration-200 ease-in-out">
           <DialogHeader>
@@ -808,7 +878,14 @@ export function Workspaces() {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteState.confirmOpen} onOpenChange={handleCancelDelete}>
+      <Dialog
+        open={deleteState.confirmOpen}
+        onOpenChange={(open) => {
+          if (open) return;
+          handleCancelDelete();
+          setTopLevelError(null);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Workspace</DialogTitle>
@@ -818,14 +895,6 @@ export function Workspaces() {
               undone.
             </DialogDescription>
           </DialogHeader>
-
-          <ErrorDisplay
-            error={deleteState.error}
-            title="Deletion Failed"
-            onDismiss={() =>
-              setDeleteState((prev) => ({ ...prev, error: null }))
-            }
-          />
 
           <DialogFooter>
             <Button

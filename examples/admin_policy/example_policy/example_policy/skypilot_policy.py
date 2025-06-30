@@ -200,3 +200,17 @@ class DynamicKubernetesContextsUpdatePolicy(sky.AdminPolicy):
         config.set_nested(('kubernetes', 'allowed_contexts'), allowed_contexts)
         return sky.MutatedUserRequest(task=user_request.task,
                                       skypilot_config=config)
+
+
+class AddVolumesPolicy(sky.AdminPolicy):
+    """Example policy: add volumes to the task."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        task = user_request.task
+        # Use `task.set_volumes` to set the volumes.
+        # Or use `task.update_volumes` to update in-place
+        # instead of overwriting.
+        task.set_volumes({'/mnt/data0': 'pvc0'})
+        return sky.MutatedUserRequest(task, user_request.skypilot_config)

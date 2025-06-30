@@ -6,6 +6,8 @@ import getpass
 import os
 from typing import Any, Dict, Optional
 
+import pydantic
+
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -18,6 +20,18 @@ class User:
     # Display name of the user
     name: Optional[str] = None
     password: Optional[str] = None
+    created_at: Optional[int] = None
+
+    def __init__(
+            self,
+            id: str,  # pylint: disable=redefined-builtin
+            name: Optional[str] = None,
+            password: Optional[str] = None,
+            created_at: Optional[int] = None):
+        self.id = id.strip().lower()
+        self.name = name
+        self.password = password
+        self.created_at = created_at
 
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
@@ -34,6 +48,10 @@ class User:
         user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
         user_hash = common_utils.get_user_hash()
         return User(id=user_hash, name=user_name)
+
+    def is_service_account(self) -> bool:
+        """Check if the user is a service account."""
+        return self.id.lower().startswith('sa-')
 
 
 RealtimeGpuAvailability = collections.namedtuple(
@@ -78,3 +96,15 @@ class KubernetesNodesInfo:
             },
             hint=data['hint'],
         )
+
+
+class VolumeConfig(pydantic.BaseModel):
+    """Configuration for creating a volume."""
+    name: str
+    type: str
+    cloud: str
+    region: Optional[str]
+    zone: Optional[str]
+    name_on_cloud: str
+    size: Optional[str]
+    config: Dict[str, Any] = {}

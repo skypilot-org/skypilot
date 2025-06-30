@@ -733,7 +733,11 @@ def _setup_proxy_command_on_controller(
     config = config_utils.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
-    ssh_proxy_command = config.get_nested(proxy_command_key, None)
+    ssh_proxy_command = skypilot_config.get_effective_region_config(
+        cloud=str(controller_launched_cloud).lower(),
+        region=None,
+        keys=('ssh_proxy_command',),
+        default_value=None)
     if isinstance(ssh_proxy_command, str):
         config.set_nested(proxy_command_key, None)
     elif isinstance(ssh_proxy_command, dict):

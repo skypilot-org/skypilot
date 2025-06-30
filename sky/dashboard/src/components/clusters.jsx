@@ -55,6 +55,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -771,7 +772,10 @@ export function ClusterTable({
                         </Link>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        {item.user}
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <Link

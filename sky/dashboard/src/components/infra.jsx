@@ -6,7 +6,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
-import { RotateCwIcon, SearchIcon, XIcon } from 'lucide-react';
+import {
+  RotateCwIcon,
+  SearchIcon,
+  XIcon,
+  PlusIcon,
+  EditIcon,
+  TrashIcon,
+  PlayIcon,
+} from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import {
   checkGrafanaAvailability,
@@ -17,12 +25,33 @@ import {
 import { getInfraData } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  getSSHNodePools,
+  updateSSHNodePools,
+  deleteSSHNodePool,
+  deploySSHNodePool,
+  sshDownNodePool,
+  getSSHNodePoolStatus,
+  streamSSHDeploymentLogs,
+  streamSSHOperationLogs,
+} from '@/data/connectors/ssh-node-pools';
+import { SSHNodePoolModal } from '@/components/ssh-node-pool-modal';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
+import { Card } from '@/components/ui/card';
 
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -40,6 +69,7 @@ export function InfrastructureSection({
   handleContextClick,
   contextStats = {},
   isSSH = false, // To differentiate between SSH and Kubernetes
+  actionButton = null, // Optional action button for the header
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -64,7 +94,10 @@ export function InfrastructureSection({
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
-          <h3 className="text-lg font-semibold mb-4">{title}</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            {actionButton}
+          </div>
           <p className="text-sm text-gray-500">
             No {title} found or {title} is not configured.
           </p>
@@ -77,18 +110,21 @@ export function InfrastructureSection({
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
-          <div className="flex items-center mb-4">
-            <h3 className="text-lg font-semibold">{title}</h3>
-            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {safeContexts.length}{' '}
-              {safeContexts.length === 1
-                ? isSSH
-                  ? 'pool'
-                  : 'context'
-                : isSSH
-                  ? 'pools'
-                  : 'contexts'}
-            </span>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <h3 className="text-lg font-semibold">{title}</h3>
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                {safeContexts.length}{' '}
+                {safeContexts.length === 1
+                  ? isSSH
+                    ? 'pool'
+                    : 'context'
+                  : isSSH
+                    ? 'pools'
+                    : 'contexts'}
+              </span>
+            </div>
+            {actionButton}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -191,7 +227,7 @@ export function InfrastructureSection({
                               </span>
                             )}
                           </td>
-                          <td className="p-3">{(nodes || []).length}</td>
+                          <td className="p-3">{nodes.length}</td>
                           <td className="p-3">{gpuTypes || '-'}</td>
                           <td className="p-3">{totalGpus}</td>
                         </tr>
@@ -647,6 +683,701 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
   );
 }
 
+// SSH Node Pool Details component
+function SSHNodePoolDetails({
+  poolName,
+  gpusInContext,
+  nodesInContext,
+  handleDeploySSHPool,
+  handleEditSSHPool,
+  handleDeleteSSHPool,
+  poolConfig,
+}) {
+  const [statusData, setStatusData] = useState(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    action: null, // 'deploy', 'repair', or 'delete'
+    loading: false,
+  });
+
+  // Deployment streaming dialog state
+  const [streamingDialog, setStreamingDialog] = useState({
+    isOpen: false,
+    logs: '',
+    isStreaming: false,
+    deploymentComplete: false,
+    deploymentSuccess: false,
+    requestId: null,
+  });
+
+  // Fetch status when component mounts
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        setStatusLoading(true);
+        const status = await getSSHNodePoolStatus(poolName);
+        setStatusData(status);
+      } catch (error) {
+        console.error('Failed to fetch SSH Node Pool status:', error);
+        setStatusData({
+          pool_name: poolName,
+          status: 'Error',
+          reason: 'Failed to fetch status',
+        });
+      } finally {
+        setStatusLoading(false);
+      }
+    };
+
+    fetchStatus();
+  }, [poolName]);
+
+  const StatusBadge = ({ status, reason }) => {
+    const isReady = status === 'Ready';
+    const isNotReady = status === 'Not Ready';
+    const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
+    const textColor = isReady ? 'text-green-800' : 'text-red-800';
+
+    // Show helpful hint for "Not Ready" status
+    const displayReason = isNotReady
+      ? 'Click Deploy to set up this node pool'
+      : reason;
+
+    return (
+      <div className="flex items-center space-x-2">
+        <span
+          className={`px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}`}
+        >
+          {status}
+        </span>
+        {!isReady && displayReason && (
+          <span className="text-sm text-gray-600">({displayReason})</span>
+        )}
+      </div>
+    );
+  };
+
+  // Clean up SSH deployment logs
+  const cleanSSHDeploymentLogs = (logs) => {
+    if (!logs) return '';
+
+    return logs
+      .split('\n')
+      .map((line) => {
+        // Remove ANSI escape codes
+        line = line.replace(/\x1b\[[0-9;]*m/g, '');
+
+        // Skip debug lines (starting with D)
+        if (line.match(/^D \d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
+          return null;
+        }
+
+        // Clean up tree characters and extra formatting
+        line = line.replace(/├──/g, '├─');
+        line = line.replace(/└──/g, '└─');
+
+        return line;
+      })
+      .filter((line) => line !== null && line.trim() !== '')
+      .join('\n');
+  };
+
+  const handleEditClick = () => {
+    console.log('Edit button clicked for pool:', poolName);
+    console.log('Pool config:', poolConfig);
+    console.log('handleEditSSHPool function:', handleEditSSHPool);
+    if (handleEditSSHPool) {
+      handleEditSSHPool(poolName, poolConfig);
+    } else {
+      console.error('handleEditSSHPool function not provided');
+    }
+  };
+
+  // Determine button states based on status
+  const getButtonStates = () => {
+    if (!statusData) {
+      return {
+        deployDisabled: true,
+      };
+    }
+
+    const status = statusData.status;
+
+    if (status === 'Ready') {
+      return {
+        deployDisabled: true,
+      };
+    } else if (status === 'Error') {
+      return {
+        deployDisabled: true,
+      };
+    } else {
+      // Not Ready or other status
+      return {
+        deployDisabled: false,
+      };
+    }
+  };
+
+  const { deployDisabled } = getButtonStates();
+
+  const handleDeployClick = () => {
+    setConfirmDialog({
+      isOpen: true,
+      action: 'deploy',
+      loading: false,
+    });
+  };
+
+  const handleDeleteClick = () => {
+    setConfirmDialog({
+      isOpen: true,
+      action: 'delete',
+      loading: false,
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    setConfirmDialog({ ...confirmDialog, loading: true });
+
+    try {
+      if (confirmDialog.action === 'deploy') {
+        // Hide confirmation dialog and show streaming dialog
+        setConfirmDialog({ isOpen: false, action: null, loading: false });
+        setStreamingDialog({
+          isOpen: true,
+          logs: '',
+          isStreaming: true,
+          deploymentComplete: false,
+          deploymentSuccess: false,
+          requestId: null,
+        });
+
+        try {
+          const response = await handleDeploySSHPool(poolName);
+          const requestId = response.request_id;
+
+          setStreamingDialog((prev) => ({ ...prev, requestId }));
+
+          // Create an AbortController for this streaming session
+          const abortController = new AbortController();
+
+          await streamSSHDeploymentLogs({
+            requestId,
+            signal: abortController.signal,
+            onNewLog: (log) => {
+              setStreamingDialog((prev) => ({
+                ...prev,
+                logs: prev.logs + log,
+              }));
+            },
+          });
+
+          // Deployment completed successfully
+          setStreamingDialog((prev) => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: true,
+          }));
+
+          // Refresh status after successful deployment
+          setTimeout(async () => {
+            const fetchStatus = async () => {
+              try {
+                const status = await getSSHNodePoolStatus(poolName);
+                setStatusData(status);
+              } catch (error) {
+                console.error(
+                  'Failed to fetch SSH Node Pool status after deployment:',
+                  error
+                );
+              }
+            };
+            fetchStatus();
+          }, 1000);
+        } catch (error) {
+          console.error('Deployment failed:', error);
+          setStreamingDialog((prev) => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: false,
+            logs: prev.logs + `\nDeployment failed: ${error.message}`,
+          }));
+        }
+      } else if (confirmDialog.action === 'delete') {
+        // Hide confirmation dialog and show streaming dialog
+        setConfirmDialog({ isOpen: false, action: null, loading: false });
+        setStreamingDialog({
+          isOpen: true,
+          logs: '',
+          isStreaming: true,
+          deploymentComplete: false,
+          deploymentSuccess: false,
+          requestId: null,
+        });
+
+        try {
+          // Step 1: Call sshDownNodePool to get request_id for streaming
+          const downResponse = await sshDownNodePool(poolName);
+          const requestId = downResponse.request_id;
+
+          setStreamingDialog((prev) => ({ ...prev, requestId }));
+
+          if (requestId) {
+            // Stream the down operation logs
+            await streamSSHOperationLogs({
+              requestId,
+              signal: null, // No abort signal for now
+              onNewLog: (log) => {
+                setStreamingDialog((prev) => ({
+                  ...prev,
+                  logs: prev.logs + log,
+                }));
+              },
+              operationType: 'down',
+            });
+          }
+
+          // Step 2: After streaming completes, call the parent's delete handler
+          // which will handle the actual deletion and navigation
+          await handleDeleteSSHPool(poolName);
+
+          // Down operation completed successfully
+          setStreamingDialog((prev) => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: true,
+            logs:
+              prev.logs + '\nSSH Node Pool teardown completed successfully.',
+          }));
+        } catch (error) {
+          console.error('Down operation failed:', error);
+          setStreamingDialog((prev) => ({
+            ...prev,
+            isStreaming: false,
+            deploymentComplete: true,
+            deploymentSuccess: false,
+            logs: prev.logs + `\nTeardown failed: ${error.message}`,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Action failed:', error);
+      setConfirmDialog({ ...confirmDialog, loading: false });
+    }
+  };
+
+  const handleCancelAction = () => {
+    setConfirmDialog({ isOpen: false, action: null, loading: false });
+  };
+
+  const handleCloseStreamingDialog = () => {
+    setStreamingDialog({
+      isOpen: false,
+      logs: '',
+      isStreaming: false,
+      deploymentComplete: false,
+      deploymentSuccess: false,
+      requestId: null,
+    });
+
+    // Refresh status after deployment
+    if (streamingDialog.deploymentComplete) {
+      setTimeout(() => {
+        const fetchStatus = async () => {
+          try {
+            const status = await getSSHNodePoolStatus(poolName);
+            setStatusData(status);
+          } catch (error) {
+            console.error('Failed to refresh status:', error);
+          }
+        };
+        fetchStatus();
+      }, 1000);
+    }
+  };
+
+  const getDialogContent = () => {
+    if (confirmDialog.action === 'deploy') {
+      return {
+        title: 'Deploy SSH Node Pool',
+        description: `Are you sure you want to deploy SSH Node Pool "${poolName}"?`,
+        details: [
+          '• Set up SkyPilot runtime on the configured SSH hosts',
+          '• Install required components and dependencies',
+          '• Make the node pool available for workloads',
+          '',
+          'This process may take a few minutes to complete.',
+        ],
+      };
+    } else {
+      return {
+        title: 'Delete SSH Node Pool',
+        description: `Are you sure you want to delete SSH Node Pool "${poolName}"?`,
+        details: [
+          '• Clean up any deployed resources',
+          '• Remove the SSH Node Pool configuration',
+        ],
+      };
+    }
+  };
+
+  const dialogContent = getDialogContent();
+
+  return (
+    <div>
+      {/* SSH Node Pool Info Card */}
+      <div className="mb-6">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex items-center justify-between px-4 pt-4">
+            <h3 className="text-lg font-semibold">SSH Node Pool Details</h3>
+            <div className="flex items-center space-x-2">
+              <button
+                className={`px-3 py-1 text-sm border rounded flex items-center ${
+                  deployDisabled
+                    ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                }`}
+                onClick={deployDisabled ? undefined : handleDeployClick}
+                disabled={deployDisabled}
+              >
+                <PlayIcon className="w-4 h-4 mr-2" />
+                Deploy
+              </button>
+              <button
+                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
+                onClick={handleDeleteClick}
+              >
+                <TrashIcon className="w-4 h-4 mr-2" />
+                Delete
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Pool Name
+                </div>
+                <div className="text-base mt-1">{poolName}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">Nodes</div>
+                <div className="text-base mt-1">
+                  {nodesInContext ? nodesInContext.length : 0}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
+                <div className="text-base mt-1">
+                  {statusLoading ? (
+                    <div className="flex items-center">
+                      <CircularProgress size={16} className="mr-2" />
+                      <span className="text-gray-500">Loading...</span>
+                    </div>
+                  ) : statusData ? (
+                    <StatusBadge
+                      status={statusData.status}
+                      reason={statusData.reason}
+                    />
+                  ) : (
+                    <span className="text-gray-500">Unknown</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* GPU and Node Details */}
+      <ContextDetails
+        contextName={`ssh-${poolName}`}
+        gpusInContext={gpusInContext}
+        nodesInContext={nodesInContext}
+      />
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmDialog.isOpen} onOpenChange={handleCancelAction}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="">
+            <DialogTitle className="">{dialogContent.title}</DialogTitle>
+            <DialogDescription className="">
+              {dialogContent.description}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="text-sm text-gray-600 space-y-1">
+              <p className="font-medium mb-2">This will:</p>
+              {dialogContent.details.map((detail, index) => (
+                <p key={index} className={detail === '' ? 'pt-2' : ''}>
+                  {detail}
+                </p>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter className="">
+            <Button
+              variant="outline"
+              onClick={handleCancelAction}
+              disabled={confirmDialog.loading}
+              className=""
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmAction}
+              disabled={confirmDialog.loading}
+              className={
+                confirmDialog.action === 'deploy'
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-red-600 hover:bg-red-700 text-white'
+              }
+            >
+              {confirmDialog.loading ? (
+                <>
+                  <CircularProgress size={16} className="mr-2" />
+                  {confirmDialog.action === 'deploy'
+                    ? 'Deploying...'
+                    : 'Deleting...'}
+                </>
+              ) : confirmDialog.action === 'deploy' ? (
+                'Deploy'
+              ) : (
+                'Delete'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deployment Streaming Dialog */}
+      <Dialog
+        open={streamingDialog.isOpen}
+        onOpenChange={
+          !streamingDialog.isStreaming ? handleCloseStreamingDialog : undefined
+        }
+      >
+        <DialogContent className="sm:max-w-4xl max-h-[80vh]">
+          <DialogHeader className="">
+            <DialogTitle className="">
+              Deploying SSH Node Pool: {poolName}
+            </DialogTitle>
+            <DialogDescription className="">
+              {streamingDialog.isStreaming
+                ? 'Deployment in progress. Do not close this dialog.'
+                : streamingDialog.deploymentSuccess
+                  ? 'Deployment completed successfully!'
+                  : 'Deployment completed with errors.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="bg-black text-green-400 p-4 rounded-md font-mono text-sm max-h-96 overflow-y-auto">
+              <pre className="whitespace-pre-wrap">
+                {cleanSSHDeploymentLogs(streamingDialog.logs)}
+              </pre>
+              {streamingDialog.isStreaming && (
+                <div className="flex items-center mt-2">
+                  <CircularProgress size={16} className="mr-2 text-green-400" />
+                  <span className="text-green-400">Streaming logs...</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="">
+            <Button
+              onClick={handleCloseStreamingDialog}
+              disabled={streamingDialog.isStreaming}
+              className={
+                streamingDialog.deploymentSuccess
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : streamingDialog.deploymentComplete &&
+                      !streamingDialog.deploymentSuccess
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-gray-600 hover:bg-gray-700 text-white'
+              }
+            >
+              {streamingDialog.isStreaming ? (
+                <>
+                  <CircularProgress size={16} className="mr-2" />
+                  Deploying...
+                </>
+              ) : (
+                'Close'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// SSH Node Pool Table component with status fetching
+function SSHNodePoolTable({ pools, handleContextClick }) {
+  const [poolStatuses, setPoolStatuses] = useState({});
+  const [statusLoading, setStatusLoading] = useState({});
+
+  // Fetch status for deployed pools
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      const deployedPools = pools.filter((pool) => pool.isDeployed);
+
+      for (const pool of deployedPools) {
+        setStatusLoading((prev) => ({ ...prev, [pool.name]: true }));
+
+        try {
+          const status = await getSSHNodePoolStatus(pool.name);
+          setPoolStatuses((prev) => ({ ...prev, [pool.name]: status }));
+        } catch (error) {
+          console.error(`Failed to fetch status for pool ${pool.name}:`, error);
+          setPoolStatuses((prev) => ({
+            ...prev,
+            [pool.name]: {
+              status: 'Error',
+              reason: 'Failed to fetch status',
+            },
+          }));
+        } finally {
+          setStatusLoading((prev) => ({ ...prev, [pool.name]: false }));
+        }
+      }
+    };
+
+    if (pools.length > 0) {
+      fetchStatuses();
+    }
+  }, [pools]);
+
+  const StatusDisplay = ({ pool }) => {
+    if (!pool.isDeployed) {
+      return (
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+          Not Deployed
+        </span>
+      );
+    }
+
+    if (statusLoading[pool.name]) {
+      return (
+        <div className="flex items-center">
+          <CircularProgress size={16} className="mr-2" />
+          <span className="text-gray-500 text-xs">Loading...</span>
+        </div>
+      );
+    }
+
+    const status = poolStatuses[pool.name];
+    if (!status) {
+      return (
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+          Unknown
+        </span>
+      );
+    }
+
+    const isReady = status.status === 'Ready';
+    const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
+    const textColor = isReady ? 'text-green-800' : 'text-red-800';
+
+    return (
+      <div className="flex items-center space-x-2">
+        <span
+          className={`px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}`}
+        >
+          {status.status}
+        </span>
+        {!isReady && status.reason && (
+          <span className="text-xs text-gray-600" title={status.reason}>
+            (
+            {status.reason.length > 30
+              ? status.reason.substring(0, 30) + '...'
+              : status.reason}
+            )
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="p-3 text-left font-medium text-gray-600">
+              Pool Name
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600">Status</th>
+            <th className="p-3 text-left font-medium text-gray-600">
+              Clusters
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600">Jobs</th>
+            <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
+            <th className="p-3 text-left font-medium text-gray-600">
+              GPU Types
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {pools.map((pool) => (
+            <tr
+              key={pool.name}
+              className="hover:bg-gray-50 cursor-pointer"
+              onClick={() => handleContextClick(`ssh-${pool.name}`)}
+            >
+              <td className="p-3 font-medium text-gray-700">
+                {pool.displayName}
+              </td>
+              <td className="p-3">
+                <StatusDisplay pool={pool} />
+              </td>
+              <td className="p-3">
+                {pool.clusters > 0 ? (
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                    {pool.clusters}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
+              </td>
+              <td className="p-3">
+                {pool.jobs > 0 ? (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                    {pool.jobs}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    0
+                  </span>
+                )}
+              </td>
+              <td className="p-3">{pool.nodes}</td>
+              <td className="p-3">{pool.gpuTypes}</td>
+              <td className="p-3">{pool.totalGPUs}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function GPUs() {
   // Separate loading states for different data sources
   const [kubeLoading, setKubeLoading] = useState(true);
@@ -666,6 +1397,12 @@ export function GPUs() {
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
   const [contextStats, setContextStats] = useState({});
+
+  // SSH Node Pool state
+  const [sshNodePools, setSshNodePools] = useState({});
+  const [sshModalOpen, setSshModalOpen] = useState(false);
+  const [editingPool, setEditingPool] = useState(null);
+  const [sshLoading, setSshLoading] = useState(false);
 
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
@@ -728,6 +1465,9 @@ export function GPUs() {
           // If no data at all, still need to clear loading eventually
           console.log('No cloud data received from cache');
         }
+
+        // Add SSH Node Pool fetching
+        await fetchSSHNodePools();
       } catch (error) {
         console.error('Error in fetchData:', error);
         // On error, we should still mark data as loaded but with empty values
@@ -757,6 +1497,72 @@ export function GPUs() {
     },
     [isInitialLoad]
   );
+
+  // SSH Node Pool data fetching
+  const fetchSSHNodePools = async () => {
+    try {
+      const pools = await getSSHNodePools();
+      setSshNodePools(pools);
+    } catch (error) {
+      console.error('Failed to fetch SSH Node Pools:', error);
+      setSshNodePools({});
+    }
+  };
+
+  // SSH Node Pool handlers
+  const handleAddSSHPool = () => {
+    setEditingPool(null);
+    setSshModalOpen(true);
+  };
+
+  const handleEditSSHPool = (poolName, poolConfig) => {
+    setEditingPool({ name: poolName, config: poolConfig });
+    setSshModalOpen(true);
+  };
+
+  const handleDeleteSSHPool = async (poolName) => {
+    try {
+      // Just handle the actual deletion and navigation
+      // The streaming is now handled in the SSHNodePoolDetails component
+      await deleteSSHNodePool(poolName);
+      await fetchSSHNodePools(); // Refresh the list
+
+      // Clear selected context and navigate back to infra home page after successful deletion
+      setSelectedContext(null);
+      router.push('/infra');
+    } catch (error) {
+      console.error('Failed to delete SSH Node Pool:', error);
+      // Let the error bubble up to be handled by the dialog
+      throw error;
+    }
+  };
+
+  const handleDeploySSHPool = async (poolName) => {
+    try {
+      await deploySSHNodePool(poolName);
+    } catch (error) {
+      console.error('Failed to deploy SSH Node Pool:', error);
+      // Let the error bubble up to be handled by the dialog
+      throw error;
+    }
+  };
+
+  const handleSaveSSHPool = async (poolName, poolConfig) => {
+    setSshLoading(true);
+    try {
+      const updatedPools = { ...sshNodePools };
+      updatedPools[poolName] = poolConfig;
+
+      await updateSSHNodePools(updatedPools);
+      await fetchSSHNodePools(); // Refresh the list
+      setSshModalOpen(false);
+    } catch (error) {
+      console.error('Failed to save SSH Node Pool:', error);
+      alert('Failed to save SSH Node Pool. Please try again.');
+    } finally {
+      setSshLoading(false);
+    }
+  };
 
   // Effect for assigning fetchData to refreshDataRef, stable after isInitialLoad becomes false.
   useEffect(() => {
@@ -943,6 +1749,26 @@ export function GPUs() {
       );
     }
 
+    // Check if this is an SSH context
+    const isSSHContext = contextName.startsWith('ssh-');
+
+    if (isSSHContext) {
+      // Extract pool name from context (remove 'ssh-' prefix)
+      const poolName = contextName.replace(/^ssh-/, '');
+      return (
+        <SSHNodePoolDetails
+          poolName={poolName}
+          gpusInContext={gpusInContext}
+          nodesInContext={nodesInContext}
+          handleDeploySSHPool={handleDeploySSHPool}
+          handleEditSSHPool={handleEditSSHPool}
+          handleDeleteSSHPool={handleDeleteSSHPool}
+          poolConfig={sshNodePools[poolName]}
+        />
+      );
+    }
+
+    // For Kubernetes contexts, show the regular context details
     return (
       <ContextDetails
         contextName={contextName}
@@ -1035,23 +1861,6 @@ export function GPUs() {
     );
   };
 
-  const renderKubernetesInfrastructure = () => {
-    return (
-      <InfrastructureSection
-        title="Kubernetes"
-        isLoading={kubeLoading}
-        isDataLoaded={kubeDataLoaded}
-        contexts={kubeContexts}
-        gpus={kubeGPUs}
-        groupedPerContextGPUs={groupedPerContextGPUs}
-        groupedPerNodeGPUs={groupedPerNodeGPUs}
-        handleContextClick={handleContextClick}
-        contextStats={contextStats}
-        isSSH={false}
-      />
-    );
-  };
-
   const renderSSHNodePoolInfrastructure = () => {
     return (
       <InfrastructureSection
@@ -1065,6 +1874,34 @@ export function GPUs() {
         handleContextClick={handleContextClick}
         contextStats={contextStats}
         isSSH={true}
+        actionButton={
+          // TODO: Add back when SSH Node Pool add operation is more robust
+          // <button
+          //   className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+          //   onClick={handleAddSSHPool}
+          // >
+          //   <PlusIcon className="w-4 h-4 mr-2" />
+          //   Add SSH Node Pool
+          // </button>
+          null
+        }
+      />
+    );
+  };
+
+  const renderKubernetesInfrastructure = () => {
+    return (
+      <InfrastructureSection
+        title="Kubernetes"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={kubeContexts}
+        gpus={kubeGPUs}
+        groupedPerContextGPUs={groupedPerContextGPUs}
+        groupedPerNodeGPUs={groupedPerNodeGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={contextStats}
+        isSSH={false}
       />
     );
   };
@@ -1169,6 +2006,15 @@ export function GPUs() {
       ) : (
         renderKubernetesTab()
       )}
+
+      {/* SSH Node Pool Modal - Always available */}
+      <SSHNodePoolModal
+        isOpen={sshModalOpen}
+        onClose={() => setSshModalOpen(false)}
+        onSave={handleSaveSSHPool}
+        poolData={editingPool}
+        isLoading={sshLoading}
+      />
     </>
   );
 }

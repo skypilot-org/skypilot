@@ -28,7 +28,7 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
     os.environ[
         skypilot_config.
         ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config.yaml'
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     cloud = clouds.AWS()
 
