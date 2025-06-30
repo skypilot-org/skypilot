@@ -51,6 +51,10 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
     # Memory: 1 GiB RAM per 1 vCPU;
     'n2-highcpu',
+    # This is the latest general-purpose instance family as of 2024.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'n4-standard',
 ]
 # n2 is not allowed for launching GPUs for now.
 _DEFAULT_HOST_VM_FAMILY = (
