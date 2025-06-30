@@ -20,14 +20,17 @@ from smoke_tests.docker import docker_utils
 import sky
 from sky import serve
 from sky import skypilot_config
+from sky.client import sdk
 from sky.clouds import AWS
 from sky.clouds import gcp
 from sky.clouds import GCP
+from sky.jobs import utils as managed_job_utils
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import subprocess_utils
 
@@ -829,6 +832,24 @@ def kill_and_wait_controller(controller_name: str) -> str:
         'done; '
         f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
     )
+
+
+def server_side_is_consolidation_mode() -> bool:
+    """Returns whether the consolidation mode is enabled on the server side.
+
+    This is required because when --postgres and --jobs-consolidation specified
+    at the same time, the server side will have config for consolidation mode,
+    but the client side will only have a config to specify the db url for
+    postgres. Here we manually retrieve the config from the server side to
+    check if the consolidation mode is enabled.
+    """
+    response = requests.get(f'{get_api_server_url()}/workspaces/config')
+    request_id = server_common.get_request_id(response)
+    config = config_utils.Config.from_dict(sdk.get(request_id))
+    config = skypilot_config.overlay_skypilot_config(
+        original_config=config, override_configs=skypilot_config.to_dict())
+    with skypilot_config.replace_skypilot_config(config):
+        return managed_job_utils.is_consolidation_mode()
 
 
 def is_in_buildkite_env() -> bool:
