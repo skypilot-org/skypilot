@@ -1156,6 +1156,7 @@ def get_latest_task_id_status(
     return task_id, status
 
 
+@_init_db
 def get_job_controller_pid(job_id: int) -> Optional[int]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
