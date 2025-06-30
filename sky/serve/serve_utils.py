@@ -72,14 +72,17 @@ def _read_last_n_lines(file_path: str,
     Returns:
         A list of the last N lines, preserving newlines where applicable.
     """
-    if n <= 0:
-        return []
+    if n < 0:
+        raise ValueError('n must be non-negative.')
 
     if chunk_size <= 0:
         raise ValueError('chunk_size must be positive.')
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(f'File not found: {file_path}')
+
+    if n == 0:
+        return []
 
     try:
         with open(file_path, 'rb') as f:
