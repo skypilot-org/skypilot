@@ -6,6 +6,7 @@ import re
 from typing import Callable, Literal, Mapping, NamedTuple, Optional, Tuple
 
 import colorama
+from packaging import version as version_lib
 
 import sky
 from sky import exceptions
@@ -58,24 +59,38 @@ class VersionInfo(NamedTuple):
     error: Optional[str] = None
 
 
-def check_version_compatibility(
-        headers: Mapping[str, str],
-        remote: Literal['client', 'server']) -> Optional[VersionInfo]:
+def check_compatibility_at_server(
+        client_headers: Mapping[str, str]) -> Optional[VersionInfo]:
+    """Check API compatibility between client and server."""
+    return _check_version_compatibility(client_headers, 'client')
+
+
+def check_compatibility_at_client(
+        server_headers: Mapping[str, str]) -> Optional[VersionInfo]:
+    """Check API compatibility between client and server."""
+    return _check_version_compatibility(server_headers, 'server')
+
+
+def _check_version_compatibility(
+        remote_headers: Mapping[str, str],
+        remote_type: Literal['client', 'server']) -> Optional[VersionInfo]:
     """Check API compatibility between client and server.
 
     This function can be called at both client and server side, where the
     headers should contain the version info of the remote.
 
     Args:
-        headers: The headers of the request/response sent from the remote.
-        remote: The type of the remote, used to determine the error message.
+        remote_headers: The headers of the request/response sent from the
+            remote.
+        remote_type: The type of the remote, used to determine the error
+            message. Valid options are 'client' and 'server'.
 
     Returns:
         The version info of the remote, None if the version info is not found
         in the headers for backward compatibility.
     """
-    api_version_str = headers.get(constants.API_VERSION_HEADER)
-    version = headers.get(constants.VERSION_HEADER)
+    api_version_str = remote_headers.get(constants.API_VERSION_HEADER)
+    version = remote_headers.get(constants.VERSION_HEADER)
     if version is None or api_version_str is None:
         return None
     try:
@@ -89,7 +104,7 @@ def check_version_compatibility(
             f'{api_version_str} is not a valid API version.') from None
 
     if api_version < constants.MIN_COMPATIBLE_API_VERSION:
-        if remote == 'server':
+        if remote_type == 'server':
             # Hint the user to downgrade to client to the remote server server.
             server_version, server_commit = parse_readable_version(version)
             command = install_version_command(server_version, server_commit)
@@ -98,14 +113,14 @@ def check_version_compatibility(
             command = install_version_command(sky.__version__, sky.__commit__)
         return VersionInfo(api_version=api_version,
                            version=version,
-                           error=_REMOTE_TO_ERROR[remote].format(
+                           error=_REMOTE_TO_ERROR[remote_type].format(
                                remote_version=version,
                                local_version=get_local_readable_version(),
                                min_version=constants.MIN_COMPATIBLE_VERSION,
                                command=command,
                            ))
 
-    if remote == 'server':
+    if remote_type == 'server':
         # Only print the reminder at client-side.
         _remind_minor_version_upgrade(version)
 
@@ -159,31 +174,6 @@ def install_version_command(version: str, commit: Optional[str] = None) -> str:
     return f'pip install -U "skypilot=={version}"'
 
 
-def _parse_semver(version: str) -> Optional[Tuple[int, int, int]]:
-    """Parse semantic version string into (major, minor, patch) tuple.
-
-    Args:
-        version: Version string to parse (e.g., "1.2.3", "1.2.3-dev0")
-
-    Returns:
-        Tuple of (major, minor, patch) if valid semver, None otherwise
-    """
-    # Remove any suffix like "-dev0", "-alpha1", etc.
-    base_version = version.split('-')[0]
-
-    # Match standard semver pattern: MAJOR.MINOR.PATCH
-    semver_pattern = r'^(\d+)\.(\d+)\.(\d+)$'
-    match = re.match(semver_pattern, base_version)
-
-    if match:
-        major = int(match.group(1))
-        minor = int(match.group(2))
-        patch = int(match.group(3))
-        return (major, minor, patch)
-
-    return None
-
-
 def _remind_minor_version_upgrade(remote_version: str) -> None:
     """Remind the user to upgrade the CLI/SDK."""
     # Only print the reminder once per process.
@@ -198,27 +188,24 @@ def _remind_minor_version_upgrade(remote_version: str) -> None:
     remote_base_version, _ = parse_readable_version(remote_version)
 
     # Parse semver for both local and remote versions
-    local_semver = _parse_semver(sky.__version__)
-    remote_semver = _parse_semver(remote_base_version)
+    try:
+        local = version_lib.parse(sky.__version__)
+        remote = version_lib.parse(remote_base_version)
 
-    # Skip for non-valid semver (probabely a dev version)
-    if local_semver is None or remote_semver is None:
-        return
-
-    local_major, local_minor, _ = local_semver
-    remote_major, remote_minor, _ = remote_semver
-
-    # Check if local version is behind remote version, ignore patch version.
-    if (local_major, local_minor) < (remote_major, remote_minor):
-        logger.warning(
-            f'{colorama.Fore.YELLOW}The SkyPilot API server is running in '
-            f'version {remote_version}, which is newer than your client '
-            f'version {sky.__version__}. The compatibility for your current '
-            f'version might be dropped in the next server upgrade.\n'
-            f'Consider upgrading your client with:\n'
-            f'{install_version_command(remote_version)}'
-            f'{colorama.Style.RESET_ALL}')
-        _reminded_for_minor_version_upgrade = True
+        # Check if local version is behind remote version, ignore patch version.
+        if (local.major, local.minor) < (remote.major, remote.minor):
+            logger.warning(
+                f'{colorama.Fore.YELLOW}The SkyPilot API server is running in '
+                f'version {remote_version}, which is newer than your client '
+                f'version {sky.__version__}. The compatibility for your '
+                f'current version might be dropped in the next server upgrade.'
+                f'\nConsider upgrading your client with:\n'
+                f'{install_version_command(remote_version)}'
+                f'{colorama.Style.RESET_ALL}')
+            _reminded_for_minor_version_upgrade = True
+    except version_lib.InvalidVersion:
+        # Skip for non-valid semver (probabely a dev version)
+        pass
 
 
 def get_remote_api_version() -> Optional[int]:

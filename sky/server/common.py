@@ -319,8 +319,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                f'version info. {server_url} may '
                                f'not be running SkyPilot API server.')
                 server_info.status = ApiServerStatus.UNHEALTHY
-            version_info = versions.check_version_compatibility(
-                response.headers, remote='server')
+            version_info = versions.check_compatibility_at_client(
+                response.headers)
             if version_info is None:
                 # Backward compatibility for server prior to v0.11.0 which
                 # does not check compatibility at server side.

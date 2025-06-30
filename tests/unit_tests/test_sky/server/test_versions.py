@@ -17,7 +17,7 @@ def test_check_version_compatibility_compatible_versions():
     }
 
     with mock.patch.object(constants, 'MIN_COMPATIBLE_API_VERSION', 1):
-        result = versions.check_version_compatibility(headers, 'client')
+        result = versions.check_compatibility_at_server(headers)
 
     assert result is not None
     assert result.api_version == 1
@@ -29,12 +29,12 @@ def test_check_version_compatibility_missing_headers():
     """Test check_version_compatibility with missing headers."""
     # Test missing API version header - should return None for backward compatibility
     headers = {constants.VERSION_HEADER: '1.0.0'}
-    result = versions.check_version_compatibility(headers, 'client')
+    result = versions.check_compatibility_at_server(headers)
     assert result is None
 
     # Test missing version header - should return None for backward compatibility
     headers = {constants.API_VERSION_HEADER: '1'}
-    result = versions.check_version_compatibility(headers, 'client')
+    result = versions.check_compatibility_at_server(headers)
     assert result is None
 
 
@@ -45,14 +45,14 @@ def test_check_version_compatibility_headers_with_none_values():
         constants.API_VERSION_HEADER: None,
         constants.VERSION_HEADER: '1.0.0'
     }
-    result = versions.check_version_compatibility(headers, 'client')
+    result = versions.check_compatibility_at_server(headers)
     assert result is None
 
     headers = {
         constants.API_VERSION_HEADER: '1',
         constants.VERSION_HEADER: None
     }
-    result = versions.check_version_compatibility(headers, 'client')
+    result = versions.check_compatibility_at_server(headers)
     assert result is None
 
 
@@ -64,7 +64,7 @@ def test_check_version_compatibility_invalid_api_version():
     }
 
     with pytest.raises(ValueError, match='is not a valid API version'):
-        versions.check_version_compatibility(headers, 'client')
+        versions.check_compatibility_at_server(headers)
 
 
 def test_check_version_compatibility_incompatible_client():
@@ -81,7 +81,7 @@ def test_check_version_compatibility_incompatible_client():
          mock.patch('sky.server.versions.install_version_command',
                     return_value='pip install skypilot==0.9.0'):
 
-        result = versions.check_version_compatibility(headers, 'client')
+        result = versions.check_compatibility_at_server(headers)
 
     assert result is not None
     assert result.api_version == 1
@@ -106,7 +106,7 @@ def test_check_version_compatibility_incompatible_server():
          mock.patch('sky.server.versions.install_version_command',
                     return_value='pip install skypilot==0.9.0'):
 
-        result = versions.check_version_compatibility(headers, 'server')
+        result = versions.check_compatibility_at_client(headers)
 
     assert result is not None
     assert result.api_version == 1
@@ -193,40 +193,6 @@ def test_install_version_command_regular():
     result = versions.install_version_command('1.2.3')
     expected = 'pip install -U "skypilot==1.2.3"'
     assert result == expected
-
-
-def test_parse_semver_valid():
-    """Test _parse_semver with valid semantic versions."""
-    # Standard semver
-    result = versions._parse_semver('1.2.3')
-    assert result == (1, 2, 3)
-
-    # With dev suffix
-    result = versions._parse_semver('1.2.3-dev0')
-    assert result == (1, 2, 3)
-
-    # With alpha suffix
-    result = versions._parse_semver('2.0.1-alpha1')
-    assert result == (2, 0, 1)
-
-
-def test_parse_semver_invalid():
-    """Test _parse_semver with invalid versions."""
-    # Missing patch version
-    result = versions._parse_semver('1.2')
-    assert result is None
-
-    # Non-numeric components
-    result = versions._parse_semver('1.2.x')
-    assert result is None
-
-    # Empty string
-    result = versions._parse_semver('')
-    assert result is None
-
-    # Just letters
-    result = versions._parse_semver('invalid')
-    assert result is None
 
 
 def test_remind_minor_version_upgrade_should_remind():

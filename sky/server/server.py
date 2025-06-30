@@ -517,8 +517,7 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add API version to the request."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        version_info = versions.check_version_compatibility(request.headers,
-                                                            remote='client')
+        version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
         # to v0.11.0, the client will check the version in the body of
         # /api/health response and hint an upgrade.
