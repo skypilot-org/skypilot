@@ -581,8 +581,9 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
-    # Cleanup the HA recovery script first as it is possible that some error was raised when we
-    # construct the task object (e.g. sky.exceptions.ResourcesUnavailableError).
+    # Cleanup the HA recovery script first as it is possible that some error
+    # was raised when we construct the task object (e.g.,
+    # sky.exceptions.ResourcesUnavailableError).
     managed_job_state.remove_ha_recovery_script(job_id)
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
