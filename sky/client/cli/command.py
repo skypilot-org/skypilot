@@ -5012,10 +5012,13 @@ def serve_logs(
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
-    if tail is not None and tail < 0:
-        raise click.UsageError('--tail must be a non-negative integer.')
-    if tail is not None and follow:
-        raise click.UsageError('--tail and --follow cannot be used together.')
+    if tail is not None:
+        if tail < 0:
+            raise click.UsageError('--tail must be a non-negative integer.')
+        if follow:
+            follow = False
+            logger.warning('--tail and --follow cannot be used together. '
+                           'Changed the mode to --no-follow.')
 
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
