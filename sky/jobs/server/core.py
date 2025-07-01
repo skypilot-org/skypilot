@@ -57,8 +57,9 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
     # For consolidation mode, we don't need to use cloud storage,
     # as uploading to the controller is only a local copy.
-    if (not managed_job_utils.is_consolidation_mode() and
-            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
+    storage_clouds = (
+        storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+    if not managed_job_utils.is_consolidation_mode() and storage_clouds:
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -69,7 +70,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
         # directly to the controller, because the controller may not
         # even be up yet.
         for task_ in dag.tasks:
-            if task_.storage_mounts:
+            if task_.storage_mounts and not storage_clouds:
                 # Technically, we could convert COPY storage_mounts that
                 # have a local source and do not specify `store`, but we
                 # will not do that for now. Only plain file_mounts are
