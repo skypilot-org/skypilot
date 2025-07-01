@@ -132,10 +132,10 @@ class TestBackwardCompatibility:
         base_sky_api_version = subprocess.run(
             f'{self.ACTIVATE_BASE} && python -c "'
             'from sky.server import constants; '
-            'print(constants.API_VERSION); '
+            'print(f\'API_VERSION: {constants.API_VERSION}\'); '
             # Handle the base that does not have MIN_COMPATIBLE_API_VERSION defined
             'min_compatible_version = getattr(constants, \'MIN_COMPATIBLE_API_VERSION\', constants.API_VERSION); '
-            'print(min_compatible_version);'
+            'print(f\'MIN_COMPATIBLE_API_VERSION: {min_compatible_version}\');'
             '"',
             shell=True,
             check=False,
@@ -149,17 +149,29 @@ class TestBackwardCompatibility:
                 f'stderr: {base_sky_api_version.stderr}, '
                 f'stdout: {base_sky_api_version.stdout}')
 
-        base_versions = base_sky_api_version.stdout.strip().split('\n')
-        base_versions = [v for v in base_versions if v.strip()]
+        # Use regex to extract version numbers from the output
+        output = base_sky_api_version.stdout.strip()
 
-        if len(base_versions) < 2:
+        # Extract API_VERSION
+        api_version_match = re.search(r'API_VERSION:\s*(\d+)', output)
+        if not api_version_match:
+            raise RuntimeError(f'Could not find API_VERSION in output. '
+                               f'Output: {output}, '
+                               f'stderr: {base_sky_api_version.stderr}')
+
+        # Extract MIN_COMPATIBLE_API_VERSION
+        min_compatible_version_match = re.search(
+            r'MIN_COMPATIBLE_API_VERSION:\s*(\d+)', output)
+        if not min_compatible_version_match:
             raise RuntimeError(
-                f'Expected 2 lines of output but got {len(base_versions)}. '
-                f'Output: {base_versions}, '
+                f'Could not find MIN_COMPATIBLE_API_VERSION in output. '
+                f'Output: {output}, '
                 f'stderr: {base_sky_api_version.stderr}')
-        TestBackwardCompatibility.BASE_API_VERSION = int(base_versions[0])
-        TestBackwardCompatibility.BASE_MIN_COMPATIBLE_API_VERSION = \
-            int(base_versions[1])
+
+        TestBackwardCompatibility.BASE_API_VERSION = int(
+            api_version_match.group(1))
+        TestBackwardCompatibility.BASE_MIN_COMPATIBLE_API_VERSION = int(
+            min_compatible_version_match.group(1))
 
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
