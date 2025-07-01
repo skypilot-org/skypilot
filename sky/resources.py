@@ -1911,9 +1911,9 @@ class Resources:
 
         # we know we have some case of manufacturer, memory, count, now we
         # need to convert that to a list of possible accelerators
-        memory_parsed = parse_memory_resource(memory,
-                                              'accelerators',
-                                              allow_plus=True)
+        memory_parsed = resources_utils.parse_memory_resource(memory,
+                                                              'accelerators',
+                                                              allow_plus=True)
         plus = memory_parsed[-1] == '+'
         if plus:
             memory_parsed = memory_parsed[:-1]
@@ -2023,8 +2023,7 @@ class Resources:
             # other copy being given by memory size. In this case, we only care
             # about the user specified ones (so we can give a warning if it
             # doesn't exist).
-            accel_to_user_specified: Dict[str,
-                                          bool] = collections.OrderedDict()
+            accel_to_user_specified: Dict[str, bool] = collections.OrderedDict()
             for accel, user_specified in accelerators_list:
                 # If this accelerator is not in dict yet, or if current one is
                 # user specified and existing one is not, update the entry
