@@ -675,10 +675,7 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
-# This test requires gcp credentials, but in order to trigger together with
-# test_helm_deploy_okta, we mark it as kubernetes, since our test env have both
-# kubernetes and gcp setup. This is not standard practice.
-@pytest.mark.kubernetes
+@pytest.mark.gcp
 def test_helm_deploy_gke(request):
     if not request.config.getoption('--helm-package'):
         # Test pulls image from dockerhub, unrelated to codebase. Package name
@@ -694,15 +691,8 @@ def test_helm_deploy_gke(request):
 
 
 @pytest.mark.kubernetes
-def test_helm_deploy_okta(request):
-    if not request.config.getoption('--helm-package'):
-        # Test pulls image from dockerhub, unrelated to codebase. Package name
-        # indicates intentional testing - without it, test is meaningless.
-        pytest.skip('Skipping test as helm package is not set')
-
-    helm_version = request.config.getoption('--helm-version')
-    package_name = request.config.getoption('--helm-package')
+def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
-        f'bash tests/kubernetes/scripts/helm_okta.sh {package_name} {helm_version}',
+        f'bash tests/kubernetes/scripts/helm_okta.sh',
     ])
     smoke_tests_utils.run_one_test(test)

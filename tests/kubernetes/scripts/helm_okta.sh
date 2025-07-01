@@ -17,26 +17,21 @@
 #   OKTA_CLIENT_ID=your_client_id OKTA_CLIENT_SECRET=your_secret \
 #   OKTA_TEST_USERNAME=test@example.com OKTA_TEST_PASSWORD=pass \
 #   OKTA_ISSUER_URL=https://your-org.okta.com \
-#   ./helm_okta.sh [package_name] [version]
+#   DOCKER_IMAGE=skypilot:local \
+#   ./helm_okta.sh
 #
-#   All five environment variables are required:
+#   All environment variables are required:
 #   - OKTA_CLIENT_ID: OAuth application client ID
 #   - OKTA_CLIENT_SECRET: OAuth application client secret
 #   - OKTA_TEST_USERNAME: Test user email/username
 #   - OKTA_TEST_PASSWORD: Test user password
 #   - OKTA_ISSUER_URL: Okta issuer URL (e.g., https://your-org.okta.com)
-#
-#   Optional parameters:
-#   - package_name: Helm package name (default: skypilot-nightly)
-#   - version: Helm chart version (default: latest)
+#   - DOCKER_IMAGE: Local docker image name and tag to build
 
 NAMESPACE=skypilot
 NODEPORT=30082
 HTTPS_NODEPORT=30100
-
-# Accept package name and version as arguments
-PACKAGE_NAME=${1:-"skypilot-nightly"}  # Accept package name as first argument, default to skypilot-nightly
-HELM_VERSION=${2:-"latest"}  # Accept version as second argument, default to latest
+RELEASE_NAME=skypilot
 
 # Cleanup function to delete namespace and resources
 cleanup() {
@@ -81,14 +76,15 @@ if [[ -z "$OKTA_ISSUER_URL" ]]; then
     exit 1
 fi
 
+if [[ -z "$DOCKER_IMAGE" ]]; then
+    echo "❌ DOCKER_IMAGE is required"
+    exit 1
+fi
+
 echo "Using OAuth client ID: $OKTA_CLIENT_ID"
 echo "Using test credentials for user: $OKTA_TEST_USERNAME"
 echo "Using Okta issuer URL: $OKTA_ISSUER_URL"
-echo "Installing SkyPilot Helm chart version: $HELM_VERSION"
-
-
-helm repo add skypilot https://helm.skypilot.co
-helm repo update
+echo "Building Docker image locally: $DOCKER_IMAGE"
 
 # Verify that nginx ingress controller is already running (installed by sky local up)
 echo "Verifying nginx ingress controller is running..."
@@ -123,41 +119,52 @@ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{
 }'
 echo "nginx ingress controller configured for NodePort $NODEPORT ✓"
 
-# Get the image name from the Helm chart
-echo "Getting image name from Helm chart..."
-FULL_IMAGE_NAME=$(helm show values skypilot/$PACKAGE_NAME --devel | grep "^  image:" | awk '{print $2}')
+# Build the Docker image locally
+echo "Building Docker image locally..."
+docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile .
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to build Docker image"
+    exit 1
+fi
+echo "✅ Docker image built successfully"
 
-echo "Loading image $FULL_IMAGE_NAME into kind cluster..."
-# Pull the image first (in case it's not available locally)
-docker pull $FULL_IMAGE_NAME
 # Load the image into kind cluster
-kind load docker-image $FULL_IMAGE_NAME --name skypilot
+echo "Loading image $DOCKER_IMAGE into kind cluster..."
+kind load docker-image $DOCKER_IMAGE --name skypilot
+
+# Add required Helm repositories for dependencies
+echo "Adding required Helm repositories..."
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+echo "✅ Helm repositories added successfully"
+
+# Build Helm chart dependencies
+echo "Building Helm chart dependencies..."
+helm dependency build ./charts/skypilot
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to build Helm chart dependencies"
+    exit 1
+fi
+echo "✅ Helm chart dependencies built successfully"
 
 # Install the Skypilot Helm chart with the OAuth2 Proxy
 # Disable the ingress-nginx subchart since sky local up already installed nginx
-
-# Set version-specific flag
-if [ "$HELM_VERSION" = "latest" ]; then
-    extra_flag="--devel"
-else
-    # Convert PEP440 version to SemVer if needed (e.g., 1.0.0.dev20250609 -> 1.0.0-dev.20250609)
-    SEMVER_VERSION=$(echo "$HELM_VERSION" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
-    extra_flag="--version $SEMVER_VERSION"
-fi
-
-helm upgrade -n $NAMESPACE --install skypilot skypilot/$PACKAGE_NAME $extra_flag \
+echo "Installing Skypilot Helm chart..."
+helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
+    --namespace $NAMESPACE \
     --create-namespace \
+    --set apiService.image=$DOCKER_IMAGE \
+    --set imagePullPolicy=IfNotPresent \
     --set ingress.oauth2-proxy.enabled=true \
     --set ingress.oauth2-proxy.oidc-issuer-url="$OKTA_ISSUER_URL" \
     --set ingress.oauth2-proxy.client-id="$OKTA_CLIENT_ID" \
     --set ingress.oauth2-proxy.client-secret="$OKTA_CLIENT_SECRET" \
-    --set imagePullPolicy=IfNotPresent \
     --set ingress-nginx.enabled=false
 
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."
-echo "Checking pod status..."
-kubectl get pods -n $NAMESPACE
 
 # Wait for pods with increased timeout and better error handling
 if ! kubectl wait --namespace $NAMESPACE \
@@ -174,13 +181,66 @@ fi
 echo "Fixing OAuth2 proxy ingress configuration for kind cluster..."
 # The Helm chart sets auth-url to use $host which becomes "localhost:30082" from the client side,
 # but the nginx ingress controller inside the cluster can't resolve "localhost" to reach the OAuth2 proxy.
-# We need to patch the ingress to use the internal cluster service URL instead.
+# We also need to remove risky annotations that nginx rejects and set the correct host.
 kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
+  "spec": {
+    "rules": [
+      {
+        "host": "localhost",
+        "http": {
+          "paths": [
+            {
+              "path": "/",
+              "pathType": "Prefix",
+              "backend": {
+                "service": {
+                  "name": "skypilot-api-service",
+                  "port": {
+                    "number": 80
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
   "metadata": {
     "annotations": {
       "nginx.ingress.kubernetes.io/auth-url": "http://skypilot-oauth2-proxy.'$NAMESPACE'.svc.cluster.local:4180/oauth2/auth",
-      "nginx.ingress.kubernetes.io/auth-signin": "http://localhost:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri"
+      "nginx.ingress.kubernetes.io/auth-signin": "http://localhost:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
+      "nginx.ingress.kubernetes.io/auth-snippet": null,
+      "nginx.ingress.kubernetes.io/configuration-snippet": null,
+      "nginx.ingress.kubernetes.io/enable-external-auth": "true"
     }
+  }
+}'
+
+# Also fix the OAuth2 proxy ingress to use localhost host instead of wildcard
+kubectl patch ingress skypilot-oauth2-proxy -n $NAMESPACE --type='merge' -p='{
+  "spec": {
+    "rules": [
+      {
+        "host": "localhost",
+        "http": {
+          "paths": [
+            {
+              "path": "/oauth2",
+              "pathType": "Prefix",
+              "backend": {
+                "service": {
+                  "name": "skypilot-oauth2-proxy",
+                  "port": {
+                    "number": 4180
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 }'
 echo "OAuth2 proxy ingress configuration updated ✓"
