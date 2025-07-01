@@ -571,10 +571,12 @@ def _reload_config_as_server() -> None:
 
     if db_url:
         with _DB_USE_LOCK:
-            sqlalchemy_engine = sqlalchemy.create_engine(db_url, poolclass=NullPool)
+            sqlalchemy_engine = sqlalchemy.create_engine(db_url,
+                                                         poolclass=NullPool)
             Base.metadata.create_all(bind=sqlalchemy_engine)
 
-            def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
+            def _get_config_yaml_from_db(
+                    key: str) -> Optional[config_utils.Config]:
                 assert sqlalchemy_engine is not None
                 with orm.Session(sqlalchemy_engine) as session:
                     row = session.query(config_yaml_table).filter_by(
@@ -588,9 +590,11 @@ def _reload_config_as_server() -> None:
             db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
             if db_config:
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                    logger.debug(f'Config loaded from db:\n'
-                                f'{common_utils.dump_yaml_str(dict(db_config))}')
-                server_config = overlay_skypilot_config(server_config, db_config)
+                    logger.debug(
+                        f'Config loaded from db:\n'
+                        f'{common_utils.dump_yaml_str(dict(db_config))}')
+                server_config = overlay_skypilot_config(server_config,
+                                                        db_config)
             # Close the engine to avoid connection leaks
             sqlalchemy_engine.dispose()
     _set_loaded_config(server_config)
@@ -854,10 +858,11 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 raise ValueError('Cannot change db url while server is running')
             with _DB_USE_LOCK:
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
-                                                            poolclass=NullPool)
+                                                             poolclass=NullPool)
                 Base.metadata.create_all(bind=sqlalchemy_engine)
 
-                def _set_config_yaml_to_db(key: str, config: config_utils.Config):
+                def _set_config_yaml_to_db(key: str,
+                                           config: config_utils.Config):
                     assert sqlalchemy_engine is not None
                     config.pop_nested(('db',), None)
                     config_str = common_utils.dump_yaml_str(dict(config))
@@ -866,7 +871,7 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                                 db_utils.SQLAlchemyDialect.SQLITE.value):
                             insert_func = sqlite.insert
                         elif (sqlalchemy_engine.dialect.name ==
-                            db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
                             insert_func = postgresql.insert
                         else:
                             raise ValueError('Unsupported database dialect')
@@ -877,6 +882,7 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                             set_={config_yaml_table.c.value: config_str})
                         session.execute(do_update_stmt)
                         session.commit()
+
                 logger.debug('saving api_server config to db')
                 _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
                 db_updated = True
