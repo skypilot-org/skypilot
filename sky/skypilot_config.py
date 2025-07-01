@@ -589,6 +589,8 @@ def _reload_config_as_server() -> None:
 
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
+    # Close the engine to avoid connection leaks
+    _SQLALCHEMY_ENGINE.dispose()
     del _SQLALCHEMY_ENGINE
 
 
@@ -872,6 +874,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             logger.debug('saving api_server config to db')
             _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
             db_updated = True
+            # Close the engine to avoid connection leaks
+            _SQLALCHEMY_ENGINE.dispose()
+            del _SQLALCHEMY_ENGINE
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
