@@ -2010,7 +2010,7 @@ class Resources:
             # about the user specified ones (so we can give a warning if it
             # doesn't exist).
             accel_to_user_specified: Dict[str,
-                                          bool] = (collections.OrderedDict())
+                                          bool] = collections.OrderedDict()
             for accel, user_specified in accelerators_list:
                 # If this accelerator is not in dict yet, or if current one is
                 # user specified and existing one is not, update the entry
