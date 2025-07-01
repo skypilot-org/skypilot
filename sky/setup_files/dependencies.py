@@ -71,6 +71,8 @@ server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
+    # Required for service account token authentication.
+    'pyjwt',
 ]
 
 local_ray = [
