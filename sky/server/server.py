@@ -228,6 +228,14 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+class InitializeRequestAuthUserMiddleware(
+    starlette.middleware.base.BaseHTTPMiddleware):
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # Make sure that request.state.auth_user is set. Otherwise, we may get a
+        # KeyError while trying to read it.
+        request.state.auth_user = None
+        return await call_next(request)
+
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
@@ -550,10 +558,17 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+# Middleware wraps in the order defined here. E.g., given
+#   app.add_middleware(Middleware1)
+#   app.add_middleware(Middleware2)
+#   app.add_middleware(Middleware3)
+# The effect will be like:
+#   Middleware3(Middleware2(Middleware1(request)))
+# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
+#   3; 2; 1; <request>; 1; 2; 3
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
-app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
@@ -566,15 +581,26 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    # TODO(syang): remove X-Request-ID when v0.10.0 is released.
+    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
+app.add_middleware(RBACMiddleware)
+# AuthProxyMiddleware should precede BasicAuthMiddleware and
+# BearerTokenMiddleware, since it should be skipped if either of those set the
+# auth user.
+app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
 if str(enable_basic_auth).lower() == 'true':
     app.add_middleware(BasicAuthMiddleware)
 # Bearer token middleware should always be present to handle service account
 # authentication
 app.add_middleware(BearerTokenMiddleware)
-app.add_middleware(AuthProxyMiddleware)
+# InitializeRequestAuthUserMiddleware must be the last added middleware so that
+# request.state.auth_user is always set, but can be overridden by the auth
+# middleware above.
+app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
