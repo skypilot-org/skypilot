@@ -73,16 +73,16 @@ def deploy_ssh_cluster(cleanup: bool = False,
                        kubeconfig_path: Optional[str] = None):
     """Deploy a Kubernetes cluster on SSH targets.
 
-    This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a
-    Kubernetes cluster on the specified machines.
+    This function deploys a Kubernetes (k3s) cluster on the specified machines.
 
     Args:
         cleanup: Whether to clean up the cluster instead of deploying.
-        infra: Name of the cluster in ssh_node_pools.yaml to use.
-            If None, the first cluster in the file will be used.
+        infra: Name of the cluster to use. If None, all clusters will be used.
+            Must not be None for deployment
         kubeconfig_path: Path to save the Kubernetes configuration file.
             If None, the default ~/.kube/config will be used.
     """
+    assert cleanup or infra is not None
     check_ssh_cluster_dependencies()
 
     # Prepare command to call deploy_remote_cluster.py script
