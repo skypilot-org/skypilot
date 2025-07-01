@@ -157,9 +157,9 @@ class TestBackwardCompatibility:
                 f'Expected 2 lines of output but got {len(base_versions)}. '
                 f'Output: {base_versions}, '
                 f'stderr: {base_sky_api_version.stderr}')
-        TestBackwardCompatibility.BASE_API_VERSION = base_versions[0]
+        TestBackwardCompatibility.BASE_API_VERSION = int(base_versions[0])
         TestBackwardCompatibility.BASE_MIN_COMPATIBLE_API_VERSION = \
-            base_versions[1]
+            int(base_versions[1])
 
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
