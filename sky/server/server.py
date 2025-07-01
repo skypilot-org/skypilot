@@ -313,7 +313,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         # Extract token
         split_header = auth_header.split(' ', 1)
-        if split_header[0] != 'Bearer':
+        if split_header[0].lower() != 'bearer':
             return fastapi.responses.JSONResponse(
                 status_code=401,
                 content={'detail': 'Invalid authentication method'})
