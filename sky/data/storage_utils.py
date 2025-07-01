@@ -100,6 +100,8 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                 # Check if pattern is anchored to root
                 if line.startswith('/'):
                     pattern = line[1:]
+                    # Make parsing consistent with rsync.
+                    # Rsync uses '/' as current directory.
                     patterns.add(f'./{pattern}')
                     # Add directory wildcard for non-glob patterns
                     if not any(c in pattern for c in '*?['):
