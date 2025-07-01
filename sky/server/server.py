@@ -218,9 +218,11 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
-    if 'X-Auth-Request-Email' not in request.headers:
+    header_name = os.environ.get(constants.ENV_VAR_SERVER_AUTH_USER_HEADER,
+                                 'X-Auth-Request-Email')
+    if header_name not in request.headers:
         return None
-    user_name = request.headers['X-Auth-Request-Email']
+    user_name = request.headers[header_name]
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
@@ -405,6 +407,18 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         auth_user = _get_auth_user_header(request)
+
+        if request.state.auth_user is not None:
+            # Previous middleware is trusted more than this middleware.  For
+            # instance, a client could set the Authorization and the
+            # X-Auth-Request-Email header. In that case, the auth proxy will be
+            # skipped and we should rely on the Bearer token to authenticate the
+            # user - but that means the user could set X-Auth-Request-Email to
+            # whatever the user wants. We should thus ignore it.
+            if auth_user is not None:
+                logger.debug('Warning: ignoring auth proxy header since the '
+                             'auth user was already set.')
+            return await call_next(request)
 
         # Add user to database if auth_user is present
         if auth_user is not None:
