@@ -843,6 +843,12 @@ def server_side_is_consolidation_mode() -> bool:
     postgres. Here we manually retrieve the config from the server side to
     check if the consolidation mode is enabled.
     """
+    if is_remote_server_test():
+        # The buildkite pre_command setup does not affect the remote server
+        # config. So --postgres and --jobs-consolidation will not be enabled
+        # even if they are specified.
+        # (TODO: zeping) support this in the future.
+        return False
     response = requests.get(f'{get_api_server_url()}/workspaces/config')
     request_id = server_common.get_request_id(response)
     config = config_utils.Config.from_dict(sdk.get(request_id))
