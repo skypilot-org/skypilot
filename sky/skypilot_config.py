@@ -591,12 +591,10 @@ def _reload_config_as_server() -> None:
                     logger.debug(f'Config loaded from db:\n'
                                 f'{common_utils.dump_yaml_str(dict(db_config))}')
                 server_config = overlay_skypilot_config(server_config, db_config)
-
+            # Close the engine to avoid connection leaks
+            sqlalchemy_engine.dispose()
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
-    # Close the engine to avoid connection leaks
-    sqlalchemy_engine.dispose()
-    del sqlalchemy_engine
 
 
 def _reload_config_as_client() -> None:
@@ -851,11 +849,10 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         existing_db_url = get_nested(('db',), None)
         if existing_db_url:
+            new_db_url = config.get_nested(('db',), None)
+            if new_db_url and new_db_url != existing_db_url:
+                raise ValueError('Cannot change db url while server is running')
             with _DB_USE_LOCK:
-                new_db_url = config.get_nested(('db',), None)
-                if new_db_url and new_db_url != existing_db_url:
-                    raise ValueError('Cannot change db url while server is running')
-
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
                                                             poolclass=NullPool)
                 Base.metadata.create_all(bind=sqlalchemy_engine)
@@ -885,7 +882,6 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 db_updated = True
                 # Close the engine to avoid connection leaks
                 sqlalchemy_engine.dispose()
-                del sqlalchemy_engine
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
