@@ -49,6 +49,7 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`enableServiceAccounts <helm-values-apiService-enableServiceAccounts>`: true
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
@@ -60,6 +61,10 @@ Below is the available helm value keys and the default value of each key:
         cpu: "4"
         memory: "8Gi"
     :ref:`skypilotDev <helm-values-apiService-skypilotDev>`: false
+    :ref:`metrics <helm-values-apiService-metrics>`:
+      :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
+      :ref:`port <helm-values-apiService-metrics-port>`: 9090
+    :ref:`terminationGracePeriodSeconds <helm-values-apiService-terminationGracePeriodSeconds>`: 60
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -167,6 +172,12 @@ Below is the available helm value keys and the default value of each key:
     :ref:`allowPrivilegeEscalation <helm-values-securityContext-allowPrivilegeEscalation>`: false
 
   :ref:`runtimeClassName <helm-values-runtimeClassName>`: ""
+
+  :ref:`prometheus <helm-values-prometheus>`:
+    :ref:`enabled <helm-values-prometheus-enabled>`: false
+
+  :ref:`grafana <helm-values-grafana>`:
+    :ref:`enabled <helm-values-grafana-enabled>`: false
 
 Fields
 ----------
@@ -298,6 +309,16 @@ Default: ``null``
         - aws
         - gcp
 
+.. _helm-values-apiService-enableServiceAccounts:
+
+``apiService.enableServiceAccounts``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable service accounts in the API server.
+
+Default: ``true``
+
+
 .. _helm-values-apiService-sshNodePools:
 
 ``apiService.sshNodePools``
@@ -393,6 +414,66 @@ Default: ``false``
 
   apiService:
     skypilotDev: false
+
+.. _helm-values-apiService-metrics:
+
+``apiService.metrics``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for metrics collection on the API server.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  apiService:
+    metrics:
+      enabled: true
+      port: 9090
+
+.. _helm-values-apiService-metrics-enabled:
+
+``apiService.metrics.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable (exposing API metrics)[Link to docs/source/reference/api-server/examples/api-server-metrics-setup.rst] from the API server. If this is enabled and the API server image does not support metrics, the deployment will fail.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    metrics:
+      enabled: true
+
+.. _helm-values-apiService-metrics-port:
+
+``apiService.metrics.port``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The port to expose the metrics on.
+
+Default: ``9090``
+
+.. code-block:: yaml
+
+  apiService:
+    metrics:
+      port: 9090
+
+.. _helm-values-apiService-terminationGracePeriodSeconds:
+
+``apiService.terminationGracePeriodSeconds``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The number of seconds to wait for the API server to finish processing the request before shutting down. Refer to :ref:`sky-api-server-graceful-upgrade` for more details.
+
+Default: ``60``
+
+.. code-block:: yaml
+
+  apiService:
+    terminationGracePeriodSeconds: 300
 
 .. _helm-values-storage:
 
@@ -1147,3 +1228,62 @@ Default: (empty)
 .. code-block:: yaml
 
   runtimeClassName:
+
+.. _helm-values-prometheus:
+
+``prometheus``
+~~~~~~~~~~~~~~
+
+Configuration for Prometheus helm chart. Refer to the `Prometheus helm chart repository <https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml>`_ for available values.
+
+.. code-block:: yaml
+
+  prometheus:
+    enabled: true
+    server:
+      persistentVolume:
+        enabled: true
+        size: 10Gi
+
+.. _helm-values-prometheus-enabled:
+
+``prometheus.enabled``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Enable prometheus for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  prometheus:
+    enabled: false
+
+.. _helm-values-grafana:
+
+``grafana``
+~~~~~~~~~~~~
+
+Configuration for Grafana helm chart. Refer to the `Grafana helm chart documentation <https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md>`_ for available values.
+
+.. code-block:: yaml
+
+  grafana:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 10Gi
+
+.. _helm-values-grafana-enabled:
+
+``grafana.enabled``
+^^^^^^^^^^^^^^^^^^^^
+
+Enable grafana for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  grafana:
+    enabled: false
