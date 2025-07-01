@@ -568,12 +568,14 @@ def _reload_config_as_server() -> None:
             'if db config is specified, no other config is allowed')
 
     if db_url:
-        _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url, poolclass=NullPool)
-        Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+        sqlalchemy_engine = sqlalchemy.create_engine(db_url, poolclass=NullPool)
+        Base.metadata.create_all(bind=sqlalchemy_engine)
+
         def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
-            assert _SQLALCHEMY_ENGINE is not None
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                row = session.query(config_yaml_table).filter_by(key=key).first()
+            assert sqlalchemy_engine is not None
+            with orm.Session(sqlalchemy_engine) as session:
+                row = session.query(config_yaml_table).filter_by(
+                    key=key).first()
             if row:
                 db_config = config_utils.Config(yaml.safe_load(row.value))
                 db_config.pop_nested(('db',), None)
@@ -590,8 +592,8 @@ def _reload_config_as_server() -> None:
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
     # Close the engine to avoid connection leaks
-    _SQLALCHEMY_ENGINE.dispose()
-    del _SQLALCHEMY_ENGINE
+    sqlalchemy_engine.dispose()
+    del sqlalchemy_engine
 
 
 def _reload_config_as_client() -> None:
@@ -846,28 +848,31 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         existing_db_url = get_nested(('db',), None)
         if existing_db_url:
-            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(existing_db_url, poolclass=NullPool)
-            Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+            sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
+                                                         poolclass=NullPool)
+            Base.metadata.create_all(bind=sqlalchemy_engine)
+
             def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-                assert _SQLALCHEMY_ENGINE is not None
+                assert sqlalchemy_engine is not None
                 config.pop_nested(('db',), None)
                 config_str = common_utils.dump_yaml_str(dict(config))
-                with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                    if (_SQLALCHEMY_ENGINE.dialect.name ==
+                with orm.Session(sqlalchemy_engine) as session:
+                    if (sqlalchemy_engine.dialect.name ==
                             db_utils.SQLAlchemyDialect.SQLITE.value):
                         insert_func = sqlite.insert
-                    elif (_SQLALCHEMY_ENGINE.dialect.name ==
-                        db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                    elif (sqlalchemy_engine.dialect.name ==
+                          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
                         insert_func = postgresql.insert
                     else:
                         raise ValueError('Unsupported database dialect')
-                    insert_stmnt = insert_func(config_yaml_table).values(key=key,
-                                                                        value=config_str)
+                    insert_stmnt = insert_func(config_yaml_table).values(
+                        key=key, value=config_str)
                     do_update_stmt = insert_stmnt.on_conflict_do_update(
                         index_elements=[config_yaml_table.c.key],
                         set_={config_yaml_table.c.value: config_str})
                     session.execute(do_update_stmt)
                     session.commit()
+
             new_db_url = config.get_nested(('db',), None)
             if new_db_url and new_db_url != existing_db_url:
                 raise ValueError('Cannot change db url while server is running')
@@ -875,8 +880,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
             db_updated = True
             # Close the engine to avoid connection leaks
-            _SQLALCHEMY_ENGINE.dispose()
-            del _SQLALCHEMY_ENGINE
+            sqlalchemy_engine.dispose()
+            del sqlalchemy_engine
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
