@@ -14,7 +14,6 @@ SSHBase = declarative_base()
 class SSHClusterStatus(Enum):
     PENDING = 'pending'
     STARTING = 'starting'
-    UPDATE = 'update'
     ACTIVE = 'active'
     TERMINATING = 'terminating'
 

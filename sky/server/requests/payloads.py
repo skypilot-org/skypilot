@@ -16,6 +16,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
 from sky.skylet import constants
+from sky.ssh_node_pools import models as ssh_models
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -594,10 +595,47 @@ class LocalUpBody(RequestBody):
     password: Optional[str] = None
 
 
-class SSHUpBody(RequestBody):  # TODO(kyuds): Change to Optional Union str list
+class SSHUpBody(RequestBody):
     """The request body for the SSH up/down endpoints."""
-    infra: Optional[str] = None
+    infra: str
     cleanup: bool = False
+
+
+class SSHNodeResponse(pydantic.BaseModel):
+    """Response body for individual SSH nodes"""
+    ip: str
+    user: str
+    identity_file: str
+    password: str
+    use_ssh_config: bool
+
+    @classmethod
+    def from_ssh_node(cls, node: ssh_models.SSHNode) -> 'SSHNodeResponse':
+        return cls(
+            ip=node.ip,
+            user=node.user,
+            identity_file=node.identity_file,
+            password=node.password,
+            use_ssh_config=node.use_ssh_config
+        )
+
+
+class SSHClusterResponse(pydantic.BaseModel):
+    """Response body for SSHCluster"""
+    name: str
+    status: str
+    head_node_ip: str
+    hosts: List[SSHNodeResponse]
+
+    @classmethod
+    def from_ssh_cluster(cls, cluster: ssh_models.SSHCluster) -> 'SSHClusterResponse':  # pylint: disable=line-too-long
+        nodes = cluster.update_nodes or cluster.current_nodes
+        return cls(
+            name=cluster.name,
+            status=cluster.status.name,
+            head_node_ip=cluster.head_node_ip,
+            hosts=[SSHNodeResponse.from_ssh_node(n) for n in nodes]
+        )
 
 
 class ServeTerminateReplicaBody(RequestBody):

@@ -41,6 +41,7 @@ from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import constants as ssh_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import annotations
@@ -1472,8 +1473,7 @@ def local_down() -> server_common.RequestId:
     return server_common.get_request_id(response)
 
 
-def _update_remote_ssh_node_pools(file: str,
-                                  infra: Optional[str] = None) -> None:
+def _update_remote_ssh_node_pools(file: str) -> str:
     """Update the SSH node pools on the remote server.
 
     This function will also upload the local SSH key to the remote server, and
@@ -1481,8 +1481,9 @@ def _update_remote_ssh_node_pools(file: str,
 
     Args:
         file: The path to the local SSH node pools config file.
-        infra: The name of the cluster configuration in the local SSH node
-            pools config file. If None, all clusters in the file are updated.
+
+    Returns:
+        infra: Name of ssh cluster updated.
     """
     file = os.path.expanduser(file)
     if not os.path.exists(file):
@@ -1490,16 +1491,25 @@ def _update_remote_ssh_node_pools(file: str,
             raise ValueError(
                 f'SSH Node Pool config file {file} does not exist. '
                 'Please check if the file exists and the path is correct.')
-    config = ssh_utils.load_ssh_targets(file)
-    config = ssh_utils.get_cluster_config(config, infra)
-    pools_config = {}
-    for name, pool_config in config.items():
-        hosts_info = ssh_utils.prepare_hosts_info(
-            name, pool_config, upload_ssh_key_func=_upload_ssh_key_and_wait)
-        pools_config[name] = {'hosts': hosts_info}
+
+    config, msg = ssh_utils.load_ssh_targets(file), None
+    if not config:
+        msg = f'No clusters defined in SSH Node Pools file {file}'
+    if len(config.keys()) > 1:
+        msg = ('Please specify only one configuration in '
+               f'SSH Node Pools file {file}')
+    if msg:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(msg)
+
+    infra, config = next(iter(config.items()))
+    hosts_info = ssh_utils.prepare_hosts_info(
+        infra, config, upload_ssh_key_func=_upload_ssh_key_and_wait)
+    pool_config = {infra: {'hosts': hosts_info}}
     server_common.make_authenticated_request('POST',
                                              '/ssh_node_pools',
-                                             json=pools_config)
+                                             json=pool_config)
+    return infra
 
 
 def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
@@ -1533,38 +1543,29 @@ def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_up(infra: Optional[str] = None,
-           file: Optional[str] = None) -> server_common.RequestId:
-    """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
+def ssh_up(file: Optional[str] = None) -> server_common.RequestId:
+    """Deploys the SSH Node Pools defined in file.
 
     Args:
-        infra: Name of the cluster configuration in ssh_targets.yaml.
-            If None, the first cluster in the file is used.
         file: Name of the ssh node pool configuration file to use. If
             None, the default path, ~/.sky/ssh_node_pools.yaml is used.
 
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
-    # TODO (kyuds): file default is ~/.sky/ssh_node_pools.yaml
-    if file is not None:
-        _update_remote_ssh_node_pools(file, infra)  # run this regardless.
-        # take output and put it as the infra (as list)
+    if file is None:
+        file = os.path.expanduser(ssh_constants.SKYSSH_DEFAULT_YAML)
+
+    infra = _update_remote_ssh_node_pools(file)
 
     # Use SSH node pools router endpoint
     body = payloads.SSHUpBody(infra=infra, cleanup=False)
 
-    # TODO(kyuds): change to single api call (reduce to single endpoint)
-    if infra is not None:
-        # Call the specific pool deployment endpoint
-        response = server_common.make_authenticated_request(
-            'POST', f'/ssh_node_pools/{infra}/deploy')
-    else:
-        # Call the general deployment endpoint
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/ssh_node_pools/deploy',
-            json=json.loads(body.model_dump_json()))
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/ssh_node_pools/deploy',
+        json=json.loads(body.model_dump_json()))
+
     return server_common.get_request_id(response)
 
 
@@ -1583,17 +1584,12 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     """
     # Use SSH node pools router endpoint
     body = payloads.SSHUpBody(infra=infra, cleanup=True)
-    # TODO(kyuds): change this to single endpoint
-    if infra is not None:
-        # Call the specific pool down endpoint
-        response = server_common.make_authenticated_request(
-            'POST', f'/ssh_node_pools/{infra}/down')
-    else:
-        # Call the general down endpoint
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/ssh_node_pools/down',
-            json=json.loads(body.model_dump_json()))
+
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/ssh_node_pools/down',
+        json=json.loads(body.model_dump_json()))
+
     return server_common.get_request_id(response)
 
 
