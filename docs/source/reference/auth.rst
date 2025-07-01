@@ -85,6 +85,60 @@ SkyPilot will automatically use the user email from the auth proxy to create a u
     :align: center
     :width: 70%
 
+.. _service-accounts:
+
+Optional: Service accounts
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also use service accounts to access SkyPilot API server programmatically without browser authentication, which is good for CI/CD pipelines, Airflow integration, etc.
+
+
+Creating service accounts
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Navigate to **Users > Service Accounts** in the SkyPilot dashboard
+2. Click **Create Service Account** and provide:
+   
+   * **Token Name**: Descriptive name (e.g., "pipeline")
+   * **Expiration**: Optional (defaults to 30 days)
+
+3. **Save the token immediately** - it won't be shown again
+4. Assign appropriate role (admin/user)
+
+.. image:: ../images/client-server/service-account.png
+    :alt: Service account
+    :align: center
+    :width: 90%
+
+Accessing the API server
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Authenticate with the service account token:
+
+.. code-block:: console
+
+    $ sky api login -e <ENDPOINT> --token <SERVICE_ACCOUNT_TOKEN>
+
+Or, use the ``SKYPILOT_SERVICE_ACCOUNT_TOKEN`` environment variable:
+
+.. code-block:: console
+
+    $ export SKYPILOT_SERVICE_ACCOUNT_TOKEN=<SERVICE_ACCOUNT_TOKEN>
+    $ sky api info
+
+Example: GitHub actions (CI/CD)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: yaml
+
+    # .github/workflows/deploy.yml
+    - name: Configure SkyPilot
+      run: sky api login -e ${{ vars.SKYPILOT_API_ENDPOINT }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
+        
+    - name: Launch training job
+      run: sky launch training.yaml
+
+
 .. _oauth2-proxy-okta:
 
 Setting up Okta
@@ -166,6 +220,16 @@ Okta integration FAQ
 
   Your proxy may be configured to redirect to a different URL (e.g., changing the URL from ``http`` to ``https``). Make sure to set the ``Sign-in redirect URIs`` in Okta application settings to all possible URLs that your proxy may redirect to, including HTTP and HTTPS endpoints.
 
+
+Service account architecture
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. image:: ../images/client-server/service-account-architecture.svg
+    :alt: Service Account Architecture with Auth Proxy
+    :align: center
+    :width: 90%
+
+Service accounts is enabled by default in the SkyPilot API server helm chart. To disable it, set ``--set apiService.enableServiceAccounts=false`` in the helm upgrade command.
 
 .. _auth-proxy-byo:
 

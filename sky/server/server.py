@@ -119,8 +119,11 @@ def _basic_auth_401_response(content: str):
 # TODO(hailong): Remove this function and use request.state.auth_user instead.
 async def _override_user_info_in_request_body(request: fastapi.Request,
                                               auth_user: Optional[models.User]):
+    if auth_user is None:
+        return
+
     body = await request.body()
-    if auth_user and body:
+    if body:
         try:
             original_json = await request.json()
         except json.JSONDecodeError as e:
@@ -228,14 +231,17 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/api/'):
-            # Try to set the auth user from the basic auth header so the
-            # following endpoint handlers can leverage the auth_user info
+            # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
-        if not auth_header or not auth_header.lower().startswith('basic '):
-            return _basic_auth_401_response('Invalid basic auth')
+        if not auth_header:
+            return _basic_auth_401_response('Authentication required')
+
+        # Only handle basic auth
+        if not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid authentication method')
 
         # Check username and password
         encoded = auth_header.split(' ', 1)[1]
@@ -263,6 +269,133 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
+
+        return await call_next(request)
+
+
+class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle Bearer Token Auth (Service Accounts)."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        """Make sure correct bearer token auth is present.
+
+        1. If the request has the X-Skypilot-Auth-Mode: token header, it must
+           have a valid bearer token.
+        2. For backwards compatibility, if the request has a Bearer token
+           beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
+           it must be a valid token.
+        3. If X-Skypilot-Auth-Mode is not set to "token", and there is no Bearer
+           token beginning with "sky_", allow the request to continue.
+
+        In conjunction with an auth proxy, the idea is to make the auth proxy
+        bypass requests with bearer tokens, instead setting the
+        X-Skypilot-Auth-Mode header. The auth proxy should either validate the
+        auth or set the header X-Skypilot-Auth-Mode: token.
+        """
+        has_skypilot_auth_header = (
+            request.headers.get('X-Skypilot-Auth-Mode') == 'token')
+        auth_header = request.headers.get('authorization')
+        has_bearer_token_starting_with_sky = (
+            auth_header and auth_header.lower().startswith('bearer ') and
+            auth_header.split(' ', 1)[1].startswith('sky_'))
+
+        if (not has_skypilot_auth_header and
+                not has_bearer_token_starting_with_sky):
+            # This is case #3 above. We do not need to validate the request.
+            # No Bearer token, continue with normal processing (OAuth2 cookies,
+            # etc.)
+            return await call_next(request)
+        # After this point, all requests must be validated.
+
+        if auth_header is None:
+            return fastapi.responses.JSONResponse(
+                status_code=401, content={'detail': 'Authentication required'})
+
+        # Extract token
+        split_header = auth_header.split(' ', 1)
+        if split_header[0].lower() != 'bearer':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid authentication method'})
+        sa_token = split_header[1]
+
+        # Handle SkyPilot service account tokens
+        return await self._handle_service_account_token(request, sa_token,
+                                                        call_next)
+
+    async def _handle_service_account_token(self, request: fastapi.Request,
+                                            sa_token: str, call_next):
+        """Handle SkyPilot service account tokens."""
+        # Check if service account tokens are enabled
+        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                                    'false').lower()
+        if sa_enabled != 'true':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Service account authentication disabled'})
+
+        try:
+            # Import here to avoid circular imports
+            # pylint: disable=import-outside-toplevel
+            from sky.users.token_service import token_service
+
+            # Verify and decode JWT token
+            payload = token_service.verify_token(sa_token)
+
+            if payload is None:
+                logger.warning('Service account token verification failed')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={
+                        'detail': 'Invalid or expired service account token'
+                    })
+
+            # Extract user information from JWT payload
+            user_id = payload.get('sub')
+            user_name = payload.get('name')
+            token_id = payload.get('token_id')
+
+            if not user_id or not token_id:
+                logger.warning(
+                    'Invalid token payload: missing user_id or token_id')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Invalid token payload'})
+
+            # Verify user still exists in database
+            user_info = global_user_state.get_user(user_id)
+            if user_info is None:
+                logger.warning(
+                    f'Service account user {user_id} no longer exists')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Service account user no longer exists'})
+
+            # Update last used timestamp for token tracking
+            try:
+                global_user_state.update_service_account_token_last_used(
+                    token_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to update token last used time: {e}')
+
+            # Set the authenticated user
+            auth_user = models.User(id=user_id,
+                                    name=user_name or user_info.name)
+            request.state.auth_user = auth_user
+
+            # Override user info in request body for service account requests
+            await _override_user_info_in_request_body(request, auth_user)
+
+            logger.debug(f'Authenticated service account: {user_id}')
+
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Service account authentication failed: {e}',
+                         exc_info=True)
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={
+                    'detail': f'Service account authentication failed: {str(e)}'
+                })
 
         return await call_next(request)
 
@@ -330,7 +463,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
                 request_id=event.id,
                 request_name=event.name,
                 request_body=payloads.RequestBody(),
-                func=event.event_fn,
+                func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
             )
@@ -424,6 +557,9 @@ app.add_middleware(
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
 if str(enable_basic_auth).lower() == 'true':
     app.add_middleware(BasicAuthMiddleware)
+# Bearer token middleware should always be present to handle service account
+# authentication
+app.add_middleware(BearerTokenMiddleware)
 app.add_middleware(AuthProxyMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
@@ -1339,6 +1475,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
+    logger.info(f'Health endpoint: request.state.auth_user = {user}')
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         'api_version': server_constants.API_VERSION,

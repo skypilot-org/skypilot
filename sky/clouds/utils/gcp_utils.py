@@ -137,10 +137,16 @@ def _list_reservations_for_instance_type(
     For example, if we have a specific reservation with n1-highmem-8
     in us-central1-c. `sky launch --gpus V100` will fail.
     """
-    prioritize_reservations = skypilot_config.get_nested(
-        ('gcp', 'prioritize_reservations'), False)
-    specific_reservations = skypilot_config.get_nested(
-        ('gcp', 'specific_reservations'), [])
+    prioritize_reservations = skypilot_config.get_effective_region_config(
+        cloud='gcp',
+        region=None,
+        keys=('prioritize_reservations',),
+        default_value=False)
+    specific_reservations = skypilot_config.get_effective_region_config(
+        cloud='gcp',
+        region=None,
+        keys=('specific_reservations',),
+        default_value=[])
     if not prioritize_reservations and not specific_reservations:
         return []
     logger.debug(f'Querying GCP reservations for instance {instance_type!r}')
@@ -170,14 +176,23 @@ def _list_reservations_for_instance_type(
 
 def get_minimal_compute_permissions() -> List[str]:
     permissions = copy.copy(constants.VM_MINIMAL_PERMISSIONS)
-    if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is None:
+    if skypilot_config.get_effective_region_config(
+            cloud='gcp', region=None, keys=('vpc_name',),
+            default_value=None) is None:
         # If custom VPC is not specified, permissions to modify network are
         # required to ensure SkyPilot to be able to setup the network, and
         # allow opening ports (e.g., via `resources.ports`).
         permissions += constants.FIREWALL_PERMISSIONS
 
-    if (skypilot_config.get_nested(('gcp', 'prioritize_reservations'), False) or
-            skypilot_config.get_nested(('gcp', 'specific_reservations'), [])):
+    if (skypilot_config.get_effective_region_config(
+            cloud='gcp',
+            region=None,
+            keys=('prioritize_reservations',),
+            default_value=False) or skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=None,
+                keys=('specific_reservations',),
+                default_value=[])):
         permissions += constants.RESERVATION_PERMISSIONS
 
     permissions += constants.GCP_MINIMAL_PERMISSIONS

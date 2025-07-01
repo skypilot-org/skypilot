@@ -15,7 +15,6 @@ from sky.server import constants
 
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
-ENDPOINT = 'http://127.0.0.1:46580/api/health'
 
 
 class TestBackwardCompatibility:
@@ -40,25 +39,14 @@ class TestBackwardCompatibility:
     ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
 
-    # Fix the flakyness of the test, server may not ready when we run the command after restart.
-    WAIT_FOR_API = (
-        'for i in $(seq 1 30); do '
-        f'if curl -s {ENDPOINT} > /dev/null; then '
-        'echo "API is up and running"; break; fi; '
-        'echo "Waiting for API to be ready... ($i/30)"; '
-        '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
-        'sleep 1; done')
-
-    SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
-
     # Shorthand of switching to base environment and running a list of commands in environment.
     def _switch_to_base(self, *cmds: str) -> list[str]:
-        cmds = [self.SKY_API_RESTART] + list(cmds)
+        cmds = [smoke_tests_utils.SKY_API_RESTART] + list(cmds)
         return [f'{self.ACTIVATE_BASE} && {c}' for c in cmds]
 
     # Shorthand of switching to current environment and running a list of commands in environment.
     def _switch_to_current(self, *cmds: str) -> list[str]:
-        cmds = [self.SKY_API_RESTART] + list(cmds)
+        cmds = [smoke_tests_utils.SKY_API_RESTART] + list(cmds)
         return [f'{self.ACTIVATE_CURRENT} && {c}' for c in cmds]
 
     def _run_cmd(self, cmd: str):
@@ -171,11 +159,11 @@ class TestBackwardCompatibility:
         if need_launch:
             need_launch_cmd = f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -y -c {cluster_name}'
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 100',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             need_launch_cmd,
             f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
@@ -205,9 +193,9 @@ class TestBackwardCompatibility:
         """Test cluster stop/start functionality across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky stop -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && s=$(sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml) && '
             'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2"',
@@ -231,12 +219,12 @@ class TestBackwardCompatibility:
             f.write(task_yaml)
             yaml_path = f.name
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             # Set intiial autostop in base
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} {yaml_path}',
             f'{self.ACTIVATE_BASE} && sky status {cluster_name} | grep "5m"',
             # Change the autostop time in current
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                     cluster_name=f"{cluster_name}",
@@ -251,10 +239,10 @@ class TestBackwardCompatibility:
         """Test single node operations (launch, stop, restart, logs)"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky launch --cloud {generic_cloud} -y --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky launch --cloud {generic_cloud} -y --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status',
@@ -268,10 +256,10 @@ class TestBackwardCompatibility:
         """Test operations on restarted clusters"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
@@ -287,10 +275,10 @@ class TestBackwardCompatibility:
         """Test multi-node cluster operations"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/multi_hostname.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
@@ -376,10 +364,10 @@ class TestBackwardCompatibility:
         """Test serve deployment functionality across versions"""
         serve_name = smoke_tests_utils.get_cluster_name()
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && sky check && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && sky check && '
             f'sky serve up --cloud {generic_cloud} -y -n {serve_name}-0 examples/serve/http_server/task.yaml',
             f'{self.ACTIVATE_BASE} && sky serve status {serve_name}-0',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky serve status {serve_name}-0',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky serve status {serve_name}-0',
             f'{self.ACTIVATE_CURRENT} && sky serve logs {serve_name}-0 2 --no-follow',
             f'{self.ACTIVATE_CURRENT} && sky serve logs --controller {serve_name}-0 --no-follow',
             f'{self.ACTIVATE_CURRENT} && sky serve logs --load-balancer {serve_name}-0 --no-follow',
@@ -405,13 +393,13 @@ class TestBackwardCompatibility:
         job_name = f"{cluster_name}-job"
         commands = [
             # Check API version compatibility
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'{self.ACTIVATE_CURRENT} && result="$(sky status 2>&1)" || true; '
             'if echo "$result" | grep -q "SkyPilot API server is too old"; then '
             '  echo "$result" && exit 1; '
             'fi',
             # managed job test
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
             f'{self.ACTIVATE_CURRENT} && sky api status',
@@ -422,7 +410,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
             # cluster launch/exec test
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} &&'
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} &&'
             f'sky launch --cloud {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
@@ -432,7 +420,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
             f'{self.ACTIVATE_BASE} && sky autostop -i 1 -y {cluster_name}',
             # serve test
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky serve up --cloud {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
             # No restart on switch to current, cli in current, server in base
             f'{self.ACTIVATE_CURRENT} && sky serve status {cluster_name}-0',
@@ -459,14 +447,14 @@ class TestBackwardCompatibility:
         cmd_to_sdk_file = f'python {sdk_utils_file}'
         commands = [
             # cluster test
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'{cmd_to_sdk_file} launch-cluster --cloud {generic_cloud} --cluster-name {cluster_name} --command "echo hello world; sleep 60"',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'{cmd_to_sdk_file} get-cluster-status --cluster-name {cluster_name} | grep "\'name\': \'{cluster_name}\'"',
             f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} queue --cluster-name {cluster_name} | grep "\'job_id\': 1"',
             f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} cluster-logs --cluster-name {cluster_name} --job-id 1 | grep "hello world"',
             # # managed job test
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'{cmd_to_sdk_file} launch-managed-job --job-name {job_name} --cloud {generic_cloud} --command "echo hello world; sleep 60"',
             f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} managed-job-logs --job-name {job_name} | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {cmd_to_sdk_file} managed-job-queue | grep "{job_name}"',

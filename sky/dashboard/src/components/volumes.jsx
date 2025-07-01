@@ -8,7 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import PropTypes from 'prop-types';
-import { CircularProgress } from '@mui/material';
+import { CircularProgress, Popover } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -35,6 +35,9 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { TimestampWithTooltip } from '@/components/utils';
+import { StatusBadge } from '@/components/elements/StatusBadge';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
@@ -48,6 +51,7 @@ export function Volumes() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const handleRefresh = () => {
+    dashboardCache.invalidate(getVolumes);
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
@@ -86,6 +90,10 @@ export function Volumes() {
     setDeleteError(null);
   };
 
+  useEffect(() => {
+    cachePreloader.preloadForPage('volumes');
+  }, []);
+
   return (
     <>
       <div className="flex items-center justify-between mb-4 h-5">
@@ -116,6 +124,7 @@ export function Volumes() {
       </div>
 
       <VolumesTable
+        key="volumes"
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
@@ -182,7 +191,7 @@ function VolumesTable({
     setLoading(true);
     setLocalLoading(true);
     try {
-      const volumesData = await getVolumes();
+      const volumesData = await dashboardCache.get(getVolumes);
       setData(volumesData);
     } catch (error) {
       console.error('Failed to fetch volumes:', error);
@@ -271,7 +280,7 @@ function VolumesTable({
   };
 
   const formatTimestamp = (timestamp) => {
-    if (!timestamp) return '-';
+    if (!timestamp) return 'N/A';
     try {
       const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
       return <TimestampWithTooltip date={date} />;
@@ -328,6 +337,12 @@ function VolumesTable({
               >
                 Type{getSortDirection('type')}
               </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                onClick={() => requestSort('usedby_clusters')}
+              >
+                Used By{getSortDirection('usedby_clusters')}
+              </TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -350,17 +365,7 @@ function VolumesTable({
                   <TableCell className="font-medium">{volume.name}</TableCell>
                   <TableCell>{volume.infra || 'N/A'}</TableCell>
                   <TableCell>
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${
-                        volume.status === 'READY'
-                          ? 'bg-green-100 text-green-800'
-                          : volume.status === 'IN_USE'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {volume.status || 'UNKNOWN'}
-                    </span>
+                    <StatusBadge status={volume.status} />
                   </TableCell>
                   <TableCell>{formatSize(volume.size)}</TableCell>
                   <TableCell>{volume.user_name || 'N/A'}</TableCell>
@@ -368,6 +373,12 @@ function VolumesTable({
                     {formatTimestamp(volume.last_attached_at)}
                   </TableCell>
                   <TableCell>{volume.type || 'N/A'}</TableCell>
+                  <TableCell>
+                    <UsedByCell
+                      clusters={volume.usedby_clusters}
+                      pods={volume.usedby_pods}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Button
                       variant="ghost"
@@ -484,6 +495,88 @@ function VolumesTable({
         </div>
       )}
     </div>
+  );
+}
+
+function UsedByCell({ clusters, pods }) {
+  const MAX_DISPLAY = 2;
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  // clusters first
+  let arr =
+    Array.isArray(clusters) && clusters.length > 0
+      ? clusters
+      : Array.isArray(pods) && pods.length > 0
+        ? pods
+        : [];
+  const isCluster = Array.isArray(clusters) && clusters.length > 0;
+
+  if (!arr || arr.length === 0) return 'N/A';
+
+  const displayed = arr.slice(0, MAX_DISPLAY);
+  const hidden = arr.slice(MAX_DISPLAY);
+
+  const handleClick = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  return (
+    <>
+      {displayed.map((item, idx) => (
+        <span key={item}>
+          {isCluster ? (
+            <Link
+              href={`/clusters/${encodeURIComponent(item)}`}
+              className="text-sky-blue hover:underline"
+            >
+              {item}
+            </Link>
+          ) : (
+            <span>{item}</span>
+          )}
+          {idx < displayed.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+      {hidden.length > 0 && (
+        <>
+          ,{' '}
+          <span
+            className="text-sky-blue cursor-pointer underline"
+            onClick={handleClick}
+            style={{ userSelect: 'none' }}
+          >
+            +{hidden.length} more
+          </span>
+          <Popover
+            open={Boolean(anchorEl)}
+            anchorEl={anchorEl}
+            onClose={handleClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          >
+            <div style={{ padding: 12, maxWidth: 300 }}>
+              {hidden.map((item) => (
+                <div key={item} style={{ marginBottom: 4 }}>
+                  {isCluster ? (
+                    <Link
+                      href={`/clusters/${encodeURIComponent(item)}`}
+                      className="text-sky-blue hover:underline"
+                    >
+                      {item}
+                    </Link>
+                  ) : (
+                    <span>{item}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Popover>
+        </>
+      )}
+    </>
   );
 }
 

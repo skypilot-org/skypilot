@@ -1,10 +1,12 @@
 """Kubernetes pvc provisioning."""
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.volumes import volume as volume_lib
 
@@ -45,17 +47,26 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
         access_mode = pvc.spec.access_modes[0]
         if access_mode not in once_modes:
             continue
-        usedby = _get_volume_usedby(context, namespace, pvc_name)
-        if usedby:
+        usedby_pods, _ = _get_volume_usedby(context, namespace, pvc_name)
+        if usedby_pods:
             raise config_lib.KubernetesError(f'Volume {pvc_name} with access '
                                              f'mode {access_mode} is already '
-                                             f'in use by {usedby}.')
+                                             f'in use by Pods {usedby_pods}.')
 
 
 def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a volume."""
     context, namespace = _get_context_namespace(config)
     pvc_spec = _get_pvc_spec(namespace, config)
+    # Check if the storage class exists
+    storage_class_name = pvc_spec['spec'].get('storageClassName')
+    if storage_class_name is not None:
+        try:
+            kubernetes.storage_api(context).read_storage_class(
+                name=storage_class_name)
+        except kubernetes.api_exception() as e:
+            raise config_lib.KubernetesError(
+                f'Check storage class {storage_class_name} error: {e}')
     create_persistent_volume_claim(namespace, context, pvc_spec)
     return config
 
@@ -76,22 +87,73 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     return config
 
 
-def _get_volume_usedby(context: Optional[str], namespace: str,
-                       pvc_name: str) -> List[str]:
-    """Gets the usedby resources of a volume."""
-    usedby = []
+def _get_volume_usedby(
+    context: Optional[str],
+    namespace: str,
+    pvc_name: str,
+) -> Tuple[List[str], List[str]]:
+    """Gets the usedby resources of a volume.
+
+    This function returns the pods and clusters that are using the volume.
+    The usedby_pods is accurate, which also includes the Pods that are not
+    managed by SkyPilot.
+
+    Args:
+        context: Kubernetes context
+        namespace: Kubernetes namespace
+        pvc_name: PVC name
+
+    Returns:
+        usedby_pods: List of pods using the volume. These may include pods
+                     not created by SkyPilot.
+        usedby_clusters: List of clusters using the volume.
+    """
+    usedby_pods = []
+    usedby_clusters = []
+    field_selector = ','.join([
+        f'status.phase!={phase}'
+        for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
+    ])
+    cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
-    pods = kubernetes.core_api(context).list_namespaced_pod(namespace=namespace)
+    pods = kubernetes.core_api(context).list_namespaced_pod(
+        namespace=namespace, field_selector=field_selector)
     for pod in pods.items:
-        if pod.spec.volumes is not None:
-            for volume in pod.spec.volumes:
-                if volume.persistent_volume_claim is not None:
-                    if volume.persistent_volume_claim.claim_name == pvc_name:
-                        usedby.append(pod.metadata.name)
-    return usedby
+        if pod.spec.volumes is None:
+            continue
+        for volume in pod.spec.volumes:
+            if volume.persistent_volume_claim is None:
+                continue
+            if volume.persistent_volume_claim.claim_name == pvc_name:
+                usedby_pods.append(pod.metadata.name)
+                # Get the real cluster name
+                cluster_name_on_cloud = pod.metadata.labels.get(
+                    k8s_constants.TAG_SKYPILOT_CLUSTER_NAME)
+                if cluster_name_on_cloud is None:
+                    continue
+                cluster_name = cloud_to_name_map.get(cluster_name_on_cloud)
+                if cluster_name is not None:
+                    usedby_clusters.append(cluster_name)
+    if usedby_pods:
+        logger.debug(f'Volume {pvc_name} is used by Pods {usedby_pods}'
+                     f' and clusters {usedby_clusters}')
+    return usedby_pods, usedby_clusters
 
 
-def get_volume_usedby(config: models.VolumeConfig) -> List[str]:
+def _get_cluster_name_on_cloud_to_cluster_name_map() -> Dict[str, str]:
+    """Gets the map from cluster name on cloud to cluster name."""
+    clusters = global_user_state.get_clusters()
+    cloud_to_name_map = {}
+    for cluster in clusters:
+        handle = cluster['handle']
+        if handle is None:
+            continue
+        cloud_to_name_map[handle.cluster_name_on_cloud] = cluster['name']
+    return cloud_to_name_map
+
+
+def get_volume_usedby(
+    config: models.VolumeConfig,) -> Tuple[List[str], List[str]]:
     """Gets the usedby resources of a volume."""
     context, namespace = _get_context_namespace(config)
     pvc_name = config.name_on_cloud
