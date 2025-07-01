@@ -21,7 +21,7 @@ import {
   TimestampWithTooltip,
 } from '@/components/utils';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+
 import { Card } from '@/components/ui/card';
 import {
   Table,
@@ -56,6 +56,7 @@ import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { FilterSystem, SearchInput } from '@/components/FilterSystem';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -130,36 +131,21 @@ const formatUserDisplay = (username, userId) => {
 
 // Helper function to format duration in a human-readable way
 const formatDuration = (durationSeconds) => {
-  if (!durationSeconds || durationSeconds === 0) {
+  if (!durationSeconds || durationSeconds < 0) {
     return '-';
   }
 
-  // Convert to a whole number if it's a float
-  durationSeconds = Math.floor(durationSeconds);
+  const hours = Math.floor(durationSeconds / 3600);
+  const minutes = Math.floor((durationSeconds % 3600) / 60);
+  const seconds = durationSeconds % 60;
 
-  const units = [
-    { value: 31536000, label: 'y' }, // years (365 days)
-    { value: 2592000, label: 'mo' }, // months (30 days)
-    { value: 86400, label: 'd' }, // days
-    { value: 3600, label: 'h' }, // hours
-    { value: 60, label: 'm' }, // minutes
-    { value: 1, label: 's' }, // seconds
-  ];
-
-  let remaining = durationSeconds;
-  let result = '';
-  let count = 0;
-
-  for (const unit of units) {
-    if (remaining >= unit.value && count < 2) {
-      const value = Math.floor(remaining / unit.value);
-      result += `${value}${unit.label} `;
-      remaining %= unit.value;
-      count++;
-    }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  } else {
+    return `${seconds}s`;
   }
-
-  return result.trim() || '0s';
 };
 
 export function Clusters() {
@@ -169,35 +155,75 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
-  const [nameFilter, setNameFilter] = useState('');
+  
+  // Modern filter state - using a single object to manage all filters
+  const [filters, setFilters] = useState({});
   const [workspaces, setWorkspaces] = useState([]);
   const [users, setUsers] = useState([]);
-  const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
+  const [showHistory, setShowHistory] = useState(false);
   const isMobile = useMobile();
 
-  // Handle URL query parameters for workspace and user filtering
+  // Define filter configuration for the new filter system
+  const filterConfig = useMemo(() => [
+    {
+      key: 'search',
+      label: 'Search',
+      type: 'text',
+      placeholder: 'Search clusters by name...',
+    },
+    {
+      key: 'workspace',
+      label: 'Workspace',
+      type: 'select',
+      options: workspaces.map(ws => ({ value: ws, label: ws })),
+    },
+    {
+      key: 'user',
+      label: 'User',
+      type: 'select',
+      options: users.map(user => ({ value: user.userId, label: user.display })),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      type: 'select',
+      options: [
+        { value: 'RUNNING', label: 'Running' },
+        { value: 'STOPPED', label: 'Stopped' },
+        { value: 'LAUNCHING', label: 'Launching' },
+        { value: 'STOPPING', label: 'Stopping' },
+        { value: 'TERMINATED', label: 'Terminated' },
+      ],
+    },
+  ], [workspaces, users]);
+
+  // Handle URL query parameters for filtering (backward compatibility)
   useEffect(() => {
     if (router.isReady) {
+      const newFilters = {};
+      
       if (router.query.workspace) {
         const workspaceParam = Array.isArray(router.query.workspace)
           ? router.query.workspace[0]
           : router.query.workspace;
-        setWorkspaceFilter(workspaceParam);
+        newFilters.workspace = workspaceParam;
       }
+      
       if (router.query.user) {
         const userParam = Array.isArray(router.query.user)
           ? router.query.user[0]
           : router.query.user;
-        setUserFilter(userParam);
+        newFilters.user = userParam;
       }
+      
       if (router.query.name) {
         const nameParam = Array.isArray(router.query.name)
           ? router.query.name[0]
           : router.query.name;
-        setNameFilter(nameParam);
+        newFilters.search = nameParam;
       }
+      
+      setFilters(newFilters);
     }
   }, [
     router.isReady,
@@ -207,26 +233,24 @@ export function Clusters() {
   ]);
 
   // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser, newName) => {
+  const updateURLParams = (newFilters) => {
     const query = { ...router.query };
 
-    // Update workspace parameter
-    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
-      query.workspace = newWorkspace;
+    // Update parameters based on filters
+    if (newFilters.workspace) {
+      query.workspace = newFilters.workspace;
     } else {
       delete query.workspace;
     }
 
-    // Update user parameter
-    if (newUser && newUser !== ALL_USERS_VALUE) {
-      query.user = newUser;
+    if (newFilters.user) {
+      query.user = newFilters.user;
     } else {
       delete query.user;
     }
 
-    // Update name parameter
-    if (newName && newName.trim() !== '') {
-      query.name = newName.trim();
+    if (newFilters.search) {
+      query.name = newFilters.search;
     } else {
       delete query.name;
     }
@@ -242,22 +266,10 @@ export function Clusters() {
     );
   };
 
-  // Handle workspace filter change
-  const handleWorkspaceFilterChange = (newWorkspace) => {
-    setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter, nameFilter);
-  };
-
-  // Handle user filter change
-  const handleUserFilterChange = (newUser) => {
-    setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser, nameFilter);
-  };
-
-  // Handle name filter change
-  const handleNameFilterChange = (newName) => {
-    setNameFilter(newName);
-    updateURLParams(workspaceFilter, userFilter, newName);
+  // Handle filter changes
+  const handleFiltersChange = (newFilters) => {
+    setFilters(newFilters);
+    updateURLParams(newFilters);
   };
 
   useEffect(() => {
@@ -360,133 +372,76 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+        <div className="flex items-center gap-4">
           <Link
             href="/clusters"
-            className="text-sky-blue hover:underline leading-none"
+            className="text-sky-blue hover:underline text-lg font-medium"
           >
             Sky Clusters
           </Link>
-          <div className="flex items-center ml-6 space-x-3">
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => setShowHistory(e.target.checked)}
-                className="sr-only"
-              />
-              <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    showHistory ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </div>
-              <span className="ml-2 text-sm text-gray-700">
-                Show history (Last 30 days)
-              </span>
-            </label>
-          </div>
-          <div className="relative ml-4 mr-2">
+          
+          {/* Show history toggle */}
+          <label className="flex items-center cursor-pointer">
             <input
-              type="text"
-              placeholder="Filter by cluster name"
-              value={nameFilter}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-32 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => setShowHistory(e.target.checked)}
+              className="sr-only"
             />
-            {nameFilter && (
-              <button
-                onClick={() => handleNameFilterChange('')}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear filter"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-          <Select
-            value={workspaceFilter}
-            onValueChange={handleWorkspaceFilterChange}
-          >
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE
-                  ? 'All Workspaces'
-                  : workspaceFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>
-                All Workspaces
-              </SelectItem>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={userFilter} onValueChange={handleUserFilterChange}>
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by user...">
-                {userFilter === ALL_USERS_VALUE
-                  ? 'All Users'
-                  : users.find((u) => u.userId === userFilter)?.display ||
-                    userFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.userId} value={user.userId}>
-                  {user.display}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showHistory ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  showHistory ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
             </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+            <span className="ml-2 text-sm text-gray-700">
+              Show history (Last 30 days)
+            </span>
+          </label>
+        </div>
+
+        {/* Right side: Filter system and refresh button */}
+        <div className="flex items-center gap-3">
+          {/* Modern filter system */}
+          <FilterSystem
+            filters={filters}
+            onFiltersChange={handleFiltersChange}
+            filterConfig={filterConfig}
+            className="flex-shrink-0"
+          />
+
+          {/* Loading indicator and refresh button */}
+          <div className="flex items-center gap-2">
+            {/* Loading indicator */}
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              </div>
+            )}
+                         <button
+               onClick={handleRefresh}
+               disabled={loading}
+               className="h-8 px-3 text-sm flex items-center gap-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+             >
+               <RotateCwIcon className="h-4 w-4" />
+               {!isMobile && <span>Refresh</span>}
+             </button>
+          </div>
         </div>
       </div>
+
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
-        workspaceFilter={workspaceFilter}
-        userFilter={userFilter}
-        nameFilter={nameFilter}
+        filters={filters}
         showHistory={showHistory}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
@@ -518,9 +473,7 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
-  workspaceFilter,
-  userFilter,
-  nameFilter,
+  filters,
   showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
@@ -584,29 +537,40 @@ export function ClusterTable({
     setIsInitialLoad(false);
   }, [setLoading, showHistory]);
 
-  // Use useMemo to compute sorted data
+  // Apply filters to data
   const sortedData = React.useMemo(() => {
     let filteredData = data;
-    // Filter by workspace if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
-    if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
+    
+    // Apply search filter
+    if (filters.search) {
+      filteredData = filterClustersByName(filteredData, filters.search);
+    }
+    
+    // Apply workspace filter
+    if (filters.workspace) {
       filteredData = filteredData.filter((item) => {
-        const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
-        return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
+        const itemWorkspace = item.workspace || 'default';
+        return itemWorkspace.toLowerCase() === filters.workspace.toLowerCase();
       });
     }
-    // Filter by user if userFilter is set and not 'ALL_USERS_VALUE'
-    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+    
+    // Apply user filter
+    if (filters.user) {
       filteredData = filteredData.filter((item) => {
         const itemUserId = item.user_hash || item.user;
-        return itemUserId === userFilter;
+        return itemUserId === filters.user;
       });
     }
-    // Filter by name if nameFilter is set
-    if (nameFilter) {
-      filteredData = filterClustersByName(filteredData, nameFilter);
+    
+    // Apply status filter
+    if (filters.status) {
+      filteredData = filteredData.filter((item) => {
+        return item.status === filters.status;
+      });
     }
+    
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, workspaceFilter, userFilter, nameFilter]);
+  }, [data, sortConfig, filters]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -857,7 +821,6 @@ export function ClusterTable({
         </div>
       </Card>
 
-      {/* Pagination controls */}
       {data.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
@@ -893,55 +856,39 @@ export function ClusterTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
             </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
-            </div>
+                         <div className="flex items-center space-x-2">
+               <button
+                 onClick={goToPreviousPage}
+                 disabled={currentPage === 1}
+                 className="h-7 w-7 p-0 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+               >
+                 {'<<'}
+               </button>
+               <button
+                 onClick={goToPreviousPage}
+                 disabled={currentPage === 1}
+                 className="h-7 w-7 p-0 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+               >
+                 {'<'}
+               </button>
+               <button
+                 onClick={goToNextPage}
+                 disabled={currentPage === totalPages}
+                 className="h-7 w-7 p-0 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+               >
+                 {'>'}
+               </button>
+               <button
+                 onClick={() => setCurrentPage(totalPages)}
+                 disabled={currentPage === totalPages}
+                 className="h-7 w-7 p-0 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+               >
+                 {'>>'}
+               </button>
+             </div>
           </div>
         </div>
       )}
@@ -950,33 +897,25 @@ export function ClusterTable({
 }
 
 export const handleVSCodeConnection = (cluster, onOpenVSCodeModal) => {
-  if (onOpenVSCodeModal) {
-    onOpenVSCodeModal(cluster);
-  }
+  // Open the modal for VSCode instructions
+  onOpenVSCodeModal(cluster);
 };
 
 const handleConnect = (cluster, onOpenSSHModal) => {
-  if (onOpenSSHModal) {
-    onOpenSSHModal(cluster);
-  } else {
-    const uri = `ssh://${cluster}`;
-    window.open(uri);
-  }
+  // Open the modal for SSH instructions
+  onOpenSSHModal(cluster);
 };
 
-// TODO(hailong): The enabled actions are also related to the `cloud` of the cluster
 export const enabledActions = (status) => {
-  switch (status) {
-    case 'RUNNING':
-      return ['connect', 'VSCode'];
-    default:
-      return [];
-  }
-};
-
-const actionIcons = {
-  connect: <Terminal className="w-4 h-4 text-gray-500 inline-block" />,
-  VSCode: <SquareCode className="w-4 h-4 text-gray-500 inline-block" />,
+  // Define which actions are enabled based on cluster status
+  const actionsMap = {
+    RUNNING: ['ssh', 'vscode', 'stop'],
+    STOPPED: ['start', 'delete'],
+    LAUNCHING: [],
+    STOPPING: [],
+    TERMINATED: ['delete'],
+  };
+  return actionsMap[status] || [];
 };
 
 export function Status2Actions({
@@ -986,76 +925,37 @@ export function Status2Actions({
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
-  const actions = enabledActions(status);
-  const isMobile = useMobile();
+  const enabled = enabledActions(status);
 
   const handleActionClick = (actionName) => {
-    switch (actionName) {
-      case 'connect':
-        handleConnect(cluster, onOpenSSHModal);
-        break;
-      case 'VSCode':
-        handleVSCodeConnection(cluster, onOpenVSCodeModal);
-        break;
-      default:
-        return;
+    if (actionName === 'ssh') {
+      handleConnect(cluster, onOpenSSHModal);
+    } else if (actionName === 'vscode') {
+      handleVSCodeConnection(cluster, onOpenVSCodeModal);
     }
+    // Add other action handlers as needed
   };
 
-  return (
-    <>
-      <div className="flex items-center space-x-4">
-        {Object.entries(actionIcons).map(([actionName, actionIcon]) => {
-          let label, tooltipText;
-          switch (actionName) {
-            case 'connect':
-              label = 'Connect';
-              tooltipText = 'Connect with SSH';
-              break;
-            case 'VSCode':
-              label = 'VSCode';
-              tooltipText = 'Open in VS Code';
-              break;
-            default:
-              break;
-          }
-          if (!withLabel) {
-            label = '';
-          }
-          if (actions.includes(actionName)) {
-            return (
-              <Tooltip
-                key={actionName}
-                content={tooltipText}
-                className="capitalize text-sm text-muted-foreground"
-              >
-                <button
-                  onClick={() => handleActionClick(actionName)}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
-                >
-                  {actionIcon}
-                  {!isMobile && <span className="ml-1.5">{label}</span>}
-                </button>
-              </Tooltip>
-            );
-          }
-          return (
-            <Tooltip
-              key={actionName}
-              content={tooltipText}
-              className="capitalize text-sm text-muted-foreground"
-            >
-              <span
-                className="opacity-30 flex items-center cursor-not-allowed text-sm"
-                title={actionName}
-              >
-                {actionIcon}
-                {!isMobile && <span className="ml-1.5">{label}</span>}
-              </span>
-            </Tooltip>
-          );
-        })}
-      </div>
-    </>
-  );
+     return (
+     <div className="flex items-center gap-1">
+       {enabled.includes('ssh') && (
+         <button
+           onClick={() => handleActionClick('ssh')}
+           className="h-7 w-7 p-0 hover:bg-gray-100 rounded"
+           title="SSH"
+         >
+           <Terminal className="h-3 w-3" />
+         </button>
+       )}
+       {enabled.includes('vscode') && (
+         <button
+           onClick={() => handleActionClick('vscode')}
+           className="h-7 w-7 p-0 hover:bg-gray-100 rounded"
+           title="VS Code"
+         >
+           <SquareCode className="h-3 w-3" />
+         </button>
+       )}
+     </div>
+   );
 }
