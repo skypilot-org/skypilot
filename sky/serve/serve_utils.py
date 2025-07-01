@@ -3,6 +3,7 @@ import base64
 import collections
 import dataclasses
 import enum
+import io
 import os
 import pathlib
 import pickle
@@ -862,7 +863,6 @@ def _capped_follow_logs_with_provision_expanding(
     cluster_name: str,
     *,
     should_stop: Callable[[], bool],
-    stop_on_eof: bool = False,
     idle_timeout_seconds: Optional[int] = None,
     line_cap: int = 100,
 ) -> Iterator[str]:
@@ -873,7 +873,7 @@ def _capped_follow_logs_with_provision_expanding(
             file=file,
             cluster_name=cluster_name,
             should_stop=should_stop,
-            stop_on_eof=stop_on_eof,
+            stop_on_eof=True,
             idle_timeout_seconds=idle_timeout_seconds):
         all_lines.append(line)
 
@@ -922,22 +922,24 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
 
     # Handle launch logs based on number parameter
-    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        if tail is not None:
-            if tail - total_lines_printed <= 0:
-                return ''
-            lines = list(
-                _capped_follow_logs_with_provision_expanding(
-                    file=f,
-                    cluster_name=replica_cluster_name,
-                    should_stop=replica_provisioned,
-                    stop_on_eof=not follow,
-                    line_cap=tail - total_lines_printed,
-                ))
-            total_lines_printed += len(lines)
-            for line in lines:
-                print(line, end='', flush=True)
-        else:
+    if tail is not None:
+        if tail - total_lines_printed <= 0:
+            return ''
+        static_lines = common_utils.read_last_n_lines(
+            launch_log_file_name, tail - total_lines_printed)
+        temp_file = io.StringIO(''.join(static_lines))
+        lines = list(
+            _capped_follow_logs_with_provision_expanding(
+                file=temp_file,
+                cluster_name=replica_cluster_name,
+                should_stop=replica_provisioned,
+                line_cap=tail - total_lines_printed,
+            ))
+        total_lines_printed += len(lines)
+        for line in lines:
+            print(line, end='', flush=True)
+    else:
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
             for line in _follow_logs_with_provision_expanding(
                     f,
                     replica_cluster_name,
