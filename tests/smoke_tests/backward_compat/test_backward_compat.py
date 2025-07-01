@@ -429,9 +429,9 @@ class TestBackwardCompatibility:
             # compatible.
             pytest.fail(
                 f'Base API version: {self.BASE_API_VERSION} and current API '
-                f'version: {self.CURRENT_API_VERSION} are not compatible:'
-                f'- Base minimal compatible API version: {self.BASE_MIN_COMPATIBLE_API_VERSION}'
-                f'- Current minimal compatible API version: {self.CURRENT_MIN_COMPATIBLE_API_VERSION}'
+                f'version: {self.CURRENT_API_VERSION} are not compatible:\n'
+                f'- Base minimal compatible API version: {self.BASE_MIN_COMPATIBLE_API_VERSION}\n'
+                f'- Current minimal compatible API version: {self.CURRENT_MIN_COMPATIBLE_API_VERSION}\n'
                 'Change is rejected since it breaks the compatibility between adjacent versions'
             )
         cluster_name = smoke_tests_utils.get_cluster_name()
