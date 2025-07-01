@@ -516,5 +516,5 @@
     "timezone": "browser",
     "title": "SkyPilot DCGM GPU Metrics",
     "uid": "skypilot-dcgm-gpu",
-    "version": 3
-  } 
+    "version": 1
+  }

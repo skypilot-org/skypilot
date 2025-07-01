@@ -21,6 +21,9 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     Raises:
         RuntimeError: If port forward fails to start
     """
+    start_port_forward_timeout = 10  # 10 second timeout
+    terminate_port_forward_timeout = 5  # 5 second timeout
+
     # Use ':service_port' to let kubectl choose the local port
     cmd = [
         'kubectl', '--context', context, '-n', namespace, 'port-forward',
@@ -40,10 +43,9 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
     local_port = None
     start_time = time.time()
-    timeout = 10  # 10 second timeout
 
     # wait for the port forward to start and extract the local port
-    while time.time() - start_time < timeout:
+    while time.time() - start_time < start_port_forward_timeout:
         if port_forward_process.poll() is not None:
             # port forward process has terminated
             if port_forward_process.returncode != 0:
@@ -62,12 +64,13 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                     local_port = int(match.group(1))
                     break
 
+        # sleep for 100ms to avoid busy-waiting
         time.sleep(0.1)
 
     if local_port is None:
         try:
             port_forward_process.terminate()
-            port_forward_process.wait(timeout=5)
+            port_forward_process.wait(timeout=terminate_port_forward_timeout)
         except subprocess.TimeoutExpired:
             port_forward_process.kill()
             port_forward_process.wait()
@@ -191,6 +194,8 @@ async def get_metrics_for_context(context: str) -> str:
     # Query both DCGM metrics and kube_pod_labels metrics
     # This ensures the dashboard can perform joins to filter by skypilot cluster
     match_patterns = ['{__name__=~"DCGM_.*"}', 'kube_pod_labels']
+
+    # TODO(rohan): don't hardcode the namespace and service name
     metrics_text = await send_metrics_request_with_port_forward(
         context=context,
         namespace='skypilot',

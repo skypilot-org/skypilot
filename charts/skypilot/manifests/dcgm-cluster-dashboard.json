@@ -85,7 +85,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "avg(DCGM_FI_DEV_GPU_TEMP{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"})",
+          "expr": "avg(avg by (node, gpu, cluster) (DCGM_FI_DEV_GPU_TEMP{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"}))",
           "interval": "",
           "legendFormat": "",
           "range": true,
@@ -157,7 +157,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(DCGM_FI_DEV_POWER_USAGE{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"})",
+          "expr": "sum(avg by (node, gpu, cluster) (DCGM_FI_DEV_POWER_USAGE{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"}))",
           "instant": true,
           "interval": "",
           "legendFormat": "",
@@ -258,7 +258,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"}[1h]) / 3600000)",
+          "expr": "sum(increase(avg by (node, gpu, cluster) (DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"}))[1h]) / 3600000)",
           "instant": false,
           "interval": "",
           "legendFormat": "Last 1h",
@@ -271,7 +271,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"}[24h]) / 3600000)",
+          "expr": "sum(increase(avg by (node, gpu, cluster) (DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{node=~\"$host\", gpu=~\"$gpu\", cluster=~\"$cluster\"}))[24h]) / 3600000)",
           "hide": false,
           "instant": false,
           "legendFormat": "Last 24h",
