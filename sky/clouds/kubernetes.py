@@ -22,6 +22,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -281,7 +282,8 @@ class Kubernetes(clouds.Cloud):
                 default_value=None)
             if (autoscaler_type is not None and
                     not kubernetes_utils.get_autoscaler(
-                        autoscaler_type).can_query_backend):
+                        kubernetes_enums.KubernetesAutoscalerType(
+                            autoscaler_type)).can_query_backend):
                 # Unsupported autoscaler type. Rely on the autoscaler to
                 # provision the right instance type without running checks.
                 # Worst case, if autoscaling fails, the pod will be stuck in
@@ -298,7 +300,8 @@ class Kubernetes(clouds.Cloud):
 
             if autoscaler_type is None:
                 continue
-            autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
+            autoscaler = kubernetes_utils.get_autoscaler(
+                kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
             logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
             if autoscaler.can_create_new_instance_of_type(
                     context, instance_type):
@@ -406,8 +409,10 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def _calculate_provision_timeout(
-            num_nodes: int,
-            volume_mounts: Optional[List['volume_lib.VolumeMount']]) -> int:
+        num_nodes: int,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']],
+        enable_flex_start: bool,
+    ) -> int:
         """Calculate provision timeout based on number of nodes.
 
         The timeout scales linearly with the number of nodes to account for
@@ -415,6 +420,8 @@ class Kubernetes(clouds.Cloud):
 
         Args:
             num_nodes: Number of nodes being provisioned
+            volume_mounts: Volume mounts for the pod
+            enable_flex_start: Whether flex start is enabled
 
         Returns:
             Timeout in seconds
@@ -422,7 +429,12 @@ class Kubernetes(clouds.Cloud):
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
-        if volume_mounts is not None:
+        if enable_flex_start:
+            # Flex start takes longer to provision.
+            base_timeout = 600
+            per_node_timeout = 10
+            max_timeout = 900
+        elif volume_mounts is not None:
             for volume_mount in volume_mounts:
                 if (volume_mount.volume_config.type ==
                         volume_lib.VolumeType.PVC.value):
@@ -581,24 +593,6 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
-        # Timeout for resource provisioning. This timeout determines how long to
-        # wait for pod to be in pending status before giving up.
-        # Larger timeout may be required for autoscaling clusters, since
-        # autoscaler may take some time to provision new nodes.
-        # Note that this timeout includes time taken by the Kubernetes scheduler
-        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
-        # scheduling 100s of pods.
-        # We use a linear scaling formula to determine the timeout based on the
-        # number of nodes.
-
-        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
-        timeout = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('provision_timeout',),
-            default_value=timeout,
-            override_configs=resources.cluster_config_overrides)
-
         # Check if this cluster supports high performance networking and
         # configure IPC_LOCK capability for clusters like Nebius that support it
         k8s_ipc_lock_capability = False
@@ -641,6 +635,45 @@ class Kubernetes(clouds.Cloud):
                 region=context,
                 keys=('kueue', 'local_queue_name'),
                 default_value=None))
+
+        dws_config = skypilot_config.get_effective_region_config(
+            cloud='kubernetes', region=context, keys=('dws',), default_value={})
+        enable_flex_start = dws_config.get('enable_flex_start', False)
+        enable_flex_start_queued_provisioning = dws_config.get(
+            'enable_flex_start_queued_provisioning', False)
+        max_run_duration_seconds = dws_config.get('max_run_duration_seconds',
+                                                  None)
+        if enable_flex_start_queued_provisioning:
+            # If both are enabled, queued provisioning takes precedence.
+            enable_flex_start = False
+            if k8s_kueue_local_queue_name is None:
+                raise ValueError(
+                    f'kubernetes.kueue.local_queue_name is required to enable '
+                    f'flex start queued provisioning for context {context}')
+        else:
+            # Max run duration is only used in the flex start
+            # queued provisioning case.
+            max_run_duration_seconds = None
+
+        # Timeout for resource provisioning. This timeout determines how long to
+        # wait for pod to be in pending status before giving up.
+        # Larger timeout may be required for autoscaling clusters, since
+        # autoscaler may take some time to provision new nodes.
+        # Note that this timeout includes time taken by the Kubernetes scheduler
+        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
+        # scheduling 100s of pods.
+        # We use a linear scaling formula to determine the timeout based on the
+        # number of nodes.
+
+        timeout = self._calculate_provision_timeout(
+            num_nodes, volume_mounts, enable_flex_start or
+            enable_flex_start_queued_provisioning)
+        timeout = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('provision_timeout',),
+            default_value=timeout,
+            override_configs=resources.cluster_config_overrides)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -696,6 +729,8 @@ class Kubernetes(clouds.Cloud):
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
             'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
+            'k8s_enable_flex_start': enable_flex_start,
+            'k8s_max_run_duration_seconds': max_run_duration_seconds,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

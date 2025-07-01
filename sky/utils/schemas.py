@@ -1081,6 +1081,23 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'dws': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'enable_flex_start': {
+                'type': 'boolean',
+            },
+            'enable_flex_start_queued_provisioning': {
+                'type': 'boolean',
+            },
+            # Only used for queued provisioning.
+            'max_run_duration_seconds': {
+                'type': 'integer',
+            },
+        },
+    },
 }
 
 

@@ -1,0 +1,1 @@
+../../generated-examples/gke_dws.md

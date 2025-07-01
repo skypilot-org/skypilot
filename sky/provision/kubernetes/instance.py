@@ -876,6 +876,17 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
+        if needs_gpus:
+            gpu_toleration = {
+                'key': kubernetes_utils.get_gpu_resource_key(),
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            }
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                gpu_toleration
+            ]
 
         if to_create_deployment:
             volume.create_persistent_volume_claim(namespace, context, pvc_spec)
