@@ -139,6 +139,7 @@ class TestBackwardCompatibility:
             '"',
             shell=True,
             check=False,
+            executable='/bin/bash',
             text=True,
             capture_output=True)
         if base_sky_api_version.returncode != 0:
