@@ -50,7 +50,15 @@ class TestBackwardCompatibility:
         return [f'{self.ACTIVATE_CURRENT} && {c}' for c in cmds]
 
     def _run_cmd(self, cmd: str):
-        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        ret = subprocess.run(cmd,
+                             shell=True,
+                             check=True,
+                             executable='/bin/bash')
+        if ret.returncode != 0:
+            raise RuntimeError(f'Failed to run command: {cmd}. '
+                               f'Return code: {ret.returncode}, '
+                               f'stderr: {ret.stderr}, '
+                               f'stdout: {ret.stdout}')
 
     def _is_git_sha(self, ref: str) -> bool:
         """Check if the reference looks like a git SHA (commit hash)."""
