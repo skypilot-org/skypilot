@@ -438,8 +438,6 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
             request.state.auth_user = auth_user
-        else:
-            request.state.auth_user = None
 
         await _override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
