@@ -12,8 +12,8 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import rich_console_utils
 from sky.utils import env_options
+from sky.utils import rich_console_utils
 
 if typing.TYPE_CHECKING:
     import pathlib
@@ -66,7 +66,6 @@ def print_exception_no_traceback():
         sys.tracebacklimit = 0
         yield
         sys.tracebacklimit = original_tracelimit
-
 
 
 @contextlib.contextmanager
