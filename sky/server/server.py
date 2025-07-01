@@ -277,10 +277,9 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        """
-        Make sure correct bearer token auth is present.
+        """Make sure correct bearer token auth is present.
 
-        1. If the request has the X-Skypilot-Auth-Mode: token header, it must 
+        1. If the request has the X-Skypilot-Auth-Mode: token header, it must
            have a valid bearer token.
         2. For backwards compatibility, if the request has a Bearer token
            beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
@@ -296,12 +295,12 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         has_skypilot_auth_header = (
             request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')
-        has_bearer_token_starting_with_sky = (auth_header and 
-            auth_header.lower().startswith('bearer ') and
+        has_bearer_token_starting_with_sky = (
+            auth_header and auth_header.lower().startswith('bearer ') and
             auth_header.split(' ', 1)[1].startswith('sky_'))
 
-        if (not has_skypilot_auth_header and 
-            not has_bearer_token_starting_with_sky):
+        if (not has_skypilot_auth_header and
+                not has_bearer_token_starting_with_sky):
             # This is case #3 above. We do not need to validate the request.
             # No Bearer token, continue with normal processing (OAuth2 cookies,
             # etc.)
@@ -310,8 +309,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         if auth_header is None:
             return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Authentication required'})
+                status_code=401, content={'detail': 'Authentication required'})
 
         # Extract token
         split_header = auth_header.split(' ', 1)
@@ -322,8 +320,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
-        return await self._handle_service_account_token(
-            request, sa_token, call_next)
+        return await self._handle_service_account_token(request, sa_token,
+                                                        call_next)
 
     async def _handle_service_account_token(self, request: fastapi.Request,
                                             sa_token: str, call_next):
