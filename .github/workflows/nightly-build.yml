@@ -84,7 +84,7 @@ jobs:
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: skypilot-artifacts-skypilot-nightly
+          name: python-package-distributions
           path: dist/
 
   smoke-tests-aws:
