@@ -45,18 +45,20 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-def _maybe_upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
-    """Maybe upload files to the controller.
+def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
+    """Upload files to the controller.
 
-    In consolidation mode, we don't need to upload files to the controller as
-    the API server and the controller are colocated.
+    In consolidation mode, we still need to upload files to the controller as
+    we should keep a separate workdir for each jobs. Assuming two jobs using
+    the same workdir, if there are some modifications to the workdir after job 1
+    is submitted, on recovery of job 1, the modifications should not be applied.
     """
     local_to_controller_file_mounts: Dict[str, str] = {}
 
-    if managed_job_utils.is_consolidation_mode():
-        return local_to_controller_file_mounts
-
-    if storage_lib.get_cached_enabled_storage_cloud_names_or_refresh():
+    # For consolidation mode, we don't need to use cloud storage,
+    # as uploading to the controller is only a local copy.
+    if (not managed_job_utils.is_consolidation_mode() and
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -241,7 +243,7 @@ def launch(
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
 
-    local_to_controller_file_mounts = _maybe_upload_files_to_controller(dag)
+    local_to_controller_file_mounts = _upload_files_to_controller(dag)
 
     # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
