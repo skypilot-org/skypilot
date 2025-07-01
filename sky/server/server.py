@@ -277,29 +277,53 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        # Only process requests with Bearer token authorization header
+        """
+        Make sure correct bearer token auth is present.
+
+        1. If the request has the X-Skypilot-Auth-Mode: token header, it must 
+           have a valid bearer token.
+        2. For backwards compatibility, if the request has a Bearer token
+           beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
+           it must be a valid token.
+        3. If X-Skypilot-Auth-Mode is not set to "token", and there is no Bearer
+           token beginning with "sky_", allow the request to continue.
+
+        In conjunction with an auth proxy, the idea is to make the auth proxy
+        bypass requests with bearer tokens, instead setting the
+        X-Skypilot-Auth-Mode header. The auth proxy should either validate the
+        auth or set the header X-Skypilot-Auth-Mode: token.
+        """
+        has_skypilot_auth_header = (
+            request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')
-        if not auth_header or not auth_header.lower().startswith('bearer '):
+        has_bearer_token_starting_with_sky = (auth_header and 
+            auth_header.lower().startswith('bearer ') and
+            auth_header.split(' ', 1)[1].startswith('sky_'))
+
+        if (not has_skypilot_auth_header and 
+            not has_bearer_token_starting_with_sky):
+            # This is case #3 above. We do not need to validate the request.
             # No Bearer token, continue with normal processing (OAuth2 cookies,
             # etc.)
             return await call_next(request)
+        # After this point, all requests must be validated.
+
+        if auth_header is None:
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Authentication required'})
 
         # Extract token
-        sa_token = auth_header.split(' ', 1)[1]
+        split_header = auth_header.split(' ', 1)
+        if split_header[0] != 'Bearer':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid authentication method'})
+        sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
-        if sa_token.startswith('sky_'):
-            return await self._handle_service_account_token(
-                request, sa_token, call_next)
-
-        # Handle other Bearer tokens (OAuth2 access tokens, etc.)
-        # These requests bypassed OAuth2 proxy, so let the application decide
-        # how to handle them
-        # For now, we'll let them continue through normal processing
-        logger.debug(
-            'Non-SkyPilot Bearer token detected, continuing with normal '
-            'processing')
-        return await call_next(request)
+        return await self._handle_service_account_token(
+            request, sa_token, call_next)
 
     async def _handle_service_account_token(self, request: fastapi.Request,
                                             sa_token: str, call_next):
