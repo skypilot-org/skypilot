@@ -49,12 +49,12 @@ jobs:
       - name: Determine installation method
         id: install_method
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "install_from_source=true" >> $GITHUB_OUTPUT
-            echo "Installing from source (manual trigger)"
-          else
+          if [ -n "${{ github.workflow_ref }}" ]; then
             echo "install_from_source=false" >> $GITHUB_OUTPUT
-            echo "Installing from wheel (pipeline trigger)"
+            echo "Installing from wheel (workflow call)"
+          else
+            echo "install_from_source=true" >> $GITHUB_OUTPUT
+            echo "Installing from source (direct trigger)"
           fi
 
       # For workflow trigger: download all artifacts
@@ -99,10 +99,10 @@ jobs:
             echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
-          # Verify version is not exactly 1.0.0.dev
+          # Verify version is not exactly 1.0.0-dev0
           VERSION_TO_CHECK=$(cat $GITHUB_OUTPUT | grep "latest_version=" | cut -d"=" -f2)
-          if [[ "$VERSION_TO_CHECK" == "1.0.0.dev" ]]; then
-            echo "Error: Version cannot be exactly 1.0.0.dev"
+          if [[ "$VERSION_TO_CHECK" == "1.0.0-dev0" ]]; then
+            echo "Error: Version cannot be exactly 1.0.0-dev0"
             exit 1
           fi
           cat $GITHUB_OUTPUT
