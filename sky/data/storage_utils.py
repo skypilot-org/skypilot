@@ -1,7 +1,7 @@
 """Utility functions for the storage module."""
-import fnmatch
 import os
 import pathlib
+import re
 import shlex
 import stat
 import subprocess
@@ -80,10 +80,10 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
     patterns: Set[str] = set()
 
     try:
-        with open(skyignore_path, encoding='utf-8') as f:
+        with open(skyignore_path, mode='r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith(('#', '!')):
+                if not line or line.startswith('#'):
                     continue
 
                 # Handle **/ prefixed patterns
@@ -271,6 +271,25 @@ def is_path_excluded(abs_path: str, base_path: str,
                      patterns: List[str]) -> bool:
     """Check if a path matches any exclusion pattern.
 
+    Pattern matching rules (similar to .gitignore):
+    - `*` matches any characters except `/` (within a single path segment)
+    - `**` matches zero or more path segments
+    - `?` matches any single character except `/`
+    - `/` at the beginning anchors the pattern to the root
+    - `/` at the end matches only directories
+
+    Examples:
+    - `*.py` - matches any .py file in any directory
+    - `test/*.py` - matches .py files directly in test/ directory
+    - `test/**/*.py` - matches .py files anywhere under test/ directory
+    - `**/test/**` - matches any path containing /test/ anywhere
+    - `*/test/**` - matches paths like foo/test/bar but not test/bar or
+                    a/b/test/bar
+    - `build/` - matches build directory and everything under it
+    - `./README.md` - matches README.md only at the root
+    - `.env` - matches .env file only at the root
+    - `**/.env` - matches .env files at any depth
+
     Args:
         abs_path: Absolute path to check
         base_path: Base directory path to calculate relative paths from
@@ -282,21 +301,58 @@ def is_path_excluded(abs_path: str, base_path: str,
     rel = os.path.relpath(abs_path, base_path).replace(os.path.sep, '/')
 
     for pattern in patterns:
+        original_pattern = pattern
         pattern = pattern.rstrip('/')
 
-        # For ./ prefixed patterns, match against ./ + relative path
-        if pattern.startswith('./'):
+        # Handle root-anchored patterns
+        if pattern.startswith('/'):
+            # Remove leading / and treat as root-anchored
+            pattern = pattern[1:]
+            path = rel
+        elif pattern.startswith('./'):
+            # For ./ prefixed patterns, match against ./ + relative path
             path = './' + rel
         else:
             path = rel
 
-        # Special handling for wildcards without **
-        if '*' in pattern and '**' not in pattern:
-            # Ensure path depth matches pattern depth
+        # Handle trailing slash patterns (directory patterns)
+        if original_pattern.endswith('/') and '**' not in pattern:
+            # Pattern like 'build/' should match 'build' and 'build/anything'
+            if path == pattern or path.startswith(pattern + '/'):
+                return True
+            continue
+
+        # Convert glob pattern to regex more simply
+        # Escape special regex chars except * and ?
+        regex_pattern = re.escape(pattern)
+
+        # Handle ** (matches zero or more path segments)
+        # Leading ** should match from start (including empty)
+        regex_pattern = regex_pattern.replace(r'\*\*/', '(?:.*/)?')
+        # Trailing ** should match to end (including empty)
+        regex_pattern = regex_pattern.replace(r'/\*\*', '(?:/.*)?')
+        # Middle ** between slashes
+        regex_pattern = regex_pattern.replace(r'/\*\*/', '(?:/.*/)?')
+        # Standalone ** (entire pattern)
+        regex_pattern = regex_pattern.replace(r'\*\*', '.*')
+
+        # Handle * (matches any chars except /)
+        regex_pattern = regex_pattern.replace(r'\*', '[^/]*')
+
+        # Handle ? (matches single char except /)
+        regex_pattern = regex_pattern.replace(r'\?', '[^/]')
+
+        # Add anchors
+        regex_pattern = '^' + regex_pattern + '$'
+
+        # For non-** patterns with *, ensure path depth matches
+        if '*' in pattern and '**' not in pattern and '/' in pattern:
+            # Count slashes to ensure depth matches
             if pattern.count('/') != path.count('/'):
                 continue
 
-        if fnmatch.fnmatch(path, pattern):
+        # Compile and match
+        if re.match(regex_pattern, path):
             return True
 
     return False

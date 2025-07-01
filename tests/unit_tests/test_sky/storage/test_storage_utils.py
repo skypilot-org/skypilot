@@ -677,3 +677,90 @@ def test_get_excluded_files_for_file():
 def test_get_excluded_files_for_non_existent_dir():
     with pytest.raises(ValueError):
         storage_utils.get_excluded_files('tests/non_existent_dir')
+
+
+def test_is_path_excluded():
+    """Test the is_path_excluded function with various patterns."""
+    base_path = '/home/user/project'
+
+    # Test cases: (abs_path, patterns, expected_result)
+    test_cases = [
+        # Basic file matching
+        ('/home/user/project/test.py', ['*.py'], True),
+        ('/home/user/project/test.txt', ['*.py'], False),
+
+        # Root-anchored patterns
+        ('/home/user/project/README.md', ['./README.md'], True),
+        ('/home/user/project/docs/README.md', ['./README.md'], False),
+
+        # Directory patterns
+        ('/home/user/project/build/output.txt', ['build/**'], True),
+        ('/home/user/project/src/build/output.txt', ['build/**'], False),
+
+        # Double-star patterns
+        ('/home/user/project/src/test/file.py', ['**/test/**'], True),
+        ('/home/user/project/test/file.py', ['**/test/**'], True),
+
+        # Specific path patterns
+        ('/home/user/project/src/test.py', ['src/*.py'], True),
+        ('/home/user/project/src/subdir/test.py', ['src/*.py'], False),
+
+        # Multiple patterns (should match if ANY pattern matches)
+        ('/home/user/project/test.pyc', ['*.py', '*.pyc'], True),
+        ('/home/user/project/test.log', ['*.py', '*.pyc'], False),
+
+        # '**' should match zero-or-more segments (root included)
+        ('/home/user/project/log.txt', ['**/*.txt'], True),
+        ('/home/user/project/src/log.txt', ['**/*.txt'], True),
+
+        # Single '*' between slashes ⇒ exactly one segment
+        ('/home/user/project/src/test/file.py', ['*/test/**'], True),
+        ('/home/user/project/test/file.py', ['*/test/**'], False),
+
+        # Directory-only pattern at repo root
+        ('/home/user/project/test/file.py', ['test/'], True),
+        ('/home/user/project/src/test/file.py', ['test/'], False),
+
+        # Non-anchored 'test/**' excludes root-level test dir only
+        ('/home/user/project/test/file.py', ['test/**'], True),
+        ('/home/user/project/src/test/file.py', ['test/**'], False),
+
+        # Root-level hidden file
+        ('/home/user/project/.env', ['.env'], True),
+        ('/home/user/project/src/.env', ['.env'], False),
+
+        # Hidden files anywhere
+        ('/home/user/project/src/.DS_Store', ['**/.*'], True),
+
+        # Root-anchored directory with trailing slash
+        ('/home/user/project/build/file.o', ['build/'], True),
+        ('/home/user/project/src/build/file.o', ['build/'], False),
+
+        # test/*.py - matches .py files directly in test/ directory
+        ('/home/user/project/test/file.py', ['test/*.py'], True),
+        ('/home/user/project/test/sub/file.py', ['test/*.py'], False),
+
+        # test/**/*.py - matches .py files anywhere under test/ directory
+        ('/home/user/project/test/file.py', ['test/**/*.py'], True),
+        ('/home/user/project/test/sub/file.py', ['test/**/*.py'], True),
+        ('/home/user/project/test/a/b/c/file.py', ['test/**/*.py'], True),
+        ('/home/user/project/src/test/file.py', ['test/**/*.py'], False),
+
+        # **/.env - matches .env files at any depth
+        ('/home/user/project/.env', ['**/.env'], True),
+        ('/home/user/project/src/.env', ['**/.env'], True),
+        ('/home/user/project/a/b/c/.env', ['**/.env'], True),
+
+        # Test patterns 3-4 layers deep
+        ('/home/user/project/a/b/c/file.txt', ['a/b/c/*'], True),
+        ('/home/user/project/a/b/c/file.txt', ['/a/b/c/*'], True),
+        ('/home/user/project/a/b/c/d/file.txt', ['a/b/c/d/*'], True),
+        ('/home/user/project/x/a/b/c/file.txt', ['a/b/c/*'], False),
+        ('/home/user/project/a/b/c/file.txt', ['*/b/c/*'], True),
+        ('/home/user/project/a/b/c/file.txt', ['/*/b/c/*'], True),
+        ('/home/user/project/x/y/c/file.txt', ['*/y/c/*'], True),
+    ]
+
+    for abs_path, patterns, expected in test_cases:
+        result = storage_utils.is_path_excluded(abs_path, base_path, patterns)
+        assert result == expected, f"Failed for path={abs_path}, patterns={patterns}"
