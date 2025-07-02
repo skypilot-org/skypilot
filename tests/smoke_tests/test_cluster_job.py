@@ -1970,7 +1970,7 @@ def test_gcp_network_tier():
 def test_gcp_network_tier_with_gpu():
     """Test GCP network_tier=best with GPU to verify GPU Direct functionality."""
     name = smoke_tests_utils.get_cluster_name() + '-gpu-best'
-    cmd='echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths"'
+    cmd = 'echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths"'
     test = smoke_tests_utils.Test(
         'gcp-network-tier-best-gpu',
         [
