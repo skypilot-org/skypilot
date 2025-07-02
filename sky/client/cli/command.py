@@ -766,7 +766,7 @@ class _NaturalOrderGroup(click.Group):
 
         if cmd_name in self._common_mistakes:
             suggestion = self._common_mistakes[cmd_name]
-            ctx.fail(f'No such command \'{cmd_name}\'.'
+            ctx.fail(f'No such command \'{cmd_name}\'. '
                      f'Did you mean: \'{suggestion}\'?')
 
         matches = difflib.get_close_matches(cmd_name,
@@ -775,7 +775,7 @@ class _NaturalOrderGroup(click.Group):
                                             cutoff=0.5)
         if matches:
             suggestion = '\', \''.join(matches)
-            ctx.fail(f'No such command \'{cmd_name}\'.'
+            ctx.fail(f'No such command \'{cmd_name}\'. '
                      f'Did you mean: \'{suggestion}\'?')
         else:
             ctx.fail(f'No such command \'{cmd_name}\'.')
