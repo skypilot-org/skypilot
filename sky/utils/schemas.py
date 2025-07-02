@@ -311,6 +311,9 @@ def _get_single_resources_schema():
                     }
                 }
             },
+            '_no_missing_accel_warnings': {
+                'type': 'boolean'
+            },
             'image_id': {
                 'anyOf': [{
                     'type': 'string',

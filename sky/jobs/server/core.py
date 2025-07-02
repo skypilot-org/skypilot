@@ -159,7 +159,8 @@ def launch(
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
 
-    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    user_dag_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
+        dag, redact_secrets=True)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
@@ -248,7 +249,7 @@ def launch(
                                      mode='w') as f, \
          tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
                                      mode='w') as original_user_yaml_path:
-        original_user_yaml_path.write(user_dag_str)
+        original_user_yaml_path.write(user_dag_str_redacted)
         original_user_yaml_path.flush()
 
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
@@ -352,13 +353,8 @@ def launch(
                 # Dump script for high availability recovery.
                 if controller_utils.high_availability_specified(
                         controller_name):
-                    dump_script_path = (
-                        managed_job_utils.get_ha_dump_script_path(
-                            consolidation_mode_job_id))
-                    dump_script_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(dump_script_path, 'w',
-                              encoding='utf-8') as script_f:
-                        script_f.write(run_script)
+                    managed_job_state.set_ha_recovery_script(
+                        consolidation_mode_job_id, run_script)
                 backend.run_on_head(local_handle, run_script)
                 return consolidation_mode_job_id, local_handle
 
