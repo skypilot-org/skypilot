@@ -136,6 +136,28 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
             skypilot_config=user_request.skypilot_config)
 
 
+class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
+    """Example policy: set max autostop idle minutes for all tasks."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Sets max autostop idle minutes for all tasks."""
+        max_idle_minutes = 10
+        task = user_request.task
+        for r in task.resources:
+            disabled = (r.autostop_config is None or
+                        not r.autostop_config.enabled)
+            too_long = (not disabled and
+                        r.autostop_config.idle_minutes is not None and
+                        r.autostop_config.idle_minutes > max_idle_minutes)
+            if disabled or too_long:
+                r.override_autostop_config(idle_minutes=max_idle_minutes)
+
+        return sky.MutatedUserRequest(
+            task=task, skypilot_config=user_request.skypilot_config)
+
+
 def update_current_kubernetes_clusters_from_registry():
     """Mock implementation of updating kubernetes clusters from registry."""
     # All cluster names can be fetched from an organization's internal API.
@@ -178,3 +200,17 @@ class DynamicKubernetesContextsUpdatePolicy(sky.AdminPolicy):
         config.set_nested(('kubernetes', 'allowed_contexts'), allowed_contexts)
         return sky.MutatedUserRequest(task=user_request.task,
                                       skypilot_config=config)
+
+
+class AddVolumesPolicy(sky.AdminPolicy):
+    """Example policy: add volumes to the task."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        task = user_request.task
+        # Use `task.set_volumes` to set the volumes.
+        # Or use `task.update_volumes` to update in-place
+        # instead of overwriting.
+        task.set_volumes({'/mnt/data0': 'pvc0'})
+        return sky.MutatedUserRequest(task, user_request.skypilot_config)

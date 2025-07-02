@@ -4,6 +4,7 @@ import asyncio
 import os
 import pathlib
 import tempfile
+from unittest import mock
 
 import pytest
 
@@ -118,16 +119,17 @@ def test_contextual_environ_set_del(ctx):
 
     # Set a new value in the base environ
     env['NEW_VAR'] = 'direct_value'
-    assert base_environ['NEW_VAR'] == 'direct_value'
+    assert 'NEW_VAR' not in base_environ, 'set env key in context should not affect the process env'
 
     # Delete a value from base environ
     del env['BASE_VAR']
-    assert 'BASE_VAR' not in base_environ
+    assert 'BASE_VAR' in base_environ, 'delete env key in context should not affect the process env'
 
     # Context overrides should take precedence over base
     ctx.override_envs({'NEW_VAR': 'override_value'})
     assert env['NEW_VAR'] == 'override_value'
-    assert base_environ['NEW_VAR'] == 'direct_value'
+    assert base_environ['BASE_VAR'] == 'base_value'
+    assert env.get('BASE_VAR') is None
 
 
 def test_contextual_environ_methods(ctx):

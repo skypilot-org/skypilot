@@ -2,8 +2,11 @@
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 from typing import List, Optional
+
+import colorama
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -19,6 +22,147 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Default path for Kubernetes configuration file
+DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
+
+
+def check_ssh_cluster_dependencies(
+        raise_error: bool = True) -> Optional[List[str]]:
+    """Checks if the dependencies for ssh cluster are installed.
+
+    Args:
+        raise_error: set to true when the dependency needs to be present.
+            set to false for `sky check`, where reason strings are compiled
+            at the end.
+
+    Returns: the reasons list if there are missing dependencies.
+    """
+    # error message
+    jq_message = ('`jq` is required to setup ssh cluster.')
+
+    # save
+    reasons = []
+    required_binaries = []
+
+    # Ensure jq is installed
+    try:
+        subprocess.run(['jq', '--version'],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        required_binaries.append('jq')
+        reasons.append(jq_message)
+
+    if required_binaries:
+        reasons.extend([
+            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+            f'  $ sudo apt install {" ".join(required_binaries)}',
+            'On MacOS, install with: ',
+            f'  $ brew install {" ".join(required_binaries)}',
+        ])
+        if raise_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('\n'.join(reasons))
+        return reasons
+    return None
+
+
+def deploy_ssh_cluster(cleanup: bool = False,
+                       infra: Optional[str] = None,
+                       kubeconfig_path: Optional[str] = None):
+    """Deploy a Kubernetes cluster on SSH targets.
+
+    This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a
+    Kubernetes cluster on the specified machines.
+
+    Args:
+        cleanup: Whether to clean up the cluster instead of deploying.
+        infra: Name of the cluster in ssh_node_pools.yaml to use.
+            If None, the first cluster in the file will be used.
+        kubeconfig_path: Path to save the Kubernetes configuration file.
+            If None, the default ~/.kube/config will be used.
+    """
+    check_ssh_cluster_dependencies()
+
+    # Prepare command to call deploy_remote_cluster.py script
+    # TODO(romilb): We should move this to a native python method/class call
+    #  instead of invoking a script with subprocess.
+    path_to_package = os.path.dirname(__file__)
+    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+
+    deploy_command = [sys.executable, up_script_path]
+
+    if cleanup:
+        deploy_command.append('--cleanup')
+
+    if infra:
+        deploy_command.extend(['--infra', infra])
+
+    # Use the default kubeconfig path if none is provided
+    kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
+    deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
+
+    # Setup logging paths
+    run_timestamp = sky_logging.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'ssh_up.log')
+
+    if cleanup:
+        msg_str = 'Cleaning up SSH Node Pools...'
+    else:
+        msg_str = 'Initializing deployment to SSH Node Pools...'
+
+    # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(msg_str, log_path=log_path,
+                                     is_local=True)):
+        returncode, _, stderr = log_lib.run_with_log(
+            cmd=deploy_command,
+            log_path=log_path,
+            require_outputs=True,
+            stream_logs=False,
+            line_processor=log_utils.SkySSHUpLineProcessor(log_path=log_path,
+                                                           is_local=False),
+            cwd=cwd,
+            env=env)
+
+    if returncode == 0:
+        success = True
+    else:
+        with ux_utils.print_exception_no_traceback():
+            log_hint = ux_utils.log_path_hint(log_path, is_local=False)
+            raise RuntimeError('Failed to deploy SkyPilot on some Node Pools. '
+                               f'{log_hint}'
+                               f'\nError: {stderr}')
+
+    if success:
+        # Add an empty line to separate the deployment logs from the final
+        # message
+        logger.info('')
+        if cleanup:
+            logger.info(
+                ux_utils.finishing_message(
+                    '🎉 SSH Node Pools cleaned up successfully.',
+                    log_path=log_path,
+                    is_local=True))
+        else:
+            logger.info(
+                ux_utils.finishing_message(
+                    '🎉 SSH Node Pools set up successfully. ',
+                    follow_up_message=(
+                        f'Run `{colorama.Style.BRIGHT}'
+                        f'sky check ssh'
+                        f'{colorama.Style.RESET_ALL}` to verify access, '
+                        f'`{colorama.Style.BRIGHT}sky launch --infra ssh'
+                        f'{colorama.Style.RESET_ALL}` to launch a cluster. '),
+                    log_path=log_path,
+                    is_local=True))
+
 
 def deploy_remote_cluster(ip_list: List[str],
                           ssh_user: str,
@@ -28,7 +172,7 @@ def deploy_remote_cluster(ip_list: List[str],
                           password: Optional[str] = None):
     success = False
     path_to_package = os.path.dirname(__file__)
-    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.sh')
+    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
 
@@ -44,17 +188,18 @@ def deploy_remote_cluster(ip_list: List[str],
         key_file.flush()
         os.chmod(key_file.name, 0o600)
 
-        deploy_command = (f'{up_script_path} {ip_file.name} '
-                          f'{ssh_user} {key_file.name}')
-        if context_name is not None:
-            deploy_command += f' {context_name}'
-        if password is not None:
-            deploy_command += f' --password {password}'
-        if cleanup:
-            deploy_command += ' --cleanup'
+        # Use the legacy mode command line arguments for backward compatibility
+        deploy_command = [
+            sys.executable, up_script_path, '--ips-file', ip_file.name,
+            '--user', ssh_user, '--ssh-key', key_file.name
+        ]
 
-        # Convert the command to a format suitable for subprocess
-        deploy_command = shlex.split(deploy_command)
+        if context_name is not None:
+            deploy_command.extend(['--context-name', context_name])
+        if password is not None:
+            deploy_command.extend(['--password', password])
+        if cleanup:
+            deploy_command.append('--cleanup')
 
         # Setup logging paths
         run_timestamp = sky_logging.get_run_timestamp()
@@ -65,6 +210,11 @@ def deploy_remote_cluster(ip_list: List[str],
             msg_str = 'Cleaning up remote cluster...'
         else:
             msg_str = 'Deploying remote cluster...'
+
+        # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
+
         with rich_utils.safe_status(
                 ux_utils.spinner_message(msg_str,
                                          log_path=log_path,
@@ -76,7 +226,8 @@ def deploy_remote_cluster(ip_list: List[str],
                 stream_logs=False,
                 line_processor=log_utils.SkyRemoteUpLineProcessor(
                     log_path=log_path, is_local=True),
-                cwd=cwd)
+                cwd=cwd,
+                env=env)
         if returncode == 0:
             success = True
         else:

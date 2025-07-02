@@ -12,6 +12,7 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import rich_console_utils
 
 if typing.TYPE_CHECKING:
@@ -57,10 +58,14 @@ def print_exception_no_traceback():
             if error():
                 raise ValueError('...')
     """
-    original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-    sys.tracebacklimit = 0
-    yield
-    sys.tracebacklimit = original_tracelimit
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        # When SKYPILOT_DEBUG is set, show the full traceback
+        yield
+    else:
+        original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
+        sys.tracebacklimit = 0
+        yield
+        sys.tracebacklimit = original_tracelimit
 
 
 @contextlib.contextmanager
@@ -161,7 +166,8 @@ def finishing_message(message: str,
     follow_up_message = follow_up_message if (follow_up_message
                                               is not None) else ''
     success_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.GREEN}✓ '
-                      f'{message}{colorama.Style.RESET_ALL}{follow_up_message}')
+                      f'{message}{colorama.Style.RESET_ALL}{follow_up_message}'
+                      f'{colorama.Style.RESET_ALL}')
     if log_path is None:
         return success_prefix
     path_hint = log_path_hint(log_path, is_local)

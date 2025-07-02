@@ -1,5 +1,19 @@
-import { ManagedJobs } from '@/components/jobs';
+import React from 'react';
+import Head from 'next/head';
+import dynamic from 'next/dynamic';
+
+const ManagedJobs = dynamic(
+  () => import('@/components/jobs').then((mod) => mod.ManagedJobs),
+  { ssr: false }
+);
 
 export default function JobsPage() {
-  return <ManagedJobs />;
+  return (
+    <>
+      <Head>
+        <title>Managed Jobs | SkyPilot Dashboard</title>
+      </Head>
+      <ManagedJobs />
+    </>
+  );
 }

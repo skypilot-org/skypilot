@@ -1,11 +1,11 @@
 # Usage:
-#   HF_TOKEN=abc sky launch -c axolotl axolotl.yaml --env HF_TOKEN -y -i30 --down
+#   HF_TOKEN=xxx sky launch -c axolotl axolotl.yaml --secret HF_TOKEN -y -i30 --down
 
 name: axolotl
 
 resources:
   accelerators: L4:1
-  cloud: gcp # optional
+  infra: gcp # optional
 
 workdir: mistral
 
@@ -26,4 +26,4 @@ run: |
     accelerate launch -m axolotl.cli.train /sky_workdir/qlora.yaml
 
 envs:
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI

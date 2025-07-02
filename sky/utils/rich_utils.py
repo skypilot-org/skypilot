@@ -7,6 +7,7 @@ import threading
 import typing
 from typing import Callable, Iterator, Optional, Tuple, Union
 
+from sky import exceptions
 from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
 from sky.utils import context
@@ -57,6 +58,8 @@ class Control(enum.Enum):
     STOP = 'rich_stop'
     EXIT = 'rich_exit'
     UPDATE = 'rich_update'
+    HEARTBEAT = 'heartbeat'
+    RETRY = 'retry'
 
     def encode(self, msg: str) -> str:
         return f'<{self.value}>{msg}</{self.value}>'
@@ -364,6 +367,10 @@ def decode_rich_status(
                     yield line
                     continue
 
+                if control == Control.RETRY:
+                    raise exceptions.ServerTemporarilyUnavailableError(
+                        'The server is temporarily unavailable. Please try '
+                        'again.')
                 # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():
                     yield None
@@ -385,6 +392,10 @@ def decode_rich_status(
                         decoding_status.__exit__(None, None, None)
                     elif control == Control.START:
                         decoding_status.start()
+                    elif control == Control.HEARTBEAT:
+                        # Heartbeat is not displayed to the user, so we do not
+                        # need to update the status.
+                        pass
     finally:
         if decoding_status is not None:
             decoding_status.__exit__(None, None, None)

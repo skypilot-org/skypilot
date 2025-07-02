@@ -8,6 +8,7 @@ import colorama
 
 from sky import admin_policy
 from sky import backends
+from sky import catalog
 from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
@@ -17,10 +18,10 @@ from sky import global_user_state
 from sky import models
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
-from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -32,6 +33,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -74,18 +76,17 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    dag.resolve_and_validate_volumes()
     # TODO: We apply the admin policy only on the first DAG optimization which
     # is shown on `sky launch`. The optimizer is also invoked during failover,
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
-    dag, _ = admin_policy_utils.apply(
-        dag,
-        use_mutated_config_in_current_request=True,
-        request_options=request_options)
-    return optimizer.Optimizer.optimize(dag=dag,
-                                        minimize=minimize,
-                                        blocked_resources=blocked_resources,
-                                        quiet=quiet)
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, request_options=request_options) as dag:
+        return optimizer.Optimizer.optimize(dag=dag,
+                                            minimize=minimize,
+                                            blocked_resources=blocked_resources,
+                                            quiet=quiet)
 
 
 @usage_lib.entrypoint
@@ -266,7 +267,7 @@ def endpoints(cluster: str,
         the dictionary will contain all ports:endpoints exposed on the cluster.
 
     Raises:
-        ValueError: if the cluster is not UP or the endpoint is not exposed.
+    ValueError: if the cluster is not UP or the endpoint is not exposed.
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
@@ -277,7 +278,7 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report() -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -295,6 +296,13 @@ def cost_report() -> List[Dict[str, Any]]:
             'cluster_hash': (str) unique hash identifying cluster,
             'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
             'total_cost': (float) cost given resources and usage intervals,
+            'cloud': (str) cloud of the cluster,
+            'region': (str) region of the cluster,
+            'cpus': (str) number of vCPUs of the cluster,
+            'memory': (str) memory of the cluster,
+            'accelerators': (str) accelerators of the cluster,
+            'resources_str': (str) resources string of the cluster,
+            'resources_str_full': (str) full resources string of the cluster,
         }
 
     The estimated cost column indicates price for the cluster based on the type
@@ -304,27 +312,92 @@ def cost_report() -> List[Dict[str, Any]]:
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
 
+    Args:
+        days: Number of days to look back from now. Active clusters are always
+            included. Historical clusters are only included if they were last
+            used within the past 'days' days. Defaults to 30 days.
+
     Returns:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    cluster_reports = global_user_state.get_clusters_from_history()
+    if days is None:
+        days = constants.COST_REPORT_DEFAULT_DAYS
 
-    def get_total_cost(cluster_report: dict) -> float:
-        duration = cluster_report['duration']
-        launched_nodes = cluster_report['num_nodes']
-        launched_resources = cluster_report['resources']
+    cluster_reports = global_user_state.get_clusters_from_history(days=days)
+    logger.debug(
+        f'{len(cluster_reports)} clusters found from history with {days} days.')
 
-        cost = (launched_resources.get_cost(duration) * launched_nodes)
-        return cost
+    def _process_cluster_report(
+            cluster_report: Dict[str, Any]) -> Dict[str, Any]:
+        """Process cluster report by calculating cost and adding fields."""
+        # Make a copy to avoid modifying the original
+        report = cluster_report.copy()
 
-    for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = get_total_cost(cluster_report)
-        cluster_report['cloud'] = str(cluster_report['resources'].cloud)
-        cluster_report['accelerators'] = cluster_report[
-            'resources'].accelerators
+        def get_total_cost(cluster_report: dict) -> float:
+            duration = cluster_report['duration']
+            launched_nodes = cluster_report['num_nodes']
+            launched_resources = cluster_report['resources']
 
-    return cluster_reports
+            cost = (launched_resources.get_cost(duration) * launched_nodes)
+            return cost
+
+        def _update_record_with_resources(record: Dict[str, Any]) -> None:
+            """Add resource fields for dashboard compatibility."""
+            if record is None:
+                return
+            resources = record.get('resources')
+            if resources is None:
+                return
+            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+            for field in fields:
+                try:
+                    record[field] = str(getattr(resources, field))
+                except Exception as e:  # pylint: disable=broad-except
+                    # Ok to skip the fields as this is just for display
+                    # purposes.
+                    logger.debug(f'Failed to get resources.{field} for cluster '
+                                 f'{record["name"]}: {str(e)}')
+                    record[field] = None
+
+            # Add resources_str and resources_str_full for dashboard
+            # compatibility
+            num_nodes = record.get('num_nodes', 1)
+            try:
+                resource_str_simple = resources_utils.format_resource(
+                    resources, simplify=True)
+                resource_str_full = resources_utils.format_resource(
+                    resources, simplify=False)
+                record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+                record[
+                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get resources_str for cluster '
+                             f'{record["name"]}: {str(e)}')
+                for field in fields:
+                    record[field] = None
+                record['resources_str'] = '-'
+                record['resources_str_full'] = '-'
+
+        try:
+            report['total_cost'] = get_total_cost(report)
+        except Exception as e:  # pylint: disable=broad-except
+            # Ok to skip the total cost as this is just for display purposes.
+            logger.warning(f'Failed to get total cost for cluster '
+                           f'{report["name"]}: {str(e)}')
+            report['total_cost'] = 0.0
+
+        _update_record_with_resources(report)
+        return report
+
+    # Process clusters in parallel
+    if not cluster_reports:
+        return []
+
+    processed_reports = subprocess_utils.run_in_parallel(
+        _process_cluster_report, cluster_reports)
+
+    return processed_reports
 
 
 def _start(
@@ -472,7 +545,10 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
         message = ('Stopping spot instances is currently not supported on '
                    f'{resources.cloud}')
     else:
-        message = f'Stopping is currently not supported for {resources}'
+        cloud_name = resources.cloud.display_name(
+        ) if resources.cloud else resources.cloud
+        message = ('Stopping is currently not supported for '
+                   f'{cloud_name}')
     return message
 
 
@@ -709,9 +785,10 @@ def queue(cluster_name: str,
         exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
-    user_hash: Optional[str] = common_utils.get_user_hash()
     if all_users:
         user_hash = None
+    else:
+        user_hash = common_utils.get_current_user().id
     code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
@@ -827,7 +904,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_user_hash())
+                        user_hash=common_utils.get_current_user().id)
 
 
 @usage_lib.entrypoint
@@ -1008,20 +1085,49 @@ def storage_delete(name: str) -> None:
 # = Catalog Observe =
 # ===================
 @usage_lib.entrypoint
-def enabled_clouds() -> List[clouds.Cloud]:
-    return global_user_state.get_cached_enabled_clouds(
-        sky_cloud.CloudCapability.COMPUTE)
+def enabled_clouds(workspace: Optional[str] = None,
+                   expand: bool = False) -> List[str]:
+    if workspace is None:
+        workspace = skypilot_config.get_active_workspace()
+    cached_clouds = global_user_state.get_cached_enabled_clouds(
+        sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
+    with skypilot_config.local_active_workspace_ctx(workspace):
+        if not expand:
+            return [cloud.canonical_name() for cloud in cached_clouds]
+        enabled_ssh_infras = []
+        enabled_k8s_infras = []
+        enabled_cloud_infras = []
+        for cloud in cached_clouds:
+            cloud_infra = cloud.expand_infras()
+            if isinstance(cloud, clouds.SSH):
+                enabled_ssh_infras.extend(cloud_infra)
+            elif isinstance(cloud, clouds.Kubernetes):
+                enabled_k8s_infras.extend(cloud_infra)
+            else:
+                enabled_cloud_infras.extend(cloud_infra)
+        all_infras = sorted(enabled_ssh_infras) + sorted(
+            enabled_k8s_infras) + sorted(enabled_cloud_infras)
+        return all_infras
 
 
 @usage_lib.entrypoint
 def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
-    quantity_filter: Optional[int] = None
+    quantity_filter: Optional[int] = None,
+    is_ssh: Optional[bool] = None
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
 
     if context is None:
-        context_list = clouds.Kubernetes.existing_allowed_contexts()
+        # Include contexts from both Kubernetes and SSH clouds
+        kubernetes_contexts = clouds.Kubernetes.existing_allowed_contexts()
+        ssh_contexts = clouds.SSH.existing_allowed_contexts()
+        if is_ssh is None:
+            context_list = kubernetes_contexts + ssh_contexts
+        elif is_ssh:
+            context_list = ssh_contexts
+        else:
+            context_list = kubernetes_contexts
     else:
         context_list = [context]
 
@@ -1030,9 +1136,9 @@ def realtime_kubernetes_gpu_availability(
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None
     ) -> List[models.RealtimeGpuAvailability]:
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
+        counts, capacity, available = catalog.list_accelerator_realtime(
             gpus_only=True,
-            clouds='kubernetes',
+            clouds='ssh' if is_ssh else 'kubernetes',
             name_filter=name_filter,
             region_filter=context,
             quantity_filter=quantity_filter,
@@ -1064,16 +1170,19 @@ def realtime_kubernetes_gpu_availability(
             name_filter=name_filter,
             quantity_filter=quantity_filter), context_list)
 
+    cloud_identity = 'ssh' if is_ssh else 'kubernetes'
+    cloud_identity_capital = 'SSH' if is_ssh else 'Kubernetes'
+
     for ctx, queried in zip(context_list, parallel_queried):
         cumulative_count += len(queried)
         if len(queried) == 0:
             # don't add gpu results for clusters that don't have any
-            logger.debug(f'No gpus found in k8s cluster {ctx}')
+            logger.debug(f'No gpus found in {cloud_identity} cluster {ctx}')
             continue
         availability_lists.append((ctx, queried))
 
     if cumulative_count == 0:
-        err_msg = 'No GPUs found in any Kubernetes clusters. '
+        err_msg = f'No GPUs found in any {cloud_identity_capital} clusters. '
         debug_msg = 'To further debug, run: sky check '
         if name_filter is not None:
             gpu_info_msg = f' {name_filter!r}'
@@ -1081,9 +1190,9 @@ def realtime_kubernetes_gpu_availability(
                 gpu_info_msg += (' with requested quantity'
                                  f' {quantity_filter}')
             err_msg = (f'Resources{gpu_info_msg} not found '
-                       'in Kubernetes clusters. ')
-            debug_msg = ('To show available accelerators on kubernetes,'
-                         ' run: sky show-gpus --cloud kubernetes ')
+                       f'in {cloud_identity_capital} clusters. ')
+            debug_msg = (f'To show available accelerators on {cloud_identity}, '
+                         f' run: sky show-gpus --cloud {cloud_identity} ')
         full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                         debug_msg)
         raise ValueError(full_err_msg)
@@ -1181,3 +1290,52 @@ def local_down() -> None:
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,
                                        is_local=True))
+
+
+@usage_lib.entrypoint
+def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
+    """Deploys or tears down a Kubernetes cluster on SSH targets.
+
+    Args:
+        infra: Name of the cluster configuration in ssh_node_pools.yaml.
+            If None, the first cluster in the file is used.
+        cleanup: If True, clean up the cluster instead of deploying.
+    """
+    kubernetes_deploy_utils.deploy_ssh_cluster(
+        cleanup=cleanup,
+        infra=infra,
+    )
+
+
+@usage_lib.entrypoint
+def ssh_status(context_name: str) -> Tuple[bool, str]:
+    """Check the status of an SSH Node Pool context.
+
+    Args:
+        context_name: The SSH context name (e.g., 'ssh-my-cluster')
+
+    Returns:
+        Tuple[bool, str]: (is_ready, reason)
+            - is_ready: True if the SSH Node Pool is ready, False otherwise
+            - reason: Explanation of the status
+    """
+    try:
+        is_ready, reason = clouds.SSH.check_single_context(context_name)
+        return is_ready, reason
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('Failed to check SSH context: '
+                       f'{common_utils.format_exception(e)}')
+
+
+def get_all_contexts() -> List[str]:
+    """Get all available contexts from Kubernetes and SSH clouds.
+
+    Returns:
+        List[str]: A list of all available context names.
+    """
+    kube_contexts = clouds.Kubernetes.existing_allowed_contexts()
+    ssh_contexts = clouds.SSH.get_ssh_node_pool_contexts()
+    # Ensure ssh_contexts are prefixed appropriately if not already
+    # For now, assuming get_ssh_node_pool_contexts already returns them
+    # in the desired format (e.g., 'ssh-my-cluster')
+    return sorted(list(set(kube_contexts + ssh_contexts)))

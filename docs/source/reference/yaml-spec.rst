@@ -26,10 +26,8 @@ Below is the configuration syntax and some example values.  See details under ea
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
   :ref:`resources <yaml-spec-resources>`:
-    # Location.
-    :ref:`cloud <yaml-spec-resources-cloud>`: aws
-    :ref:`region <yaml-spec-resources-region>`: us-east-1
-    :ref:`zone <yaml-spec-resources-zone>`: us-east-1a
+    # Infra to use. Click to see schema and example values.
+    :ref:`infra <yaml-spec-resources-infra>`: aws
 
     # Hardware.
     :ref:`accelerators <yaml-spec-resources-accelerators>`: H100:8
@@ -41,25 +39,24 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
+    :ref:`network_tier <yaml-spec-resources-network-tier>`: best
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
+    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
-      - cloud: aws
-        region: us-west-2
+      - infra: aws/us-west-2
         accelerators: H100
-      - cloud: gcp
+      - infra: gcp/us-central1
         accelerators: H100
 
     :ref:`ordered <yaml-spec-resources-ordered>`:
-      - cloud: aws
-        region: us-east-1
-      - cloud: aws
-        region: us-west-2
+      - infra: aws/us-east-1
+      - infra: aws/us-west-2
 
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
@@ -68,12 +65,41 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_LOCAL_PATH: tmp-workdir
     MODEL_SIZE: 13b
 
+  :ref:`secrets <yaml-spec-secrets>`:
+    MY_HF_TOKEN: my-secret-value
+    WANDB_API_KEY: my-secret-value-2
+
+  :ref:`volumes <yaml-spec-new-volumes>`:
+    /mnt/data: volume-name
+
   :ref:`file_mounts <yaml-spec-file-mounts>`:
+    # Sync a local directory to a remote directory
     /remote/path: /local/path
+    # Mount a S3 bucket to a remote directory
     /checkpoints:
       source: s3://existing-bucket
       mode: MOUNT
     /datasets-s3: s3://my-awesome-dataset
+    # Mount an existing volume to a remote directory,
+    # and sync the local directory to the volume.
+    /mnt/path1:
+      name: volume-name1
+      source: /local/path1
+      store: volume
+      persistent: True
+    # Create a new network volume with name "volume-name2"
+    # and mount it to a remote directory
+    /mnt/path2:
+      name: volume-name2
+      store: volume
+      config:
+        disk_size: 10
+        disk_tier: high
+    # Create a new instance volume and mount it to a remote directory
+    /mnt/path3:
+      store: volume
+      config:
+        storage_type: instance
 
   :ref:`setup <yaml-spec-setup>`: |
     echo "Begin setup."
@@ -151,58 +177,111 @@ Per-node resource requirements (optional).
 .. code-block:: yaml
 
   resources:
-    cloud: aws
+    infra: aws
     instance_type: p3.8xlarge
 
 
-.. _yaml-spec-resources-cloud:
+.. _yaml-spec-resources-infra:
 
-``resources.cloud``
+``resources.infra``
 ~~~~~~~~~~~~~~~~~~~
 
-The cloud to use (optional).
+
+Infrastructure to use (optional).
+
+Schema: ``<cloud>/<region>/<zone>`` (region
+and zone are optional), or ``k8s/<context-name>`` (context-name is optional).
+Wildcards are supported in any component.
+
+Example values: ``aws``, ``aws/us-east-1``, ``aws/us-east-1/us-east-1a``,
+``aws/*/us-east-1a``, ``k8s``, ``k8s/my-cluster-context``.
 
 .. code-block:: yaml
 
   resources:
-    cloud: aws
+    infra: aws  # Use any available AWS region/zone.
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s  # Use any available Kubernetes context.
+
+You can also specify a specific region, zone, or Kubernetes context.
+
+.. code-block:: yaml
+
+  resources:
+    infra: aws/us-east-1
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: aws/us-east-1/us-east-1a
+
+
+.. code-block:: yaml
+
+  resources:
+    infra: k8s/my-h100-cluster-context
+
+
+.. _yaml-spec-resources-autostop:
+
+``resources.autostop``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Autostop configuration (optional).
+
+Controls whether and when to automatically stop or tear down the cluster after it becomes idle. See :ref:`auto-stop` for more details.
+
+Format:
+
+- ``true``: Use default idle minutes (5)
+- ``false``: Disable autostop
+- ``<num>``: Stop after this many idle minutes
+- ``<num><unit>``: Stop after this much time
+- Object with configuration:
+  - ``idle_minutes``: Number of idle minutes before stopping
+  - ``down``: If true, tear down the cluster instead of stopping it
+
+``<unit>`` can be one of:
+- ``m``: minutes (default if not specified)
+- ``h``: hours
+- ``d``: days
+- ``w``: weeks
+
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    autostop: true  # Stop after default idle minutes (5)
 
 OR
 
 .. code-block:: yaml
 
   resources:
-    cloud: gcp
+    autostop: 10  # Stop after 10 minutes
 
-
-.. _yaml-spec-resources-region:
-
-``resources.region``
-~~~~~~~~~~~~~~~~~~~~
-
-The region to use (optional).
-
-Auto-failover will be disabled if this is specified.
+OR
 
 .. code-block:: yaml
 
   resources:
-    region: us-east-1
+    autostop: 10h  # Stop after 10 hours
 
-
-.. _yaml-spec-resources-zone:
-
-``resources.zone``
-~~~~~~~~~~~~~~~~~~
-
-The zone to use (optional).
-
-Auto-failover will be disabled if this is specified.
+OR
 
 .. code-block:: yaml
 
   resources:
-    zone: us-east-1a
+    autostop:
+      idle_minutes: 10
+      down: true  # Use autodown instead of autostop
 
 
 .. _yaml-spec-resources-accelerators:
@@ -329,12 +408,20 @@ OR
 ``resources.memory``
 ~~~~~~~~~~~~~~~~~~~~
 
-Memory in GiB per node (optional).
+Memory specification per node (optional).
 
 Format:
 
--  ``<num>``: exactly ``<num>`` GiB
--  ``<num>+``: at least ``<num>`` GiB
+-  ``<num>``: exactly ``<num>`` GB
+-  ``<num>+``: at least ``<num>`` GB
+-  ``<num><unit>``: memory with unit (e.g., ``1024MB``, ``64GB``)
+
+Units supported (case-insensitive):
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes) (default if not specified)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
@@ -348,7 +435,7 @@ OR
 .. code-block:: yaml
 
   resources:
-    memory: 64
+    memory: 64GB
 
 .. _yaml-spec-resources-instance-type:
 
@@ -385,14 +472,34 @@ If unspecified, defaults to ``false`` (on-demand instances).
 ``resources.disk_size``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Disk size in GB to allocate for OS (mounted at ``/``).
+Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+.. warning::
+
+   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
   resources:
     disk_size: 256
+  
+OR
+
+.. code-block:: yaml
+
+  resources:
+    disk_size: 256GB
+
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -425,6 +532,26 @@ OR
 
   resources:
     disk_tier: best
+
+
+.. _yaml-spec-resources-network-tier:
+
+``resources.network_tier``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Network tier to use (optional).
+
+Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
+
+If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
+
+- ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
+
+.. code-block:: yaml
+
+  resources:
+    network_tier: best
 
 
 .. _yaml-spec-resources-ports:
@@ -658,12 +785,10 @@ Example:
 .. code-block:: yaml
 
   resources:
+    accelerators: H100
     any_of:
-      - cloud: aws
-        region: us-west-2
-        accelerators: H100
-      - cloud: gcp
-        accelerators: H100
+      - infra: aws/us-west-2
+      - infra: gcp/us-central1
 
 .. _yaml-spec-resources-ordered:
 
@@ -683,10 +808,8 @@ Example:
 
   resources:
     ordered:
-      - cloud: aws
-        region: us-east-1
-      - cloud: aws
-        region: us-west-2
+      - infra: aws/us-east-1
+      - infra: aws/us-west-2
 
 .. _yaml-spec-resources-job-recovery:
 
@@ -731,26 +854,6 @@ These values can be accessed in the ``file_mounts``, ``setup``, and ``run`` sect
 
 Values set here can be overridden by a CLI flag: ``sky launch/exec --env ENV=val`` (if ``ENV`` is present).
 
-For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
-
-If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
-
-.. code-block:: yaml
-
-  envs:
-    SKYPILOT_DOCKER_USERNAME: <username>
-    SKYPILOT_DOCKER_PASSWORD: <password>
-    SKYPILOT_DOCKER_SERVER: <registry server>
-
-SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
-
-You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
-
-.. code-block:: yaml
-
-  sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
-
-For more information about docker support in SkyPilot, please refer to the ``image_id`` section above.
 
 Example of using envs:
 
@@ -760,6 +863,65 @@ Example of using envs:
     MY_BUCKET: skypilot-data
     MODEL_SIZE: 13b
     MY_LOCAL_PATH: tmp-workdir
+
+.. dropdown:: Docker login authentication with environment variables
+
+  For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
+
+  If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
+
+  .. code-block:: yaml
+
+    envs:
+      SKYPILOT_DOCKER_USERNAME: <username>
+      SKYPILOT_DOCKER_PASSWORD: <password>
+      SKYPILOT_DOCKER_SERVER: <registry server>
+
+  SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
+
+  You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
+
+  .. code-block:: yaml
+
+    sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+
+  For more information about docker support in SkyPilot, please refer to :ref:`Using private docker registries <docker-containers-private-registries>`.
+
+  You can also use :ref:`secrets <yaml-spec-secrets>` to set the authentication above.
+
+.. _yaml-spec-secrets:
+
+``secrets``
+~~~~~~~~~~~
+
+Secrets (optional).
+
+Secrets are similar to :ref:`envs <yaml-spec-envs>` above but can only be used in the ``setup`` and ``run``, and will be redacted in the entrypoint/YAML in the dashboard.
+
+Values set here can be overridden by a CLI flag: ``sky launch/exec --secret SECRET=val`` (if ``SECRET`` is present).
+
+Example:
+
+.. code-block:: yaml
+
+  secrets:
+    HF_TOKEN: my-huggingface-token
+    WANDB_API_KEY: my-wandb-api-key
+
+.. _yaml-spec-new-volumes:
+
+``volumes``
+~~~~~~~~~~~
+
+SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+
+Example:
+
+.. code-block:: yaml
+
+  volumes:
+    /mnt/data: volume-name
+
 
 .. _yaml-spec-file-mounts:
 
@@ -817,6 +979,105 @@ OR
       source: ~/local_models
       store: gcs
       mode: MOUNT
+
+
+.. _yaml-spec-volumes:
+
+Volumes
++++++++
+
+SkyPilot also supports mounting network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
+
+To mount an existing volume:
+
+* Ensure the volume exists
+* Specify the volume name using ``name: volume-name``
+* You must specify the ``region`` or ``zone`` in the ``resources`` section to match the volume's location
+
+To create and mount a new network volume:
+
+* Specify the volume name using ``name: volume-name``
+* Specify the desired volume configuration (disk_size, disk_tier, etc.)
+* SkyPilot will automatically create and mount the volume to the specified path
+
+To create and mount a new instance volume:
+
+* Omit the ``name`` field, which will be ignored even if specified
+* Specify the desired volume configuration (storage_type, etc.)
+* SkyPilot will automatically create and mount the volume to the specified path
+
+.. code-block:: yaml
+
+  file_mounts:
+    # Path to mount the volume on the instance
+    /mnt/path1:
+      # Name of the volume to mount
+      # It's required for the network volume,
+      # and will be ignored for the instance volume.
+      # If the volume does not exist in the specified region,
+      # it will be created in the region.
+      # optional
+      name: volume-name
+      # Source local path
+      # Do not set it if no need to sync data from local
+      # to volume, if specified, the data will be synced
+      # to the /mnt/path1/data directory.
+      # optional
+      source: /local/path1
+      # For volume mount
+      store: volume
+      # If set to False, the volume will be deleted after cluster is downed.
+      # optional, default: False
+      persistent: True
+      config:
+        # Size of the volume in GB
+        disk_size: 100
+        # Type of the volume, either 'network' or 'instance', optional, default: network
+        storage_type: network
+        # Tier of the volume, same as `resources.disk_tier`, optional, default: best
+        disk_tier: best
+        # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
+        attach_mode: read_write
+
+- Mount with existing volume:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path1:
+      name: volume-name
+      store: volume
+      persistent: true
+
+- Mount with a new network volume:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path2:
+      name: new-volume
+      store: volume
+      config:
+        disk_size: 100
+
+- Mount with a new instance volume:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /mnt/path3:
+      store: volume
+      config:
+        storage_type: instance
+
+.. note::
+
+  * If :ref:`GCP TPU <tpu>` is used, creating and mounting a new volume is not supported, please use the existing volume instead.
+  * If :ref:`GCP MIG <config-yaml-gcp-managed-instance-group>` is used:
+
+    * For the existing volume, the `attach_mode` needs to be `read_only`.
+    * For the new volume, the `name` field is ignored.
+  * When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
 
 .. _yaml-spec-setup:
 
@@ -908,7 +1169,7 @@ Example:
 SkyServe Service
 ================
 
-To define a YAML for use for :ref:services <sky-serve>, use previously mentioned fields to describe each replica, then add a service section to describe the entire service.
+To define a YAML for use for :ref:`services <sky-serve>`, use previously mentioned fields to describe each replica, then add a service section to describe the entire service.
 
 Syntax
 

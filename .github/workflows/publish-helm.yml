@@ -102,8 +102,8 @@ jobs:
       - name: Update docker image in charts
         if: inputs.version != ''
         run: |
-          # Update the image in values.yaml
-          sed -i "s|image: .*$|image: ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ inputs.version }}|" src/charts/skypilot/values.yaml
+          # Update the apiService.image in values.yaml using yq
+          yq -i '.apiService.image = "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ inputs.version }}"' src/charts/skypilot/values.yaml
           # Print the new values.yaml for debugging
           cat src/charts/skypilot/values.yaml
 

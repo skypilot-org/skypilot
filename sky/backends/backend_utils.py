@@ -28,10 +28,12 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -51,6 +53,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     import requests
@@ -63,6 +66,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+    from sky.volumes import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -125,7 +129,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
 # If a cluster is less than LAUNCH_DOUBLE_CHECK_WINDOW seconds old, and we don't
-# see any instances in the cloud, the instances might be in the proccess of
+# see any instances in the cloud, the instances might be in the process of
 # being created. We will wait LAUNCH_DOUBLE_CHECK_DELAY seconds and then double
 # check to make sure there are still no instances. LAUNCH_DOUBLE_CHECK_DELAY
 # should be set longer than the delay between (sending the create instance
@@ -213,7 +217,7 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
 # Add retry for the file mounts optimization, as the underlying cp command may
 # experience transient errors, #4758.
 @common_utils.retry
-def _optimize_file_mounts(yaml_path: str) -> None:
+def _optimize_file_mounts(tmp_yaml_path: str) -> None:
     """Optimize file mounts in the given ray yaml file.
 
     Runtime files handling:
@@ -227,7 +231,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
         subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
-    yaml_config = common_utils.read_yaml(yaml_path)
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -311,7 +315,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
             shell=True,
             check=True)
 
-    common_utils.dump_yaml(yaml_path, yaml_config)
+    common_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -340,7 +344,13 @@ def path_size_megabytes(path: str) -> int:
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:
-        rsync_output = str(subprocess.check_output(rsync_command, shell=True))
+        # rsync sometimes fails `--dry-run` for MacOS' rsync build, however this function is only used to display
+        # a warning message to the user if the size of a file/directory is too
+        # large, so we can safely ignore the error.
+        rsync_output = str(
+            subprocess.check_output(rsync_command,
+                                    shell=True,
+                                    stderr=subprocess.DEVNULL))
     except subprocess.CalledProcessError:
         logger.debug('Command failed, proceeding without estimating size: '
                      f'{rsync_command}')
@@ -510,11 +520,51 @@ def get_expirable_clouds(
     expirable_clouds = []
     local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
     for cloud in enabled_clouds:
-        remote_identities = skypilot_config.get_nested(
-            (str(cloud).lower(), 'remote_identity'), None)
-        if remote_identities is None:
-            remote_identities = schemas.get_default_remote_identity(
-                str(cloud).lower())
+        # Kubernetes config might have context-specific properties
+        if isinstance(cloud, clouds.Kubernetes):
+            # get all custom contexts
+            contexts = kubernetes_utils.get_custom_config_k8s_contexts()
+            # add remote_identity of each context if it exists
+            remote_identities = None
+            for context in contexts:
+                context_remote_identity = skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=None)
+                if context_remote_identity is not None:
+                    if remote_identities is None:
+                        remote_identities = []
+                    if isinstance(context_remote_identity, str):
+                        remote_identities.append(
+                            {context: context_remote_identity})
+                    elif isinstance(context_remote_identity, list):
+                        remote_identities.extend(context_remote_identity)
+            # add global kubernetes remote identity if it exists, if not, add default
+            global_remote_identity = skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=None,
+                keys=('remote_identity',),
+                default_value=None)
+            if global_remote_identity is not None:
+                if remote_identities is None:
+                    remote_identities = []
+                if isinstance(global_remote_identity, str):
+                    remote_identities.append({'*': global_remote_identity})
+                elif isinstance(global_remote_identity, list):
+                    remote_identities.extend(global_remote_identity)
+            if remote_identities is None:
+                remote_identities = schemas.get_default_remote_identity(
+                    str(cloud).lower())
+        else:
+            remote_identities = skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=None,
+                keys=('remote_identity',),
+                default_value=None)
+            if remote_identities is None:
+                remote_identities = schemas.get_default_remote_identity(
+                    str(cloud).lower())
 
         local_credential_expiring = cloud.can_credential_expire()
         if isinstance(remote_identities, str):
@@ -532,16 +582,18 @@ def get_expirable_clouds(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources_lib.Resources',
-        num_nodes: int,
-        cluster_config_template: str,
-        cluster_name: str,
-        local_wheel_path: pathlib.Path,
-        wheel_hash: str,
-        region: clouds.Region,
-        zones: Optional[List[clouds.Zone]] = None,
-        dryrun: bool = False,
-        keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+    to_provision: 'resources_lib.Resources',
+    num_nodes: int,
+    cluster_config_template: str,
+    cluster_name: str,
+    local_wheel_path: pathlib.Path,
+    wheel_hash: str,
+    region: clouds.Region,
+    zones: Optional[List[clouds.Zone]] = None,
+    dryrun: bool = False,
+    keep_launch_fields_in_existing_config: bool = True,
+    volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns:
@@ -589,12 +641,15 @@ def write_cluster_config(
         resources_utils.ClusterName(
             cluster_name,
             cluster_name_on_cloud,
-        ), region, zones, num_nodes, dryrun)
+        ), region, zones, num_nodes, dryrun, volume_mounts)
     config_dict = {}
 
     specific_reservations = set(
-        skypilot_config.get_nested(
-            (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
+        skypilot_config.get_effective_region_config(
+            cloud=str(to_provision.cloud).lower(),
+            region=to_provision.region,
+            keys=('specific_reservations',),
+            default_value=set()))
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
@@ -607,8 +662,11 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), None)
+    remote_identity_config = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('remote_identity',),
+        default_value=None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
@@ -637,21 +695,33 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if skypilot_config.get_nested(
-                ('kubernetes', 'allowed_contexts'), None) is None:
+            if skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    region=None,
+                    keys=('allowed_contexts',),
+                    default_value=None) is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_nested(
-            (cloud_str.lower(), 'remote_identity'), None)
+        remote_identity_config = skypilot_config.get_effective_region_config(
+            cloud=cloud_str.lower(),
+            region=region.name,
+            keys=('remote_identity',),
+            default_value=None)
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+
+    logging_agent = logs.get_logging_agent()
+    if logging_agent:
+        for k, v in logging_agent.get_credential_file_mounts().items():
+            assert k not in credentials, f'{k} already in credentials'
+            credentials[k] = v
 
     private_key_path, _ = auth.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
@@ -660,8 +730,11 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Retrieve the ssh_proxy_command for the given cloud / region.
-    ssh_proxy_command_config = skypilot_config.get_nested(
-        (str(cloud).lower(), 'ssh_proxy_command'), None)
+    ssh_proxy_command_config = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=None,
+        keys=('ssh_proxy_command',),
+        default_value=None)
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
@@ -687,7 +760,11 @@ def write_cluster_config(
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
-    labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
+    labels = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('labels',),
+        default_value={})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
@@ -716,6 +793,15 @@ def write_cluster_config(
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name)
 
+    volume_mount_vars = []
+    if volume_mounts is not None:
+        for vol in volume_mounts:
+            volume_mount_vars.append({
+                'name': vol.volume_name,
+                'path': vol.path,
+                'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+            })
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -735,12 +821,17 @@ def write_cluster_config(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # Networking configs
-                'use_internal_ips': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'use_internal_ips'), False),
+                'use_internal_ips': skypilot_config.get_effective_region_config(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('use_internal_ips',),
+                    default_value=False),
                 'ssh_proxy_command': ssh_proxy_command,
-                'vpc_name': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'vpc_name'), None),
-
+                'vpc_name': skypilot_config.get_effective_region_config(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('vpc_name',),
+                    default_value=None),
                 # User-supplied labels.
                 'labels': labels,
                 # User-supplied remote_identity
@@ -806,6 +897,9 @@ def write_cluster_config(
 
                 # High availability
                 'high_availability': high_availability_specified,
+
+                # Volume mounts
+                'volume_mounts': volume_mount_vars,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -813,10 +907,13 @@ def write_cluster_config(
 
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
+        cluster_config_overrides = to_provision.cluster_config_overrides
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path,
-            cluster_config_overrides=to_provision.cluster_config_overrides)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+            cluster_config_overrides=cluster_config_overrides,
+            cloud=cloud,
+            context=region.name)
+        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
@@ -842,9 +939,8 @@ def write_cluster_config(
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
-    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            old_yaml_content = f.read()
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
@@ -881,18 +977,29 @@ def write_cluster_config(
     # compatibility should go before this call.
     _optimize_file_mounts(tmp_yaml_path)
 
-    # Rename the tmp file to the final YAML path.
-    os.rename(tmp_yaml_path, yaml_path)
-    usage_lib.messages.usage.update_ray_yaml(yaml_path)
+    # commit the final yaml to the database
+    global_user_state.set_cluster_yaml(
+        cluster_name,
+        open(tmp_yaml_path, 'r', encoding='utf-8').read())
+
+    usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
+
+    # Remove the tmp file.
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        debug_yaml_path = yaml_path + '.debug'
+        os.rename(tmp_yaml_path, debug_yaml_path)
+    else:
+        os.remove(tmp_yaml_path)
+
     return config_dict
 
 
-def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
+def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
     """
-    config = common_utils.read_yaml(cluster_config_file)
+    config = common_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
     if isinstance(cloud, (
             clouds.AWS,
@@ -920,9 +1027,11 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
+    elif isinstance(cloud, clouds.Hyperbolic):
+        config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
-    common_utils.dump_yaml(cluster_config_file, config)
+    common_utils.dump_yaml(tmp_yaml_path, config)
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -980,7 +1089,7 @@ def _count_healthy_nodes_from_ray(output: str,
 
 
 @timeline.event
-def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
+def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
     """Hash the cluster yaml and contents of file mounts to a unique string.
 
     Two invocations of this function should return the same string if and only
@@ -1024,7 +1133,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
     """
 
     # Load the yaml contents so that we can directly remove keys.
-    yaml_config = common_utils.read_yaml(yaml_path)
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
     for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
         dict_to_remove_from = yaml_config
         found_key = True
@@ -1053,7 +1162,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
         file_mounts.pop('')
 
     for dst, src in sorted(file_mounts.items()):
-        if src == yaml_path:
+        if src == tmp_yaml_path:
             # Skip the yaml file itself. We have already hashed a modified
             # version of it. The file may include fields we don't want to hash.
             continue
@@ -1148,7 +1257,7 @@ def wait_until_ray_cluster_ready(
         logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
-    config = common_utils.read_yaml(cluster_config_file)
+    config = global_user_state.get_cluster_yaml_dict(cluster_config_file)
 
     docker_user = None
     if 'docker' in config:
@@ -1248,11 +1357,11 @@ def ssh_credential_from_yaml(
     """
     if cluster_yaml is None:
         return dict()
-    config = common_utils.read_yaml(cluster_yaml)
+    config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     auth_section = config['auth']
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
-    ssh_private_key = auth_section.get('ssh_private_key')
+    ssh_private_key_path = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
@@ -1261,9 +1370,10 @@ def ssh_credential_from_yaml(
             constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
         ssh_proxy_command = ssh_proxy_command.replace(
             constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
+
     credentials = {
         'ssh_user': ssh_user,
-        'ssh_private_key': ssh_private_key,
+        'ssh_private_key': ssh_private_key_path,
         'ssh_control_name': ssh_control_name,
         'ssh_proxy_command': ssh_proxy_command,
     }
@@ -1436,7 +1546,7 @@ def get_node_ips(cluster_yaml: str,
         exceptions.FetchClusterInfoError: if we failed to get the IPs. e.reason is
             HEAD or WORKER.
     """
-    ray_config = common_utils.read_yaml(cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(cluster_yaml)
     # Use the new provisioner for AWS.
     provider_name = cluster_utils.get_provider_name(ray_config)
     cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
@@ -1556,6 +1666,16 @@ def check_owner_identity(cluster_name: str) -> None:
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
+    active_workspace = skypilot_config.get_active_workspace()
+    cluster_workspace = record.get('workspace',
+                                   constants.SKYPILOT_DEFAULT_WORKSPACE)
+    if active_workspace != cluster_workspace:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{colorama.Fore.YELLOW}'
+                f'The cluster {cluster_name!r} is in workspace '
+                f'{cluster_workspace!r}, but the active workspace is '
+                f'{active_workspace!r}.{colorama.Fore.RESET}')
 
     launched_resources = handle.launched_resources.assert_launchable()
     cloud = launched_resources.cloud
@@ -1642,7 +1762,7 @@ def _query_cluster_status_via_cloud_api(
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    ray_config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     provider_config = ray_config['provider']
 
     # Query the cloud provider.
@@ -2152,57 +2272,64 @@ def refresh_cluster_record(
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
-    check_owner_identity(cluster_name)
+    # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
+    # using the correct cloud credentials.
+    workspace = record.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+    with skypilot_config.local_active_workspace_ctx(workspace):
+        check_owner_identity(cluster_name)
 
-    if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
-        return record
-
-    # The loop logic allows us to notice if the status was updated in the
-    # global_user_state by another process and stop trying to get the lock.
-    # The core loop logic is adapted from FileLock's implementation.
-    lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
-    start_time = time.perf_counter()
-
-    # Loop until we have an up-to-date status or until we acquire the lock.
-    while True:
-        # Check to see if we can return the cached status.
-        if not _must_refresh_cluster_status(record, force_refresh_statuses):
+        if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
             return record
 
-        if not acquire_per_cluster_status_lock:
-            return _update_cluster_status(cluster_name)
+        # The loop logic allows us to notice if the status was updated in the
+        # global_user_state by another process and stop trying to get the lock.
+        # The core loop logic is adapted from FileLock's implementation.
+        lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+        start_time = time.perf_counter()
 
-        # Try to acquire the lock so we can fetch the status.
-        try:
-            with lock.acquire(blocking=False):
-                # Check the cluster status again, since it could have been
-                # updated between our last check and acquiring the lock.
-                record = global_user_state.get_cluster_from_name(cluster_name)
-                if record is None or not _must_refresh_cluster_status(
-                        record, force_refresh_statuses):
-                    return record
-                # Update and return the cluster status.
+        # Loop until we have an up-to-date status or until we acquire the lock.
+        while True:
+            # Check to see if we can return the cached status.
+            if not _must_refresh_cluster_status(record, force_refresh_statuses):
+                return record
+
+            if not acquire_per_cluster_status_lock:
                 return _update_cluster_status(cluster_name)
-        except filelock.Timeout:
-            # lock.acquire() will throw a Timeout exception if the lock is not
-            # available and we have blocking=False.
-            pass
 
-        # Logic adapted from FileLock.acquire().
-        # If cluster_status_lock_time is <0, we will never hit this. No timeout.
-        # Otherwise, if we have timed out, return the cached status. This has
-        # the potential to cause correctness issues, but if so it is the
-        # caller's responsibility to set the timeout to -1.
-        if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
-            logger.debug('Refreshing status: Failed get the lock for cluster '
-                         f'{cluster_name!r}. Using the cached status.')
-            return record
-        time.sleep(0.05)
+            # Try to acquire the lock so we can fetch the status.
+            try:
+                with lock.acquire(blocking=False):
+                    # Check the cluster status again, since it could have been
+                    # updated between our last check and acquiring the lock.
+                    record = global_user_state.get_cluster_from_name(
+                        cluster_name)
+                    if record is None or not _must_refresh_cluster_status(
+                            record, force_refresh_statuses):
+                        return record
+                    # Update and return the cluster status.
+                    return _update_cluster_status(cluster_name)
+            except filelock.Timeout:
+                # lock.acquire() will throw a Timeout exception if the lock is not
+                # available and we have blocking=False.
+                pass
 
-        # Refresh for next loop iteration.
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is None:
-            return None
+            # Logic adapted from FileLock.acquire().
+            # If cluster_status_lock_time is <0, we will never hit this. No timeout.
+            # Otherwise, if we have timed out, return the cached status. This has
+            # the potential to cause correctness issues, but if so it is the
+            # caller's responsibility to set the timeout to -1.
+            if 0 <= cluster_status_lock_timeout < time.perf_counter(
+            ) - start_time:
+                logger.debug(
+                    'Refreshing status: Failed get the lock for cluster '
+                    f'{cluster_name!r}. Using the cached status.')
+                return record
+            time.sleep(0.05)
+
+            # Refresh for next loop iteration.
+            record = global_user_state.get_cluster_from_name(cluster_name)
+            if record is None:
+                return None
 
 
 @timeline.event
@@ -2408,6 +2535,17 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    if (managed_job_utils.is_consolidation_mode() and
+            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+        cn = 'local-controller-consolidation'
+        return backends.LocalResourcesHandle(
+            cluster_name=cn,
+            cluster_name_on_cloud=cn,
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=sky.Resources(cloud=clouds.Cloud(),
+                                             instance_type=cn),
+        )
     if non_existent_message is None:
         non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name
@@ -2471,7 +2609,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -2540,18 +2678,33 @@ def get_clusters(
             public clouds only, and 'local' for only local clouds.
         cluster_names: If provided, only return records for the given cluster
             names.
+        all_users: If True, return clusters from all users. If False, only
+            return clusters from the current user.
 
     Returns:
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
+    current_user = common_utils.get_current_user()
+
+    # Filter by user if requested
     if not all_users:
-        current_user_hash = common_utils.get_user_hash()
         records = [
             record for record in records
-            if record['user_hash'] == current_user_hash
+            if record['user_hash'] == current_user.id
         ]
+
+    accessible_workspaces = workspaces_core.get_workspaces()
+
+    workspace_filtered_records = []
+    for record in records:
+        cluster_workspace = record.get('workspace',
+                                       constants.SKYPILOT_DEFAULT_WORKSPACE)
+        if cluster_workspace in accessible_workspaces:
+            workspace_filtered_records.append(record)
+
+    records = workspace_filtered_records
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -2570,7 +2723,10 @@ def get_clusters(
         if handle is None:
             return
         record['resources_str'] = resources_utils.get_readable_resources_repr(
-            handle)
+            handle, simplify=True)
+        record[
+            'resources_str_full'] = resources_utils.get_readable_resources_repr(
+                handle, simplify=False)
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
@@ -2579,6 +2735,8 @@ def get_clusters(
             return
         ssh_private_key_path = credentials.get('ssh_private_key', None)
         if ssh_private_key_path is not None:
+            if not os.path.exists(os.path.expanduser(ssh_private_key_path)):
+                auth.create_ssh_key_files_from_db(ssh_private_key_path)
             with open(os.path.expanduser(ssh_private_key_path),
                       'r',
                       encoding='utf-8') as f:
@@ -2803,6 +2961,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         if is_managed_job:
             if task.best_resources.use_spot:
                 spot_str = '[Spot]'
+            assert task.best_resources.cpus is not None
             task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
@@ -2979,7 +3138,7 @@ def get_endpoints(cluster: str,
             raise ValueError('Querying endpoints is not supported '
                              f'for {cluster!r} on {cloud}.') from None
 
-    config = common_utils.read_yaml(handle.cluster_yaml)
+    config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
                                              handle.cluster_name_on_cloud,
                                              handle.launched_resources.ports,
@@ -3001,7 +3160,8 @@ def get_endpoints(cluster: str,
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
             if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
-                error_msg += (kubernetes_utils.get_endpoint_debug_message())
+                error_msg += kubernetes_utils.get_endpoint_debug_message(
+                    launched_resources.region)
             logger.warning(error_msg)
             return {}
         return {port: port_details[port][0].url()}
@@ -3019,8 +3179,8 @@ def get_endpoints(cluster: str,
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
                 if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                     # Add Kubernetes specific debugging info
-                    error_msg += \
-                        kubernetes_utils.get_endpoint_debug_message()
+                    error_msg += kubernetes_utils.get_endpoint_debug_message(
+                        launched_resources.region)
                 logger.warning(error_msg)
                 return {}
         return {

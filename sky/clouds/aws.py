@@ -10,14 +10,14 @@ import time
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
+from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
-from sky.clouds import service_catalog
-from sky.clouds.service_catalog import common as catalog_common
+from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -32,13 +32,14 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
+    from sky.volumes import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
 # For GPU-related package version,
-# see sky/clouds/service_catalog/images/provisioners/cuda.sh
+# see sky/catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
@@ -206,7 +207,7 @@ class AWS(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
 
         if region is not None:
@@ -261,19 +262,20 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
-                                                         region_name,
-                                                         clouds='aws')
+        image_id = catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
+                                                 region_name,
+                                                 clouds='aws')
         if acc is not None:
-            image_id = service_catalog.get_image_id_from_tag(
-                _DEFAULT_GPU_IMAGE_ID, region_name, clouds='aws')
+            image_id = catalog.get_image_id_from_tag(_DEFAULT_GPU_IMAGE_ID,
+                                                     region_name,
+                                                     clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                image_id = service_catalog.get_image_id_from_tag(
+                image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
             if acc_name in ['Trainium', 'Inferentia']:
-                image_id = service_catalog.get_image_id_from_tag(
+                image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
             return image_id
@@ -300,9 +302,9 @@ class AWS(clouds.Cloud):
             assert region_name in image_id, image_id
             image_id_str = image_id[region_name]
         if image_id_str.startswith('skypilot:'):
-            image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
-                                                                 region_name,
-                                                                 clouds='aws')
+            image_id_str = catalog.get_image_id_from_tag(image_id_str,
+                                                         region_name,
+                                                         clouds='aws')
             if image_id_str is None:
                 # Raise ResourcesUnavailableError to make sure the failover
                 # in CloudVMRayBackend will be correctly triggered.
@@ -361,11 +363,11 @@ class AWS(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='aws')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='aws')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -408,10 +410,10 @@ class AWS(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='aws')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -420,25 +422,27 @@ class AWS(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='aws')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='aws')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='aws')
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
@@ -459,10 +463,16 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
-        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
-                                                    False)
-        user_security_group_config = skypilot_config.get_nested(
-            ('aws', 'security_group_name'), None)
+        disk_encrypted = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('disk_encrypted',),
+            default_value=False)
+        user_security_group_config = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('security_group_name',),
+            default_value=None)
         user_security_group = None
         if isinstance(user_security_group_config, str):
             user_security_group = user_security_group_config
@@ -553,16 +563,16 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            memory=resources.memory,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='aws')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='aws')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -570,12 +580,14 @@ class AWS(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's compute service."""
         return cls._check_credentials()
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's storage service."""
         # TODO(seungjin): Implement separate check for
         # if the user has access to S3.
@@ -674,7 +686,7 @@ class AWS(clouds.Cloud):
 
         # Fetch the AWS catalogs
         # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.catalog import aws_catalog
 
         # Trigger the fetch of the availability zones mapping.
         try:
@@ -927,7 +939,7 @@ class AWS(clouds.Cloud):
                 identity_type.can_credential_expire())
 
     def instance_type_exists(self, instance_type):
-        return service_catalog.instance_type_exists(instance_type, clouds='aws')
+        return catalog.instance_type_exists(instance_type, clouds='aws')
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
@@ -983,7 +995,7 @@ class AWS(clouds.Cloud):
         use_spot = resources.use_spot
 
         # pylint: disable=import-outside-toplevel,unused-import
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 

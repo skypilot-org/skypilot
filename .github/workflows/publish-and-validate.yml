@@ -1,0 +1,111 @@
+name: Publish and Validate Package
+
+on:
+  workflow_call:
+    inputs:
+      package_name:
+        description: 'Name of the package to validate (skypilot or skypilot-nightly)'
+        required: true
+        type: string
+      expected_version:
+        description: 'Expected version of the package'
+        required: true
+        type: string
+      repository_type:
+        description: 'Repository to publish to (test-pypi or pypi)'
+        required: true
+        type: string
+        default: 'test-pypi'
+    secrets:
+      TEST_PYPI_API_TOKEN:
+        description: 'API token for Test PyPI'
+        required: true
+      PYPI_API_TOKEN:
+        description: 'API token for PyPI'
+        required: true
+
+jobs:
+  publish-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: skypilot-artifacts-${{ inputs.package_name }}
+          path: dist/
+
+      - name: Publish distribution to repository
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ inputs.repository_type == 'test-pypi' && secrets.TEST_PYPI_API_TOKEN || secrets.PYPI_API_TOKEN }}
+          repository-url: ${{ inputs.repository_type == 'test-pypi' && 'https://test.pypi.org/legacy/' || '' }}
+          skip-existing: true
+
+      - name: Validate published package
+        run: |
+          export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+          pip install fastapi
+
+          # Set up variables for package check
+          MAX_ATTEMPTS=10
+          ATTEMPT=1
+
+          # Validate expected version is not empty
+          if [ -z "${{ inputs.expected_version }}" ]; then
+            echo "Error: Expected version is empty"
+            exit 1
+          fi
+
+          echo "Waiting for package ${{ inputs.package_name }} version ${{ inputs.expected_version }} to be available..."
+
+          # Try installing the package up to MAX_ATTEMPTS times
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS"
+
+            # Uninstall package first (ignore errors if not installed)
+            pip uninstall -y ${{ inputs.package_name }} || true
+
+            # Install the package with no cache
+            if [ "${{ inputs.repository_type }}" == "test-pypi" ]; then
+              echo "Installing from Test PyPI..."
+              pip install --no-cache-dir --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple ${{ inputs.package_name }}
+            else
+              echo "Installing from PyPI..."
+              pip install --no-cache-dir ${{ inputs.package_name }}
+            fi
+
+            # Check the version
+            INSTALLED_VERSION=$(pip show ${{ inputs.package_name }} | grep Version | awk '{print $2}')
+            echo "Installed version: $INSTALLED_VERSION, Expected version: ${{ inputs.expected_version }}"
+
+            # If version matches, we're done
+            if [ "$INSTALLED_VERSION" = "${{ inputs.expected_version }}" ]; then
+              echo "Package ${{ inputs.package_name }} version ${{ inputs.expected_version }} successfully installed!"
+              break
+            fi
+
+            # If this is the final attempt, don't sleep
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "Final attempt completed."
+              echo "Failed to install expected version after $MAX_ATTEMPTS attempts"
+              exit 1
+            fi
+
+            # Wait before next attempt
+            echo "Version mismatch. Waiting 30 seconds before next attempt..."
+            sleep 30
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          # Verify installation capabilities regardless of version match
+          echo "Verifying installation capabilities..."
+          sky -v
+          sky -c
+          sky check
+          sky show-gpus
+          sky dashboard || (echo "Launch dashboard failed" && exit 1)
+
+          # Verify dashboard endpoint is accessible
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:46580/dashboard/ || (echo "Dashboard endpoint is not accessible" && exit 1)
+
+          echo "Package validation successful from ${{ inputs.repository_type }}!"

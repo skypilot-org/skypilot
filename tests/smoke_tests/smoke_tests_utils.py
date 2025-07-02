@@ -16,18 +16,22 @@ import colorama
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
-import yaml
 
 import sky
 from sky import serve
 from sky import skypilot_config
+from sky.client import sdk
 from sky.clouds import AWS
+from sky.clouds import gcp
 from sky.clouds import GCP
+from sky.jobs import utils as managed_job_utils
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -37,10 +41,10 @@ from sky.utils import subprocess_utils
 # different job id.
 test_id = str(uuid.uuid4())[-2:]
 
-LAMBDA_TYPE = '--cloud lambda --gpus A10'
-FLUIDSTACK_TYPE = '--cloud fluidstack --gpus RTXA4000'
+LAMBDA_TYPE = '--infra lambda --gpus A10'
+FLUIDSTACK_TYPE = '--infra fluidstack --gpus RTXA4000'
 
-SCP_TYPE = '--cloud scp'
+SCP_TYPE = '--infra scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 STORAGE_SETUP_COMMANDS = [
@@ -57,7 +61,7 @@ LOW_RESOURCE_PARAM = {
     'memory': '4+',
 }
 LOW_CONTROLLER_RESOURCE_ENV = {
-    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
+    skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
@@ -87,6 +91,27 @@ JOB_WAIT_NOT_RUNNING = (
     'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
     'sleep 10; s=$(sky jobs queue);'
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
+
+ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
+    'GOOGLE_APPLICATION_CREDENTIALS='
+    f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+    'gcloud auth activate-service-account '
+    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+    '2> /dev/null || true; '
+    'gsutil')
+
+ENDPOINT = 'http://127.0.0.1:46580/api/health'
+
+# Fix the flakyness of the test, server may not ready when we run the command after restart.
+WAIT_FOR_API = (
+    'for i in $(seq 1 30); do '
+    f'if curl -s {ENDPOINT} > /dev/null; then '
+    'echo "API is up and running"; break; fi; '
+    'echo "Waiting for API to be ready... ($i/30)"; '
+    '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
+    'sleep 1; done')
+
+SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
@@ -306,6 +331,10 @@ class Test(NamedTuple):
         prefix = f'[{self.name}]'
         message = f'{prefix} {message}'
         message = message.replace('\n', f'\n{prefix} ')
+        self.echo_without_prefix(message)
+
+    @classmethod
+    def echo_without_prefix(cls, message: str):
         print(message, file=sys.stderr, flush=True)
 
 
@@ -358,14 +387,30 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 
 @contextlib.contextmanager
 def override_sky_config(
-    test: Test, env_dict: Dict[str, str]
+    test: Optional[Test] = None,
+    env_dict: Optional[Dict[str, str]] = None
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
+    echo = Test.echo_without_prefix if test is None else test.echo
+    env_before_override: Optional[Dict[str, Any]] = None
     override_sky_config_dict = skypilot_config.config_utils.Config()
+
+    if env_dict is None:
+        env_dict = os.environ
+        env_before_override = os.environ.copy()
+
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
                                             endpoint)
-        test.echo(
+        # For test that use SDK, not subprocess, the python process already
+        # cache the lru_cache of get_server_url and created the sky_config
+        # before we override the environment, so we need to disabled the
+        # lru_cache of get_server_url and set SKY_API_SERVER_URL_ENV_VAR
+        # to make sure the new endpoint is used.
+        env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
+        # Clear the get_server_url cache
+        server_common.get_server_url.cache_clear()
+        echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
         )
@@ -375,7 +420,7 @@ def override_sky_config(
             ('jobs', 'controller', 'resources', 'cloud'), cloud)
         override_sky_config_dict.set_nested(
             ('serve', 'controller', 'resources', 'cloud'), cloud)
-        test.echo(
+        echo(
             f'Overriding controller cloud: '
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
@@ -385,10 +430,10 @@ def override_sky_config(
         return
 
     temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+    if skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_dict:
         # Read the original config
-        original_config = skypilot_config.parse_config_file(
-            env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG])
+        original_config = skypilot_config.parse_and_validate_config_file(
+            env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
     else:
         original_config = skypilot_config.config_utils.Config()
     overlay_config = skypilot_config.overlay_skypilot_config(
@@ -396,8 +441,11 @@ def override_sky_config(
     temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
-    env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config_file.name
+    env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
     yield temp_config_file
+    if env_before_override is not None:
+        os.environ.clear()
+        os.environ.update(env_before_override)
 
 
 def run_one_test(test: Test) -> None:
@@ -490,7 +538,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
-    original_resources = sky.Resources(cloud=sky.AWS(),
+    original_resources = sky.Resources(infra='aws',
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
@@ -517,7 +565,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
-    original_resources = sky.Resources(cloud=sky.GCP(),
+    original_resources = sky.Resources(infra='gcp',
                                        instance_type='a2-ultragpu-1g',
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
@@ -607,11 +655,15 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
     """Launch the cluster for cloud commands asynchronously."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
+        # We need is_remote_server_test() because we override the SKY_API_SERVER_URL_ENV_VAR
+        # in the middle of the test, which is after the test is launched, so the
+        # is_api_server_local() already cached and returned True but we're actually
+        # running the test on the remote server if --remote-server is specified.
         return 'true'
     else:
         return (
-            f'sky launch -y -c {cluster_name} --cloud {cloud} {LOW_RESOURCE_ARG} --async'
+            f'sky launch -y -c {cluster_name} --infra {cloud} {LOW_RESOURCE_ARG} --async'
         )
 
 
@@ -620,7 +672,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              envs: Set[str] = None) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
         return cmd
     else:
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
@@ -640,7 +692,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
 def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
     """Down the cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
-    if sky.server.common.is_api_server_local():
+    if sky.server.common.is_api_server_local() and not is_remote_server_test():
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
@@ -689,6 +741,10 @@ def is_remote_server_test() -> bool:
 
 def pytest_controller_cloud() -> Optional[str]:
     return os.environ.get('PYTEST_SKYPILOT_CONTROLLER_CLOUD', None)
+
+
+def is_postgres_backend_test() -> bool:
+    return os.environ.get('PYTEST_SKYPILOT_POSTGRES_BACKEND', None) is not None
 
 
 def override_env_config(config: Dict[str, str]):
@@ -747,3 +803,55 @@ def get_response_from_request_id(request_id: str) -> Any:
         return request_task.get_return_value()
     raise RuntimeError(f'Failed to get request {request_id}: '
                        f'{response.status_code} {response.text}')
+
+
+def with_config(cmd: str, config_path: str) -> str:
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
+            f'{cmd}')
+
+
+def _get_controller_pod_name(controller_name: str) -> str:
+    return (
+        'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
+        'APP:.metadata.labels.app --no-headers | '
+        f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
+
+
+def kill_and_wait_controller(controller_name: str) -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    assert controller_name in ['serve', 'jobs'
+                              ], (f'Invalid controller name: {controller_name}')
+    return (
+        f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
+        f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        f'until new_controller_pod=$({_get_controller_pod_name(controller_name)}) && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && '
+        'kubectl get pod $new_controller_pod | grep "1/1"; do '
+        f'  echo "Waiting for new {controller_name} controller pod..."; sleep 5; '
+        'done; '
+        f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
+    )
+
+
+def server_side_is_consolidation_mode() -> bool:
+    """Returns whether the consolidation mode is enabled on the server side.
+
+    This is required because when --postgres and --jobs-consolidation specified
+    at the same time, the server side will have config for consolidation mode,
+    but the client side will only have a config to specify the db url for
+    postgres. Here we manually retrieve the config from the server side to
+    check if the consolidation mode is enabled.
+    """
+    response = requests.get(f'{get_api_server_url()}/workspaces/config')
+    request_id = server_common.get_request_id(response)
+    config = config_utils.Config.from_dict(sdk.get(request_id))
+    config = skypilot_config.overlay_skypilot_config(
+        original_config=config, override_configs=skypilot_config.to_dict())
+    with skypilot_config.replace_skypilot_config(config):
+        return managed_job_utils.is_consolidation_mode()
+
+
+def is_in_buildkite_env() -> bool:
+    """Check if the test is running in the Buildkite environment."""
+    return env_options.Options.RUNNING_IN_BUILDKITE.get()

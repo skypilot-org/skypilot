@@ -19,7 +19,7 @@ The SkyPilot API server helm chart provides typical `helm values <https://helm.s
 * ``--set``: Specify overrides on the command line.
 
   .. code-block:: bash
-      
+
       helm install $RELEASE_NAME skypilot/skypilot-nightly --set apiService.image="berkeleyskypilot/skypilot:0.9.1"
 
 Values
@@ -35,6 +35,9 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.1
+    :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
+    :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
+    :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
     :ref:`preDeployHook <helm-values-apiService-preDeployHook>`: \|-
       # Run commands before deploying the API server, e.g. installing an admin
       # policy. Remember to set the admin policy in the config section below.
@@ -46,6 +49,9 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`enableServiceAccounts <helm-values-apiService-enableServiceAccounts>`: true
+    :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
+    :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
     :ref:`skipResourceCheck <helm-values-apiService-skipResourceCheck>`: false
     :ref:`resources <helm-values-apiService-resources>`:
       requests:
@@ -55,6 +61,10 @@ Below is the available helm value keys and the default value of each key:
         cpu: "4"
         memory: "8Gi"
     :ref:`skypilotDev <helm-values-apiService-skypilotDev>`: false
+    :ref:`metrics <helm-values-apiService-metrics>`:
+      :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
+      :ref:`port <helm-values-apiService-metrics-port>`: 9090
+    :ref:`terminationGracePeriodSeconds <helm-values-apiService-terminationGracePeriodSeconds>`: 60
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -69,6 +79,20 @@ Below is the available helm value keys and the default value of each key:
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: "username:$apr1$encrypted_password"
     :ref:`path <helm-values-ingress-path>`: '/'
+    :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
+      :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
+      # Required when enabled:
+      :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: null
+      :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
+      :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
+      # Optional settings:
+      :ref:`image <helm-values-ingress-oauth2-proxy-image>`: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+      :ref:`use-https <helm-values-ingress-oauth2-proxy-use-https>`: false
+      :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
+      :ref:`session-store-type <helm-values-ingress-oauth2-proxy-session-store-type>`: "redis"
+      :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
+      :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
+      :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
 
   :ref:`ingress-nginx <helm-values-ingress-nginx>`:
     :ref:`enabled <helm-values-ingress-nginx-enabled>`: true
@@ -149,6 +173,12 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`runtimeClassName <helm-values-runtimeClassName>`: ""
 
+  :ref:`prometheus <helm-values-prometheus>`:
+    :ref:`enabled <helm-values-prometheus-enabled>`: false
+
+  :ref:`grafana <helm-values-grafana>`:
+    :ref:`enabled <helm-values-grafana-enabled>`: false
+
 Fields
 ----------
 
@@ -180,6 +210,66 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
   apiService:
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
+
+.. _helm-values-apiService-enableUserManagement:
+
+``apiService.enableUserManagement``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable basic auth and user management in the API server. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
+
+If enabled, the user can be created, updated, and deleted in the Dashboard, and the basic auth will be done in the API server instead of the ingress controller. In this case, the basic auth configuration ``ingress.authCredentials`` and ``ingress.authSecret`` in the ingress will be ignored.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    enableUserManagement: false
+
+.. _helm-values-apiService-initialBasicAuthCredentials:
+
+``apiService.initialBasicAuthCredentials``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Initial basic auth credentials for the API server.
+
+The user in the credentials will be used to create a new admin user in the API server, and the password can be updated by the user in the Dashboard.
+
+If both ``initialBasicAuthCredentials`` and ``initialBasicAuthSecret`` are set, ``initialBasicAuthSecret`` will be used. They are only used when ``enableUserManagement`` is true.
+
+Default: ``"skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"``
+
+.. code-block:: yaml
+
+  apiService:
+    initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
+
+.. _helm-values-apiService-initialBasicAuthSecret:
+
+``apiService.initialBasicAuthSecret``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Initial basic auth secret for the API server. If not specified, a new secret will be created using ``initialBasicAuthCredentials``.
+
+To create a new secret, you can use the following command:
+
+.. code-block:: bash
+
+  WEB_USERNAME=skypilot
+  WEB_PASSWORD=skypilot
+  AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+  NAMESPACE=skypilot
+  kubectl create secret generic initial-basic-auth \
+    --from-literal=auth=$AUTH_STRING \
+    -n $NAMESPACE
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    initialBasicAuthSecret: null
 
 .. _helm-values-apiService-preDeployHook:
 
@@ -218,6 +308,64 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-enableServiceAccounts:
+
+``apiService.enableServiceAccounts``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable service accounts in the API server.
+
+Default: ``true``
+
+
+.. _helm-values-apiService-sshNodePools:
+
+``apiService.sshNodePools``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the ``~/.sky/ssh_node_pools.yaml`` to set on the API server. Set to ``null`` to use an empty ssh node pools. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sshNodePools: |-
+      my-cluster:
+        hosts:
+          - 1.2.3.4
+          - 1.2.3.5
+
+      my-box:
+        hosts:
+          - hostname_in_ssh_config
+
+.. _helm-values-apiService-sshKeySecret:
+
+``apiService.sshKeySecret``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Optional secret that contains SSH identity files to the API server to use, all the entries in the secret will be mounted to ``~/.ssh/`` directory in the API server. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sshKeySecret: my-ssh-key-secret
+
+The content of the secret should be like:
+
+.. code-block:: yaml
+
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: my-ssh-key-secret
+  data:
+    id_rsa: <secret-content>
+
 
 .. _helm-values-apiService-skipResourceCheck:
 
@@ -266,6 +414,66 @@ Default: ``false``
 
   apiService:
     skypilotDev: false
+
+.. _helm-values-apiService-metrics:
+
+``apiService.metrics``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for metrics collection on the API server.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  apiService:
+    metrics:
+      enabled: true
+      port: 9090
+
+.. _helm-values-apiService-metrics-enabled:
+
+``apiService.metrics.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable (exposing API metrics)[Link to docs/source/reference/api-server/examples/api-server-metrics-setup.rst] from the API server. If this is enabled and the API server image does not support metrics, the deployment will fail.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    metrics:
+      enabled: true
+
+.. _helm-values-apiService-metrics-port:
+
+``apiService.metrics.port``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The port to expose the metrics on.
+
+Default: ``9090``
+
+.. code-block:: yaml
+
+  apiService:
+    metrics:
+      port: 9090
+
+.. _helm-values-apiService-terminationGracePeriodSeconds:
+
+``apiService.terminationGracePeriodSeconds``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The number of seconds to wait for the API server to finish processing the request before shutting down. Refer to :ref:`sky-api-server-graceful-upgrade` for more details.
+
+Default: ``60``
+
+.. code-block:: yaml
+
+  apiService:
+    terminationGracePeriodSeconds: 300
 
 .. _helm-values-storage:
 
@@ -380,9 +588,9 @@ Default: ``true``
 ``ingress.authSecret``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Name of the Kubernetes secret containing basic auth credentials for ingress. If not specified, a new secret will be created using ``authCredentials``.
+Name of the Kubernetes secret containing basic auth credentials for ingress. If not specified, a new secret will be created using ``authCredentials``. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set.
+One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
 Default: ``null``
 
@@ -396,9 +604,9 @@ Default: ``null``
 ``ingress.authCredentials``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Basic auth credentials in the format ``username:encrypted_password``. Used only if ``authSecret`` is not set.
+Basic auth credentials in the format ``username:encrypted_password``. Used only if ``authSecret`` is not set. This is ignored if ``ingress.oauth2-proxy.enabled`` is ``true``.
 
-One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set.
+One of ``ingress.authSecret`` or ``ingress.authCredentials`` must be set, unless ``ingress.oauth2-proxy.enabled`` is ``true``.
 
 Default: ``"username:$apr1$encrypted_password"``
 
@@ -420,6 +628,200 @@ Default: ``'/'``
 
   ingress:
     path: '/'
+
+.. _helm-values-ingress-oauth2-proxy:
+
+``ingress.oauth2-proxy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for the OAuth2 Proxy authentication for the API server. This enables SSO providers like Okta.
+
+If enabled, ``ingress.authSecret`` and ``ingress.authCredentials`` are ignored.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      enabled: false
+      # Required when enabled:
+      oidc-issuer-url: null
+      client-id: ""
+      client-secret: ""
+      # Optional settings:
+      image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+      use-https: false
+      email-domain: "*"
+      session-store-type: "redis"
+      redis-url: null
+      cookie-refresh: null
+      cookie-expire: null
+
+.. _helm-values-ingress-oauth2-proxy-enabled:
+
+``ingress.oauth2-proxy.enabled``
+''''''''''''''''''''''''''''''''''''
+
+Enable OAuth2 Proxy for authentication. When enabled, this will deploy an OAuth2 Proxy component and configure the ingress to use it for authentication instead of basic auth.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      enabled: true
+
+.. _helm-values-ingress-oauth2-proxy-oidc-issuer-url:
+
+``ingress.oauth2-proxy.oidc-issuer-url``
+''''''''''''''''''''''''''''''''''''''''
+
+The URL of the OIDC issuer (e.g., your Okta domain). Required when oauth2-proxy is enabled.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      oidc-issuer-url: "https://mycompany.okta.com"
+
+.. _helm-values-ingress-oauth2-proxy-client-id:
+
+``ingress.oauth2-proxy.client-id``
+''''''''''''''''''''''''''''''''''
+
+The OAuth client ID from your OIDC provider (e.g., Okta). Required when oauth2-proxy is enabled.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-id: "0abc123def456"
+
+.. _helm-values-ingress-oauth2-proxy-client-secret:
+
+``ingress.oauth2-proxy.client-secret``
+'''''''''''''''''''''''''''''''''''''''''
+
+The OAuth client secret from your OIDC provider (e.g., Okta). Required when oauth2-proxy is enabled.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-secret: "abcdef123456"
+
+.. _helm-values-ingress-oauth2-proxy-image:
+
+``ingress.oauth2-proxy.image``
+''''''''''''''''''''''''''''''
+
+Docker image for the OAuth2 Proxy component.
+
+Default: ``"quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
+
+.. _helm-values-ingress-oauth2-proxy-use-https:
+
+``ingress.oauth2-proxy.use-https``
+''''''''''''''''''''''''''''''''''
+
+Set to ``true`` when using HTTPS for the API server endpoint. When set to ``false``, secure cookies are disabled, which is required for HTTP endpoints.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      use-https: true
+
+.. _helm-values-ingress-oauth2-proxy-email-domain:
+
+``ingress.oauth2-proxy.email-domain``
+'''''''''''''''''''''''''''''''''''''''
+
+Email domains to allow for authentication. Use ``"*"`` to allow all email domains.
+
+Default: ``"*"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      email-domain: "mycompany.com"
+
+.. _helm-values-ingress-oauth2-proxy-session-store-type:
+
+``ingress.oauth2-proxy.session-store-type``
+'''''''''''''''''''''''''''''''''''''''''''
+
+Session storage type for OAuth2 Proxy. Can be set to ``"cookie"`` or ``"redis"``. Using Redis as a session store results in smaller cookies and better performance for large-scale deployments.
+
+Default: ``"redis"``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      session-store-type: "redis"
+
+.. _helm-values-ingress-oauth2-proxy-redis-url:
+
+``ingress.oauth2-proxy.redis-url``
+''''''''''''''''''''''''''''''''''
+
+URL to connect to an external Redis instance for session storage. If set to ``null`` and ``session-store-type`` is ``"redis"``, a Redis instance will be automatically deployed. Format: ``redis://host[:port][/db-number]``
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      redis-url: "redis://redis-host:6379/0"
+
+.. _helm-values-ingress-oauth2-proxy-cookie-refresh:
+
+``ingress.oauth2-proxy.cookie-refresh``
+'''''''''''''''''''''''''''''''''''''''
+
+Duration in seconds after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      cookie-refresh: 3540  # 59 minutes (for a 60-minute access token)
+
+.. _helm-values-ingress-oauth2-proxy-cookie-expire:
+
+``ingress.oauth2-proxy.cookie-expire``
+''''''''''''''''''''''''''''''''''''''
+
+Expiration time for cookies in seconds. Should match the refresh token lifespan from your OIDC provider.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      cookie-expire: 86400  # 24 hours
 
 .. _helm-values-ingress-nginx:
 
@@ -826,3 +1228,62 @@ Default: (empty)
 .. code-block:: yaml
 
   runtimeClassName:
+
+.. _helm-values-prometheus:
+
+``prometheus``
+~~~~~~~~~~~~~~
+
+Configuration for Prometheus helm chart. Refer to the `Prometheus helm chart repository <https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml>`_ for available values.
+
+.. code-block:: yaml
+
+  prometheus:
+    enabled: true
+    server:
+      persistentVolume:
+        enabled: true
+        size: 10Gi
+
+.. _helm-values-prometheus-enabled:
+
+``prometheus.enabled``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Enable prometheus for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  prometheus:
+    enabled: false
+
+.. _helm-values-grafana:
+
+``grafana``
+~~~~~~~~~~~~
+
+Configuration for Grafana helm chart. Refer to the `Grafana helm chart documentation <https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md>`_ for available values.
+
+.. code-block:: yaml
+
+  grafana:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 10Gi
+
+.. _helm-values-grafana-enabled:
+
+``grafana.enabled``
+^^^^^^^^^^^^^^^^^^^^
+
+Enable grafana for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  grafana:
+    enabled: false

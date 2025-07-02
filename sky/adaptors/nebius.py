@@ -1,17 +1,44 @@
 """Nebius cloud adaptor."""
 import os
 import threading
+from typing import List, Optional
 
+from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import ux_utils
 
-NEBIUS_TENANT_ID_FILENAME = 'NEBIUS_TENANT_ID.txt'
-NEBIUS_IAM_TOKEN_FILENAME = 'NEBIUS_IAM_TOKEN.txt'
-NEBIUS_CREDENTIALS_FILENAME = 'credentials.json'
-NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
-NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
-NEBIUS_CREDENTIALS_PATH = '~/.nebius/' + NEBIUS_CREDENTIALS_FILENAME
+logger = sky_logging.init_logger(__name__)
+
+
+def tenant_id_path() -> str:
+    return '~/.nebius/NEBIUS_TENANT_ID.txt'
+
+
+def iam_token_path() -> str:
+    return '~/.nebius/NEBIUS_IAM_TOKEN.txt'
+
+
+def credentials_path() -> str:
+    workspace_path = skypilot_config.get_workspace_cloud('nebius').get(
+        'credentials_file_path', None)
+    if workspace_path is not None:
+        return workspace_path
+    return _get_default_credentials_path()
+
+
+def _get_workspace_credentials_path() -> Optional[str]:
+    """Get credentials path if explicitly set in workspace config."""
+    workspace_cred_path = skypilot_config.get_workspace_cloud('nebius').get(
+        'credentials_file_path', None)
+    return workspace_cred_path
+
+
+def _get_default_credentials_path() -> str:
+    """Get the default credentials path."""
+    return '~/.nebius/credentials.json'
+
 
 DEFAULT_REGION = 'eu-north1'
 
@@ -74,39 +101,77 @@ def vpc():
     return vpc_v1
 
 
-@annotations.lru_cache(scope='request')
 def get_iam_token():
     try:
-        with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
+        with open(os.path.expanduser(iam_token_path()),
                   encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
         return None
 
 
-@annotations.lru_cache(scope='request')
 def is_token_or_cred_file_exist():
-    return (os.path.exists(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH)) or
-            os.path.exists(os.path.expanduser(NEBIUS_CREDENTIALS_PATH)))
+    return (os.path.exists(os.path.expanduser(iam_token_path())) or
+            os.path.exists(os.path.expanduser(credentials_path())))
 
 
-@annotations.lru_cache(scope='request')
 def get_tenant_id():
+    tenant_id_in_ws_config = skypilot_config.get_workspace_cloud('nebius').get(
+        'tenant_id', None)
+    if tenant_id_in_ws_config is not None:
+        return tenant_id_in_ws_config
+    tenant_id_in_config = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('tenant_id',), default_value=None)
+    if tenant_id_in_config is not None:
+        return tenant_id_in_config
     try:
-        with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
+        with open(os.path.expanduser(tenant_id_path()),
                   encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
         return None
 
 
-@annotations.lru_cache(scope='request')
 def sdk():
+    """Create the Nebius SDK with the correct credentials.
+
+    The order of priority is:
+    1. Credentials file specified in workspace config, if set
+    2. IAM token file, if set
+    3. Default credentials path
+    """
+    # 1. Check if credentials path is set in workspace config (highest priority)
+    workspace_cred_path = _get_workspace_credentials_path()
+    if workspace_cred_path is not None:
+        # Check if token is also available and warn
+        token = get_iam_token()
+        if token is not None:
+            logger.warning(
+                f'Both workspace credentials file ({workspace_cred_path}) and '
+                f'IAM token file ({iam_token_path()}) are available. Using '
+                'workspace credentials file.')
+        return _sdk(None, workspace_cred_path)
+
+    # 2. Check for IAM token file (second priority)
     token = get_iam_token()
     if token is not None:
+        return _sdk(token, None)
+
+    # 3. Fall back to default credentials path (lowest priority)
+    default_cred_path = _get_default_credentials_path()
+    return _sdk(None, default_cred_path)
+
+
+@annotations.lru_cache(scope='request')
+def _sdk(token: Optional[str], cred_path: Optional[str]):
+    # Exactly one of token or cred_path must be provided
+    assert (token is None) != (cred_path is None), (token, cred_path)
+    if token is not None:
         return nebius.sdk.SDK(credentials=token)
-    return nebius.sdk.SDK(
-        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
+    if cred_path is not None:
+        return nebius.sdk.SDK(
+            credentials_file_name=os.path.expanduser(cred_path))
+    raise ValueError('Either token or credentials file path must be provided')
 
 
 def get_nebius_credentials(boto3_session):
@@ -184,3 +249,21 @@ def botocore_exceptions():
     # pylint: disable=import-outside-toplevel
     from botocore import exceptions
     return exceptions
+
+
+def get_credential_file_paths() -> List[str]:
+    """Get the list of credential file paths based on current configuration."""
+    paths = {
+        # Always include tenant ID and IAM token paths
+        tenant_id_path(),
+        iam_token_path(),
+    }
+
+    # Add workspace-specific credentials path if set
+    workspace_cred_path = _get_workspace_credentials_path()
+    if workspace_cred_path is not None:
+        paths.add(workspace_cred_path)
+    # Always add default path in case it's needed for fallback
+    paths.add(_get_default_credentials_path())
+
+    return list(paths)

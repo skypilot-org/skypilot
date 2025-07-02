@@ -1,0 +1,104 @@
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") }}
+{{- $oauth2 := index .Values.ingress "oauth2-proxy" }}
+{{- if not (index $oauth2 "oidc-issuer-url") -}}
+{{- fail "ingress.oauth2-proxy.oidc-issuer-url is required when OAuth2 proxy is enabled" -}}
+{{- end -}}
+{{- if and (not (index $oauth2 "client-details-from-secret")) (eq (index $oauth2 "client-id") "") -}}
+{{- fail "ingress.oauth2-proxy.client-id is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
+{{- end -}}
+{{- if and (not (index $oauth2 "client-details-from-secret")) (eq (index $oauth2 "client-secret") "") -}}
+{{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
+{{- end -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ .Release.Name }}-oauth2-proxy
+    skypilot.co/component: oauth2-proxy
+  name: {{ .Release.Name }}-oauth2-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-oauth2-proxy
+        skypilot.co/component: oauth2-proxy
+    spec:
+      containers:
+      - name: oauth2-proxy
+        image: {{ index .Values.ingress "oauth2-proxy" "image" | default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" }}
+        imagePullPolicy: IfNotPresent
+        args:
+        - --provider=oidc
+        - --oidc-issuer-url={{ index .Values.ingress "oauth2-proxy" "oidc-issuer-url" }}
+        - --email-domain={{ index .Values.ingress "oauth2-proxy" "email-domain" | default "*" }}
+        - --upstream=file:///dev/null
+        - --http-address=0.0.0.0:4180
+        - --skip-provider-button=true
+        - --reverse-proxy=true
+        - --set-xauthrequest
+        - --session-store-type={{ index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis" }}
+        {{- if not (index .Values.ingress "oauth2-proxy" "use-https" | default false) }}
+        - --cookie-secure=false
+        {{- end }}
+        {{- if (index .Values.ingress "oauth2-proxy" "cookie-refresh") }}
+        - --cookie-refresh={{ index .Values.ingress "oauth2-proxy" "cookie-refresh" }}
+        {{- end }}
+        {{- if (index .Values.ingress "oauth2-proxy" "cookie-expire") }}
+        - --cookie-expire={{ index .Values.ingress "oauth2-proxy" "cookie-expire" }}
+        {{- end }}
+        {{- if eq (index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis") "redis" }}
+        {{- if (index .Values.ingress "oauth2-proxy" "redis-url") }}
+        - --redis-connection-url={{ index .Values.ingress "oauth2-proxy" "redis-url" }}
+        {{- else }}
+        - --redis-connection-url=redis://$(SERVICE_NAME)-oauth2-proxy-redis:6379/0
+        {{- end }}
+        {{- end }}
+        env:
+        - name: OAUTH2_PROXY_CLIENT_ID
+          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret") }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
+              key: client-id
+          {{- else }}
+          value: {{ index .Values.ingress "oauth2-proxy" "client-id" | quote }}
+          {{- end }}
+        - name: OAUTH2_PROXY_CLIENT_SECRET
+          {{- if (index .Values.ingress "oauth2-proxy" "client-details-from-secret") }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
+              key: client-secret
+          {{- else }}
+          value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
+          {{- end }}
+        - name: SERVICE_NAME
+          value: {{ .Release.Name }}
+        - name: OAUTH2_PROXY_COOKIE_SECRET
+          {{- /* Look up existing deployment to get the current cookie secret if available */}}
+          {{- $deploymentName := printf "%s-oauth2-proxy" .Release.Name }}
+          {{- $existingDeployment := lookup "apps/v1" "Deployment" .Release.Namespace $deploymentName }}
+          {{- if and $existingDeployment $existingDeployment.spec.template.spec.containers }}
+            {{- range $container := $existingDeployment.spec.template.spec.containers }}
+              {{- if eq $container.name "oauth2-proxy" }}
+                {{- range $env := $container.env }}
+                  {{- if eq $env.name "OAUTH2_PROXY_COOKIE_SECRET" }}
+          value: {{ $env.value }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+          {{- else }}
+          # Generate a random cookie secret if no existing one is found
+          value: {{ randAlphaNum 32 | b64enc | quote }}
+          {{- end }}
+        ports:
+        - containerPort: 4180
+          protocol: TCP
+{{- end }}

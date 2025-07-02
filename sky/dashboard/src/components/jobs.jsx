@@ -17,11 +17,19 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration } from '@/components/utils';
+import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
+import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
 import { Layout } from '@/components/elements/layout';
-import { CustomTooltip as Tooltip, relativeTime } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
+  relativeTime,
+  formatDateTime,
+  TimestampWithTooltip,
+} from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
@@ -32,9 +40,207 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+
+// Define status groups for active and finished jobs
+export const statusGroups = {
+  active: [
+    'PENDING',
+    'RUNNING',
+    'RECOVERING',
+    'SUBMITTED',
+    'STARTING',
+    'CANCELLING',
+  ],
+  finished: [
+    'SUCCEEDED',
+    'FAILED',
+    'CANCELLED',
+    'FAILED_SETUP',
+    'FAILED_PRECHECKS',
+    'FAILED_NO_RESOURCE',
+    'FAILED_CONTROLLER',
+  ],
+};
+
+// Define constant for "All Workspaces" like in clusters.jsx
+const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
+
+// Define constant for "All Users"
+const ALL_USERS_VALUE = '__ALL_USERS__';
+
+// Helper function to filter jobs by name
+export function filterJobsByName(jobs, nameFilter) {
+  // If no name filter, return all jobs
+  if (!nameFilter || nameFilter.trim() === '') {
+    return jobs;
+  }
+
+  // Filter jobs by the name filter (case-insensitive partial match)
+  const filterLower = nameFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobName = job.name || '';
+    return jobName.toLowerCase().includes(filterLower);
+  });
+}
+
+// Helper function to filter jobs by workspace
+export function filterJobsByWorkspace(jobs, workspaceFilter) {
+  // If no workspace filter or set to "All Workspaces", return all jobs
+  if (!workspaceFilter || workspaceFilter === ALL_WORKSPACES_VALUE) {
+    return jobs;
+  }
+
+  // Filter jobs by the selected workspace
+  return jobs.filter((job) => {
+    const jobWorkspace = job.workspace || 'default'; // Treat missing/empty workspace as 'default'
+    return jobWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
+  });
+}
+
+// Helper function to filter jobs by user
+export function filterJobsByUser(jobs, userFilter) {
+  // If no user filter or set to "All Users", return all jobs
+  if (!userFilter || userFilter === ALL_USERS_VALUE) {
+    return jobs;
+  }
+
+  // Filter jobs by the selected user
+  return jobs.filter((job) => {
+    const jobUserId = job.user_hash || job.user;
+    return jobUserId === userFilter;
+  });
+}
+
+// Helper function to format username for display (reuse from clusters.jsx)
+const formatUserDisplay = (username, userId) => {
+  if (username && username.includes('@')) {
+    const emailPrefix = username.split('@')[0];
+    // Show email prefix with userId if they're different
+    if (userId && userId !== emailPrefix) {
+      return `${emailPrefix} (${userId})`;
+    }
+    return emailPrefix;
+  }
+  // If no email, show username with userId in parentheses only if they're different
+  const usernameBase = username || userId || 'N/A';
+
+  // Skip showing userId if it's the same as username
+  if (userId && userId !== usernameBase) {
+    return `${usernameBase} (${userId})`;
+  }
+
+  return usernameBase;
+};
+
+// Helper function to format submitted time with abbreviated units (now uses TimestampWithTooltip)
+const formatSubmittedTime = (timestamp) => {
+  if (!timestamp) return '-';
+
+  // Convert timestamp to Date object if it's not already
+  const date =
+    timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
+
+  return <TimestampWithTooltip date={date} />;
+};
+
+// Helper function to shorten time strings for jobs
+function shortenTimeForJobs(timeString) {
+  if (!timeString || typeof timeString !== 'string') {
+    return timeString;
+  }
+
+  // Handle "just now" case
+  if (timeString === 'just now') {
+    return 'now';
+  }
+
+  // Handle "less than a minute ago" case
+  if (timeString.toLowerCase() === 'less than a minute ago') {
+    return 'Less than 1m ago';
+  }
+
+  // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
+  const aboutMatch = timeString.match(/^About\s+(\d+)\s+(\w+)\s+ago$/);
+  if (aboutMatch) {
+    const num = aboutMatch[1];
+    const unit = aboutMatch[2];
+    const unitMap = {
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
+      day: 'd',
+      days: 'd',
+      month: 'mo',
+      months: 'mo',
+      year: 'yr',
+      years: 'yr',
+    };
+    if (unitMap[unit]) {
+      return `${num}${unitMap[unit]} ago`;
+    }
+  }
+
+  // Handle "a minute ago", "an hour ago", etc.
+  const singleUnitMatch = timeString.match(/^a[n]?\s+(\w+)\s+ago$/);
+  if (singleUnitMatch) {
+    const unit = singleUnitMatch[1];
+    const unitMap = {
+      second: 's',
+      minute: 'm',
+      hour: 'h',
+      day: 'd',
+      month: 'mo',
+      year: 'yr',
+    };
+    if (unitMap[unit]) {
+      return `1${unitMap[unit]} ago`;
+    }
+  }
+
+  // Handle "X units ago"
+  const multiUnitMatch = timeString.match(/^(\d+)\s+(\w+)\s+ago$/);
+  if (multiUnitMatch) {
+    const num = multiUnitMatch[1];
+    const unit = multiUnitMatch[2];
+    const unitMap = {
+      second: 's',
+      seconds: 's',
+      minute: 'm',
+      minutes: 'm',
+      hour: 'h',
+      hours: 'h',
+      day: 'd',
+      days: 'd',
+      month: 'mo',
+      months: 'mo',
+      year: 'yr',
+      years: 'yr',
+    };
+    if (unitMap[unit]) {
+      return `${num}${unitMap[unit]} ago`;
+    }
+  }
+
+  // Fallback if no specific regex match (e.g., for dates beyond 7 days or other formats)
+  return timeString;
+}
 
 export function ManagedJobs() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [confirmationModal, setConfirmationModal] = useState({
@@ -44,23 +250,264 @@ export function ManagedJobs() {
     onConfirm: null,
   });
   const isMobile = useMobile();
+  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
+  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
+  const [nameFilter, setNameFilter] = useState('');
+  const [workspaces, setWorkspaces] = useState([]);
+  const [users, setUsers] = useState([]);
+
+  // Handle URL query parameters for workspace and user filtering
+  useEffect(() => {
+    if (router.isReady) {
+      if (router.query.workspace) {
+        const workspaceParam = Array.isArray(router.query.workspace)
+          ? router.query.workspace[0]
+          : router.query.workspace;
+        setWorkspaceFilter(workspaceParam);
+      }
+      if (router.query.user) {
+        const userParam = Array.isArray(router.query.user)
+          ? router.query.user[0]
+          : router.query.user;
+        setUserFilter(userParam);
+      }
+      if (router.query.name) {
+        const nameParam = Array.isArray(router.query.name)
+          ? router.query.name[0]
+          : router.query.name;
+        setNameFilter(nameParam);
+      }
+    }
+  }, [
+    router.isReady,
+    router.query.workspace,
+    router.query.user,
+    router.query.name,
+  ]);
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (newWorkspace, newUser, newName) => {
+    const query = { ...router.query };
+
+    // Update workspace parameter
+    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
+      query.workspace = newWorkspace;
+    } else {
+      delete query.workspace;
+    }
+
+    // Update user parameter
+    if (newUser && newUser !== ALL_USERS_VALUE) {
+      query.user = newUser;
+    } else {
+      delete query.user;
+    }
+
+    // Update name parameter
+    if (newName && newName.trim() !== '') {
+      query.name = newName.trim();
+    } else {
+      delete query.name;
+    }
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Handle workspace filter change
+  const handleWorkspaceFilterChange = (newWorkspace) => {
+    setWorkspaceFilter(newWorkspace);
+    updateURLParams(newWorkspace, userFilter, nameFilter);
+  };
+
+  // Handle user filter change
+  const handleUserFilterChange = (newUser) => {
+    setUserFilter(newUser);
+    updateURLParams(workspaceFilter, newUser, nameFilter);
+  };
+
+  // Handle name filter change
+  const handleNameFilterChange = (newName) => {
+    setNameFilter(newName);
+    updateURLParams(workspaceFilter, userFilter, newName);
+  };
+
+  // Fetch workspaces and users for filter dropdown
+  useEffect(() => {
+    const fetchFilterData = async () => {
+      try {
+        // Trigger cache preloading for jobs page and background preload other pages
+        await cachePreloader.preloadForPage('jobs');
+
+        // Fetch configured workspaces for the filter dropdown
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+
+        // Fetch all jobs to see if 'default' workspace is implicitly used
+        const jobsResponse = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
+        const allJobs = jobsResponse.jobs || [];
+        const uniqueJobWorkspaces = [
+          ...new Set(
+            allJobs.map((job) => job.workspace || 'default').filter((ws) => ws)
+          ),
+        ];
+
+        // Combine configured workspaces with any actively used workspaces
+        const finalWorkspaces = new Set(configuredWorkspaceNames);
+        uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
+
+        setWorkspaces(Array.from(finalWorkspaces).sort());
+
+        // Fetch users for the filter dropdown
+        const fetchedUsers = await dashboardCache.get(getUsers);
+        const uniqueJobUsers = [
+          ...new Set(
+            allJobs
+              .map((job) => ({
+                userId: job.user_hash || job.user,
+                username: job.user,
+              }))
+              .filter((user) => user.userId)
+          ).values(),
+        ];
+
+        // Combine fetched users with unique job users
+        const finalUsers = new Map();
+
+        // Add fetched users first
+        fetchedUsers.forEach((user) => {
+          finalUsers.set(user.userId, {
+            userId: user.userId,
+            username: user.username,
+            display: formatUserDisplay(user.username, user.userId),
+          });
+        });
+
+        // Add any job users not in the fetched list
+        uniqueJobUsers.forEach((user) => {
+          if (!finalUsers.has(user.userId)) {
+            finalUsers.set(user.userId, {
+              userId: user.userId,
+              username: user.username,
+              display: formatUserDisplay(user.username, user.userId),
+            });
+          }
+        });
+
+        setUsers(
+          Array.from(finalUsers.values()).sort((a, b) =>
+            a.display.localeCompare(b.display)
+          )
+        );
+      } catch (error) {
+        console.error('Error fetching data for filters:', error);
+        setWorkspaces(['default']); // Fallback or error state
+        setUsers([]); // Fallback or error state
+      }
+    };
+    fetchFilterData();
+  }, []);
 
   const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
+
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
   };
 
   return (
-    <Layout highlighted="jobs">
+    <>
       <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base">
+        <div className="text-base flex items-center">
           <Link
             href="/jobs"
             className="text-sky-blue hover:underline leading-none"
           >
             Managed Jobs
           </Link>
+          <div className="relative ml-4 mr-2">
+            <input
+              type="text"
+              placeholder="Filter by job name"
+              value={nameFilter}
+              onChange={(e) => handleNameFilterChange(e.target.value)}
+              className="h-8 w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            />
+            {nameFilter && (
+              <button
+                onClick={() => handleNameFilterChange('')}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear filter"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+          <Select
+            value={workspaceFilter}
+            onValueChange={handleWorkspaceFilterChange}
+          >
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by workspace...">
+                {workspaceFilter === ALL_WORKSPACES_VALUE
+                  ? 'All Workspaces'
+                  : workspaceFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_WORKSPACES_VALUE}>
+                All Workspaces
+              </SelectItem>
+              {workspaces.map((ws) => (
+                <SelectItem key={ws} value={ws}>
+                  {ws}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={userFilter} onValueChange={handleUserFilterChange}>
+            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+              <SelectValue placeholder="Filter by user...">
+                {userFilter === ALL_USERS_VALUE
+                  ? 'All Users'
+                  : users.find((u) => u.userId === userFilter)?.display ||
+                    userFilter}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.userId} value={user.userId}>
+                  {user.display}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center space-x-2">
           {loading && (
@@ -69,23 +516,24 @@ export function ManagedJobs() {
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
+          <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
             title="Refresh"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             {!isMobile && <span>Refresh</span>}
-          </Button>
+          </button>
         </div>
       </div>
       <ManagedJobsTable
-        refreshInterval={20000}
+        refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        workspaceFilter={workspaceFilter}
+        userFilter={userFilter}
+        nameFilter={nameFilter}
       />
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -96,7 +544,7 @@ export function ManagedJobs() {
         title={confirmationModal.title}
         message={confirmationModal.message}
       />
-    </Layout>
+    </>
   );
 }
 
@@ -104,6 +552,9 @@ export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  workspaceFilter,
+  userFilter,
+  nameFilter,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -121,7 +572,7 @@ export function ManagedJobsTable({
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [activeTab, setActiveTab] = useState('active');
+  const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
@@ -134,13 +585,12 @@ export function ManagedJobsTable({
     setConfirmationModal({
       isOpen: true,
       title: 'Restart Controller',
-      message:
-        'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
+      message: 'Are you sure you want to restart the controller?',
       onConfirm: async () => {
         try {
           setIsRestarting(true);
           setLocalLoading(true);
-          await handleJobAction('restartcontroller', null, null, true);
+          await handleJobAction('restartcontroller');
           // Refresh data after restarting the controller
           await fetchData();
         } catch (err) {
@@ -159,13 +609,15 @@ export function ManagedJobsTable({
     try {
       // Fetch both jobs and clusters data in parallel
       const [jobsResponse, clustersData] = await Promise.all([
-        getManagedJobs(),
-        getClusters(),
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        dashboardCache.get(getClusters),
       ]);
 
-      const { jobs, controllerStopped } = jobsResponse;
+      // Always process the response, even if it's null
+      const { jobs = [], controllerStopped = false } = jobsResponse || {};
+
       // for the clusters, check if there is a cluster that `isJobController`
-      const jobControllerCluster = clustersData.find((c) =>
+      const jobControllerCluster = clustersData?.find((c) =>
         isJobController(c.cluster)
       );
       const jobControllerClusterStatus = jobControllerCluster
@@ -183,13 +635,16 @@ export function ManagedJobsTable({
 
       setData(jobs);
       setControllerStopped(isControllerStopped);
+      setIsInitialLoad(false);
     } catch (err) {
       console.error('Error fetching data:', err);
+      // Still set data to empty array on error to show proper UI
       setData([]);
+      setControllerStopped(false);
+      setIsInitialLoad(false);
     } finally {
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
-      setIsInitialLoad(false);
     }
   }, [setLoading]);
 
@@ -215,13 +670,15 @@ export function ManagedJobsTable({
     return () => {
       isCurrent = false;
       clearInterval(interval);
+      // Don't invalidate cache on component unmount - this causes premature cache invalidation
+      // Cache should only be invalidated on manual refresh or TTL expiration
     };
   }, [refreshInterval, fetchData]);
 
   // Reset to first page when activeTab changes or when data changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, data.length]);
+  }, [activeTab, data?.length]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
@@ -244,40 +701,17 @@ export function ManagedJobsTable({
     return '';
   };
 
-  // Define status groups
-  const statusGroups = React.useMemo(
-    () => ({
-      active: [
-        'PENDING',
-        'RUNNING',
-        'RECOVERING',
-        'SUBMITTED',
-        'STARTING',
-        'CANCELLING',
-      ],
-      finished: [
-        'SUCCEEDED',
-        'FAILED',
-        'CANCELLED',
-        'FAILED_SETUP',
-        'FAILED_PRECHECKS',
-        'FAILED_NO_RESOURCE',
-        'FAILED_CONTROLLER',
-      ],
-    }),
-    []
-  );
-
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
-    const active = data.filter((item) =>
+    const safeData = data || [];
+    const active = safeData.filter((item) =>
       statusGroups.active.includes(item.status)
     ).length;
-    const finished = data.filter((item) =>
+    const finished = safeData.filter((item) =>
       statusGroups.finished.includes(item.status)
     ).length;
     return { active, finished };
-  }, [data, statusGroups]);
+  }, [data]);
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -286,27 +720,53 @@ export function ManagedJobsTable({
       return selectedStatuses.includes(status);
     }
 
-    // If no statuses are selected, highlight all statuses in the active tab
+    // If no statuses are selected, highlight all statuses based on active tab
+    if (activeTab === 'all') {
+      // Highlight all statuses when showing all jobs
+      return true;
+    }
+
     return statusGroups[activeTab].includes(status);
   };
 
   // Filter data based on selected statuses and active tab
   const filteredData = React.useMemo(() => {
+    // First apply workspace filter
+    let filtered = filterJobsByWorkspace(data, workspaceFilter);
+
+    // Then apply user filter
+    filtered = filterJobsByUser(filtered, userFilter);
+
+    // Then apply name filter
+    filtered = filterJobsByName(filtered, nameFilter);
+
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
-      return data.filter((item) => selectedStatuses.includes(item.status));
+      return filtered.filter((item) => selectedStatuses.includes(item.status));
     }
 
-    // If no statuses are selected but we're in "show all" mode, show all jobs of the active tab
+    // If no statuses are selected but we're in "show all" mode
     if (showAllMode) {
-      return data.filter((item) =>
+      // Show all jobs if activeTab is 'all', otherwise filter by active/finished
+      if (activeTab === 'all') {
+        return filtered; // Show all jobs regardless of status
+      }
+      return filtered.filter((item) =>
         statusGroups[activeTab].includes(item.status)
       );
     }
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, activeTab, selectedStatuses, showAllMode, statusGroups]);
+  }, [
+    data,
+    activeTab,
+    selectedStatuses,
+    showAllMode,
+    workspaceFilter,
+    userFilter,
+    nameFilter,
+  ]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -356,7 +816,8 @@ export function ManagedJobsTable({
 
   // Update status counts when data changes
   useEffect(() => {
-    const counts = data.reduce((acc, job) => {
+    const safeData = data || [];
+    const counts = safeData.reduce((acc, job) => {
       acc[job.status] = (acc[job.status] || 0) + 1;
       return acc;
     }, {});
@@ -385,7 +846,7 @@ export function ManagedJobsTable({
         <div className="flex flex-wrap items-center text-sm mb-1">
           <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
-            {!loading && data.length === 0 && !isInitialLoad && (
+            {!loading && (!data || data.length === 0) && !isInitialLoad && (
               <span className="text-gray-500 mr-2">No jobs found</span>
             )}
             {Object.entries(statusCounts).map(([status, count]) => (
@@ -407,9 +868,25 @@ export function ManagedJobsTable({
                 </span>
               </button>
             ))}
-            {data.length > 0 && (
+            {data && data.length > 0 && (
               <div className="flex items-center ml-2 gap-2">
                 <span className="text-gray-500">(</span>
+                <button
+                  onClick={() => {
+                    // When showing all jobs, clear all selected statuses
+                    setActiveTab('all');
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                  }}
+                  className={`text-sm font-medium ${
+                    activeTab === 'all' && showAllMode
+                      ? 'text-purple-700 underline'
+                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  }`}
+                >
+                  show all jobs
+                </button>
+                <span className="text-gray-500 mx-1">|</span>
                 <button
                   onClick={() => {
                     // When showing all active jobs, clear all selected statuses
@@ -472,6 +949,12 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('workspace')}
+              >
+                Workspace{getSortDirection('workspace')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('submitted_at')}
               >
                 Submitted{getSortDirection('submitted_at')}
@@ -490,21 +973,21 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('resources')}
+                onClick={() => requestSort('resources_str')}
               >
-                Resources{getSortDirection('resources')}
+                Requested{getSortDirection('resources_str')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('infra')}
+              >
+                Infra{getSortDirection('infra')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('cluster')}
               >
-                Cluster{getSortDirection('cluster')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('region')}
-              >
-                Region{getSortDirection('region')}
+                Resources{getSortDirection('cluster')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -517,7 +1000,7 @@ export function ManagedJobsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && isInitialLoad ? (
+            {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
                   colSpan={12}
@@ -550,15 +1033,65 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.user}</TableCell>
-                      <TableCell>{relativeTime(item.submitted_at)}</TableCell>
+                      <TableCell>
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href="/workspaces"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {item.workspace || 'default'}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        {formatSubmittedTime(item.submitted_at)}
+                      </TableCell>
                       <TableCell>{formatDuration(item.job_duration)}</TableCell>
                       <TableCell>
                         <StatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell>{item.resources}</TableCell>
-                      <TableCell>{item.cluster}</TableCell>
-                      <TableCell>{item.region}</TableCell>
+                      <TableCell>{item.requested_resources}</TableCell>
+                      <TableCell>
+                        {item.infra && item.infra !== '-' ? (
+                          <NonCapitalizedTooltip
+                            content={item.full_infra || item.infra}
+                            className="text-sm text-muted-foreground"
+                          >
+                            <span>
+                              <Link
+                                href="/infra"
+                                className="text-blue-600 hover:underline"
+                              >
+                                {item.cloud || item.infra.split('(')[0].trim()}
+                              </Link>
+                              {item.infra.includes('(') && (
+                                <span>
+                                  {' ' +
+                                    item.infra.substring(
+                                      item.infra.indexOf('(')
+                                    )}
+                                </span>
+                              )}
+                            </span>
+                          </NonCapitalizedTooltip>
+                        ) : (
+                          <span>{item.infra || '-'}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <NonCapitalizedTooltip
+                          content={
+                            item.resources_str_full || item.resources_str
+                          }
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span>{item.resources_str}</span>
+                        </NonCapitalizedTooltip>
+                      </TableCell>
                       <TableCell>{item.recoveries}</TableCell>
                       <TableCell>
                         {item.details ? (
@@ -597,8 +1130,8 @@ export function ManagedJobsTable({
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller is launching. Please wait
-                          for it to be ready.
+                          The managed job controller is launching. It will be
+                          ready shortly.
                         </p>
                         <div className="flex items-center">
                           <CircularProgress size={12} className="mr-2" />
@@ -612,8 +1145,8 @@ export function ManagedJobsTable({
                     {controllerStopped && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">
-                          The managed job controller has been stopped. Please
-                          restart it to check the latest job status.
+                          The managed job controller has been stopped. Restart
+                          to check the latest job status.
                         </p>
                         <Button
                           variant="outline"
@@ -645,7 +1178,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls */}
-      {sortedData.length > 0 && (
+      {sortedData && sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -741,6 +1274,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
+        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
       />
     </div>
   );
@@ -802,7 +1336,14 @@ export function Status2Actions({
   );
 }
 
-export function ClusterJobs({ clusterName, clusterJobData, loading }) {
+export function ClusterJobs({
+  clusterName,
+  clusterJobData,
+  loading,
+  refreshClusterJobsOnly,
+  userFilter = null,
+  nameFilter = null,
+}) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
     key: null,
@@ -830,8 +1371,20 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
   }, [expandedRowId]);
 
   const jobData = React.useMemo(() => {
-    return clusterJobData || [];
-  }, [clusterJobData]);
+    let filtered = clusterJobData || [];
+
+    // Apply user filter if provided
+    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+      filtered = filterJobsByUser(filtered, userFilter);
+    }
+
+    // Apply name filter if provided
+    if (nameFilter) {
+      filtered = filterJobsByName(filtered, nameFilter);
+    }
+
+    return filtered;
+  }, [clusterJobData, userFilter, nameFilter]);
 
   useEffect(() => {
     // Check if the data has changed significantly (new data received)
@@ -896,12 +1449,18 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
       <Card>
         <div className="flex items-center justify-between p-4">
           <h3 className="text-lg font-semibold">Cluster Jobs</h3>
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
+          <div className="flex items-center">
+            {refreshClusterJobsOnly && (
+              <button
+                onClick={refreshClusterJobsOnly}
+                disabled={loading}
+                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center text-sm ml-2"
+              >
+                <RotateCwIcon className="w-4 h-4 mr-1" />
+                Refresh Jobs
+              </button>
+            )}
+          </div>
         </div>
         <Table>
           <TableHeader>
@@ -923,6 +1482,12 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                 onClick={() => requestSort('user')}
               >
                 User{getSortDirection('user')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('workspace')}
+              >
+                Workspace{getSortDirection('workspace')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -952,7 +1517,19 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedData.length > 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={9}
+                  className="text-center py-12 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={24} className="mr-2" />
+                    <span>Loading cluster jobs...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -979,8 +1556,23 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
-                    <TableCell>{relativeTime(item.submitted_at)}</TableCell>
+                    <TableCell>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href="/workspaces"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {item.workspace || 'default'}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      {formatSubmittedTime(item.submitted_at)}
+                    </TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
                       <StatusBadge status={item.status} />
@@ -997,7 +1589,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      colSpan={8}
+                      colSpan={9}
                       innerRef={expandedRowRef}
                     />
                   )}
@@ -1017,7 +1609,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
         </Table>
       </Card>
 
-      {sortedData.length > 0 && (
+      {sortedData && sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -1133,10 +1725,11 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 }
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
-  const isTruncated = text.length > 50;
+  const safeText = text || '';
+  const isTruncated = safeText.length > 50;
   const isExpanded = expandedRowId === rowId;
   // Always show truncated text in the table cell
-  const displayText = isTruncated ? `${text.substring(0, 50)}` : text;
+  const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
   const buttonRef = useRef(null);
 
   const handleClick = (e) => {

@@ -7,6 +7,7 @@ import enum
 from typing import Any, Dict, List, Tuple
 
 from sky.skylet import constants
+from sky.utils import kubernetes_enums
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -43,14 +44,20 @@ _AUTOSTOP_SCHEMA = {
         {
             # Shorthand to set idle_minutes by directly specifying, e.g.
             #   autostop: 5
-            'type': 'integer',
-            'minimum': 0,
+            'anyOf': [{
+                'type': 'string',
+                'pattern': constants.TIME_PATTERN,
+                'minimum': 0,
+            }, {
+                'type': 'integer',
+            }]
         },
         {
             'type': 'object',
             'required': [],
             'additionalProperties': False,
             'properties': {
+                # TODO(luca): update field to use time units as well.
                 'idle_minutes': {
                     'type': 'integer',
                     'minimum': 0,
@@ -64,11 +71,72 @@ _AUTOSTOP_SCHEMA = {
 }
 
 
+# Note: This is similar to _get_infra_pattern()
+# but without the wildcard patterns.
+def _get_volume_infra_pattern():
+    # Building the regex pattern for the infra field
+    # Format: cloud[/region[/zone]] or wildcards or kubernetes context
+    # Match any cloud name (case insensitive)
+    all_clouds = list(constants.ALL_CLOUDS)
+    all_clouds.remove('kubernetes')
+    cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
+
+    # Optional /region followed by optional /zone
+    # /[^/]+ matches a slash followed by any characters except slash (region or
+    # zone name)
+    # The outer (?:...)? makes the entire region/zone part optional
+    region_zone_pattern = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Kubernetes specific pattern - matches:
+    # 1. Just the word "kubernetes" or "k8s" by itself
+    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain
+    # slashes)
+    kubernetes_pattern = '(?i:kubernetes|k8s)(?:/.+)?'
+
+    # Combine all patterns with alternation (|)
+    # ^ marks start of string, $ marks end of string
+    infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
+                     f'{kubernetes_pattern})$')
+    return infra_pattern
+
+
+def _get_infra_pattern():
+    # Building the regex pattern for the infra field
+    # Format: cloud[/region[/zone]] or wildcards or kubernetes context
+    # Match any cloud name (case insensitive)
+    all_clouds = list(constants.ALL_CLOUDS)
+    all_clouds.remove('kubernetes')
+    cloud_pattern = f'(?i:({"|".join(all_clouds)}))'
+
+    # Optional /region followed by optional /zone
+    # /[^/]+ matches a slash followed by any characters except slash (region or
+    # zone name)
+    # The outer (?:...)? makes the entire region/zone part optional
+    region_zone_pattern = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Wildcard patterns:
+    # 1. * - any cloud
+    # 2. */region - any cloud with specific region
+    # 3. */*/zone - any cloud, any region, specific zone
+    wildcard_cloud = '\\*'  # Wildcard for cloud
+    wildcard_with_region = '(?:/[^/]+(?:/[^/]+)?)?'
+
+    # Kubernetes specific pattern - matches:
+    # 1. Just the word "kubernetes" or "k8s" by itself
+    # 2. "k8s/" or "kubernetes/" followed by any context name (which may contain
+    # slashes)
+    kubernetes_pattern = '(?i:kubernetes|k8s)(?:/.+)?'
+
+    # Combine all patterns with alternation (|)
+    # ^ marks start of string, $ marks end of string
+    infra_pattern = (f'^(?:{cloud_pattern}{region_zone_pattern}|'
+                     f'{wildcard_cloud}{wildcard_with_region}|'
+                     f'{kubernetes_pattern})$')
+    return infra_pattern
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -77,13 +145,28 @@ def _get_single_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
+                'case_insensitive_enum': list(constants.ALL_CLOUDS)
             },
             'region': {
                 'type': 'string',
             },
             'zone': {
                 'type': 'string',
+            },
+            'infra': {
+                'type': 'string',
+                'description':
+                    ('Infrastructure specification in format: '
+                     'cloud[/region[/zone]]. Use "*" as a wildcard.'),
+                # Pattern validates:
+                # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
+                #    "aws/us-east-1/us-east-1a"
+                # 2. Wildcard patterns - e.g. "*", "*/us-east-1",
+                #    "*/*/us-east-1a", "aws/*/us-east-1a"
+                # 3. Kubernetes patterns - e.g. "kubernetes/my-context",
+                #    "k8s/context-name",
+                #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
+                'pattern': _get_infra_pattern(),
             },
             'cpus': {
                 'anyOf': [{
@@ -140,10 +223,52 @@ def _get_single_resources_schema():
                     }
                 }],
             },
+            'volumes': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'disk_size': {
+                            'anyOf': [{
+                                'type': 'string',
+                                'pattern': constants.MEMORY_SIZE_PATTERN,
+                            }, {
+                                'type': 'integer',
+                            }],
+                        },
+                        'disk_tier': {
+                            'type': 'string',
+                        },
+                        'path': {
+                            'type': 'string',
+                        },
+                        'auto_delete': {
+                            'type': 'boolean',
+                        },
+                        'storage_type': {
+                            'type': 'string',
+                        },
+                        'name': {
+                            'type': 'string',
+                        },
+                        'attach_mode': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
             'disk_size': {
-                'type': 'integer',
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.MEMORY_SIZE_PATTERN,
+                }, {
+                    'type': 'integer',
+                }],
             },
             'disk_tier': {
+                'type': 'string',
+            },
+            'network_tier': {
                 'type': 'string',
             },
             'ports': {
@@ -186,6 +311,9 @@ def _get_single_resources_schema():
                     }
                 }
             },
+            '_no_missing_accel_warnings': {
+                'type': 'boolean'
+            },
             'image_id': {
                 'anyOf': [{
                     'type': 'string',
@@ -197,6 +325,11 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'priority': {
+                'type': 'integer',
+                'minimum': constants.MIN_PRIORITY,
+                'maximum': constants.MAX_PRIORITY,
+            },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -286,9 +419,70 @@ def get_resources_schema():
     }
 
 
+def get_volume_schema():
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume
+
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': ['name', 'type', 'infra'],
+        'additionalProperties': False,
+        'properties': {
+            'name': {
+                'type': 'string',
+            },
+            'type': {
+                'type': 'string',
+                'case_sensitive_enum': [
+                    type.value for type in volume.VolumeType
+                ],
+            },
+            'infra': {
+                'type': 'string',
+                'description': ('Infrastructure specification in format: '
+                                'cloud[/region[/zone]].'),
+                # Pattern validates:
+                # 1. cloud[/region[/zone]] - e.g. "aws", "aws/us-east-1",
+                #    "aws/us-east-1/us-east-1a"
+                # 2. Kubernetes patterns - e.g. "kubernetes/my-context",
+                #    "k8s/context-name",
+                #    "k8s/aws:eks:us-east-1:123456789012:cluster/my-cluster"
+                'pattern': _get_volume_infra_pattern(),
+            },
+            'size': {
+                'type': 'string',
+                'pattern': constants.MEMORY_SIZE_PATTERN,
+            },
+            'resource_name': {
+                'type': 'string',
+            },
+            'config': {
+                'type': 'object',
+                'required': [],
+                'properties': {
+                    'storage_class_name': {
+                        'type': 'string',
+                    },
+                    'access_mode': {
+                        'type': 'string',
+                        'case_sensitive_enum': [
+                            type.value for type in volume.VolumeAccessMode
+                        ],
+                    },
+                    'namespace': {
+                        'type': 'string',
+                    },
+                },
+            },
+        }
+    }
+
+
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -324,6 +518,28 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            'config': {
+                'type': 'object',
+                'properties': {
+                    'disk_size': {
+                        'anyOf': [{
+                            'type': 'string',
+                            'pattern': constants.MEMORY_SIZE_PATTERN,
+                        }, {
+                            'type': 'integer',
+                        }],
+                    },
+                    'disk_tier': {
+                        'type': 'string',
+                    },
+                    'storage_type': {
+                        'type': 'string',
+                    },
+                    'attach_mode': {
+                        'type': 'string',
+                    },
+                },
+            },
             '_is_sky_managed': {
                 'type': 'boolean',
             },
@@ -332,6 +548,49 @@ def get_storage_schema():
             },
             '_force_delete': {
                 'type': 'boolean',
+            }
+        }
+    }
+
+
+def get_volume_mount_schema():
+    """Schema for volume mount object in task config (internal use only)."""
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'path': {
+                'type': 'string',
+            },
+            'volume_name': {
+                'type': 'string',
+            },
+            'volume_config': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+                'properties': {
+                    'cloud': {
+                        'type': 'string',
+                        'case_insensitive_enum': list(constants.ALL_CLOUDS)
+                    },
+                    'region': {
+                        'anyOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'null'
+                        }]
+                    },
+                    'zone': {
+                        'anyOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'null'
+                        }]
+                    },
+                },
             }
         }
     }
@@ -569,6 +828,17 @@ def get_task_schema():
                 },
                 'additionalProperties': False,
             },
+            'secrets': {
+                'type': 'object',
+                'required': [],
+                'patternProperties': {
+                    # Checks secret keys are valid env var names.
+                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                        'type': ['string', 'null']
+                    }
+                },
+                'additionalProperties': False,
+            },
             # inputs and outputs are experimental
             'inputs': {
                 'type': 'object',
@@ -592,6 +862,14 @@ def get_task_schema():
             'config': _filter_schema(
                 get_config_schema(),
                 constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            # volumes config is validated separately using get_volume_schema
+            'volumes': {
+                'type': 'object',
+            },
+            'volume_mounts': {
+                'type': 'array',
+                'items': get_volume_mount_schema(),
+            },
             **_experimental_task_schema(),
         }
     }
@@ -676,7 +954,7 @@ _LABELS_SCHEMA = {
     }
 }
 
-_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
             'type': 'string'
@@ -744,11 +1022,73 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    'networking': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+        ],
+    },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
+    'pod_config': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating pod spec is hard
+        'additionalProperties': True,
+    },
+    'custom_metadata': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating metadata is hard
+        'additionalProperties': True,
+        # Disallow 'name' and 'namespace' keys in this dict
+        'not': {
+            'anyOf': [{
+                'required': ['name']
+            }, {
+                'required': ['namespace']
+            }]
+        },
+    },
+    'provision_timeout': {
+        'type': 'integer',
+    },
+    'autoscaler': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesAutoscalerType
+        ],
+    },
+    'high_availability': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'storage_class_name': {
+                'type': 'string',
+            }
+        },
+    },
+    'kueue': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'local_queue_name': {
+                'type': 'string',
+            },
+        },
+    },
+}
+
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
-    from sky.utils import kubernetes_enums
 
     resources_schema = {
         k: v
@@ -757,30 +1097,41 @@ def get_config_schema():
         if k != '$schema'
     }
     resources_schema['properties'].pop('ports')
-    controller_resources_schema = {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'controller': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'resources': resources_schema,
-                    'high_availability': {
-                        'type': 'boolean',
-                    },
-                    'autostop': _AUTOSTOP_SCHEMA,
-                }
+
+    def _get_controller_schema(add_consolidation_mode: bool = False):
+        controller_properties = {
+            'resources': resources_schema,
+            'high_availability': {
+                'type': 'boolean',
+                'default': False,
             },
-            'bucket': {
-                'type': 'string',
-                'pattern': '^(https|s3|gs|r2|cos)://.+',
-                'required': [],
+            'autostop': _AUTOSTOP_SCHEMA,
+        }
+        if add_consolidation_mode:
+            controller_properties['consolidation_mode'] = {
+                'type': 'boolean',
+                'default': False,
+            }
+
+        return {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'controller': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': controller_properties,
+                },
+                'bucket': {
+                    'type': 'string',
+                    'pattern': '^(https|s3|gs|r2|cos)://.+',
+                    'required': [],
+                }
             }
         }
-    }
+
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -800,7 +1151,7 @@ def get_config_schema():
                     'type': 'boolean',
                 },
                 'security_group_name':
-                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'vpc_name': {
                     'oneOf': [{
                         'type': 'string',
@@ -894,59 +1245,39 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'networking': {
-                    'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value
-                        for type in kubernetes_enums.KubernetesNetworkingMode
-                    ]
+                'context_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    # Properties are kubernetes context names.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                        },
+                    },
                 },
-                'ports': {
-                    'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value
-                        for type in kubernetes_enums.KubernetesPortMode
-                    ]
+                **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+            }
+        },
+        'ssh': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_node_pools': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
                 },
                 'pod_config': {
                     'type': 'object',
                     'required': [],
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
-                },
-                'custom_metadata': {
-                    'type': 'object',
-                    'required': [],
-                    # Allow arbitrary keys since validating metadata is hard
-                    'additionalProperties': True,
-                    # Disallow 'name' and 'namespace' keys in this dict
-                    'not': {
-                        'anyOf': [{
-                            'required': ['name']
-                        }, {
-                            'required': ['namespace']
-                        }]
-                    }
-                },
-                'provision_timeout': {
-                    'type': 'integer',
-                },
-                'autoscaler': {
-                    'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value
-                        for type in kubernetes_enums.KubernetesAutoscalerType
-                    ]
-                },
-                'high_availability': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'storage_class_name': {
-                            'type': 'string',
-                        }
-                    }
                 },
             }
         },
@@ -983,6 +1314,9 @@ def get_config_schema():
             'required': [],
             'properties': {
                 **_NETWORK_CONFIG_SCHEMA,
+                'tenant_id': {
+                    'type': 'string',
+                },
             },
             'additionalProperties': {
                 'type': 'object',
@@ -995,6 +1329,27 @@ def get_config_schema():
                     'fabric': {
                         'type': 'string',
                     },
+                    'filesystems': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'additionalProperties': False,
+                            'properties': {
+                                'filesystem_id': {
+                                    'type': 'string',
+                                },
+                                'attach_mode': {
+                                    'type': 'string',
+                                    'case_sensitive_enum': [
+                                        'READ_WRITE', 'READ_ONLY'
+                                    ]
+                                },
+                                'mount_path': {
+                                    'type': 'string',
+                                }
+                            }
+                        }
+                    },
                 }
             },
         }
@@ -1002,9 +1357,17 @@ def get_config_schema():
 
     admin_policy_schema = {
         'type': 'string',
-        # Check regex to be a valid python module path
-        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
-                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+        'anyOf': [
+            {
+                # Check regex to be a valid python module path
+                'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                            r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+            },
+            {
+                # Check for valid HTTP/HTTPS URL
+                'pattern': r'^https?://.*$',
+            }
+        ]
     }
 
     allowed_clouds = {
@@ -1013,7 +1376,7 @@ def get_config_schema():
         'items': {
             'type': 'string',
             'case_insensitive_enum':
-                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+                (list(constants.ALL_CLOUDS) + ['cloudflare'])
         }
     }
 
@@ -1055,14 +1418,183 @@ def get_config_schema():
                 # Apply validation for URL
                 'pattern': r'^https?://.*$',
             },
+            'service_account_token': {
+                'anyOf': [
+                    {
+                        'type': 'string',
+                        # Validate that token starts with sky_ prefix
+                        'pattern': r'^sky_.+$',
+                    },
+                    {
+                        'type': 'null',
+                    }
+                ]
+            },
         }
+    }
+
+    rbac_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'default_role': {
+                'type': 'string',
+                'case_insensitive_enum': ['admin', 'user']
+            },
+        },
+    }
+
+    workspace_schema = {'type': 'string'}
+
+    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
+    # Create pattern for not supported clouds, i.e.
+    # all clouds except gcp, kubernetes, ssh
+    not_supported_clouds = [
+        cloud for cloud in allowed_workspace_cloud_names
+        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
+    ]
+    not_supported_cloud_regex = '|'.join(not_supported_clouds)
+    workspaces_schema = {
+        'type': 'object',
+        'required': [],
+        # each key is a workspace name
+        'additionalProperties': {
+            'type': 'object',
+            'additionalProperties': False,
+            'patternProperties': {
+                # Pattern for non-GCP clouds - only allows 'disabled' property
+                f'^({not_supported_cloud_regex})$': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                },
+            },
+            'properties': {
+                # Explicit definition for GCP allows both project_id and
+                # disabled
+                'private': {
+                    'type': 'boolean',
+                },
+                'allowed_users': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'gcp': {
+                    'type': 'object',
+                    'properties': {
+                        'project_id': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                    'additionalProperties': False,
+                },
+                'ssh': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_node_pools': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'kubernetes': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'allowed_contexts': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string',
+                            },
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+                'nebius': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'credentials_file_path': {
+                            'type': 'string',
+                        },
+                        'tenant_id': {
+                            'type': 'string',
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
+            },
+        },
+    }
+
+    provision_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'ssh_timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        }
+    }
+
+    logs_schema = {
+        'type': 'object',
+        'required': ['store'],
+        'additionalProperties': False,
+        'properties': {
+            'store': {
+                'type': 'string',
+                'case_insensitive_enum': ['gcp'],
+            },
+            'gcp': {
+                'type': 'object',
+                'properties': {
+                    'project_id': {
+                        'type': 'string',
+                    },
+                    'credentials_file': {
+                        'type': 'string',
+                    },
+                    'additional_labels': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+        },
     }
 
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update({
-                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
-            })
+            config['properties'].update(
+                {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
@@ -1073,13 +1605,25 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'jobs': controller_resources_schema,
-            'serve': controller_resources_schema,
+            # TODO Replace this with whatever syang cooks up
+            'workspace': {
+                'type': 'string',
+            },
+            'db': {
+                'type': 'string',
+            },
+            'jobs': _get_controller_schema(add_consolidation_mode=True),
+            'serve': _get_controller_schema(add_consolidation_mode=False),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             'api_server': api_server,
+            'active_workspace': workspace_schema,
+            'workspaces': workspaces_schema,
+            'provision': provision_configs,
+            'rbac': rbac_schema,
+            'logs': logs_schema,
             **cloud_configs,
         },
     }

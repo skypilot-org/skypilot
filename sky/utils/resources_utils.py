@@ -4,11 +4,12 @@ import enum
 import itertools
 import json
 import math
-import re
 import typing
 from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
+from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
 
@@ -48,6 +49,48 @@ class DiskTier(enum.Enum):
     def __le__(self, other: 'DiskTier') -> bool:
         types = list(DiskTier)
         return types.index(self) <= types.index(other)
+
+
+class NetworkTier(enum.Enum):
+    """All network tiers supported by SkyPilot."""
+    STANDARD = 'standard'
+    BEST = 'best'
+
+    @classmethod
+    def supported_tiers(cls) -> List[str]:
+        return [tier.value for tier in cls]
+
+    @classmethod
+    def cli_help_message(cls) -> str:
+        return (
+            f'Network tier. Could be one of {", ".join(cls.supported_tiers())}'
+            f'. If {cls.BEST.value} is specified, use the best network tier '
+            'available on the specified instance. '
+            f'Default: {cls.STANDARD.value}')
+
+    @classmethod
+    def from_str(cls, tier: str) -> 'NetworkTier':
+        if tier not in cls.supported_tiers():
+            raise ValueError(f'Invalid network tier: {tier}')
+        return cls(tier)
+
+    def __le__(self, other: 'NetworkTier') -> bool:
+        types = list(NetworkTier)
+        return types.index(self) <= types.index(other)
+
+
+class StorageType(enum.Enum):
+    """Storage type."""
+    # Durable network storage, e.g. GCP persistent disks
+    NETWORK = 'network'
+    # Local instance storage, e.g. GCP local SSDs
+    INSTANCE = 'instance'
+
+
+class DiskAttachMode(enum.Enum):
+    """Disk attach mode."""
+    READ_ONLY = 'read_only'
+    READ_WRITE = 'read_write'
 
 
 @dataclasses.dataclass
@@ -139,34 +182,54 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
 def format_resource(resource: 'resources_lib.Resources',
                     simplify: bool = False) -> str:
+    resource = resource.assert_launchable()
+    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+        resource.instance_type)
+
+    components = []
+
+    if resource.accelerators is not None:
+        acc, count = list(resource.accelerators.items())[0]
+        components.append(f'gpus={acc}:{count}')
+
+    is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    if (resource.accelerators is None or is_k8s or not simplify):
+        if vcpu is not None:
+            components.append(f'cpus={int(vcpu)}')
+        if mem is not None:
+            components.append(f'mem={int(mem)}')
+
+    instance_type = resource.instance_type
     if simplify:
-        resource = resource.assert_launchable()
-        cloud = resource.cloud
-        if resource.accelerators is None:
-            vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-                resource.instance_type)
-            assert vcpu is not None, 'vCPU must be specified'
-            hardware = f'vCPU={int(vcpu)}'
-        else:
-            hardware = f'{resource.accelerators}'
-        spot = '[Spot]' if resource.use_spot else ''
-        return f'{cloud}({spot}{hardware})'
+        instance_type = common_utils.truncate_long_string(instance_type, 15)
+    if not is_k8s:
+        components.append(instance_type)
+    if simplify:
+        components.append('...')
     else:
-        # accelerator_args is way too long.
-        # Convert from:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-        # to:
-        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-        pattern = ', accelerator_args={.*}'
-        launched_resource_str = re.sub(pattern, '...', str(resource))
-        return launched_resource_str
+        image_id = resource.image_id
+        if image_id is not None:
+            if None in image_id:
+                components.append(f'image_id={image_id[None]}')
+            else:
+                components.append(f'image_id={image_id}')
+        components.append(f'disk={resource.disk_size}')
+        disk_tier = resource.disk_tier
+        if disk_tier is not None:
+            components.append(f'disk_tier={disk_tier.value}')
+        ports = resource.ports
+        if ports is not None:
+            components.append(f'ports={ports}')
+
+    spot = '[spot]' if resource.use_spot else ''
+    return f'{spot}({"" if not components else ", ".join(components)})'
 
 
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                 simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x '
+        return (f'{handle.launched_nodes}x'
                 f'{format_resource(handle.launched_resources, simplify)}')
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
 
@@ -210,10 +273,18 @@ def need_to_query_reservations() -> bool:
     clouds that do not use reservations.
     """
     for cloud_str in registry.CLOUD_REGISTRY.keys():
-        cloud_specific_reservations = skypilot_config.get_nested(
-            (cloud_str, 'specific_reservations'), None)
-        cloud_prioritize_reservations = skypilot_config.get_nested(
-            (cloud_str, 'prioritize_reservations'), False)
+        cloud_specific_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('specific_reservations',),
+                default_value=None))
+        cloud_prioritize_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('prioritize_reservations',),
+                default_value=False))
         if (cloud_specific_reservations is not None or
                 cloud_prioritize_reservations):
             return True
@@ -269,3 +340,68 @@ def make_launchables_for_valid_region_zones(
             # Batch the requests at the granularity of a single region.
             launchables.append(launchable_resources.copy(region=region.name))
     return launchables
+
+
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
+                          ret_type: type = int,
+                          unit: str = 'gb',
+                          allow_plus: bool = False,
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+
+    error_msg = (f'"{field_name}" field should be a '
+                 f'{constants.MEMORY_SIZE_PATTERN}+?,'
+                 f' got {resource_qty_str}')
+
+    resource_str = str(resource_qty_str)
+
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(error_msg)
+
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(error_msg)
+
+    try:
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        ret_type(resource_str)
+        return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
+
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = ret_type(resource_str[:-len(mem_unit)])
+                converted = (value * multiplier /
+                             constants.MEMORY_SIZE_UNITS[unit])
+                if not allow_rounding and ret_type(converted) != converted:
+                    raise ValueError(error_msg)
+                converted = ret_type(converted)
+                return f'{converted}{plus}{x}'
+            except ValueError:
+                continue
+
+    raise ValueError(error_msg)

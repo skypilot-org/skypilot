@@ -40,11 +40,13 @@ from argparse import ArgumentParser
 import contextlib
 from functools import lru_cache
 import os
+import sys
 import time
 import typing
 
 import filelock
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
@@ -81,6 +83,32 @@ def _get_lock_path() -> str:
     path = os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
+
+
+def _start_controller(job_id: int, dag_yaml_path: str,
+                      env_file_path: str) -> None:
+    activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+    source_environment_cmd = (f'source {env_file_path};'
+                              if env_file_path else '')
+    run_controller_cmd = (f'{sys.executable} -u -m sky.jobs.controller '
+                          f'{dag_yaml_path} --job-id {job_id};')
+
+    # If the command line here is changed, please also update
+    # utils._controller_process_alive. The substring `--job-id X`
+    # should be in the command.
+    run_cmd = (f'{activate_python_env_cmd}'
+               f'{source_environment_cmd}'
+               f'{run_controller_cmd}')
+
+    logs_dir = os.path.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(logs_dir, f'{job_id}.log')
+
+    pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
+    state.set_job_controller_pid(job_id, pid)
+
+    logger.debug(f'Job {job_id} started with pid {pid}')
 
 
 def maybe_schedule_next_jobs() -> None:
@@ -157,32 +185,9 @@ def maybe_schedule_next_jobs() -> None:
 
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
+                    env_file_path = maybe_next_job['env_file_path']
 
-                    activate_python_env_cmd = (
-                        f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
-                    env_file = maybe_next_job['env_file_path']
-                    source_environment_cmd = (f'source {env_file};'
-                                              if env_file else '')
-                    run_controller_cmd = ('python -u -m sky.jobs.controller '
-                                          f'{dag_yaml_path} --job-id {job_id};')
-
-                    # If the command line here is changed, please also update
-                    # utils._controller_process_alive. `--job-id X` should be at
-                    # the end.
-                    run_cmd = (f'{activate_python_env_cmd}'
-                               f'{source_environment_cmd}'
-                               f'{run_controller_cmd}')
-
-                    logs_dir = os.path.expanduser(
-                        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
-                    os.makedirs(logs_dir, exist_ok=True)
-                    log_path = os.path.join(logs_dir, f'{job_id}.log')
-
-                    pid = subprocess_utils.launch_new_process_tree(
-                        run_cmd, log_output=log_path)
-                    state.set_job_controller_pid(job_id, pid)
-
-                    logger.debug(f'Job {job_id} started with pid {pid}')
+                    _start_controller(job_id, dag_yaml_path, env_file_path)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -190,7 +195,8 @@ def maybe_schedule_next_jobs() -> None:
         pass
 
 
-def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
+def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
+               env_file_path: str, priority: int) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -201,9 +207,15 @@ def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path,
-                                    common_utils.get_user_hash())
-    maybe_schedule_next_jobs()
+        is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                                original_user_yaml_path,
+                                                env_file_path,
+                                                common_utils.get_user_hash(),
+                                                priority)
+    if is_resume:
+        _start_controller(job_id, dag_yaml_path, env_file_path)
+    else:
+        maybe_schedule_next_jobs()
 
 
 @contextlib.contextmanager
@@ -240,11 +252,19 @@ def scheduled_launch(job_id: int):
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
 
-    yield
-
-    with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_alive(job_id)
-    maybe_schedule_next_jobs()
+    try:
+        yield
+    except exceptions.NoClusterLaunchedError:
+        # NoClusterLaunchedError is indicates that the job is in retry backoff.
+        # We should transition to ALIVE_BACKOFF instead of ALIVE.
+        with filelock.FileLock(_get_lock_path()):
+            state.scheduler_set_alive_backoff(job_id)
+        raise
+    else:
+        with filelock.FileLock(_get_lock_path()):
+            state.scheduler_set_alive(job_id)
+    finally:
+        maybe_schedule_next_jobs()
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -302,6 +322,9 @@ if __name__ == '__main__':
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
+    parser.add_argument('--user-yaml-path',
+                        type=str,
+                        help='The path to the original user job yaml file.')
     parser.add_argument('--job-id',
                         required=True,
                         type=int,
@@ -309,5 +332,13 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
+    parser.add_argument(
+        '--priority',
+        type=int,
+        default=constants.DEFAULT_PRIORITY,
+        help=
+        f'Job priority ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
+        f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
-    submit_job(args.job_id, args.dag_yaml, args.env_file)
+    submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
+               args.priority)

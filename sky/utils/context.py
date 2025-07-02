@@ -4,11 +4,13 @@ import asyncio
 from collections.abc import Mapping
 from collections.abc import MutableMapping
 import contextvars
+import functools
 import os
 import pathlib
 import subprocess
 import sys
-from typing import Dict, Optional, TextIO
+import typing
+from typing import Any, Callable, Dict, Optional, TextIO, TypeVar
 
 
 class Context(object):
@@ -17,7 +19,7 @@ class Context(object):
     This is a wrapper around `contextvars.ContextVar` that provides a typed
     interface for the SkyPilot specific context variables that can be accessed
     at any layer of the call stack. ContextVar is coroutine local, an empty
-    Context will be intialized for each coroutine when it is created.
+    Context will be initialized for each coroutine when it is created.
 
     Adding a new context variable for a new feature is as simple as:
     1. Add a new instance variable to the Context class.
@@ -57,6 +59,7 @@ class Context(object):
         self._log_file = None
         self._log_file_handle = None
         self.env_overrides = {}
+        self.config_context = None
 
     def cancel(self):
         """Cancel the context."""
@@ -159,17 +162,25 @@ class ContextualEnviron(MutableMapping):
         ctx = get()
         if ctx is not None:
             if key in ctx.env_overrides:
-                return ctx.env_overrides[key]
+                value = ctx.env_overrides[key]
+                # None is used to indicate that the key is deleted in the
+                # context.
+                if value is None:
+                    raise KeyError(key)
+                return value
         return self._environ[key]
 
     def __iter__(self):
         ctx = get()
+        deleted_keys = set()
         if ctx is not None:
-            for key in ctx.env_overrides:
+            for key, value in ctx.env_overrides.items():
+                if value is None:
+                    deleted_keys.add(key)
                 yield key
             for key in self._environ:
                 # Deduplicate the keys
-                if key not in ctx.env_overrides:
+                if key not in ctx.env_overrides and key not in deleted_keys:
                     yield key
         else:
             return self._environ.__iter__()
@@ -178,10 +189,27 @@ class ContextualEnviron(MutableMapping):
         return len(dict(self))
 
     def __setitem__(self, key, value):
-        return self._environ.__setitem__(key, value)
+        ctx = get()
+        if ctx is not None:
+            ctx.env_overrides[key] = value
+        else:
+            self._environ.__setitem__(key, value)
 
     def __delitem__(self, key):
-        return self._environ.__delitem__(key)
+        ctx = get()
+        if ctx is not None:
+            if key in ctx.env_overrides:
+                del ctx.env_overrides[key]
+            elif key in self._environ:
+                # If the key is not set in the context but set in the environ
+                # of the process, we mark it as deleted in the context by
+                # setting the value to None.
+                ctx.env_overrides[key] = None
+            else:
+                # The key is not set in the context nor the process.
+                raise KeyError(key)
+        else:
+            self._environ.__delitem__(key)
 
     def __repr__(self):
         return self._environ.__repr__()
@@ -190,7 +218,11 @@ class ContextualEnviron(MutableMapping):
         copied = self._environ.copy()
         ctx = get()
         if ctx is not None:
-            copied.update(ctx.env_overrides)
+            for key in ctx.env_overrides:
+                if ctx.env_overrides[key] is None:
+                    copied.pop(key)
+                else:
+                    copied[key] = ctx.env_overrides[key]
         return copied
 
     def setdefault(self, key, default=None):
@@ -222,8 +254,28 @@ class Popen(subprocess.Popen):
     def __init__(self, *args, **kwargs):
         env = kwargs.pop('env', None)
         if env is None:
-            env = os.environ
+            # Pass a copy of current context.environ to avoid race condition
+            # when the context is updated after the Popen is created.
+            env = os.environ.copy()
         super().__init__(*args, env=env, **kwargs)
+
+
+F = TypeVar('F', bound=Callable[..., Any])
+
+
+def contextual(func: F) -> F:
+    """Decorator to initialize a context before executing the function.
+
+    If a context is already initialized, this decorator will reset the context,
+    i.e. all contextual variables set previously will be cleared.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        initialize()
+        return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)
 
 
 def initialize():

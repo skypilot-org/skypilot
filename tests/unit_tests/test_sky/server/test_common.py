@@ -1,8 +1,14 @@
 """Unit tests for the SkyPilot API server common module."""
+from http.cookiejar import Cookie
+from http.cookiejar import MozillaCookieJar
+import pathlib
 import sys
+import tempfile
+import time
 from unittest import mock
 
 import pytest
+import requests
 
 import sky
 from sky import exceptions
@@ -11,6 +17,34 @@ from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
 from sky.server.common import ApiServerStatus
+
+
+def _create_test_cookie(name: str = 'test-cookie', value: str = 'test-value'):
+    """Create a test cookie."""
+
+    server_domain = common.get_server_url().split('://')[1].split(':')[0]
+
+    # write a cookie to the file
+    test_cookie = Cookie(
+        version=0,
+        name=name,
+        value=value,
+        port=None,
+        port_specified=False,
+        domain=server_domain,
+        domain_specified=True,
+        domain_initial_dot=False,
+        path='/',
+        path_specified=True,
+        secure=False,
+        expires=time.time() + 1000,
+        discard=False,
+        comment=None,
+        comment_url=None,
+        rest={},
+    )
+
+    return test_cookie
 
 
 @mock.patch('sky.server.common.get_api_server_status')
@@ -174,7 +208,7 @@ def test_install_server_version_command():
 @pytest.fixture
 def mock_all_dependencies():
     """Mock all dependencies used in reload_for_new_request."""
-    with mock.patch('sky.utils.common_utils.set_client_status') as mock_status, \
+    with mock.patch('sky.utils.common_utils.set_request_context') as mock_status, \
          mock.patch('sky.usage.usage_lib.messages.reset') as mock_reset, \
          mock.patch('sky.sky_logging.reload_logger') as mock_logger:
         yield {
@@ -194,11 +228,13 @@ allowed_clouds:
 ''')
 
     # Set env var to point to the temp config
-    monkeypatch.setenv('SKYPILOT_CONFIG', str(config_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
     common.reload_for_new_request(
         client_entrypoint='test_entry',
         client_command='test_cmd',
         using_remote_api_server=False,
+        user=mock.Mock(id='test_user'),
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['aws']
@@ -210,6 +246,7 @@ allowed_clouds:
         client_entrypoint='test_entry',
         client_command='test_cmd',
         using_remote_api_server=False,
+        user=mock.Mock(id='test_user'),
     )
     assert skypilot_config.get_nested(keys=('allowed_clouds',),
                                       default_value=None) == ['gcp']
@@ -250,3 +287,105 @@ def test_get_dashboard_url():
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(
         server_url='http://example.com') == 'http://example.com/dashboard'
+
+
+def test_cookies_get_no_file(monkeypatch):
+    """Test getting cookies from local file."""
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    test_cookie_jar = common.get_api_cookie_jar()
+
+    assert not temp_cookie_path.exists()
+    assert isinstance(test_cookie_jar, requests.cookies.RequestsCookieJar)
+
+
+def test_cookies_get_with_file(monkeypatch):
+    """Test getting cookies from local file."""
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    test_cookie = _create_test_cookie()
+    cookie_jar = MozillaCookieJar(temp_cookie_path)
+    cookie_jar.set_cookie(test_cookie)
+    cookie_jar.save()
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    test_cookie_jar = common.get_api_cookie_jar()
+
+    assert isinstance(test_cookie_jar, requests.cookies.RequestsCookieJar)
+    assert len(test_cookie_jar) == 1
+    assert test_cookie_jar['test-cookie'] == test_cookie.value
+
+    temp_cookie_dir.cleanup()
+
+
+def test_cookies_set_with_no_file(monkeypatch):
+    """Test setting cookies to local file.
+    No file exists, so a new file is created.
+    """
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    common.set_api_cookie_jar(requests.cookies.RequestsCookieJar(),
+                              create_if_not_exists=True)
+
+    assert temp_cookie_path.exists()
+
+    temp_cookie_dir.cleanup()
+
+
+def test_cookies_set_with_file(monkeypatch):
+    """Test setting cookies to local file.
+    A file exists, so the cookies are added to the file.
+    """
+
+    # make a up a temporary cookie file
+    temp_cookie_dir = tempfile.TemporaryDirectory(prefix='sky_cookies')
+    temp_cookie_path = pathlib.Path(temp_cookie_dir.name) / 'cookies.txt'
+
+    monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
+                        lambda: temp_cookie_path)
+
+    # write a cookie to the file
+    cookie = _create_test_cookie()
+    cookie_jar = MozillaCookieJar(temp_cookie_path)
+    cookie_jar.set_cookie(cookie)
+    cookie_jar.save()
+
+    # create a new cookie jar and add a new cookie
+    expected_cookie = _create_test_cookie(name='test-cookie-2',
+                                          value='test-value-2')
+    expected_cookie_jar = requests.cookies.RequestsCookieJar()
+    expected_cookie_jar.set_cookie(expected_cookie)
+
+    common.set_api_cookie_jar(expected_cookie_jar, create_if_not_exists=False)
+
+    assert temp_cookie_path.exists()
+
+    # read the cookie file
+    _found_cookie_jar = MozillaCookieJar(temp_cookie_path)
+    _found_cookie_jar.load()
+    # convert to RequestsCookieJar to use the RequestsCookieJar API for reading cookies
+    found_cookie_jar = requests.cookies.RequestsCookieJar()
+    found_cookie_jar.update(_found_cookie_jar)
+
+    assert len(found_cookie_jar) == 2
+    assert found_cookie_jar['test-cookie'] == cookie.value
+    assert found_cookie_jar['test-cookie-2'] == expected_cookie.value
+
+    temp_cookie_dir.cleanup()

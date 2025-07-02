@@ -3,13 +3,14 @@
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+from sky import catalog
 from sky import clouds
-from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 
 @registry.CLOUD_REGISTRY.register
@@ -25,6 +26,9 @@ class Vast(clouds.Cloud):
              'are non-trivial on Vast.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Vast.'),
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
+            ('Custom network tier is currently not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is currently not supported on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
@@ -73,7 +77,7 @@ class Vast(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'Vast does not support zones.'
         del accelerators, zone  # unused
-        regions = service_catalog.get_region_zones_for_instance_type(
+        regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'vast')
 
         if region is not None:
@@ -85,8 +89,8 @@ class Vast(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='vast')
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='vast')
 
     @classmethod
     def zones_provision_loop(
@@ -113,11 +117,11 @@ class Vast(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='vast')
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='vast')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -139,29 +143,31 @@ class Vast(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
         """Returns the default instance type for Vast."""
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='vast')
+        return catalog.get_default_instance_type(cpus=cpus,
+                                                 memory=memory,
+                                                 disk_tier=disk_tier,
+                                                 clouds='vast')
 
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='vast')
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='vast')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name, num_nodes  # unused
 
         resources = resources.assert_launchable()
@@ -223,16 +229,16 @@ class Vast(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            cpus=resources.cpus,
-            region=resources.region,
-            zone=resources.zone,
-            memory=resources.memory,
-            clouds='vast')
+        (instance_list,
+         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             region=resources.region,
+             zone=resources.zone,
+             memory=resources.memory,
+             clouds='vast')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -240,7 +246,8 @@ class Vast(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has valid credentials for
         Vast's compute service. """
         try:
@@ -275,10 +282,10 @@ class Vast(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'vast')
+        return catalog.instance_type_exists(instance_type, 'vast')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='vast')
+        return catalog.validate_region_zone(region, zone, clouds='vast')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:

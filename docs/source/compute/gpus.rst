@@ -26,7 +26,7 @@ You can query the accelerators available in your Kubernetes clusters with:
 
 .. code-block:: console
 
-   $ sky show-gpus --cloud k8s
+   $ sky show-gpus --infra k8s
 
 
 .. code-block:: text

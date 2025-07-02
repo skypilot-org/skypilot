@@ -10,7 +10,7 @@
 name: hostecho-demo
 
 resources:
-  cloud: aws
+  infra: aws
   instance_type: m5.2xlarge
 
 num_nodes: 2

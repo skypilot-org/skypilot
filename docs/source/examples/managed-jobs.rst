@@ -19,9 +19,9 @@ To start a managed job, use :code:`sky jobs launch`:
   Managed job 'myjob' will be launched on (estimated):
   Considered resources (1 node):
   ------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE      vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
+   INFRA              INSTANCE      vCPUs   Mem(GB)   GPUS   COST ($)   CHOSEN
   ------------------------------------------------------------------------------------------
-   AWS     m6i.2xlarge   8       32        -              us-east-1     0.38          ✔
+   AWS (us-east-1)    m6i.2xlarge   8       32        -      0.38          ✔
   ------------------------------------------------------------------------------------------
   Launching a managed job 'myjob'. Proceed? [Y/n]: Y
   ... <job is submitted and launched>
@@ -183,22 +183,17 @@ Cancel a managed job:
   of the failure. For more details related to provisioning, check :code:`sky jobs logs --controller <job_id>`.
 
 
-Jobs dashboard
-~~~~~~~~~~~~~~
+Viewing jobs in dashboard
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
+The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all managed jobs.
 
-.. code-block:: console
 
-  $ sky jobs dashboard
+.. image:: ../images/dashboard-managed-jobs.png
+  :width: 800
+  :alt: Managed jobs dashboard
 
-This automatically opens a browser tab to show the dashboard:
-
-.. image:: ../images/managed-jobs-dashboard.png
-
-The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
-especially useful when there are many in-progress jobs to monitor, which the
-terminal-based CLI may need more than one page to display.
+The UI shows the same information as the CLI ``sky jobs queue -au``.
 
 
 .. _spot-jobs:
@@ -316,7 +311,7 @@ Jobs restarts on user code failure
 Preemptions or hardware failures will be auto-recovered, but **by default, user code failures (non-zero exit codes) are not auto-recovered**.
 
 In some cases, you may want a job to automatically restart even if it fails in application code. For instance, if a training job crashes due to an NVIDIA driver issue or NCCL timeout, it should be recovered. To specify this, you
-can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the job YAML file.
+can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the :ref:`SkyPilot YAML <yaml-spec>`.
 
 .. code-block:: yaml
 
@@ -446,7 +441,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   Fetching managed job statuses...
   Managed jobs
   In progress jobs: 1 RECOVERING
-  ID  TASK  NAME      RESOURCES                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  ID  TASK  NAME      REQUESTED                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING
    ↳  0     train     1x [V100:8][Spot|On-demand]  50 mins ago  47m 45s        -             1            RECOVERING
    ↳  1     eval      1x [T4:1]                    -            -              -             0            PENDING
@@ -560,8 +555,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       resources:
         # All configs below are optional.
         # Specify the location of the jobs controller.
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # Bump cpus to allow more managed jobs to be launched concurrently. (Default: 4+)
         cpus: 8+
         # Bump memory to allow more managed jobs to be running at once.
@@ -584,10 +578,10 @@ To see your current jobs controller, use :code:`sky status`.
   $ sky status --refresh
 
   Clusters
-  NAME                          LAUNCHED     RESOURCES                          STATUS   AUTOSTOP  COMMAND
-  my-cluster-1                  1 week ago   1x AWS(m6i.4xlarge)                STOPPED  -         sky launch --cpus 16 --cloud...
-  my-other-cluster              1 week ago   1x GCP(n2-standard-16)             STOPPED  -         sky launch --cloud gcp --...
-  sky-jobs-controller-919df126  1 day ago    1x AWS(r6i.xlarge, disk_size=50)   STOPPED  10m       sky jobs launch --cpus 2 ...
+  NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
+  my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago
+  my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago
+  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, r6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
 
   Managed jobs
   No in-progress managed jobs.
@@ -642,7 +636,7 @@ For maximum parallelism, the following configuration is recommended:
     controller:
       resources:
         # In our testing, aws > gcp > azure
-        cloud: aws
+        infra: aws
         cpus: 128
         # Azure does not have 128+ CPU instances, so use 96 instead
         # cpus: 96

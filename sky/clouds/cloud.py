@@ -16,9 +16,9 @@ from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
 
 from typing_extensions import assert_never
 
+from sky import catalog
 from sky import exceptions
 from sky import skypilot_config
-from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import timeline
@@ -27,6 +27,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import status_lib
+    from sky.volumes import volume as volume_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -45,6 +46,7 @@ class CloudImplementationFeatures(enum.Enum):
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    CUSTOM_NETWORK_TIER = 'custom_network_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
@@ -142,6 +144,9 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTED_NETWORK_TIERS = {
+        resources_utils.NetworkTier.STANDARD, resources_utils.NetworkTier.BEST
+    }
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
@@ -187,7 +192,7 @@ class Cloud:
         """Returns the regions that offer the specified resources.
 
         The order of the regions follow the order of the regions returned by
-        service_catalog/common.py#get_region_zones().
+        sky/catalog/common.py#get_region_zones().
         When region or zone is not None, the returned value will be limited to
         the specified region/zone.
 
@@ -306,6 +311,7 @@ class Cloud:
         zones: Optional[List['Zone']],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -366,9 +372,9 @@ class Cloud:
     @classmethod
     def is_image_tag_valid(cls, image_tag: str, region: Optional[str]) -> bool:
         """Validates that the image tag is valid for this cloud."""
-        return service_catalog.is_image_tag_valid(image_tag,
-                                                  region,
-                                                  clouds=cls._REPR.lower())
+        return catalog.is_image_tag_valid(image_tag,
+                                          region,
+                                          clouds=cls._REPR.lower())
 
     @classmethod
     def is_label_valid(cls, label_key: str,
@@ -460,12 +466,14 @@ class Cloud:
 
     @classmethod
     def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        cls, cloud_capability: CloudCapability
+    ) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this cloud.
 
-        Returns a boolean of whether the user can access this cloud, and a
-        string describing the reason if the user cannot access.
+        Returns a boolean of whether the user can access this cloud, and:
+          - For SSH and Kubernetes, a dictionary that maps context names to
+            the status of the context.
+          - For others, a string describing the reason if cannot access.
 
         Raises NotSupportedError if the capability is
         not supported by this cloud.
@@ -477,18 +485,29 @@ class Cloud:
         assert_never(cloud_capability)
 
     @classmethod
-    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's compute service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
 
     @classmethod
-    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(
+            cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         this cloud's storage service."""
         raise exceptions.NotSupportedError(
             f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
+
+    @classmethod
+    def expand_infras(cls) -> List[str]:
+        """Returns a list of enabled infrastructures for this cloud.
+
+        For Kubernetes and SSH, return a list of resource pools.
+        For all other clouds, return self.
+        """
+        return [cls.canonical_name()]
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
@@ -611,13 +630,13 @@ class Cloud:
         Raises:
             ValueError: If region or zone is invalid or not supported.
         """
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds=self._REPR.lower())
+        return catalog.validate_region_zone(region,
+                                            zone,
+                                            clouds=self._REPR.lower())
 
     def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
-        """Whether a resource needs cleanup after preeemption or failure.
+        """Whether a resource needs cleanup after preemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
@@ -653,8 +672,11 @@ class Cloud:
             resources)
 
         # Docker image is not compatible with ssh proxy command.
-        if skypilot_config.get_nested(
-            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+        if skypilot_config.get_effective_region_config(
+                cloud=str(cls).lower(),
+                region=None,
+                keys=('ssh_proxy_command',),
+                default_value=None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
                     f'Docker image is currently not supported on {cls._REPR} '
@@ -704,6 +726,26 @@ class Cloud:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def check_network_tier_enabled(
+            cls, instance_type: Optional[str],
+            network_tier: resources_utils.NetworkTier) -> None:
+        """Errors out if the network tier is not supported by the
+        cloud provider.
+
+        For BEST tier: always succeeds, will use best available tier.
+
+        Raises:
+            exceptions.NotSupportedError: If the network tier is not supported.
+        """
+        del instance_type  # unused
+
+        # For other tiers, check if supported
+        if network_tier not in cls._SUPPORTED_NETWORK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{network_tier} is not supported by {cls._REPR}.')
 
     @classmethod
     def _translate_disk_tier(
@@ -881,6 +923,11 @@ class Cloud:
     def canonical_name(cls) -> str:
         return cls.__name__.lower()
 
+    @classmethod
+    def display_name(cls) -> str:
+        """Name of the cloud used in messages displayed to the user."""
+        return cls.canonical_name()
+
     def __repr__(self):
         return self._REPR
 
@@ -889,6 +936,12 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+class DummyCloud(Cloud):
+    """A dummy Cloud that has zero egress cost from/to for optimization
+    purpose."""
+    pass
 
 
 # === Helper functions ===

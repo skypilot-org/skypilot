@@ -18,6 +18,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.jobs import scheduler
+from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -49,7 +50,7 @@ class StrategyExecutor:
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int) -> None:
+                 job_id: int, task_id: int) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -65,11 +66,13 @@ class StrategyExecutor:
         self.backend = backend
         self.max_restarts_on_errors = max_restarts_on_errors
         self.job_id = job_id
+        self.task_id = task_id
         self.restart_cnt_on_failure = 0
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
-             task: 'task_lib.Task', job_id: int) -> 'StrategyExecutor':
+             task: 'task_lib.Task', job_id: int,
+             task_id: int) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
@@ -100,7 +103,7 @@ class StrategyExecutor:
                                  from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
-                                     max_restarts_on_errors, job_id)
+                                     max_restarts_on_errors, job_id, task_id)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -235,7 +238,8 @@ class StrategyExecutor:
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True) -> Optional[float]:
+                raise_on_failure: bool = True,
+                recovery: bool = False) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -275,98 +279,134 @@ class StrategyExecutor:
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
-            with scheduler.scheduled_launch(self.job_id):
-                try:
-                    usage_lib.messages.usage.set_internal()
-                    # Detach setup, so that the setup failure can be detected
-                    # by the controller process (job_status -> FAILED_SETUP).
-                    execution.launch(
-                        self.dag,
-                        cluster_name=self.cluster_name,
-                        # We expect to tear down the cluster as soon as the job
-                        # is finished. However, in case the controller dies, set
-                        # autodown to try and avoid a resource leak.
-                        idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                        down=True,
-                        _is_launched_by_jobs_controller=True)
-                    logger.info('Managed job cluster launched.')
-                except (exceptions.InvalidClusterNameError,
-                        exceptions.NoCloudAccessError,
-                        exceptions.ResourcesMismatchError) as e:
-                    logger.error('Failure happened before provisioning. '
-                                 f'{common_utils.format_exception(e)}')
-                    if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(reasons=[e])
-                    return None
-                except exceptions.ResourcesUnavailableError as e:
-                    # This is raised when the launch fails due to prechecks or
-                    # after failing over through all the candidates.
-                    # Please refer to the docstring of `sky.launch` for more
-                    # details of how the exception will be structured.
-                    if not any(
-                            isinstance(err,
-                                       exceptions.ResourcesUnavailableError)
-                            for err in e.failover_history):
-                        # _launch() (this function) should fail/exit directly,
-                        # if none of the failover reasons were because of
-                        # resource unavailability or no failover was attempted
-                        # (the optimizer cannot find feasible resources for
-                        # requested resources), i.e., e.failover_history is
-                        # empty. Failing directly avoids the infinite loop of
-                        # retrying the launch when, e.g., an invalid cluster
-                        # name is used and --retry-until-up is specified.
-                        reasons = (e.failover_history
-                                   if e.failover_history else [e])
-                        reasons_str = '; '.join(
-                            common_utils.format_exception(err)
-                            for err in reasons)
-                        logger.error(
-                            'Failure happened before provisioning. Failover '
-                            f'reasons: {reasons_str}')
+            try:
+                with scheduler.scheduled_launch(self.job_id):
+                    # The job state may have been PENDING during backoff -
+                    # update to STARTING or RECOVERING.
+                    # On the first attempt (when retry_cnt is 1), we should
+                    # already be in STARTING or RECOVERING.
+                    if retry_cnt > 1:
+                        state.set_restarting(self.job_id, self.task_id,
+                                             recovery)
+                    try:
+                        usage_lib.messages.usage.set_internal()
+                        # Detach setup, so that the setup failure can be
+                        # detected by the controller process (job_status ->
+                        # FAILED_SETUP).
+                        execution.launch(
+                            self.dag,
+                            cluster_name=self.cluster_name,
+                            # We expect to tear down the cluster as soon as the
+                            # job is finished. However, in case the controller
+                            # dies, set autodown to try and avoid a resource
+                            # leak.
+                            idle_minutes_to_autostop=_AUTODOWN_MINUTES,
+                            down=True,
+                            _is_launched_by_jobs_controller=True)
+                        logger.info('Managed job cluster launched.')
+                    except (exceptions.InvalidClusterNameError,
+                            exceptions.NoCloudAccessError,
+                            exceptions.ResourcesMismatchError) as e:
+                        logger.error('Failure happened before provisioning. '
+                                     f'{common_utils.format_exception(e)}')
                         if raise_on_failure:
-                            raise exceptions.ProvisionPrechecksError(reasons)
+                            raise exceptions.ProvisionPrechecksError(
+                                reasons=[e])
                         return None
-                    logger.info('Failed to launch a cluster with error: '
-                                f'{common_utils.format_exception(e)})')
-                except Exception as e:  # pylint: disable=broad-except
-                    # If the launch fails, it will be recovered by the following
-                    # code.
-                    logger.info('Failed to launch a cluster with error: '
-                                f'{common_utils.format_exception(e)})')
-                    with ux_utils.enable_traceback():
-                        logger.info(f'  Traceback: {traceback.format_exc()}')
-                else:  # No exception, the launch succeeds.
-                    # At this point, a sky.launch() has succeeded. Cluster may
-                    # be UP (no preemption since) or DOWN (newly preempted).
-                    job_submitted_at = self._wait_until_job_starts_on_cluster()
-                    if job_submitted_at is not None:
-                        return job_submitted_at
-                    # The job fails to start on the cluster, retry the launch.
-                    # TODO(zhwu): log the unexpected error to usage collection
-                    # for future debugging.
-                    logger.info(
-                        'Failed to successfully submit the job to the '
-                        'launched cluster, due to unexpected submission errors '
-                        'or the cluster being preempted during job submission.')
+                    except exceptions.ResourcesUnavailableError as e:
+                        # This is raised when the launch fails due to prechecks
+                        # or after failing over through all the candidates.
+                        # Please refer to the docstring of `sky.launch` for more
+                        # details of how the exception will be structured.
+                        if not any(
+                                isinstance(err,
+                                           exceptions.ResourcesUnavailableError)
+                                for err in e.failover_history):
+                            # _launch() (this function) should fail/exit
+                            # directly, if none of the failover reasons were
+                            # because of resource unavailability or no failover
+                            # was attempted (the optimizer cannot find feasible
+                            # resources for requested resources), i.e.,
+                            # e.failover_history is empty. Failing directly
+                            # avoids the infinite loop of retrying the launch
+                            # when, e.g., an invalid cluster name is used and
+                            # --retry-until-up is specified.
+                            reasons = (e.failover_history
+                                       if e.failover_history else [e])
+                            reasons_str = '; '.join(
+                                common_utils.format_exception(err)
+                                for err in reasons)
+                            logger.error(
+                                'Failure happened before provisioning. '
+                                f'Failover reasons: {reasons_str}')
+                            if raise_on_failure:
+                                raise exceptions.ProvisionPrechecksError(
+                                    reasons)
+                            return None
+                        logger.info('Failed to launch a cluster with error: '
+                                    f'{common_utils.format_exception(e)})')
+                    except Exception as e:  # pylint: disable=broad-except
+                        # If the launch fails, it will be recovered by the
+                        # following code.
+                        logger.info('Failed to launch a cluster with error: '
+                                    f'{common_utils.format_exception(e)})')
+                        with ux_utils.enable_traceback():
+                            logger.info(
+                                f'  Traceback: {traceback.format_exc()}')
+                    else:  # No exception, the launch succeeds.
+                        # At this point, a sky.launch() has succeeded. Cluster
+                        # may be UP (no preemption since) or DOWN (newly
+                        # preempted).
+                        job_submitted_at = (
+                            self._wait_until_job_starts_on_cluster())
+                        if job_submitted_at is not None:
+                            return job_submitted_at
+                        # The job fails to start on the cluster, retry the
+                        # launch.
+                        # TODO(zhwu): log the unexpected error to usage
+                        # collection for future debugging.
+                        logger.info(
+                            'Failed to successfully submit the job to the '
+                            'launched cluster, due to unexpected submission '
+                            'errors or the cluster being preempted during '
+                            'job submission.')
 
-                # If we get here, the launch did not succeed. Tear down the
-                # cluster and retry.
-                managed_job_utils.terminate_cluster(self.cluster_name)
-                if max_retry is not None and retry_cnt >= max_retry:
-                    # Retry forever if max_retry is None.
-                    if raise_on_failure:
-                        with ux_utils.print_exception_no_traceback():
-                            raise exceptions.ManagedJobReachedMaxRetriesError(
-                                'Resources unavailable: failed to launch '
-                                f'clusters after {max_retry} retries.')
-                    else:
-                        return None
-            # Exit the scheduled_launch context so that the scheulde state is
-            # ALIVE during the backoff. This allows other jobs to launch.
-            gap_seconds = backoff.current_backoff()
-            logger.info('Retrying to launch the cluster in '
-                        f'{gap_seconds:.1f} seconds.')
-            time.sleep(gap_seconds)
+                    # If we get here, the launch did not succeed. Tear down the
+                    # cluster and retry.
+                    managed_job_utils.terminate_cluster(self.cluster_name)
+                    if max_retry is not None and retry_cnt >= max_retry:
+                        # Retry forever if max_retry is None.
+                        if raise_on_failure:
+                            with ux_utils.print_exception_no_traceback():
+                                raise (
+                                    exceptions.ManagedJobReachedMaxRetriesError(
+                                        'Resources unavailable: failed to '
+                                        f'launch clusters after {max_retry} '
+                                        'retries.'))
+                        else:
+                            return None
+
+                    # Raise NoClusterLaunchedError to indicate that the job is
+                    # in retry backoff. This will trigger special handling in
+                    # scheduler.schedule_launched().
+                    # We will exit the scheduled_launch context so that the
+                    # schedule state is ALIVE_BACKOFF during the backoff. This
+                    # allows other jobs to launch.
+                    raise exceptions.NoClusterLaunchedError()
+
+            except exceptions.NoClusterLaunchedError:
+                # Update the status to PENDING during backoff.
+                state.set_backoff_pending(self.job_id, self.task_id)
+                # Calculate the backoff time and sleep.
+                gap_seconds = backoff.current_backoff()
+                logger.info('Retrying to launch the cluster in '
+                            f'{gap_seconds:.1f} seconds.')
+                time.sleep(gap_seconds)
+                continue
+            else:
+                # The inner loop should either return or throw
+                # NoClusterLaunchedError.
+                assert False, 'Unreachable'
 
     def should_restart_on_failure(self) -> bool:
         """Increments counter & checks if job should be restarted on a failure.
@@ -389,9 +429,9 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int) -> None:
+                 job_id: int, task_id: int) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
-                         job_id)
+                         job_id, task_id)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
@@ -400,8 +440,10 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True) -> Optional[float]:
-        job_submitted_at = super()._launch(max_retry, raise_on_failure)
+                raise_on_failure: bool = True,
+                recovery: bool = False) -> Optional[float]:
+        job_submitted_at = super()._launch(max_retry, raise_on_failure,
+                                           recovery)
         if job_submitted_at is not None:
             # Only record the cloud/region if the launch is successful.
             handle = global_user_state.get_handle_from_cluster_name(
@@ -436,7 +478,8 @@ class FailoverStrategyExecutor(StrategyExecutor):
                     cloud=launched_cloud, region=launched_region, zone=None)
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = self._launch(raise_on_failure=False)
+                job_submitted_at = self._launch(raise_on_failure=False,
+                                                recovery=True)
                 # Restore the original dag, i.e. reset the region constraint.
                 task.set_resources(original_resources)
                 if job_submitted_at is not None:
@@ -452,7 +495,8 @@ class FailoverStrategyExecutor(StrategyExecutor):
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                            raise_on_failure=False)
+                                            raise_on_failure=False,
+                                            recovery=True)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 gap_seconds = self.RETRY_INIT_GAP_SECONDS
@@ -524,7 +568,8 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                                              region=launched_region)
                 }
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = self._launch(raise_on_failure=False)
+                job_submitted_at = self._launch(raise_on_failure=False,
+                                                recovery=True)
                 task.blocked_resources = None
                 if job_submitted_at is not None:
                     return job_submitted_at
@@ -535,7 +580,8 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                            raise_on_failure=False)
+                                            raise_on_failure=False,
+                                            recovery=True)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 gap_seconds = self.RETRY_INIT_GAP_SECONDS

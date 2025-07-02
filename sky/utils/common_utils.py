@@ -20,11 +20,13 @@ import uuid
 import jsonschema
 
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -69,11 +71,10 @@ def get_usage_run_id() -> str:
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
-    try:
-        int(user_hash, 16)
-    except (TypeError, ValueError):
-        return False
-    return len(user_hash) == USER_HASH_LENGTH
+    # Must start with a letter, followed by alphanumeric characters and hyphens
+    # This covers both old hex format (e.g., "abc123") and new service account
+    # format (e.g., "sa-abc123-token-xyz")
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
 def generate_user_hash() -> str:
@@ -256,11 +257,13 @@ class Backoff:
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
 _using_remote_api_server: Optional[bool] = None
+_current_user: Optional['models.User'] = None
 
 
-def set_client_status(client_entrypoint: Optional[str],
-                      client_command: Optional[str],
-                      using_remote_api_server: bool):
+def set_request_context(client_entrypoint: Optional[str],
+                        client_command: Optional[str],
+                        using_remote_api_server: bool,
+                        user: Optional['models.User']):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
@@ -269,9 +272,11 @@ def set_client_status(client_entrypoint: Optional[str],
     global _current_command
     global _current_client_entrypoint
     global _using_remote_api_server
+    global _current_user
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
     _using_remote_api_server = using_remote_api_server
+    _current_user = user
 
 
 def get_current_command() -> str:
@@ -284,6 +289,26 @@ def get_current_command() -> str:
         return _current_command
 
     return get_pretty_entrypoint_cmd()
+
+
+def get_current_user() -> 'models.User':
+    """Returns the current user."""
+    if _current_user is not None:
+        return _current_user
+    return models.User.get_current_user()
+
+
+def get_current_user_name() -> str:
+    """Returns the current user name."""
+    name = common_utils.get_current_user().name
+    assert name is not None
+    return name
+
+
+def set_current_user(user: 'models.User'):
+    """Sets the current user."""
+    global _current_user
+    _current_user = user
 
 
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
@@ -324,7 +349,75 @@ def get_pretty_entrypoint_cmd() -> str:
         # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
         # things like 'examples/app.py'.
         argv[0] = basename
+
+    # Redact sensitive values from secrets arguments
+    argv = _redact_secrets_values(argv)
+
     return ' '.join(argv)
+
+
+def _redact_secrets_values(argv: List[str]) -> List[str]:
+    """Redact sensitive values from --secret arguments.
+
+    Args:
+        argv: Command line arguments
+
+    Returns:
+        Modified argv with redacted --secret values, or original argv if any
+        error
+
+    Examples:
+        ['sky', 'launch', '--secret', 'HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN=<redacted>']
+
+        ['sky', 'launch', '--secret=HF_TOKEN=secret'] ->
+        ['sky', 'launch', '--secret=HF_TOKEN=<redacted>']
+
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] ->
+        ['sky', 'launch', '--secret', 'HF_TOKEN'] (no change)
+    """
+    try:
+        if not argv:
+            return argv or []
+
+        result = []
+        i = 0
+
+        while i < len(argv):
+            arg = argv[i]
+
+            # Ensure arg is a string
+            if not isinstance(arg, str):
+                result.append(arg)
+                i += 1
+                continue
+
+            if arg == '--secret' and i + 1 < len(argv):
+                result.append(arg)
+                next_arg = argv[i + 1]
+                # Ensure next_arg is a string and handle redaction safely
+                if isinstance(next_arg, str):
+                    redacted = re.sub(r'^([^=]+)=.*', r'\1=<redacted>',
+                                      next_arg)
+                    result.append(redacted)
+                else:
+                    result.append(next_arg)
+                i += 2
+            elif arg.startswith('--secret='):
+                # Redact only if there's a value after the key
+                redacted = re.sub(r'^(--secret=[^=]+)=.*', r'\1=<redacted>',
+                                  arg)
+                result.append(redacted)
+                i += 1
+            else:
+                result.append(arg)
+                i += 1
+
+        return result
+    except Exception:  # pylint: disable=broad-except
+        # If anything goes wrong with redaction, return original argv
+        # This ensures the command can still execute
+        return argv or []
 
 
 def user_and_hostname_hash() -> str:
@@ -668,7 +761,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or getpass.getuser()
+    username = username or common_utils.get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
@@ -723,10 +816,43 @@ def deprecated_function(
     return new_func
 
 
-def truncate_long_string(s: str, max_length: int = 35) -> str:
-    """Truncate a string to a maximum length, preserving whole words."""
+def truncate_long_string(s: str,
+                         max_length: int = 35,
+                         truncate_middle: bool = False) -> str:
+    """Truncate a string to a maximum length.
+
+    Args:
+        s: String to truncate.
+        max_length: Maximum length of the truncated string.
+        truncate_middle: Whether to truncate in the middle of the string.
+            If True, the middle part of the string is replaced with '...'.
+            If False, truncation happens at the end preserving whole words.
+
+    Returns:
+        Truncated string.
+    """
     if len(s) <= max_length:
         return s
+
+    if truncate_middle:
+        # Reserve 3 characters for '...'
+        if max_length <= 3:
+            return '...'
+
+        # Calculate how many characters to keep from beginning and end
+        half_length = (max_length - 3) // 2
+        remainder = (max_length - 3) % 2
+
+        # Keep one more character at the beginning if max_length - 3 is odd
+        start_length = half_length + remainder
+        end_length = half_length
+
+        # When end_length is 0, just show the start part and '...'
+        if end_length == 0:
+            return s[:start_length] + '...'
+        return s[:start_length] + '...' + s[-end_length:]
+
+    # Original end-truncation logic
     splits = s.split(' ')
     if len(splits[0]) > max_length:
         return splits[0][:max_length] + '...'  # Use '…'?
@@ -900,3 +1026,9 @@ def _get_cgroup_memory_limit() -> Optional[int]:
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
     return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
+
+
+def removeprefix(string: str, prefix: str) -> str:
+    if string.startswith(prefix):
+        return string[len(prefix):]
+    return string

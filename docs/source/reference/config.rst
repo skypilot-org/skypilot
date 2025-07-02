@@ -27,6 +27,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
+    :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -37,8 +38,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
@@ -54,6 +54,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`: false
 
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
+
+  :ref:`provision <config-yaml-provision>`:
+    :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -74,6 +77,21 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`kueue <config-yaml-kubernetes-kueue>`:
+      :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
+
+  :ref:`ssh <config-yaml-ssh>`:
+    :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
+      - node-pool-1
+      - node-pool-2
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -124,15 +142,31 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`us-ashburn-1 <config-yaml-oci>`:
       vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+
   :ref:`nebius <config-yaml-nebius>`:
     :ref:`eu-north1 <config-yaml-nebius>`:
       project_id: project-e00xxxxxxxxxxx
       fabric: fabric-3
+      filesystems:
+      - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
+        mount_path: /mnt/fsnew
+        attach_mode: READ_WRITE
     :ref:`eu-west1 <config-yaml-nebius>`:
       project_id: project-e01xxxxxxxxxxx
       fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+
+  :ref:`rbac <config-yaml-rbac>`:
+    :ref:`default_role <config-yaml-rbac-default-role>`: admin
+
+  :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
+
+  :ref:`logs <config-yaml-logs>`:
+    :ref:`store <config-yaml-logs-store>`: gcp
+    gcp:
+      project_id: my-project-id
+
 
 Fields
 ----------
@@ -162,6 +196,14 @@ Example:
 
   api_server:
     endpoint: http://xx.xx.xx.xx:8000
+
+.. _config-yaml-api-server-service-account-token:
+
+``api_server.service_account_token``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
+
 
 
 .. _config-yaml-jobs:
@@ -214,8 +256,7 @@ Example:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         # optionally set specific cloud/region
-        cloud: gcp
-        region: us-central1
+        infra: gcp/us-central1
         # default resources:
         cpus: 4+
         memory: 8x
@@ -356,6 +397,23 @@ Example:
 .. code-block:: yaml
 
   admin_policy: my_package.SkyPilotPolicyV1
+
+.. _config-yaml-provision:
+
+``provision``
+~~~~~~~~~~~~~
+
+.. _config-yaml-provision-ssh-timeout:
+
+``provision.ssh_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for SSH connection probing during provisioning (optional).
+
+Cluster SSH connection is probed during provisioning to check if a cluster is up. This timeout
+determines how long to wait for the connection to be established.
+
+Default: ``10``.
 
 .. _config-yaml-aws:
 
@@ -1039,6 +1097,63 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+.. _config-yaml-kubernetes-kueue:
+
+``kubernetes.kueue``
+~~~~~~~~~~~~~~~~~~~~~
+
+Kueue configuration (optional).
+
+.. _config-yaml-kubernetes-kueue-local-queue-name:
+
+``kubernetes.kueue.local_queue_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
+
+
+.. _config-yaml-kubernetes-context-configs:
+
+``kubernetes.context_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Context-specific configuration for Kubernetes resources (optional).
+
+When using multiple Kubernetes contexts, you can specify context-specific configuration for Kubernetes resources.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
+
+When a config field is specified for both the ``kubernetes`` and specific context ``kubernetes.context_configs.context-name``,
+the context-specific config overrides the general config according to the :ref:`config-overrides` rules.
+
+.. _config-yaml-ssh:
+
+``ssh``
+~~~~~~~
+
+Advanced SSH node pool configuration (optional).
+
+.. _config-yaml-ssh-allowed-node-pools:
+
+``ssh.allowed_node_pools``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed SSH node pools (optional).
+
+List of names that SkyPilot is allowed to use.
+
 .. _config-yaml-oci:
 
 ``oci``
@@ -1094,6 +1209,17 @@ Advanced Nebius configuration (optional).
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
 
+``filesystems``
+    List of filesystems to mount on the nodes (optional).
+    Each filesystem is a dict with the following keys:
+
+    - ``filesystem_id``: ID of the filesystem to mount. Required for each filesystem.
+    - ``filesystem_attach_mode``: Attach mode for the filesystem.
+
+      Allowed values: ``READ_WRITE``, ``READ_ONLY``. Defaults to ``READ_WRITE``.
+    - ``filesystem_mount_path``: Path to mount the filesystem on the nodes.
+
+      Defaults to ``/mnt/filesystem-skypilot-<index>``.
 
 The configuration must be specified in region-specific sections.
 
@@ -1117,6 +1243,14 @@ Example:
         eu-west1:
             project_id: project-e01...
             fabric: fabric-5
+            filesystems:
+              - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                mount_path: /mnt/fsnew
+                attach_mode: READ_WRITE
+              - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                mount_path: /mnt/fsnew2
+                attach_mode: READ_ONLY
+
 
 .. _config-yaml-nebius-use-internal-ips:
 
@@ -1161,9 +1295,85 @@ Example:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
 
+.. _config-yaml-rbac:
 
+``rbac``
+~~~~~~~~
+
+RBAC configuration (optional).
+
+.. _config-yaml-rbac-default-role:
+
+``rbac.default_role``
+~~~~~~~~~~~~~~~~~~~~~
+
+Default role for users (optional).  Either ``admin`` or ``user``.
+
+If not specified, the default role is ``admin``.
+
+Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <api-server-basic-auth>` is configured.
+
+.. _config-yaml-db:
+
+``db``
+~~~~~~
+
+API Server database configuration (optional).
+
+Specify the database connection string to use for SkyPilot. If not specified,
+SkyPilot will use a SQLite database initialized in the ``~/.sky`` directory.
+
+If a PostgreSQL database URL is specified, SkyPilot will use the database to
+persist API server state.
+
+Currently, managed job controller state is not persisted in remote databases
+even if ``db`` is specified.
+
+.. note::
+
+  (available on nightly version 20250626 and later)
+
+  ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+
+.. note::
+
+  If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
+
+  Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
+
+Example:
+
+.. code-block:: yaml
+
+  db: postgresql://postgres@localhost/skypilot
 
 .. toctree::
    :hidden:
 
    Configuration Sources <config-sources>
+
+.. _config-yaml-logs:
+
+``logs``
+~~~~~~~~
+
+External logging storage configuration (optional).
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp
+    gcp:
+      project_id: my-project-id
+
+.. _config-yaml-logs-store:
+
+``logs.store``
+~~~~~~~~~~~~~~
+
+The type of external logging storage to use. Each logging storage might have its own configuration options under ``logs.<store>`` structure. Refer to the :ref:`External Logging Storage <external-logging-storage>` for more details.
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp
