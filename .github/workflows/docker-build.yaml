@@ -36,7 +36,7 @@ on:
     outputs:
       version:
         description: "The version used for the Docker build"
-        value: ${{ jobs.build.outputs.version }}
+        value: ${{ jobs.prepare.outputs.version }}
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -44,11 +44,12 @@ on:
         required: true
 
 jobs:
-  build:
+  prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.latest_version }}
       trigger_type: ${{ steps.trigger_type.outputs.trigger_type }}
+      install_from_source: ${{ steps.install_method.outputs.install_from_source }}
     steps:
       # Determine how this workflow was triggered
       - name: Determine trigger type
@@ -79,9 +80,8 @@ jobs:
             echo "Installing from source (triggered from this file directly)"
           fi
 
-      # For source builds: checkout the repository
+      # Always checkout repository (Docker build always needs Dockerfile)
       - name: Checkout repository
-        if: steps.install_method.outputs.install_from_source == 'true'
         uses: actions/checkout@v4
 
       # For PyPI fetch: download wheel and source
@@ -178,6 +178,29 @@ jobs:
           fi
           cat $GITHUB_OUTPUT
 
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Download artifacts if needed
+      - name: Download artifacts
+        if: needs.prepare.outputs.install_from_source == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: skypilot-artifacts-${{ inputs.package_name }}
+          path: .
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -190,14 +213,58 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Extract platform name for tags
+        id: platform
+        run: |
+          PLATFORM_NAME=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
+          echo "name=$PLATFORM_NAME" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest,${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ steps.version.outputs.latest_version }}"
+          tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
           build-args: |
-            INSTALL_FROM_SOURCE=${{ steps.install_method.outputs.install_from_source }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
+          cache-from: |
+            type=gha,scope=${{ steps.platform.outputs.name }}
+            type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:cache-${{ steps.platform.outputs.name }}
+          cache-to: |
+            type=gha,mode=max,scope=${{ steps.platform.outputs.name }}
+            type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:cache-${{ steps.platform.outputs.name }},mode=max
+
+  manifest:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create and push multi-platform manifest
+        run: |
+          # Create multi-platform manifest with your original tag names
+          docker buildx imagetools create -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest \
+            -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }} \
+            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-arm64
+
+      - name: Note about temporary tags
+        run: |
+          echo "ℹ️  Temporary platform-specific tags created during build:"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-amd64"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-arm64"
+          echo ""
+          echo "✅ Final multi-platform tags available:"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}"
+          echo ""
+          echo "Note: Temporary tags remain in registry but are implementation details."
+          echo "Users should pull the final multi-platform tags (latest or version number)."
