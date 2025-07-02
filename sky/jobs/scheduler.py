@@ -85,8 +85,8 @@ LAUNCHES_PER_CPU = 4
 
 # os.cpu_count gives us an Optional[int], ignoring type since mypy has issues
 # if I don't
-WORKERS = int(os.cpu_count()) if os.cpu_count() else 2  # type: ignore
-JOBS_PER_WORKER = 200
+WORKERS = 1
+JOBS_PER_WORKER = 800
 
 
 @lru_cache(maxsize=1)
