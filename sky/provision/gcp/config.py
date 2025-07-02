@@ -857,7 +857,8 @@ def _configure_subnet(region: str, cluster_name: str,
     enable_gpu_direct = config.provider_config.get('enable_gpu_direct', False)
     enable_gvnic = config.provider_config.get('enable_gvnic', False)
     network_tier = config.provider_config.get('network_tier', 'standard')
-    if enable_gpu_direct or network_tier == resources_utils.NetworkTier.BEST:
+    if (enable_gpu_direct or
+            network_tier == resources_utils.NetworkTier.BEST.value):
         if not enable_gvnic:
             logger.warning(
                 'Enable GPU Direct requires gvnic to be enabled, enabling gvnic'

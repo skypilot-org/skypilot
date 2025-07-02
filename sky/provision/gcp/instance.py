@@ -14,6 +14,7 @@ from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -583,8 +584,10 @@ def cleanup_custom_multi_network(
     project_id = provider_config['project_id']
     region = provider_config['region']
     enable_gpu_direct = provider_config.get('enable_gpu_direct', False)
+    network_tier = provider_config.get('network_tier', 'standard')
 
-    if enable_gpu_direct:
+    if (enable_gpu_direct or
+            network_tier == resources_utils.NetworkTier.BEST.value):
         gcp_config.delete_gpu_direct_vpcs_and_subnets(cluster_name_on_cloud,
                                                       project_id, region,
                                                       failover)

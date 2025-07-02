@@ -4444,15 +4444,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 launched_resources = (
                     handle.launched_resources.assert_launchable())
                 cloud = launched_resources.cloud
-                config = common_utils.read_yaml(handle.cluster_yaml)
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
                 ports_cleaned_up = False
                 custom_multi_network_cleaned_up = False
                 try:
-                    launched_resources = (
-                        handle.launched_resources.assert_launchable())
-                    cloud = launched_resources.cloud
-                    config = global_user_state.get_cluster_yaml_dict(
-                        handle.cluster_yaml)
                     cloud.check_features_are_supported(
                         launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
