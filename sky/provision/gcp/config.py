@@ -714,7 +714,6 @@ def get_gpu_direct_usable_vpcs_and_subnets(
 ) -> List[Tuple[str, 'google.cloud.compute_v1.types.compute.Subnetwork']]:
     """Return a list of usable VPCs and subnets for GPU Direct."""
     project_id = config.provider_config['project_id']
-    vpc_prefix = constants.SKYPILOT
     cluster_prefix = cluster_name
     vpc_subnet_pairs = []
 
@@ -724,9 +723,9 @@ def get_gpu_direct_usable_vpcs_and_subnets(
     cidr_prefix = constants.SKYPILOT_GPU_DIRECT_VPC_CIDR_PREFIX
     for i in range(num_vpcs):
         if i == 0:
-            vpc_name = f'{vpc_prefix}-{cluster_prefix}-mgmt-net'
+            vpc_name = f'{cluster_prefix}-mgmt-net'
         else:
-            vpc_name = f'{vpc_prefix}-{cluster_prefix}-data-net-{i}'
+            vpc_name = f'{cluster_prefix}-data-net-{i}'
         subnet_name = f'{vpc_name}-sub'
         subnet_cidr_range = f'{cidr_prefix}.{i}.0/24'
         # Check if VPC exists
@@ -769,7 +768,6 @@ def delete_gpu_direct_vpcs_and_subnets(
 ):
     """Delete GPU Direct subnets, firewalls, and VPCs."""
     compute = _create_compute()
-    vpc_prefix = constants.SKYPILOT
     cluster_prefix = cluster_name
 
     # TODO(hailong): Determine the num_vpcs per different GPU Direct types
@@ -777,9 +775,9 @@ def delete_gpu_direct_vpcs_and_subnets(
 
     for i in range(num_vpcs):
         if i == 0:
-            vpc_name = f'{vpc_prefix}-{cluster_prefix}-mgmt-net'
+            vpc_name = f'{cluster_prefix}-mgmt-net'
         else:
-            vpc_name = f'{vpc_prefix}-{cluster_prefix}-data-net-{i}'
+            vpc_name = f'{cluster_prefix}-data-net-{i}'
         # Check if VPC exists
         vpc_list = _list_vpcnets(project_id, compute, filter=f'name={vpc_name}')
         if not vpc_list:
