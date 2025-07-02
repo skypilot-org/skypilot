@@ -84,7 +84,8 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._num_overprovision: Optional[int] = num_overprovision
         self._ports: Optional[str] = ports
-        self._target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = target_qps_per_replica
+        self._target_qps_per_replica: Optional[Union[float, Dict[
+            str, float]]] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
@@ -202,7 +203,7 @@ class SkyServiceSpec:
         use_instance_type_aware = service_config['use_instance_type_aware']
         target_qps_per_replica = service_config['target_qps_per_replica']
         load_balancing_policy = service_config['load_balancing_policy']
-        
+
         if use_instance_type_aware:
             if not isinstance(target_qps_per_replica, dict):
                 with ux_utils.print_exception_no_traceback():
@@ -212,9 +213,9 @@ class SkyServiceSpec:
                         'accelerator types to QPS values.')
             if load_balancing_policy != 'instance_aware_least_load':
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'When use_instance_type_aware is True, '
-                        'load_balancing_policy must be "instance_aware_least_load".')
+                    raise ValueError('When use_instance_type_aware is True, '
+                                     'load_balancing_policy must be '
+                                     '"instance_aware_least_load".')
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
@@ -398,7 +399,8 @@ class SkyServiceSpec:
         return self._ports
 
     @property
-    def target_qps_per_replica(self) -> Optional[Union[float, Dict[str, float]]]:
+    def target_qps_per_replica(
+            self) -> Optional[Union[float, Dict[str, float]]]:
         return self._target_qps_per_replica
 
     @property

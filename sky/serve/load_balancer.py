@@ -15,8 +15,8 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
+from sky.serve.service_spec import SkyServiceSpec
 from sky.utils import common_utils
-from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
 
@@ -29,13 +29,12 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(
-            self,
-            controller_url: str,
-            load_balancer_port: int,
-            load_balancing_policy_name: Optional[str] = None,
-            tls_credential: Optional[serve_utils.TLSCredential] = None,
-            service_spec: Optional['service_spec.SkyServiceSpec'] = None) -> None:
+    def __init__(self,
+                 controller_url: str,
+                 load_balancer_port: int,
+                 load_balancing_policy_name: Optional[str] = None,
+                 tls_credential: Optional[serve_utils.TLSCredential] = None,
+                 service_spec: Optional[SkyServiceSpec] = None) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -54,14 +53,15 @@ class SkyServeLoadBalancer:
         # Use the registry to create the load balancing policy
         self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
             load_balancing_policy_name)
-        
+
         # Set accelerator QPS for instance-aware policies
-        if (service_spec and service_spec.target_qps_per_replica and 
-            isinstance(service_spec.target_qps_per_replica, dict) and
-            hasattr(self._load_balancing_policy, 'set_target_qps_per_accelerator')):
+        if (service_spec and service_spec.target_qps_per_replica and
+                isinstance(service_spec.target_qps_per_replica, dict) and
+                hasattr(self._load_balancing_policy,
+                        'set_target_qps_per_accelerator')):
             self._load_balancing_policy.set_target_qps_per_accelerator(
                 service_spec.target_qps_per_replica)
-        
+
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
@@ -84,10 +84,9 @@ class SkyServeLoadBalancer:
 
     async def _sync_with_controller_once(self) -> List[asyncio.Task]:
         close_client_tasks = []
-        # Initialize variables outside try block to ensure they are always defined
         ready_replica_urls = []
         replica_info = []
-        
+
         async with aiohttp.ClientSession() as session:
             try:
                 # Send request information
@@ -117,7 +116,8 @@ class SkyServeLoadBalancer:
                         ready_replica_urls)
                     # Set replica info for instance-aware policies
                     if hasattr(self._load_balancing_policy, 'set_replica_info'):
-                        self._load_balancing_policy.set_replica_info(replica_info)
+                        self._load_balancing_policy.set_replica_info(
+                            replica_info)
                     for replica_url in ready_replica_urls:
                         if replica_url not in self._client_pool:
                             self._client_pool[replica_url] = httpx.AsyncClient(
@@ -282,20 +282,21 @@ class SkyServeLoadBalancer:
                     **uvicorn_tls_kwargs)
 
 
-def run_load_balancer(
-        controller_addr: str,
-        load_balancer_port: int,
-        load_balancing_policy_name: Optional[str] = None,
-        tls_credential: Optional[serve_utils.TLSCredential] = None,
-        service_spec: Optional['service_spec.SkyServiceSpec'] = None) -> None:
+def run_load_balancer(controller_addr: str,
+                      load_balancer_port: int,
+                      load_balancing_policy_name: Optional[str] = None,
+                      tls_credential: Optional[
+                          serve_utils.TLSCredential] = None,
+                      service_spec: Optional[SkyServiceSpec] = None) -> None:
     """ Run the load balancer.
 
     Args:
         controller_addr: The address of the controller.
         load_balancer_port: The port where the load balancer listens to.
-        policy_name: The name of the load balancing policy to use. Defaults to
-            None.
-        tls_credential: The TLS credentials for HTTPS endpoint. Defaults to None.
+        policy_name: The name of the load balancing policy to use.
+        Defaults to None.
+        tls_credential:
+            The TLS credentials for HTTPS endpoint. Defaults to None.
         service_spec: The service specification containing accelerator QPS
             information. Defaults to None.
     """

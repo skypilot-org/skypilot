@@ -3,7 +3,7 @@ import collections
 import random
 import threading
 import typing
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 
@@ -148,9 +148,10 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             self.load_map[replica_url] -= 1
 
 
-class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy, name='instance_aware_least_load'):
+class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy,
+                                   name='instance_aware_least_load'):
     """Instance-aware least load load balancing policy.
-    
+
     This policy considers the accelerator type and its QPS capabilities
     when distributing load. It normalizes the load by dividing the current
     load by the target QPS for that accelerator type.
@@ -160,7 +161,8 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy, name='instance_aware_lea
         super().__init__()
         self.load_map: Dict[str, int] = collections.defaultdict(int)
         self.replica_info: Dict[str, Dict[str, Any]] = {}  # replica_url -> info
-        self.target_qps_per_accelerator: Dict[str, float] = {}  # accelerator_type -> target_qps
+        self.target_qps_per_accelerator: Dict[str, float] = {
+        }  # accelerator_type -> target_qps
         self.lock = threading.Lock()
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
@@ -180,37 +182,35 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy, name='instance_aware_lea
     def set_replica_info(self, replica_info: List[Dict[str, Any]]) -> None:
         """Set replica information including accelerator types."""
         with self.lock:
-            self.replica_info = {
-                info['url']: info for info in replica_info
-            }
-            logger.info(f'InstanceAwareLeastLoadPolicy: Set replica info: {self.replica_info}')
+            self.replica_info = {info['url']: info for info in replica_info}
+            logger.info(f'Set replica info: {self.replica_info}')
 
-    def set_target_qps_per_accelerator(self, target_qps_per_accelerator: Dict[str, float]) -> None:
+    def set_target_qps_per_accelerator(
+            self, target_qps_per_accelerator: Dict[str, float]) -> None:
         """Set target QPS for each accelerator type."""
         with self.lock:
             self.target_qps_per_accelerator = target_qps_per_accelerator
-            logger.info(f'InstanceAwareLeastLoadPolicy: Set target QPS per accelerator: {self.target_qps_per_accelerator}')
 
     def _get_normalized_load(self, replica_url: str) -> float:
         """Get normalized load for a replica based on its accelerator type."""
         current_load = self.load_map.get(replica_url, 0)
-        
+
         # Get accelerator type for this replica
         replica_data = self.replica_info.get(replica_url, {})
         accelerator_type = replica_data.get('gpu_type', 'unknown')
-        
+
         # Get target QPS for this accelerator type with flexible matching
         target_qps = self._get_target_qps_for_accelerator(accelerator_type)
-        
-        # Normalize load: current_load / target_qps
-        # This means H100 with target_qps=2.5 will have normalized_load = current_load/2.5
-        # and A100 with target_qps=1.25 will have normalized_load = current_load/1.25
-        normalized_load = current_load / target_qps if target_qps > 0 else float('inf')
-        
+
+        # Load is normalized by target QPS
+        normalized_load = current_load / target_qps
+
         logger.info(f'InstanceAwareLeastLoadPolicy: Replica {replica_url} - '
-                   f'GPU type: {accelerator_type}, current load: {current_load}, '
-                   f'target QPS: {target_qps}, normalized load: {normalized_load}')
-        
+                    f'GPU type: {accelerator_type}, '
+                    f'current load: {current_load}, '
+                    f'target QPS: {target_qps}, '
+                    f'normalized load: {normalized_load}')
+
         return normalized_load
 
     def _get_target_qps_for_accelerator(self, accelerator_type: str) -> float:
@@ -218,18 +218,19 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy, name='instance_aware_lea
         # Direct match first
         if accelerator_type in self.target_qps_per_accelerator:
             return self.target_qps_per_accelerator[accelerator_type]
-        
+
         # Try matching by base name (e.g., 'A100' matches 'A100:1')
         for config_key in self.target_qps_per_accelerator.keys():
             # Remove count suffix (e.g., 'A100:1' -> 'A100')
             base_name = config_key.split(':')[0]
             if accelerator_type == base_name:
                 return self.target_qps_per_accelerator[config_key]
-        
+
         # Fallback to minimum QPS
-        logger.warning(f'No matching QPS found for accelerator type: {accelerator_type}. '
-                      f'Available types: {list(self.target_qps_per_accelerator.keys())}. '
-                      f'Using default value 1.0 as fallback.')
+        logger.warning(
+            f'No matching QPS found for accelerator type: {accelerator_type}. '
+            f'Available types: {list(self.target_qps_per_accelerator.keys())}. '
+            f'Using default value 1.0 as fallback.')
         return 1.0
 
     def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
@@ -242,11 +243,11 @@ class InstanceAwareLeastLoadPolicy(LoadBalancingPolicy, name='instance_aware_lea
             for replica in self.ready_replicas:
                 normalized_load = self._get_normalized_load(replica)
                 replica_loads.append((replica, normalized_load))
-            
+
             # Select replica with minimum normalized load
             selected_replica = min(replica_loads, key=lambda x: x[1])[0]
-            logger.info(f'InstanceAwareLeastLoadPolicy: Available replicas and loads: {replica_loads}')
-            logger.info(f'InstanceAwareLeastLoadPolicy: Selected replica: {selected_replica}')
+            logger.info(f'Available replicas and loads: {replica_loads}')
+            logger.info(f'Selected replica: {selected_replica}')
             return selected_replica
 
     def pre_execute_hook(self, replica_url: str,
