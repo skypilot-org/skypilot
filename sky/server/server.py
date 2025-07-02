@@ -229,7 +229,8 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
 
 
 class InitializeRequestAuthUserMiddleware(
-    starlette.middleware.base.BaseHTTPMiddleware):
+        starlette.middleware.base.BaseHTTPMiddleware):
+
     async def dispatch(self, request: fastapi.Request, call_next):
         # Make sure that request.state.auth_user is set. Otherwise, we may get a
         # KeyError while trying to read it.
