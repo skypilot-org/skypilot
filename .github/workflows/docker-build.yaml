@@ -103,11 +103,9 @@ jobs:
             VERSION_TO_DOWNLOAD="$LATEST_VERSION"
           fi
 
-          # Download wheel and source distribution
+          # Download wheel
           mkdir -p dist
           pip download --no-deps --dest dist ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
-          # Also download source distribution to extract source code
-          pip download --no-deps --no-binary=:all: --dest dist ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
 
       # For PyPI fetch: upload artifacts for reuse
       - name: Upload artifacts
@@ -125,24 +123,10 @@ jobs:
           name: skypilot-artifacts-${{ inputs.package_name }}
           path: .
 
-      - name: Extract source tarball
-        if: steps.install_method.outputs.install_from_source == 'false'
-        run: |
-          # Find the tarball in dist directory
-          TARBALL=$(ls dist/skypilot-*.tar.gz)
-          if [ -z "$TARBALL" ]; then
-            echo "Error: No tarball found in dist directory"
-            exit 1
-          fi
-          # Extract to current directory
-          tar -xzf "$TARBALL" --strip-components=1
-
-      - name: Verify source code
-        run: |
-          if [ ! -f "setup.py" ]; then
-            echo "Error: Source code not properly prepared"
-            exit 1
-          fi
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
 
       - name: Find and verify version
         id: version
@@ -152,20 +136,36 @@ jobs:
               echo "Error: Version must be provided when building from source"
               exit 1
             fi
+            # Verify sky/__init__.py exists
+            if [ ! -f "sky/__init__.py" ]; then
+              echo "Error: sky/__init__.py not found"
+              exit 1
+            fi
             # Use the provided version and sed replace in source
             echo "Using provided version for source build: ${{ inputs.version }}"
-            echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
             sed -i "s/__version__ = '.*'/__version__ = '${{ inputs.version }}'/g" sky/__init__.py
-          else
-            # Extract version from sky/__init__.py
-            VERSION=$(grep "__version__ = " sky/__init__.py | cut -d"'" -f2)
-            echo "Using version from source: $VERSION"
-            echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
+          # Setup uv environment and install package
+          uv venv --seed ~/version-env
+          source ~/version-env/bin/activate
+
+          if [ "${{ steps.install_method.outputs.install_from_source }}" == "true" ]; then
+            echo "Installing from source..."
+            uv pip install -e .
+          else
+            echo "Installing from wheel..."
+            WHEEL=$(ls dist/skypilot-*.whl)
+            uv pip install "$WHEEL"
+          fi
+
+          # Extract version using sky -v
+          VERSION=$(sky -v | grep -o 'version [0-9][^,]*' | cut -d' ' -f2)
+          echo "Installed version: $VERSION"
+          echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
+
           # Verify version is not exactly 1.0.0-dev0
-          VERSION_TO_CHECK=$(cat $GITHUB_OUTPUT | grep "latest_version=" | cut -d"=" -f2)
-          if [[ "$VERSION_TO_CHECK" == "1.0.0-dev0" ]]; then
+          if [[ "$VERSION" == "1.0.0-dev0" ]]; then
             echo "Error: Version cannot be exactly 1.0.0-dev0"
             exit 1
           fi
