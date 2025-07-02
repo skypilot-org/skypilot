@@ -51,6 +51,9 @@ jobs:
       trigger_type: ${{ steps.trigger_type.outputs.trigger_type }}
       install_from_source: ${{ steps.install_method.outputs.install_from_source }}
     steps:
+      # Always checkout repository (Docker build always needs Dockerfile)
+      - name: Checkout repository
+        uses: actions/checkout@v4
       # Determine how this workflow was triggered
       - name: Determine trigger type
         id: trigger_type
@@ -79,10 +82,6 @@ jobs:
             echo "install_from_source=true" >> $GITHUB_OUTPUT
             echo "Installing from source (triggered from this file directly)"
           fi
-
-      # Always checkout repository (Docker build always needs Dockerfile)
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       # For PyPI fetch: download wheel and source
       - name: Download wheel from PyPI
@@ -178,6 +177,13 @@ jobs:
           fi
           cat $GITHUB_OUTPUT
 
+      # Upload complete build context (source code + wheels) for build jobs
+      - name: Upload build context
+        uses: actions/upload-artifact@v4
+        with:
+          name: skypilot-build-context-${{ inputs.package_name }}
+          path: .
+
   build:
     needs: prepare
     strategy:
@@ -190,15 +196,11 @@ jobs:
             runner: ubuntu-24.04-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Download artifacts if needed
-      - name: Download artifacts
-        if: needs.prepare.outputs.install_from_source == 'false'
+      # Download complete build context (source code + wheels if applicable)
+      - name: Download build context
         uses: actions/download-artifact@v4
         with:
-          name: skypilot-artifacts-${{ inputs.package_name }}
+          name: skypilot-build-context-${{ inputs.package_name }}
           path: .
 
       - name: Set up Docker Buildx
