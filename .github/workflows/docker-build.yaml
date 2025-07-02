@@ -120,7 +120,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: skypilot-artifacts-${{ inputs.package_name }}
-          path: .
+          path: dist/
 
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v4
