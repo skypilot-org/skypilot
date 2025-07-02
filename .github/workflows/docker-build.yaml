@@ -12,9 +12,17 @@ on:
           - 'skypilot'
         default: 'skypilot-nightly'
       version:
-        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625, optional, use latest version if not provided)'
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625, optional if fetch from PyPI, required if build from source)'
         required: false
         type: string
+      build_method:
+        description: 'Build method: build from source or fetch from PyPI'
+        required: true
+        type: choice
+        options:
+          - 'source'
+          - 'pypi'
+        default: 'source'
   workflow_call:
     inputs:
       package_name:
@@ -54,23 +62,59 @@ jobs:
             echo "Triggered from this file directly"
           fi
 
-      # For trigger from this file directly: checkout the repository
-      - name: Checkout repository
-        if: steps.trigger_type.outputs.trigger_type == 'direct'
-        uses: actions/checkout@v4
-
       - name: Determine installation method
         id: install_method
         run: |
           if [ "${{ steps.trigger_type.outputs.trigger_type }}" == "workflow_call" ]; then
             echo "install_from_source=false" >> $GITHUB_OUTPUT
             echo "Installing from wheel (triggered by other file through workflow_call)"
+          elif [ "${{ inputs.build_method }}" == "pypi" ]; then
+            echo "install_from_source=false" >> $GITHUB_OUTPUT
+            echo "Installing from wheel (fetch from PyPI)"
           else
             echo "install_from_source=true" >> $GITHUB_OUTPUT
             echo "Installing from source (triggered from this file directly)"
           fi
 
-      # For trigger by other file through workflow_call: download all artifacts
+      # For source builds: checkout the repository
+      - name: Checkout repository
+        if: steps.install_method.outputs.install_from_source == 'true'
+        uses: actions/checkout@v4
+
+      # For PyPI fetch: download wheel and source
+      - name: Download wheel from PyPI
+        if: steps.install_method.outputs.install_from_source == 'false' && inputs.build_method == 'pypi'
+        run: |
+          # Determine version to download
+          if [ -n "${{ inputs.version }}" ]; then
+            # Use the provided version
+            echo "Using provided version: ${{ inputs.version }}"
+            VERSION_TO_DOWNLOAD="${{ inputs.version }}"
+          else
+            # Fetch package info from PyPI
+            echo "Fetching package info for ${{ inputs.package_name }}"
+            PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
+            # Parse JSON and get the latest version
+            LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+            echo "Latest version found: $LATEST_VERSION"
+            VERSION_TO_DOWNLOAD="$LATEST_VERSION"
+          fi
+
+          # Download wheel and source distribution
+          mkdir -p dist
+          pip download --no-deps --dest dist ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
+          # Also download source distribution to extract source code
+          pip download --no-deps --no-binary=:all: --dest dist ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
+
+      # For PyPI fetch: upload artifacts for reuse
+      - name: Upload artifacts
+        if: steps.install_method.outputs.install_from_source == 'false' && inputs.build_method == 'pypi'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skypilot-artifacts-${{ inputs.package_name }}
+          path: dist/
+
+      # For trigger by other file through workflow_call or PyPI fetch: download all artifacts
       - name: Download artifacts
         if: steps.install_method.outputs.install_from_source == 'false'
         uses: actions/download-artifact@v4
@@ -100,9 +144,13 @@ jobs:
       - name: Find and verify version
         id: version
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            # Use the provided version, trigger from this file directly must specify the version
-            echo "Using provided version: ${{ inputs.version }}"
+          if [ "${{ steps.install_method.outputs.install_from_source }}" == "true" ]; then
+            if [ -z "${{ inputs.version }}" ]; then
+              echo "Error: Version must be provided when building from source"
+              exit 1
+            fi
+            # Use the provided version and sed replace in source
+            echo "Using provided version for source build: ${{ inputs.version }}"
             echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
             sed -i "s/__version__ = '.*'/__version__ = '${{ inputs.version }}'/g" sky/__init__.py
           else
