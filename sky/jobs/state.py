@@ -268,9 +268,13 @@ def _init_db_async(func):
     """Initialize the async database."""
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        initialize_and_get_db_async()
-        return func(*args, **kwargs)
+    async def wrapper(*args, **kwargs):
+        if _SQLALCHEMY_ENGINE_ASYNC is None:
+            # this may happen multiple times since there is no locking
+            # here but thats fine, this is just a short circuit for the
+            # common case.
+            await job_utils.to_thread(initialize_and_get_db_async)
+        return await func(*args, **kwargs)
 
     return wrapper
 

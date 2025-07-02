@@ -561,7 +561,8 @@ class JobsController:
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
-            self._logger.info(f'Starting recovery for task {task_id}')
+            self._logger.info(f'Starting recovery for task {task_id}, '
+                              f'it is currently {job_status}')
             await managed_job_state.set_recovering_async(
                 job_id=self._job_id,
                 task_id=task_id,

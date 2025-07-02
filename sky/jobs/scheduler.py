@@ -135,6 +135,7 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         pass
 
     if to_start:
+        print(f'Starting controller for job {job_id}')
         activate_python_env_cmd = (
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
         source_environment_cmd = (f'source {env_file_path};'
