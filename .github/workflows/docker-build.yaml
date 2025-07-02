@@ -193,7 +193,7 @@ jobs:
           - platform: linux/amd64
             runner: ubuntu-latest
           - platform: linux/arm64
-            runner: ubuntu-24.04-arm64
+            runner: ubuntu-22.04-arm64
     runs-on: ${{ matrix.runner }}
     steps:
       # Download complete build context (source code + wheels if applicable)
