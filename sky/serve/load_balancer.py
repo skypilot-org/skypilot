@@ -56,10 +56,11 @@ class SkyServeLoadBalancer:
             load_balancing_policy_name)
         
         # Set accelerator QPS for instance-aware policies
-        if (service_spec and service_spec.accelerator_qps and 
-            hasattr(self._load_balancing_policy, 'set_accelerator_qps')):
-            self._load_balancing_policy.set_accelerator_qps(
-                service_spec.accelerator_qps)
+        if (service_spec and service_spec.target_qps_per_replica and 
+            isinstance(service_spec.target_qps_per_replica, dict) and
+            hasattr(self._load_balancing_policy, 'set_target_qps_per_accelerator')):
+            self._load_balancing_policy.set_target_qps_per_accelerator(
+                service_spec.target_qps_per_replica)
         
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
@@ -83,6 +84,10 @@ class SkyServeLoadBalancer:
 
     async def _sync_with_controller_once(self) -> List[asyncio.Task]:
         close_client_tasks = []
+        # Initialize variables outside try block to ensure they are always defined
+        ready_replica_urls = []
+        replica_info = []
+        
         async with aiohttp.ClientSession() as session:
             try:
                 # Send request information

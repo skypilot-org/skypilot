@@ -278,7 +278,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                     load_balancer_log_file).run,
                 args=(controller_addr, load_balancer_port,
                       service_spec.load_balancing_policy,
-                      service_spec.tls_credential))
+                      service_spec.tls_credential,
+                      service_spec))
             load_balancer_process.start()
 
             if not is_recovery:
