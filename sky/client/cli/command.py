@@ -24,6 +24,7 @@ listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
 import collections
+import difflib
 import fnmatch
 import os
 import pathlib
@@ -40,7 +41,6 @@ import click
 import colorama
 import requests as requests_lib
 from rich import progress as rich_progress
-import difflib
 import yaml
 
 import sky
@@ -766,15 +766,15 @@ class _NaturalOrderGroup(click.Group):
 
         if cmd_name in self._common_mistakes:
             suggestion = self._common_mistakes[cmd_name]
-            ctx.fail(
-                f'No such command \'{cmd_name}\'.'
-                f'Did you mean: \'{suggestion}\'?'
-            )
+            ctx.fail(f'No such command \'{cmd_name}\'.'
+                     f'Did you mean: \'{suggestion}\'?')
 
-        matches = difflib.get_close_matches(
-            cmd_name, self.commands.keys(), n=2, cutoff=0.5)
+        matches = difflib.get_close_matches(cmd_name,
+                                            self.commands.keys(),
+                                            n=2,
+                                            cutoff=0.5)
         if matches:
-            suggestion = "', '".join(matches)
+            suggestion = '\', \''.join(matches)
             ctx.fail(f'No such command \'{cmd_name}\'.'
                      f'Did you mean: \'{suggestion}\'?')
         else:
