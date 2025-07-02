@@ -21,6 +21,7 @@
 
 import pathlib
 import re
+import shlex
 import tempfile
 import textwrap
 from typing import Dict, List
@@ -1969,7 +1970,7 @@ def test_gcp_network_tier():
 def test_gcp_network_tier_with_gpu():
     """Test GCP network_tier=best with GPU to verify GPU Direct functionality."""
     name = smoke_tests_utils.get_cluster_name() + '-gpu-best'
-
+    cmd='echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths"'
     test = smoke_tests_utils.Test(
         'gcp-network-tier-best-gpu',
         [
@@ -1978,11 +1979,7 @@ def test_gcp_network_tier_with_gpu():
             f'--gpus H100:8 --network-tier best '
             f'echo "Testing network tier best with GPU"',
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths"'
-            )
+            f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=15 * 60,  # 15 mins for GPU provisioning
