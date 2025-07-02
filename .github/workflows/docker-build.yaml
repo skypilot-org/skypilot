@@ -12,8 +12,8 @@ on:
           - 'skypilot'
         default: 'skypilot-nightly'
       version:
-        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625)'
-        required: true
+        description: 'SkyPilot version to build (i.e. 1.0.0.dev20250625, optional, use latest version if not provided)'
+        required: false
         type: string
   workflow_call:
     inputs:
@@ -27,7 +27,7 @@ on:
         type: string
     outputs:
       version:
-        description: "The version fetched from PyPI"
+        description: "The version used for the Docker build"
         value: ${{ jobs.build.outputs.version }}
     secrets:
       DOCKER_USERNAME:
@@ -40,24 +40,37 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.latest_version }}
+      trigger_type: ${{ steps.trigger_type.outputs.trigger_type }}
     steps:
-      # For manual trigger: checkout the repository
+      # Determine how this workflow was triggered
+      - name: Determine trigger type
+        id: trigger_type
+        run: |
+          if [ -n "${{ github.workflow_ref }}" ]; then
+            echo "trigger_type=workflow_call" >> $GITHUB_OUTPUT
+            echo "Triggered by other file through workflow_call"
+          else
+            echo "trigger_type=direct" >> $GITHUB_OUTPUT
+            echo "Triggered from this file directly"
+          fi
+
+      # For trigger from this file directly: checkout the repository
       - name: Checkout repository
-        if: github.event_name == 'workflow_dispatch'
+        if: steps.trigger_type.outputs.trigger_type == 'direct'
         uses: actions/checkout@v4
 
       - name: Determine installation method
         id: install_method
         run: |
-          if [ -n "${{ github.workflow_ref }}" ]; then
+          if [ "${{ steps.trigger_type.outputs.trigger_type }}" == "workflow_call" ]; then
             echo "install_from_source=false" >> $GITHUB_OUTPUT
-            echo "Installing from wheel (workflow call)"
+            echo "Installing from wheel (triggered by other file through workflow_call)"
           else
             echo "install_from_source=true" >> $GITHUB_OUTPUT
-            echo "Installing from source (direct trigger)"
+            echo "Installing from source (triggered from this file directly)"
           fi
 
-      # For workflow trigger: download all artifacts
+      # For trigger by other file through workflow_call: download all artifacts
       - name: Download artifacts
         if: steps.install_method.outputs.install_from_source == 'false'
         uses: actions/download-artifact@v4
@@ -88,7 +101,7 @@ jobs:
         id: version
         run: |
           if [ -n "${{ inputs.version }}" ]; then
-            # Use the provided version, manual trigger must specify the version
+            # Use the provided version, trigger from this file directly must specify the version
             echo "Using provided version: ${{ inputs.version }}"
             echo "latest_version=${{ inputs.version }}" >> $GITHUB_OUTPUT
             sed -i "s/__version__ = '.*'/__version__ = '${{ inputs.version }}'/g" sky/__init__.py
