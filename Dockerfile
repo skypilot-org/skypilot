@@ -72,8 +72,15 @@ RUN cd /skypilot && \
         echo "Skipping dashboard build for wheel installation"; \
     fi
 
-RUN sky -v && \
-    sky api info
+RUN sky -v && sky api info || { \
+        echo "=== SkyPilot API server failed to start. Checking logs... ==="; \
+        if [ -f ~/.sky/api_server/server.log ]; then \
+            cat ~/.sky/api_server/server.log; \
+        else \
+            echo "No server log file found at ~/.sky/api_server/server.log"; \
+        fi; \
+        exit 1; \
+    }
 
 # Cleanup all caches to reduce the image size
 RUN conda clean -afy && \
