@@ -19,7 +19,7 @@ MIN_COMPATIBLE_API_VERSION = 11
 # The semantic version of the minimum compatible API version.
 # Refer to MIN_COMPATIBLE_API_VERSION for more details.
 # Note (dev): DO NOT edit this constant manually.
-MIN_COMPATIBLE_VERSION = '0.11.0'
+MIN_COMPATIBLE_VERSION = '0.10.0'
 
 # The HTTP header name for the API version of the sender.
 API_VERSION_HEADER = 'X-SkyPilot-API-Version'
