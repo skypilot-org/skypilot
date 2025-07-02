@@ -155,7 +155,14 @@ jobs:
             uv pip install -e .
           else
             echo "Installing from wheel..."
-            WHEEL=$(ls dist/skypilot-*.whl)
+            # Find wheel file - handle both skypilot and skypilot-nightly, with underscores
+            WHEEL=$(ls dist/*skypilot*.whl | head -1)
+            if [ -z "$WHEEL" ]; then
+              echo "Error: No wheel file found in dist directory"
+              ls -la dist/
+              exit 1
+            fi
+            echo "Found wheel: $WHEEL"
             uv pip install "$WHEEL"
           fi
 
