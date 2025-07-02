@@ -32,6 +32,9 @@ apiService:
   # They are only used when `enableUserManagement` is true.
   initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
   initialBasicAuthSecret: null
+  # Custom header name for user authentication (overrides default 'X-Auth-Request-Email')
+  # If not set, the default header 'X-Auth-Request-Email' will be used
+  authUserHeaderName: null
   # The number of seconds to wait for the API server to finish processing the request before shutting down.
   # If the API server is not able to finish processing the request within the grace period, the request will be aborted.
   # The default value is 60 seconds.
