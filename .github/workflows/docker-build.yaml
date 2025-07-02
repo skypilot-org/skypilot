@@ -54,12 +54,15 @@ jobs:
       - name: Determine trigger type
         id: trigger_type
         run: |
-          if [ -n "${{ github.workflow_ref }}" ]; then
-            echo "trigger_type=workflow_call" >> $GITHUB_OUTPUT
-            echo "Triggered by other file through workflow_call"
-          else
+          echo "github.workflow_ref: ${{ github.workflow_ref }}"
+
+          # Check if workflow_ref contains this file's path (docker-build.yaml)
+          if [[ "${{ github.workflow_ref }}" == *"docker-build.yaml"* ]]; then
             echo "trigger_type=direct" >> $GITHUB_OUTPUT
             echo "Triggered from this file directly"
+          else
+            echo "trigger_type=workflow_call" >> $GITHUB_OUTPUT
+            echo "Triggered by other file through workflow_call"
           fi
 
       - name: Determine installation method
