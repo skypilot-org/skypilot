@@ -284,6 +284,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         try:
             response = make_authenticated_request('GET',
                                                   '/api/health',
+                                                  server_url=server_url,
                                                   timeout=2.5)
         except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
