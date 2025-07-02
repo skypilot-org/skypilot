@@ -22,7 +22,7 @@ on:
         options:
           - 'source'
           - 'pypi'
-        default: 'source'
+        default: 'pypi'
   workflow_call:
     inputs:
       package_name:
