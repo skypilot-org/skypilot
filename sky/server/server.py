@@ -237,6 +237,7 @@ class InitializeRequestAuthUserMiddleware(
         request.state.auth_user = None
         return await call_next(request)
 
+
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
