@@ -66,16 +66,36 @@ class SkyServeController:
         logger.info('Starting autoscaler.')
         while True:
             try:
-                replica_infos = serve_state.get_replica_infos(
-                    self._service_name)
-                # Use the active versions set by replica manager to make
-                # sure we only scale down the outdated replicas that are
-                # not used by the load balancer.
+                replica_infos = serve_state.get_replica_infos(self._service_name)
                 record = serve_state.get_service_from_name(self._service_name)
                 assert record is not None, ('No service record found for '
                                             f'{self._service_name}')
                 active_versions = record['active_versions']
-                logger.info(f'All replica info: {replica_infos}')
+                logger.info(f'All replica info for autoscaler: {replica_infos}')
+                
+                # Pass replica info to autoscaler if it supports instance-aware autoscaling
+                if hasattr(self._autoscaler, 'set_replica_info'):
+                    # Prepare replica info for instance-aware autoscaling
+                    replica_info_for_autoscaler = []
+                    for info in replica_infos:
+                        # Get GPU type from handle.launched_resources.accelerators
+                        gpu_type = 'unknown'
+                        handle = info.handle()
+                        # launched_resources=1x Lambda(gpu_1x_a10, {'A10': 1}, ports=['8080']) 
+                        if handle is not None and hasattr(handle, 'launched_resources'):
+                            accelerators = handle.launched_resources.accelerators
+                            if accelerators and len(accelerators) > 0:
+                                # Get the first accelerator type
+                                gpu_type = list(accelerators.keys())[0]
+                        
+                        replica_info_for_autoscaler.append({
+                            'url': info.url,
+                            'gpu_type': gpu_type,
+                            'replica_id': info.replica_id,
+                            'status': info.status
+                        })
+                    self._autoscaler.set_replica_info(replica_info_for_autoscaler)
+                
                 scaling_options = self._autoscaler.generate_scaling_decisions(
                     replica_infos, active_versions)
                 for scaling_option in scaling_options:
