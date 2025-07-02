@@ -98,7 +98,7 @@ Creating service accounts
 
 1. Navigate to **Users > Service Accounts** in the SkyPilot dashboard
 2. Click **Create Service Account** and provide:
-   
+
    * **Token Name**: Descriptive name (e.g., "pipeline")
    * **Expiration**: Optional (defaults to 30 days)
 
@@ -134,7 +134,7 @@ Example: GitHub actions (CI/CD)
     # .github/workflows/deploy.yml
     - name: Configure SkyPilot
       run: sky api login -e ${{ vars.SKYPILOT_API_ENDPOINT }} --token ${{ secrets.SKYPILOT_SERVICE_ACCOUNT_TOKEN }}
-        
+
     - name: Launch training job
       run: sky launch training.yaml
 
@@ -253,7 +253,22 @@ During the login flow, the token provided by the web login will encode the cooki
 
     If your auth proxy is not automatically detected, try using ``sky api login --cookies`` to force auth proxy mode.
 
-If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will use it as the username in all requests.
+If the ``X-Auth-Request-Email`` header is set by your auth proxy, SkyPilot will use it as the username in all requests. You can customize the authentication header name if your auth proxy uses a different header than the default ``X-Auth-Request-Email``.
+
+.. code-block:: bash
+
+    # Using Helm chart values
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.authUserHeaderName=X-Custom-User-Header
+
+.. code-block:: bash
+
+    # Using environment variable - not necessary if using Helm
+    export SKYPILOT_AUTH_USER_HEADER=X-Custom-User-Header
+    sky api start --deploy
+
 
 SkyPilot RBAC
 -------------
@@ -284,7 +299,3 @@ Supported operations:
 
 * ``Admin`` role can create users, update the role for all users, and delete users.
 * ``User`` role can view all users and their roles.
-
-
-
-
