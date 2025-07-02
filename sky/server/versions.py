@@ -53,6 +53,22 @@ _remote_version: contextvars.ContextVar[str] = \
 _reminded_for_minor_version_upgrade = False
 
 
+def get_remote_api_version() -> Optional[int]:
+    return _remote_api_version.get()
+
+
+def set_remote_api_version(api_version: int) -> None:
+    _remote_api_version.set(api_version)
+
+
+def get_remote_version() -> str:
+    return _remote_version.get()
+
+
+def set_remote_version(version: str) -> None:
+    _remote_version.set(version)
+
+
 class VersionInfo(NamedTuple):
     api_version: int
     version: str
@@ -206,22 +222,6 @@ def _remind_minor_version_upgrade(remote_version: str) -> None:
     except version_lib.InvalidVersion:
         # Skip for non-valid semver (probabely a dev version)
         pass
-
-
-def get_remote_api_version() -> Optional[int]:
-    return _remote_api_version.get()
-
-
-def set_remote_api_version(api_version: int) -> None:
-    _remote_api_version.set(api_version)
-
-
-def get_remote_version() -> str:
-    return _remote_version.get()
-
-
-def set_remote_version(version: str) -> None:
-    _remote_version.set(version)
 
 
 # TODO(aylei): maybe we can use similiar approach to mark a new argument can
