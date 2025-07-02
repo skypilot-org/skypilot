@@ -17,4 +17,3 @@ include sky/utils/kubernetes/*
 include sky/server/html/*
 recursive-include sky/dashboard/out *
 include sky/users/*.conf
-include sky/metrics/*
