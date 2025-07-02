@@ -1,15 +1,21 @@
 """SSH Node Pool management core functionality."""
+import colorama
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import clouds
+from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import models
+from sky.ssh_node_pools import ssh_deploy
 from sky.ssh_node_pools import state
 from sky.usage import usage_lib
 from sky.utils import common_utils
-from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.utils import rich_utils
+from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
@@ -23,10 +29,34 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup: If True, clean up the cluster instead of deploying.
     """
     assert cleanup or infra is not None
-    kubernetes_deploy_utils.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
+
+    action = 'Cleaning up' if cleanup else 'Deploying'
+    msg = f'{action} SSH Node Pool(s)...'
+
+    with rich_utils.safe_status(ux_utils.spinner_message(msg)):
+        success, reason = ssh_deploy.deploy_cluster(cleanup=cleanup, 
+                                                    infra=infra)
+
+    if not success:
+        with ux_utils.print_exception_no_traceback():
+            action = 'cleanup' if cleanup else 'deploy'
+            raise RuntimeError(f'Failed to {action} SkyPilot '
+                               f'on some Node Pools. {reason}')
+    else:
+        logger.info('')
+        if cleanup:
+            logger.info(ux_utils.finishing_message(
+                    '🎉 SSH Node Pools cleaned up successfully.'))
+        else:
+            logger.info(
+                ux_utils.finishing_message(
+                    f'🎉 SSH Node Pool `{infra}` set up successfully. ',
+                    follow_up_message=(
+                        f'Run `{colorama.Style.BRIGHT}'
+                        f'sky check ssh'
+                        f'{colorama.Style.RESET_ALL}` to verify access, '
+                        f'`{colorama.Style.BRIGHT}sky launch --infra ssh'
+                        f'{colorama.Style.RESET_ALL}` to launch a cluster. ')))
 
 
 @usage_lib.entrypoint
@@ -92,20 +122,16 @@ def update_pool(pool_config: Dict[str, Any]) -> None:
     updating_cluster = state.get_cluster(infra)
     if updating_cluster is not None:
         # there is a pre-existing ssh cluster
+        logger.debug(f'Updating ssh cluster config: {infra}')
         updating_cluster.set_update_nodes(nodes)
     else:
+        logger.debug(f'Creating new ssh cluster config: {infra}')
         updating_cluster = models.SSHCluster()
         updating_cluster.name = infra
         updating_cluster.set_head_node_ip(nodes[0].ip)
         updating_cluster.set_update_nodes(nodes)
     updating_cluster.status = models.SSHClusterStatus.PENDING
     state.add_or_update_cluster(updating_cluster)
-
-
-# def delete_pool(pool_name: str) -> bool:
-#     """Delete a SSH Node Pool configuration."""
-#     manager = SSHNodePoolManager()
-#     return manager.delete_pool(pool_name)
 
 
 class SSHKeyManager:

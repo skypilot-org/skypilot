@@ -26,6 +26,7 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
 
+# TODO(kyuds): remove this function
 def check_ssh_cluster_dependencies(
         raise_error: bool = True) -> Optional[List[str]]:
     """Checks if the dependencies for ssh cluster are installed.
@@ -68,6 +69,7 @@ def check_ssh_cluster_dependencies(
     return None
 
 
+# TODO(kyuds): remove this function
 def deploy_ssh_cluster(cleanup: bool = False,
                        infra: Optional[str] = None,
                        kubeconfig_path: Optional[str] = None):
@@ -164,6 +166,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
                     is_local=True))
 
 
+# TODO(kyuds): will deprecate
 def deploy_remote_cluster(ip_list: List[str],
                           ssh_user: str,
                           ssh_key: str,

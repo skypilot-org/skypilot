@@ -5446,7 +5446,7 @@ def ssh_up(async_call: bool, file: Optional[str]):
     """
     request_id = sdk.ssh_up(file=file)
     if async_call:
-        print(f'Request submitted with ID: {request_id}')
+        click.echo(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
 
@@ -5468,7 +5468,7 @@ def ssh_down(infra: Optional[str], async_call: bool):
     """
     request_id = sdk.ssh_down(infra=infra)
     if async_call:
-        print(f'Request submitted with ID: {request_id}')
+        click.echo(f'Request submitted with ID: {request_id}')
     else:
         sdk.stream_and_get(request_id)
 
