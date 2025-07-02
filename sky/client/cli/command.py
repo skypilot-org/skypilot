@@ -5017,8 +5017,10 @@ def serve_logs(
             raise click.UsageError('--tail must be a non-negative integer.')
         if follow:
             follow = False
-            logger.warning('--tail and --follow cannot be used together. '
-                           'Changed the mode to --no-follow.')
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                '--tail and --follow cannot be used together. '
+                f'Changed the mode to --no-follow.{colorama.Style.RESET_ALL}')
 
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
