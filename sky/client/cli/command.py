@@ -135,7 +135,7 @@ def _get_cluster_records_and_set_ssh_config(
 
     # Submit status request
     request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
-    
+
     # Get cluster records
     cluster_records = sdk.stream_and_get(request_id)
 
@@ -357,7 +357,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     zshrc_diff = '\n# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
     bashrc_diff = ('\n# For SkyPilot shell completion'
                    '\n. ~/.sky/.sky-complete.bash')
- 
+
     cmd: Optional[str] = None
     reload_cmd: Optional[str] = None
 
@@ -1883,7 +1883,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 # will still be shown.
                 return -1, 'KeyboardInterrupt'
         return None, ''
-
 
     def handle_services() -> Tuple[Optional[int], str]:
         if show_services:
