@@ -178,7 +178,7 @@ Then build the local changes and deploy the new changes to the API Server:
 
 ```bash
 DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
-docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile_local .
+docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
 
 # Build the local changes
 helm dependency build ./charts/skypilot
