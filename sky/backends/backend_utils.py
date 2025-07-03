@@ -2797,7 +2797,7 @@ def get_clusters(
 
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
-        _update_records_with_resources(record)
+        _update_records_with_resources(records)
         return records
 
     plural = 's' if len(records) > 1 else ''
