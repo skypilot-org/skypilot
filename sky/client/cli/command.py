@@ -1936,7 +1936,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     in_progress_hint.format(job_info=job_info))
 
         if show_services and not keyboard_interrupted:
-                num_services, services_msg = services_future.result()
+            num_services, services_msg = services_future.result()
             click.echo(services_msg)
             if num_services is not None:
                 hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
