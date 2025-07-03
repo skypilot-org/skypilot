@@ -1483,11 +1483,10 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
                 job_info_table.c.schedule_state.in_([
                     ManagedJobScheduleState.WAITING.value,
                     ManagedJobScheduleState.ALIVE_WAITING.value,
-                ]),
-            )).order_by(
-                job_info_table.c.priority.desc(),
-                job_info_table.c.spot_job_id.asc(),
-            ).limit(1)
+                ]),)).order_by(
+                    job_info_table.c.priority.desc(),
+                    job_info_table.c.spot_job_id.asc(),
+                ).limit(1)
         waiting_job_row = session.execute(query).fetchone()
         if waiting_job_row is None:
             return None
