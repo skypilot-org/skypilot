@@ -102,11 +102,6 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
 
-    # Ensure dag.name is not None - it should be set by
-    # dag_utils.maybe_infer_and_fill_dag_and_task_names
-    if dag.name is None:
-        raise ValueError('DAG name must be set before submitting job')
-
     consolidation_mode_job_id = managed_job_state.set_job_info_without_job_id(
         dag.name,
         workspace=skypilot_config.get_active_workspace(
@@ -115,13 +110,6 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
     for task_id, task in enumerate(dag.tasks):
         resources_str = backend_utils.get_task_resources_str(
             task, is_managed_job=True)
-
-        # Ensure task.name is not None - it should be set by
-        # dag_utils.maybe_infer_and_fill_dag_and_task_names
-        if task.name is None:
-            raise ValueError(
-                f'Task name must be set before submitting job for task '
-                f'{task_id}')
 
         managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                       task.name, resources_str)
