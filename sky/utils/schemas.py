@@ -1430,6 +1430,9 @@ def get_config_schema():
                     }
                 ]
             },
+            'requests_gc_retention_seconds': {
+                'type': 'integer',
+            },
         }
     }
 
