@@ -170,8 +170,9 @@ def set_api_cookie_jar(cookie_jar: CookieJar,
     # temporary file and then move it to the final location.
     # Avoid hardcoding the tmp file path, since it could cause a race with other
     # processes that are also writing to the tmp file.
-    fd, tmp_cookie_path = tempfile.mkstemp(dir=cookie_path.parent)
-    os.close(fd)
+    with tempfile.NamedTemporaryFile(dir=cookie_path.parent,
+                                     delete=False) as tmp_file:
+        tmp_cookie_path = tmp_file.name
     file_cookie_jar = MozillaCookieJar(tmp_cookie_path)
     if cookie_path.exists():
         file_cookie_jar.load(str(cookie_path))
