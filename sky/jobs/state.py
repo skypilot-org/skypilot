@@ -1,6 +1,7 @@
 """The database for managed jobs status."""
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
+import asyncio
 import enum
 import functools
 import json
@@ -115,6 +116,120 @@ ha_recovery_script_table = sqlalchemy.Table(
     sqlalchemy.Column('script', sqlalchemy.Text),
 )
 
+schema_version_table = sqlalchemy.Table(
+    'schema_version',
+    Base.metadata,
+    sqlalchemy.Column('version', sqlalchemy.Integer, primary_key=True),
+)
+
+LATEST_SCHEMA_VERSION = 1  # Increment this when you add new migrations
+
+
+def _get_schema_version(session: orm.Session) -> int:
+    # Ensure the schema_version table exists
+    session.execute(sqlalchemy.text(
+        'CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)'))
+    session.commit()
+    result = session.execute(sqlalchemy.text('SELECT version FROM schema_version')).fetchone()
+    if result is None:
+        session.execute(sqlalchemy.text('INSERT INTO schema_version (version) VALUES (0)'))
+        session.commit()
+        return 0
+    return result[0]
+
+
+def _set_schema_version(session: orm.Session, version: int):
+    session.execute(sqlalchemy.text('UPDATE schema_version SET version = :v'), {'v': version})
+    session.commit()
+
+
+def _run_migrations(session: orm.Session, current_version: int):
+    # Add future migrations here as (version, migration_func) pairs
+    migrations = [
+        (1, _migration_v1),
+        # (2, _migration_v2),
+        # ...
+    ]
+    for version, migration_func in migrations:
+        if current_version < version:
+            migration_func(session)
+            _set_schema_version(session, version)
+
+
+def _migration_v1(session: orm.Session):
+    # This is the current set of column additions (previously always run)
+    db_utils.add_column_to_table_sqlalchemy(session, 'spot',
+                                            'failure_reason',
+                                            sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session,
+                                            'spot',
+                                            'spot_job_id',
+                                            sqlalchemy.Integer(),
+                                            copy_from='job_id')
+    db_utils.add_column_to_table_sqlalchemy(
+        session,
+        'spot',
+        'task_id',
+        sqlalchemy.Integer(),
+        default_statement='DEFAULT 0',
+        value_to_replace_existing_entries=0)
+    db_utils.add_column_to_table_sqlalchemy(session,
+                                            'spot',
+                                            'task_name',
+                                            sqlalchemy.Text(),
+                                            copy_from='job_name')
+    db_utils.add_column_to_table_sqlalchemy(
+        session,
+        'spot',
+        'specs',
+        sqlalchemy.Text(),
+        value_to_replace_existing_entries=json.dumps({
+            'max_restarts_on_errors': 0,
+        }))
+    db_utils.add_column_to_table_sqlalchemy(
+        session,
+        'spot',
+        'local_log_file',
+        sqlalchemy.Text(),
+        default_statement='DEFAULT NULL')
+
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                            'schedule_state',
+                                            sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(
+        session,
+        'job_info',
+        'controller_pid',
+        sqlalchemy.Integer(),
+        default_statement='DEFAULT NULL')
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                            'dag_yaml_path',
+                                            sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                            'env_file_path',
+                                            sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                            'user_hash', sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(
+        session,
+        'job_info',
+        'workspace',
+        sqlalchemy.Text(),
+        default_statement='DEFAULT NULL',
+        value_to_replace_existing_entries='default')
+    db_utils.add_column_to_table_sqlalchemy(
+        session,
+        'job_info',
+        'priority',
+        sqlalchemy.Integer(),
+        value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                            'entrypoint', sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                            'original_user_yaml_path',
+                                            sqlalchemy.Text())
+    session.commit()
+
 
 def create_table():
     # Enable WAL mode to avoid locking issues.
@@ -138,79 +253,11 @@ def create_table():
     # Create tables if they don't exist
     Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
 
-    # Backward compatibility: add columns that not exist in older databases
+    # Run migrations only if needed
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot',
-                                                'failure_reason',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'spot_job_id',
-                                                sqlalchemy.Integer(),
-                                                copy_from='job_id')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'task_id',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0',
-            value_to_replace_existing_entries=0)
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'task_name',
-                                                sqlalchemy.Text(),
-                                                copy_from='job_name')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'specs',
-            sqlalchemy.Text(),
-            value_to_replace_existing_entries=json.dumps({
-                'max_restarts_on_errors': 0,
-            }))
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'local_log_file',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'schedule_state',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'controller_pid',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'dag_yaml_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'env_file_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'user_hash', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'workspace',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries='default')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'priority',
-            sqlalchemy.Integer(),
-            value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'entrypoint', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'original_user_yaml_path',
-                                                sqlalchemy.Text())
-        session.commit()
+        current_version = _get_schema_version(session)
+        if current_version < LATEST_SCHEMA_VERSION:
+            _run_migrations(session, current_version)
 
 
 def initialize_and_get_db_async(
@@ -255,8 +302,12 @@ def _initialize_and_get_db(
                     conn_string = conn_string.replace('postgresql://',
                                                       'postgresql+asyncpg://')
                     # if we support another async database, add it here
-                engine = create_engine_func(conn_string,
-                                            poolclass=sqlalchemy.NullPool)
+                    engine = create_engine_func(conn_string,
+                                                pool_size=5,
+                                                max_overflow=15)
+                else:
+                    engine = create_engine_func(conn_string,
+                                                poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/spot_jobs.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
@@ -273,7 +324,7 @@ def _initialize_and_get_db(
 
 
 def _init_db_async(func):
-    """Initialize the async database."""
+    """Initialize the async database. Add backoff to the function call."""
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -283,13 +334,26 @@ def _init_db_async(func):
             # common case.
             await job_utils.to_thread(initialize_and_get_db_async)
 
-        return await func(*args, **kwargs)
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
+        last_exc = None
+        for _ in range(_DB_RETRY_TIMES):
+            try:
+                return await func(*args, **kwargs)
+            except sqlalchemy_exc.OperationalError as e:
+                last_exc = e
+            except asyncio.exceptions.TimeoutError as e:
+                last_exc = e
+            except OSError as e:
+                last_exc = e
+            await asyncio.sleep(backoff.current_backoff())
+        else:
+            raise last_exc
 
     return wrapper
 
 
 def _init_db(func):
-    """Initialize the database."""
+    """Initialize the database. Add backoff to the function call."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -299,7 +363,20 @@ def _init_db(func):
             # common case.
             initialize_and_get_db()
 
-        return func(*args, **kwargs)
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
+        last_exc = None
+        for _ in range(_DB_RETRY_TIMES):
+            try:
+                return func(*args, **kwargs)
+            except sqlalchemy_exc.OperationalError as e:
+                last_exc = e
+            except asyncio.exceptions.TimeoutError as e:
+                last_exc = e
+            except OSError as e:
+                last_exc = e
+            time.sleep(backoff.current_backoff())
+        else:
+            raise last_exc
 
     return wrapper
 
@@ -1236,15 +1313,15 @@ def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     return status
 
 
-@_init_db
-def get_failure_reason(job_id: int) -> Optional[str]:
+@_init_db_async
+async def get_failure_reason(job_id: int) -> Optional[str]:
     """Get the failure reason of a job.
 
     If the job has multiple tasks, we return the first failure reason.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        reason = session.execute(
+    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        reason = await session.execute(
             sqlalchemy.select(spot_table.c.failure_reason).where(
                 spot_table.c.spot_job_id == job_id).order_by(
                     spot_table.c.task_id.asc())).fetchall()
@@ -1301,12 +1378,12 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         return jobs
 
 
-@_init_db
-def get_task_name(job_id: int, task_id: int) -> str:
+@_init_db_async
+async def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        task_name = session.execute(
+    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        task_name = await session.execute(
             sqlalchemy.select(spot_table.c.task_name).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
@@ -1327,11 +1404,11 @@ def get_latest_job_id() -> Optional[int]:
         return job_id[0] if job_id else None
 
 
-@_init_db
-def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        task_specs = session.execute(
+@_init_db_async
+async def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        task_specs = await session.execute(
             sqlalchemy.select(spot_table.c.specs).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
@@ -1340,16 +1417,16 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
         return json.loads(task_specs[0])
 
 
-@_init_db
-def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
+@_init_db_async
+async def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
     assert _SQLALCHEMY_ENGINE is not None
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
-        local_log_file = session.execute(
+        local_log_file = await session.execute(
             sqlalchemy.select(spot_table.c.local_log_file).where(
                 sqlalchemy.and_(*where_conditions))).fetchone()
         return local_log_file[-1] if local_log_file else None
