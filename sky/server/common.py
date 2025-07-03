@@ -165,13 +165,24 @@ def set_api_cookie_jar(cookie_jar: CookieJar,
     if not cookie_path.parent.exists():
         cookie_path.parent.mkdir(parents=True, exist_ok=True)
 
-    file_cookie_jar = MozillaCookieJar(cookie_path)
+    # Writing directly to the cookie jar path can race with other processes that
+    # are reading the cookie jar, making it look malformed. Instead, write to a
+    # temporary file and then move it to the final location.
+    # Avoid hardcoding the tmp file path, since it could cause a race with other
+    # processes that are also writing to the tmp file.
+    with tempfile.NamedTemporaryFile(dir=cookie_path.parent,
+                                     delete=False) as tmp_file:
+        tmp_cookie_path = tmp_file.name
+    file_cookie_jar = MozillaCookieJar(tmp_cookie_path)
     if cookie_path.exists():
-        file_cookie_jar.load()
+        file_cookie_jar.load(str(cookie_path))
 
     for cookie in cookie_jar:
         file_cookie_jar.set_cookie(cookie)
     file_cookie_jar.save()
+
+    # Move the temporary file to the final location.
+    os.replace(tmp_cookie_path, cookie_path)
 
 
 def get_cookies_from_response(
