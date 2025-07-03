@@ -51,6 +51,7 @@ from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
@@ -247,7 +248,7 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
     #  - use a remote command to move all runtime files to their right places.
 
     # Local tmp dir holding runtime files.
-    local_runtime_files_dir = tempfile.mkdtemp()
+    local_runtime_files_dir = tempstore.mkdtemp()
     new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
 
     # Generate local_src -> unique_name.
