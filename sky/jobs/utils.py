@@ -63,7 +63,8 @@ logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
-JOB_STATUS_CHECK_GAP_SECONDS = 20
+# This is a tradeoff between the latency and the resource usage.
+JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5

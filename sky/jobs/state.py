@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import colorama
 import sqlalchemy
 import asyncio
-from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy import NullPool, exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
@@ -256,7 +256,7 @@ def _initialize_and_get_db(
                     conn_string = conn_string.replace('postgresql://',
                                                       'postgresql+asyncpg://')
                     # if we support another async database, add it here
-                engine = create_engine_func(conn_string)
+                engine = create_engine_func(conn_string, poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/spot_jobs.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
@@ -273,11 +273,7 @@ def _initialize_and_get_db(
 
 
 def _init_db_async(func):
-    """Initialize the async database.
-
-    We will run the function multiple times if the database is locked (normally
-    due to high contention).
-    """
+    """Initialize the async database."""
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -287,26 +283,13 @@ def _init_db_async(func):
             # common case.
             await job_utils.to_thread(initialize_and_get_db_async)
 
-        last_error = None
-        backoff = common_utils.Backoff()
-        for _ in range(_DB_RETRY_TIMES):
-            try:
-                return await func(*args, **kwargs)
-            except sqlalchemy.exc.OperationalError as e:
-                last_error = e
-                await asyncio.sleep(backoff.current_backoff())
-        assert last_error is not None
-        raise last_error
+        return await func(*args, **kwargs)
 
     return wrapper
 
 
 def _init_db(func):
-    """Initialize the database.
-
-    We will run the function multiple times if the database is locked (normally
-    due to high contention).
-    """
+    """Initialize the database."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -316,16 +299,7 @@ def _init_db(func):
             # common case.
             initialize_and_get_db()
 
-        last_error = None
-        backoff = common_utils.Backoff()
-        for _ in range(_DB_RETRY_TIMES):
-            try:
-                return func(*args, **kwargs)
-            except sqlalchemy.exc.OperationalError as e:
-                last_error = e
-                time.sleep(backoff.current_backoff())
-        assert last_error is not None
-        raise last_error
+        return func(*args, **kwargs)
 
     return wrapper
 
@@ -633,14 +607,16 @@ def set_job_info_without_job_id(name: str, workspace: str,
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             result = session.execute(insert_stmt)
+            ret = result.lastrowid
             session.commit()
-            return result.lastrowid
+            return ret
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             result = session.execute(
                 insert_stmt.returning(job_info_table.c.spot_job_id))
+            ret = result.scalar()
             session.commit()
-            return result.scalar()
+            return ret
         else:
             raise ValueError('Unsupported database dialect')
 
