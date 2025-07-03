@@ -6,7 +6,6 @@ import functools
 import json
 import os
 import pathlib
-import sqlite3
 import threading
 import time
 import typing
@@ -14,8 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 import sqlalchemy
-import asyncio
-from sqlalchemy import NullPool, exc as sqlalchemy_exc
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
@@ -25,10 +23,10 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.jobs import utils as job_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
-from sky.jobs import utils as job_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
@@ -215,7 +213,8 @@ def create_table():
         session.commit()
 
 
-def initialize_and_get_db_async(recursive: bool = False) -> sql_async.AsyncEngine:
+def initialize_and_get_db_async(
+        recursive: bool = False) -> sql_async.AsyncEngine:
     global _SQLALCHEMY_ENGINE_ASYNC
     if _SQLALCHEMY_ENGINE_ASYNC is not None or recursive:
         return _SQLALCHEMY_ENGINE_ASYNC
@@ -236,7 +235,7 @@ def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
 
 
 def _initialize_and_get_db(
-    create_engine_func: Callable[[str], sqlalchemy.engine.Engine],
+    create_engine_func: Any,
     get_engine: Callable[[bool], Any],
     async_override: bool,
 ) -> sqlalchemy.engine.Engine:
@@ -256,7 +255,8 @@ def _initialize_and_get_db(
                     conn_string = conn_string.replace('postgresql://',
                                                       'postgresql+asyncpg://')
                     # if we support another async database, add it here
-                engine = create_engine_func(conn_string, poolclass=sqlalchemy.NullPool)
+                engine = create_engine_func(conn_string,
+                                            poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/spot_jobs.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,

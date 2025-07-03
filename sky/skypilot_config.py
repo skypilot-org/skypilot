@@ -608,7 +608,8 @@ def _reload_config_as_server() -> None:
 
     if db_url:
         if _SQLALCHEMY_ENGINE is None:
-            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(db_url, poolclass=sqlalchemy.NullPool)
+            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+                db_url, poolclass=sqlalchemy.NullPool)
             create_table()
         db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
         if db_config:
