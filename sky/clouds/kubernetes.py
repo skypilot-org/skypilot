@@ -636,24 +636,9 @@ class Kubernetes(clouds.Cloud):
                 keys=('kueue', 'local_queue_name'),
                 default_value=None))
 
-        dws_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes', region=context, keys=('dws',), default_value={})
-        enable_flex_start = dws_config.get('enable_flex_start', False)
-        enable_flex_start_queued_provisioning = dws_config.get(
-            'enable_flex_start_queued_provisioning', False)
-        max_run_duration_seconds = dws_config.get('max_run_duration_seconds',
-                                                  None)
-        if enable_flex_start_queued_provisioning:
-            # If both are enabled, queued provisioning takes precedence.
-            enable_flex_start = False
-            if k8s_kueue_local_queue_name is None:
-                raise ValueError(
-                    f'kubernetes.kueue.local_queue_name is required to enable '
-                    f'flex start queued provisioning for context {context}')
-        else:
-            # Max run duration is only used in the flex start
-            # queued provisioning case.
-            max_run_duration_seconds = None
+        (enable_flex_start, enable_flex_start_queued_provisioning,
+         max_run_duration_seconds) = self._get_dws_config(
+             context, k8s_kueue_local_queue_name)
 
         # Timeout for resource provisioning. This timeout determines how long to
         # wait for pod to be in pending status before giving up.
@@ -742,6 +727,45 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_namespace'] = namespace
 
         return deploy_vars
+
+    def _get_dws_config(
+        self, context: str, k8s_kueue_local_queue_name: Optional[str]
+    ) -> Tuple[bool, bool, Optional[int]]:
+        dws_config = skypilot_config.get_effective_region_config(
+            cloud='kubernetes', region=context, keys=('dws',), default_value={})
+        enable_flex_start = False
+        enable_flex_start_queued_provisioning = False
+        max_run_duration_seconds = None
+        if not dws_config:
+            return False, False, None
+        dws_mode_str = dws_config.get('mode',
+                                      kubernetes_enums.DWSMode.FLEX_START.value)
+        dws_mode = kubernetes_enums.DWSMode(dws_mode_str)
+        enable_flex_start = (dws_mode == kubernetes_enums.DWSMode.FLEX_START)
+        enable_flex_start_queued_provisioning = (
+            dws_mode == kubernetes_enums.DWSMode.FLEX_START_QUEUED_PROVISIONING)
+        max_run_duration = dws_config.get('max_run_duration', None)
+        if max_run_duration:
+            max_run_duration_seconds = resources_utils.parse_time_minutes(
+                max_run_duration) * 60
+        # If users already use Kueue, just use the flex start queued
+        # provisioning mode.
+        if k8s_kueue_local_queue_name:
+            enable_flex_start_queued_provisioning = True
+            enable_flex_start = False
+        if enable_flex_start_queued_provisioning:
+            # If both are enabled, queued provisioning takes precedence.
+            enable_flex_start = False
+            if k8s_kueue_local_queue_name is None:
+                raise ValueError(
+                    f'kubernetes.kueue.local_queue_name is required to enable '
+                    f'flex start queued provisioning for context {context}')
+        else:
+            # Max run duration is only used in the flex start
+            # queued provisioning case.
+            max_run_duration_seconds = None
+        return (enable_flex_start, enable_flex_start_queued_provisioning,
+                max_run_duration_seconds)
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

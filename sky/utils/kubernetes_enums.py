@@ -43,3 +43,9 @@ class KubernetesAutoscalerType(enum.Enum):
     GKE = 'gke'
     KARPENTER = 'karpenter'
     GENERIC = 'generic'
+
+
+class DWSMode(enum.Enum):
+    """Enum for the different types of DWS modes."""
+    FLEX_START = 'flex-start'
+    FLEX_START_QUEUED_PROVISIONING = 'flex-start-queued-provisioning'

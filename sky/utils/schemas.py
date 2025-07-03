@@ -1086,15 +1086,20 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'enable_flex_start': {
-                'type': 'boolean',
-            },
-            'enable_flex_start_queued_provisioning': {
-                'type': 'boolean',
+            'mode': {
+                'type': 'string',
+                'case_sensitive_enum': [
+                    type.value for type in kubernetes_enums.DWSMode
+                ],
             },
             # Only used for queued provisioning.
-            'max_run_duration_seconds': {
-                'type': 'integer',
+            'max_run_duration': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN,
+                }, {
+                    'type': 'integer',
+                }]
             },
         },
     },

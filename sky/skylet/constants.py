@@ -457,8 +457,10 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = (
-    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
+TIME_PATTERN: str = ('^[0-9]+('
+                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
+                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
+                     ')?$')
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,

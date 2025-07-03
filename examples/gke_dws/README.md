@@ -24,7 +24,7 @@ kubernetes:
   # provision_timeout: 900
   autoscaler: gke
   dws:
-    enable_flex_start: true
+    mode: flex-start
 ```
 
 The default `provision_timeout` is set to `600` with flex-start enabled, if you still hit the provisioning timeout issue, please increase the `provision_timeout`.
@@ -60,10 +60,10 @@ kubernetes:
   # provision_timeout: 900
   autoscaler: gke
   dws:
-    enable_flex_start_queued_provisioning: true
-    # Optional, the maximum runtime of a node in seconds,
+    mode: flex-start-queued-provisioning
+    # Optional, the maximum runtime of a node,
     # up to the default of seven days
-    max_run_duration_seconds: 600
+    max_run_duration: 10m
   kueue:
     local_queue_name: skypilot-local-queue
 ```

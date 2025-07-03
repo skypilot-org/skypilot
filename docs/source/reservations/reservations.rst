@@ -170,32 +170,18 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 
 .. _dws-on-gke:
 
-Using DWS on GKE with Kueue
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Using DWS on GKE
+~~~~~~~~~~~~~~~~~
 
-DWS is also supported on Google Kubernetes Engine (GKE) with Kueue. To enable DWS on GKE, you need to set up your GKE cluster with Kueue and DWS; see the `GCP official docs <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest>`__.
+GKE supports the two kinds of flex-start configurations:
 
-To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS configuration in the SkyPilot task YAML:
+* Flex-start, where GKE allocates resources node by node. This configuration only requires you to set the `--flex-start` flag during node creation.
+* Flex-start with queued provisioning, where GKE allocates all requested resources at the same time. To use this configuration, you have to add the `--flex-start` and `enable-queued-provisioning` flags when you create the node pool. 
 
-.. code-block:: yaml
+See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
 
-    config:
-      kubernetes:
-        pod_config:
-          metadata:
-            annotations:
-              provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
-        provision_timeout: 900
+Refer to the `GKE DWS example <https://github.com/skypilot-org/skypilot/blob/master/examples/gke_dws/README.md>`_ for the detailed usage of DWS on GKE with SkyPilot.
 
-    resources:
-      infra: kubernetes
-      accelerators: A100:8
-      labels:
-        kueue.x-k8s.io/queue-name: dws-local-queue
-
-1. ``kueue.x-k8s.io/queue-name``: name of the Kueue queue to submit your resource request to.
-2. ``provreq.kueue.x-k8s.io/maxRunDurationSeconds``: maximum duration for a created instance to be kept alive (in seconds, required).
-3. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
 Long-term reservations
 ----------------------
