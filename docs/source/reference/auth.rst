@@ -65,10 +65,10 @@ While logging into an API server, SkyPilot will attempt to detect an auth proxy.
 
 Login in the browser to authenticate as required by the auth proxy.
 
-.. image:: ../images/client-server/okta.png
-    :alt: Okta auth page
+.. image:: ../images/client-server/login.png
+    :alt: Okta and Google auth pages
     :align: center
-    :width: 60%
+    :width: 100%
 
 After authentication, the CLI will automatically copy the relevant auth cookies from the browser into the CLI.
 
