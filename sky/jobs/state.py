@@ -1473,17 +1473,6 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Get the highest-priority WAITING or ALIVE_WAITING job whose priority
-        # is greater than or equal to the highest priority LAUNCHING or
-        # ALIVE_BACKOFF job's priority.
-        # First, get the max priority of LAUNCHING or ALIVE_BACKOFF jobs
-        max_priority_subquery = sqlalchemy.select(
-            sqlalchemy.func.max(job_info_table.c.priority)).where(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.LAUNCHING.value,
-                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                ])).scalar_subquery()
-        # Main query for waiting jobs
         query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
@@ -1495,8 +1484,6 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
                     ManagedJobScheduleState.WAITING.value,
                     ManagedJobScheduleState.ALIVE_WAITING.value,
                 ]),
-                job_info_table.c.priority >= sqlalchemy.func.coalesce(
-                    max_priority_subquery, 0),
             )).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
