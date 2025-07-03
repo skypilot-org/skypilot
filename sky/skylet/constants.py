@@ -421,6 +421,9 @@ ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
 
+# If set, overrides the header that we can use to get the user name.
+ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
+
 # Environment variable that is used as the DB connection string for the
 # skypilot server.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
