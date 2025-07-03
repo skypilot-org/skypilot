@@ -358,6 +358,39 @@ class UserImportBody(RequestBody):
     csv_content: str
 
 
+class ServiceAccountTokenCreateBody(RequestBody):
+    """The request body for creating a service account token."""
+    token_name: str
+    expires_in_days: Optional[int] = None
+
+
+class ServiceAccountTokenDeleteBody(RequestBody):
+    """The request body for deleting a service account token."""
+    token_id: str
+
+
+class UpdateRoleBody(RequestBody):
+    """The request body for updating a user role."""
+    role: str
+
+
+class ServiceAccountTokenRoleBody(RequestBody):
+    """The request body for getting a service account token role."""
+    token_id: str
+
+
+class ServiceAccountTokenUpdateRoleBody(RequestBody):
+    """The request body for updating a service account token role."""
+    token_id: str
+    role: str
+
+
+class ServiceAccountTokenRotateBody(RequestBody):
+    """The request body for rotating a service account token."""
+    token_id: str
+    expires_in_days: Optional[int] = None
+
+
 class DownloadBody(RequestBody):
     """The request body for the download endpoint."""
     folder_paths: List[str]
@@ -366,6 +399,22 @@ class DownloadBody(RequestBody):
 class StorageBody(RequestBody):
     """The request body for the storage endpoint."""
     name: str
+
+
+class VolumeApplyBody(RequestBody):
+    """The request body for the volume apply endpoint."""
+    name: str
+    volume_type: str
+    cloud: str
+    region: Optional[str] = None
+    zone: Optional[str] = None
+    size: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
+class VolumeDeleteBody(RequestBody):
+    """The request body for the volume delete endpoint."""
+    names: List[str]
 
 
 class EndpointsBody(RequestBody):

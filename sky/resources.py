@@ -1,6 +1,8 @@
 """Resources: compute requirements of Tasks."""
+import collections
 import dataclasses
 import math
+import re
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -30,12 +32,29 @@ from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky.volumes import volume as volume_lib
+
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
+}
+
+MEMORY_SIZE_UNITS = {
+    'b': 1,
+    'k': 2**10,
+    'kb': 2**10,
+    'm': 2**20,
+    'mb': 2**20,
+    'g': 2**30,
+    'gb': 2**30,
+    't': 2**40,
+    'tb': 2**40,
+    'p': 2**50,
+    'pb': 2**50,
 }
 
 
@@ -107,7 +126,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 27
+    _VERSION = 28
 
     def __init__(
         self,
@@ -139,6 +158,7 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
+        _no_missing_accel_warnings: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -289,7 +309,8 @@ class Resources:
                 self._job_recovery = job_recovery
 
         if disk_size is not None:
-            self._disk_size = int(parse_memory_resource(disk_size, 'disk_size'))
+            self._disk_size = int(
+                resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
@@ -362,6 +383,7 @@ class Resources:
 
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
+        self._no_missing_accel_warnings = _no_missing_accel_warnings
 
         # Initialize _priority before calling the setter
         self._priority: Optional[int] = None
@@ -645,6 +667,13 @@ class Resources:
             return False
         return self._requires_fuse
 
+    @property
+    def no_missing_accel_warnings(self) -> bool:
+        """Returns whether to force quiet mode for this resource."""
+        if self._no_missing_accel_warnings is None:
+            return False
+        return self._no_missing_accel_warnings
+
     def set_requires_fuse(self, value: bool) -> None:
         """Sets whether this resource requires FUSE mounting support.
 
@@ -707,11 +736,11 @@ class Resources:
             self._memory = None
             return
 
-        memory = parse_memory_resource(str(memory),
-                                       'memory',
-                                       ret_type=float,
-                                       allow_plus=True,
-                                       allow_x=True)
+        memory = resources_utils.parse_memory_resource(str(memory),
+                                                       'memory',
+                                                       ret_type=float,
+                                                       allow_plus=True,
+                                                       allow_x=True)
         self._memory = memory
         if memory.endswith(('+', 'x')):
             # 'x' is used internally for make sure our resources used by
@@ -750,6 +779,8 @@ class Resources:
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
+                    assert isinstance(accelerators,
+                                      str), (type(accelerators), accelerators)
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
@@ -1060,8 +1091,11 @@ class Resources:
             regions = [r for r in regions if r.name in self._image_id]
 
         # Filter the regions by the skypilot_config
-        ssh_proxy_command_config = skypilot_config.get_nested(
-            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+        ssh_proxy_command_config = skypilot_config.get_effective_region_config(
+            cloud=str(self._cloud).lower(),
+            region=None,
+            keys=('ssh_proxy_command',),
+            default_value=None)
         if (isinstance(ssh_proxy_command_config, str) or
                 ssh_proxy_command_config is None):
             # All regions are valid as the regions are not specified for the
@@ -1465,11 +1499,15 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
-    def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
-                              region: clouds.Region,
-                              zones: Optional[List[clouds.Zone]],
-                              num_nodes: int,
-                              dryrun: bool) -> Dict[str, Optional[str]]:
+    def make_deploy_variables(
+        self,
+        cluster_name: resources_utils.ClusterName,
+        region: clouds.Region,
+        zones: Optional[List[clouds.Zone]],
+        num_nodes: int,
+        dryrun: bool,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
         These variables are divided into two categories: cloud-specific and
@@ -1491,7 +1529,7 @@ class Resources:
         # Cloud specific variables
         assert self.cloud is not None, 'Cloud must be specified'
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, num_nodes, dryrun)
+            self, cluster_name, region, zones, num_nodes, dryrun, volume_mounts)
 
         # TODO(andyl): Should we print some warnings if users' envs share
         # same names with the cloud specific variables, but not enabled
@@ -1542,8 +1580,11 @@ class Resources:
             # to each cloud if any cloud supports reservations for spot.
             return {}
         specific_reservations = set(
-            skypilot_config.get_nested(
-                (str(self.cloud).lower(), 'specific_reservations'), set()))
+            skypilot_config.get_effective_region_config(
+                cloud=str(self.cloud).lower(),
+                region=self.region,
+                keys=('specific_reservations',),
+                default_value=set()))
 
         if isinstance(self.cloud, clouds.DummyCloud):
             return self.cloud.get_reservations_available_resources(
@@ -1764,6 +1805,8 @@ class Resources:
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override_configs,
+            _no_missing_accel_warnings=override.pop(
+                'no_missing_accel_warnings', self._no_missing_accel_warnings),
         )
         assert not override
         return resources
@@ -1830,9 +1873,74 @@ class Resources:
                 del config[alias]
 
     @classmethod
+    def _parse_accelerators_from_str(
+            cls, accelerators: str) -> List[Tuple[str, bool]]:
+        """Parse accelerators string into a list of possible accelerators.
+
+        Returns:
+            A list of possible accelerators. Each element is a tuple of
+            (accelerator_name, was_user_specified). was_user_specified is True
+            if the accelerator was directly named by the user (for example
+            "H100:2" would be True, but "80GB+" would be False since it doesn't
+            mention the name of the accelerator).
+        """
+        # sanity check
+        assert isinstance(accelerators, str), accelerators
+
+        manufacturer = None
+        memory = None
+        count = 1
+
+        split = accelerators.split(':')
+        if len(split) == 3:
+            manufacturer, memory, count_str = split
+            count = int(count_str)
+            assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
+                'If specifying a GPU manufacturer, you must also' \
+                'specify the memory size'
+        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            memory = split[0]
+            count = int(split[1])
+        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[1]):
+            manufacturer, memory = split
+        elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+            memory = split[0]
+        else:
+            # it is just an accelerator name, not a memory size
+            return [(accelerators, True)]
+
+        # we know we have some case of manufacturer, memory, count, now we
+        # need to convert that to a list of possible accelerators
+        memory_parsed = resources_utils.parse_memory_resource(memory,
+                                                              'accelerators',
+                                                              allow_plus=True)
+        plus = memory_parsed[-1] == '+'
+        if plus:
+            memory_parsed = memory_parsed[:-1]
+        memory_gb = int(memory_parsed)
+
+        accelerators = [
+            (f'{device}:{count}', False)
+            for device in accelerator_registry.get_devices_by_memory(
+                memory_gb, plus, manufacturer=manufacturer)
+        ]
+
+        return accelerators
+
+    @classmethod
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
+        """Creates Resources objects from a YAML config.
+
+        Args:
+            config: A dict of resource config.
+
+        Returns:
+            A set of Resources objects if any_of is specified, otherwise a list
+            of Resources objects if ordered is specified, otherwise a set with
+            a single Resources object.
+        """
         if config is None:
             return {Resources()}
 
@@ -1889,13 +1997,48 @@ class Resources:
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
             if isinstance(accelerators, str):
-                accelerators = {accelerators}
+                accelerators_list = cls._parse_accelerators_from_str(
+                    accelerators)
             elif isinstance(accelerators, dict):
-                accelerators = [
+                accelerator_names = [
                     f'{k}:{v}' if v is not None else f'{k}'
                     for k, v in accelerators.items()
                 ]
-                accelerators = set(accelerators)
+                accelerators_list = []
+                for accel_name in accelerator_names:
+                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    accelerators_list.extend(parsed_accels)
+            elif isinstance(accelerators, list) or isinstance(
+                    accelerators, set):
+                accelerators_list = []
+                for accel_name in accelerators:
+                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    accelerators_list.extend(parsed_accels)
+            else:
+                assert False, ('Invalid accelerators type:'
+                               f'{type(accelerators)}')
+            # now that accelerators is a list, we need to decide which to
+            # include in the final set, however, there may be multiple copies
+            # of the same accelerator, some given by name by the user and the
+            # other copy being given by memory size. In this case, we only care
+            # about the user specified ones (so we can give a warning if it
+            # doesn't exist).
+            accel_to_user_specified: Dict[str, bool] = collections.OrderedDict()
+            for accel, user_specified in accelerators_list:
+                # If this accelerator is not in dict yet, or if current one is
+                # user specified and existing one is not, update the entry
+                accel_to_user_specified[accel] = (user_specified or
+                                                  accel_to_user_specified.get(
+                                                      accel, False))
+
+            # only time we care about ordered is when we are given a list,
+            # otherwise we default to a set
+            accelerators_type = list if isinstance(accelerators, list) else set
+            accelerators = accelerators_type([
+                (accel, user_specified)
+                for accel, user_specified in accel_to_user_specified.items()
+            ])
+
             if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1921,20 +2064,20 @@ class Resources:
             # In Task, we store a list of resources, each with 1 accelerator.
             # This for loop is for format conversion.
             tmp_resources_list = []
-            for acc in accelerators:
+            for acc, user_specified in accelerators:
                 tmp_resource = config.copy()
                 tmp_resource['accelerators'] = acc
+                if not user_specified:
+                    tmp_resource['_no_missing_accel_warnings'] = True
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
             assert isinstance(accelerators, (list, set)), accelerators
             return type(accelerators)(tmp_resources_list)
-
         return {Resources._from_yaml_config_single(config)}
 
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
-
         resources_fields: Dict[str, Any] = {}
 
         # Extract infra field if present
@@ -1996,6 +2139,8 @@ class Resources:
             # although it will end up being an int, we don't know at this point
             # if it has units or not, so we store it as a string
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
+        resources_fields['_no_missing_accel_warnings'] = config.pop(
+            '_no_missing_accel_warnings', None)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2046,6 +2191,9 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+
+        add_if_not_none('_no_missing_accel_warnings',
+                        self._no_missing_accel_warnings)
         add_if_not_none('priority', self.priority)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
@@ -2218,6 +2366,10 @@ class Resources:
         if version < 27:
             self._priority = None
 
+        if version < 28:
+            self._no_missing_accel_warnings = state.get(
+                '_no_missing_accel_warnings', None)
+
         self.__dict__.update(state)
 
 
@@ -2291,67 +2443,3 @@ def parse_time_minutes(time: str) -> int:
                 continue
 
     raise ValueError(f'Invalid time format: {time}')
-
-
-def parse_memory_resource(resource_qty_str: Union[str, int, float],
-                          field_name: str,
-                          ret_type: type = int,
-                          unit: str = 'gb',
-                          allow_plus: bool = False,
-                          allow_x: bool = False,
-                          allow_rounding: bool = False) -> str:
-    """Returns memory size in chosen units given a resource quantity string.
-
-    Args:
-        resource_qty_str: Resource quantity string
-        unit: Unit to convert to
-        allow_plus: Whether to allow '+' prefix
-        allow_x: Whether to allow 'x' suffix
-    """
-    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
-
-    error_msg = f'"{field_name}" field should be a <int><b|k|m|g|t|p><+?>,'\
-                f' got {resource_qty_str}'
-
-    resource_str = str(resource_qty_str)
-
-    # Handle plus and x suffixes, x is only used internally for jobs controller
-    plus = ''
-    if resource_str.endswith('+'):
-        if allow_plus:
-            resource_str = resource_str[:-1]
-            plus = '+'
-        else:
-            raise ValueError(error_msg)
-
-    x = ''
-    if resource_str.endswith('x'):
-        if allow_x:
-            resource_str = resource_str[:-1]
-            x = 'x'
-        else:
-            raise ValueError(error_msg)
-
-    try:
-        # We assume it is already in the wanted units to maintain backwards
-        # compatibility
-        ret_type(resource_str)
-        return f'{resource_str}{plus}{x}'
-    except ValueError:
-        pass
-
-    resource_str = resource_str.lower()
-    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
-        if resource_str.endswith(mem_unit):
-            try:
-                value = ret_type(resource_str[:-len(mem_unit)])
-                converted = (value * multiplier /
-                             constants.MEMORY_SIZE_UNITS[unit])
-                if not allow_rounding and ret_type(converted) != converted:
-                    raise ValueError(error_msg)
-                converted = ret_type(converted)
-                return f'{converted}{plus}{x}'
-            except ValueError:
-                continue
-
-    raise ValueError(error_msg)

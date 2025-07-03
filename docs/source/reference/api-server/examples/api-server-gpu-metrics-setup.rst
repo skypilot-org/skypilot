@@ -3,8 +3,8 @@
 Monitoring Cluster-wide GPU Metrics
 ===================================
 
-SkyPilot provides native integration with Nvidia DCGM to surface 
-real-time GPU metrics directly in the SkyPilot dashboard. 
+SkyPilot provides native integration with Nvidia DCGM to surface
+real-time GPU metrics directly in the SkyPilot dashboard.
 
 .. image:: ../../../images/metrics/gpu-metrics.png
     :alt: GPU metrics dashboard
@@ -44,9 +44,9 @@ The flags do the following:
   SkyPilot API server.
 * ``prometheus.enabled`` – deploy a Prometheus instance pre-configured to
   scrape both the SkyPilot API server and DCGM-Exporter.
-* ``grafana.enabled`` – deploy Grafana with an out-of-the-box dashboard that will be embedded in the SkyPilot dashboard. 
+* ``grafana.enabled`` – deploy Grafana with an out-of-the-box dashboard that will be embedded in the SkyPilot dashboard.
 
-What metrics are collected?
+What metrics are exposed?
 ---------------------------
 
 By default, the SkyPilot dashboard exposes the following metrics:

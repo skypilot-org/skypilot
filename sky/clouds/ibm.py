@@ -18,6 +18,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -175,6 +176,7 @@ class IBM(clouds.Cloud):
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 

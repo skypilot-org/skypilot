@@ -73,6 +73,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1327,6 +1328,7 @@ class RetryingVmProvisioner(object):
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
+        volume_mounts: Optional[List[volume_lib.VolumeMount]],
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1432,7 +1434,9 @@ class RetryingVmProvisioner(object):
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists)
+                    keep_launch_fields_in_existing_config=cluster_exists,
+                    volume_mounts=volume_mounts,
+                )
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -2081,7 +2085,9 @@ class RetryingVmProvisioner(object):
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
                     prev_cluster_ever_up=prev_cluster_ever_up,
-                    skip_if_config_hash_matches=skip_if_config_hash_matches)
+                    skip_if_config_hash_matches=skip_if_config_hash_matches,
+                    volume_mounts=task.volume_mounts,
+                )
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2435,9 +2441,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             zip(cluster_internal_ips, cluster_feasible_ips))
 
         # Ensure head node is the first element, then sort based on the
-        # external IPs for stableness
-        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
-            internal_external_ips[1:], key=lambda x: x[1])
+        # external IPs for stableness. Skip for k8s nodes since pods
+        # worker ids are already mapped.
+        if (cluster_info is not None and
+                cluster_info.provider_name == 'kubernetes'):
+            stable_internal_external_ips = internal_external_ips
+        else:
+            stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+                internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @context_utils.cancellation_guard
@@ -3198,9 +3209,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self._open_ports(handle)
 
         # Capture task YAML and command
-        task_config = None
+        task_config_redacted = None
         if task is not None:
-            task_config = task.to_yaml_config(redact_secrets=True)
+            task_config_redacted = task.to_yaml_config(redact_secrets=True)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3209,7 +3220,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
-                task_config=task_config,
+                task_config=task_config_redacted,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)

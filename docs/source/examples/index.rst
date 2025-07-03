@@ -22,10 +22,10 @@ A collection of examples demonstrating the use cases of SkyPilot.
    Training <training/index>
    Serving <serving/index>
    Models <models/index>
-   Other Frameworks <frameworks/index>
    AI Applications <applications/index>
    AI Performance <performance/index>
-   Trigger based Tasks <periodic-and-trigger/index>
+   Orchestrators <orchestrators/index>
+   Other Frameworks <frameworks/index>
 
 .. _examples-contribute:
 

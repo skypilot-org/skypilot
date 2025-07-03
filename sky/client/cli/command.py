@@ -81,6 +81,8 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
+from sky.volumes import utils as volumes_utils
+from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
     import types
@@ -202,13 +204,14 @@ def _get_cluster_records_and_set_ssh_config(
 
 
 def _get_glob_matches(candidate_names: List[str],
-                      glob_patterns: List[str]) -> List[str]:
+                      glob_patterns: List[str],
+                      resource_type: str = 'Storage') -> List[str]:
     """Returns a list of names that match the glob pattern."""
     glob_storages = []
     for glob_pattern in glob_patterns:
         glob_storage = fnmatch.filter(candidate_names, glob_pattern)
         if not glob_storage:
-            click.echo(f'Storage {glob_pattern} not found.')
+            click.echo(f'{resource_type} {glob_pattern} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -284,6 +287,19 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
     response = requests_lib.get(
         f'{server_common.get_server_url()}'
         f'/api/completion/storage_name?incomplete={incomplete}',
+        timeout=2.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _complete_volume_name(ctx: click.Context, param: click.Parameter,
+                          incomplete: str) -> List[str]:
+    """Handle shell completion for volume names."""
+    del ctx, param  # Unused.
+    response = requests_lib.get(
+        f'{server_common.get_server_url()}'
+        f'/api/completion/volume_name?incomplete={incomplete}',
         timeout=2.0,
     )
     response.raise_for_status()
@@ -531,8 +547,9 @@ def _parse_override_params(
     return override_params
 
 
-def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    """Checks if entrypoint is a readable YAML file.
+def _check_yaml_only(
+        entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], bool, str]:
+    """Checks if entrypoint is a readable YAML file without confirmation.
 
     Args:
         entrypoint: Path to a YAML file.
@@ -580,6 +597,17 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                 invalid_reason = ('yaml.safe_load() failed. Please check if the'
                                   ' path is correct.')
         is_yaml = False
+    return is_yaml, result, yaml_file_provided, invalid_reason
+
+
+def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """Checks if entrypoint is a readable YAML file.
+
+    Args:
+        entrypoint: Path to a YAML file.
+    """
+    is_yaml, result, yaml_file_provided, invalid_reason = _check_yaml_only(
+        entrypoint)
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
@@ -2113,16 +2141,52 @@ def cancel(
       \b
       # Cancel the latest running job on a cluster.
       sky cancel cluster_name
+      \b
+      # Cancel the latest running job on all matching clusters.
+      sky cancel cluster-glob*
+      \b
+      # Cancel all your jobs on all matching clusters.
+      sky cancel cluster-glob* -a
 
     Job IDs can be looked up by ``sky queue cluster_name``.
+    Cluster names support glob patterns (e.g., px* matches px1, px2).
     """
+    # Handle glob patterns in cluster names
+    matching_clusters = []
+    if '*' in cluster or '?' in cluster or '[' in cluster:
+        # This is a glob pattern, expand it
+        try:
+            # Get list of all available clusters
+            all_records = sdk.get(sdk.status(cluster_names=None,
+                                             all_users=True))
+            all_clusters = [record['name'] for record in all_records]
+            matching_clusters = [
+                c for c in all_clusters if fnmatch.fnmatch(c, cluster)
+            ]
+        except Exception:
+            raise click.UsageError(
+                f'No clusters match pattern: {cluster!r}') from None
+    else:
+        # Literal cluster name
+        matching_clusters = [cluster]
+
+    if not matching_clusters:
+        raise click.UsageError(f'No clusters match pattern: {cluster!r}')
+
+    # Don't allow job IDs when using glob patterns that match multiple clusters
+    if len(matching_clusters) > 1 and jobs:
+        raise click.UsageError(
+            'Cannot specify job IDs when cluster pattern '
+            'matches multiple clusters. '
+            f'Pattern {cluster!r} matches: {", ".join(matching_clusters)}')
+
     job_identity_str = ''
     job_ids_to_cancel = None
     if not jobs and not all and not all_users:
-        click.echo(
-            f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
-            'cancelling the latest running job.'
-            f'{colorama.Style.RESET_ALL}')
+        click.echo(f'{colorama.Fore.YELLOW}No job IDs or'
+                   ' --all/--all-users provided; '
+                   'cancelling the latest running job.'
+                   f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
     elif all_users:
         job_identity_str = 'all users\' jobs'
@@ -2135,7 +2199,8 @@ def cancel(
             connector = ' and ' if job_identity_str else ''
             job_identity_str += f'{connector}job{plural} {jobs_str}'
             job_ids_to_cancel = jobs
-    job_identity_str += f' on cluster {cluster!r}'
+
+    job_identity_str += f' on cluster(s): {", ".join(matching_clusters)}'
 
     if not yes:
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
@@ -2143,22 +2208,24 @@ def cancel(
                       abort=True,
                       show_default=True)
 
-    try:
-        request_id = sdk.cancel(cluster,
-                                all=all,
-                                all_users=all_users,
-                                job_ids=job_ids_to_cancel)
-        _async_call_or_wait(request_id, async_call, 'sky.cancel')
-    except exceptions.NotSupportedError as e:
-        controller = controller_utils.Controllers.from_name(cluster)
-        assert controller is not None, cluster
-        with ux_utils.print_exception_no_traceback():
-            raise click.UsageError(controller.value.decline_cancel_hint) from e
-    except ValueError as e:
-        raise click.UsageError(str(e))
-    except exceptions.ClusterNotUpError:
-        with ux_utils.print_exception_no_traceback():
-            raise
+    for cluster in matching_clusters:
+        try:
+            request_id = sdk.cancel(cluster,
+                                    all=all,
+                                    all_users=all_users,
+                                    job_ids=job_ids_to_cancel)
+            _async_call_or_wait(request_id, async_call, 'sky.cancel')
+        except exceptions.NotSupportedError as e:
+            controller = controller_utils.Controllers.from_name(cluster)
+            assert controller is not None, cluster
+            with ux_utils.print_exception_no_traceback():
+                raise click.UsageError(
+                    controller.value.decline_cancel_hint) from e
+        except ValueError as e:
+            raise click.UsageError(str(e))
+        except exceptions.ClusterNotUpError:
+            with ux_utils.print_exception_no_traceback():
+                raise
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -3148,7 +3215,11 @@ def show_gpus(
         cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
-    kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
+    kubernetes_autoscaling = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=region,
+        keys=('autoscaler',),
+        default_value=None) is not None
     kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
     ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
@@ -3765,6 +3836,195 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
             logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def volumes():
+    """SkyPilot Volumes CLI."""
+    pass
+
+
+@volumes.command('apply', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('entrypoint',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help='Volume name. Override the name defined in the YAML.')
+@click.option('--infra',
+              required=False,
+              type=str,
+              help='Infra. Format: k8s, k8s/context-name. '
+              'Override the infra defined in the YAML.')
+@click.option(
+    '--type',
+    required=False,
+    type=str,
+    help='Volume type. Format: pvc. Override the type defined in the YAML.')
+@click.option('--size',
+              required=False,
+              type=str,
+              help='Volume size. Override the size defined in the YAML.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@_add_click_options(flags.COMMON_OPTIONS)
+@usage_lib.entrypoint
+def volumes_apply(
+        entrypoint: Optional[Tuple[str, ...]],
+        name: Optional[str],
+        infra: Optional[str],
+        type: Optional[str],  # pylint: disable=redefined-builtin
+        size: Optional[str],
+        yes: bool,
+        async_call: bool):
+    """Apply a volume.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Apply a volume from a YAML file.
+        sky volumes apply volume.yaml
+        \b
+        # Apply a volume from a command.
+        sky volumes apply --name pvc1 --infra k8s --type pvc --size 100Gi
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes import volume as volume_lib
+
+    volume_config_dict: Dict[str, Any] = {}
+    if entrypoint is not None and len(entrypoint) > 0:
+        entrypoint_str = ' '.join(entrypoint)
+        is_yaml, yaml_config, yaml_file_provided, invalid_reason = (
+            _check_yaml_only(entrypoint_str))
+        if not is_yaml:
+            if yaml_file_provided:
+                raise click.BadParameter(f'{entrypoint_str!r} looks like a '
+                                         f'yaml path but {invalid_reason}')
+            else:
+                raise click.BadParameter(
+                    f'{entrypoint_str!r} needs to be a YAML file')
+        if yaml_config is not None:
+            volume_config_dict = yaml_config.copy()
+
+    # Create Volume instance
+    volume = volume_lib.Volume.from_dict(volume_config_dict)
+
+    # Normalize the volume config with CLI options
+    volume.normalize_config(name=name, infra=infra, type=type, size=size)
+
+    logger.debug(f'Volume config: {volume.to_dict()}')
+
+    if not yes:
+        click.confirm(f'Proceed to create volume {volume.name!r}?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
+    # Call SDK to create volume
+    try:
+        request_id = volumes_sdk.apply(volume)
+        _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
+    except RuntimeError as e:
+        logger.error(f'{colorama.Fore.RED}Error applying volume: '
+                     f'{common_utils.format_exception(e, use_bracket=True)}'
+                     f'{colorama.Style.RESET_ALL}')
+
+
+@volumes.command('ls', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('--verbose',
+              '-v',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def volumes_ls(verbose: bool):
+    """List volumes managed by SkyPilot."""
+    request_id = volumes_sdk.ls()
+    all_volumes = sdk.stream_and_get(request_id)
+    volume_table = volumes_utils.format_volume_table(all_volumes,
+                                                     show_all=verbose)
+    click.echo(volume_table)
+
+
+@volumes.command('delete', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_volume_name))
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Delete all volumes.')
+@click.option('--yes',
+              '-y',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Skip confirmation prompt.')
+@_add_click_options(flags.COMMON_OPTIONS)
+@usage_lib.entrypoint
+def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
+    """Delete volumes.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Delete two volumes.
+        sky volumes delete pvc1 pvc2
+        \b
+        # Delete all volumes matching glob pattern 'pvc*'.
+        sky volumes delete "pvc*"
+        \b
+        # Delete all volumes.
+        sky volumes delete -a
+    """
+    if sum([bool(names), all]) != 1:
+        raise click.UsageError('Either --all or a name must be specified.')
+    all_volumes = sdk.get(volumes_sdk.ls())
+    if all:
+        if not all_volumes:
+            click.echo('No volumes to delete.')
+            return
+        names = [volume['name'] for volume in all_volumes]
+    else:
+        existing_volume_names = [volume['name'] for volume in all_volumes]
+        names = _get_glob_matches(existing_volume_names,
+                                  names,
+                                  resource_type='Volume')
+    if names:
+        if not yes:
+            volume_names = ', '.join(names)
+            volume_str = 'volumes' if len(names) > 1 else 'volume'
+            click.confirm(
+                f'Deleting {len(names)} {volume_str}: '
+                f'{volume_names}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+
+        try:
+            _async_call_or_wait(volumes_sdk.delete(names), async_call,
+                                'sky.volumes.delete')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
+                         f'{str(e)}{colorama.Style.RESET_ALL}')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -5140,14 +5400,42 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
-@click.option('--get-token',
+@click.option('--relogin',
               is_flag=True,
               default=False,
-              help='Force token-based login.')
+              help='Force relogin with OAuth2 when enabled.')
+@click.option(
+    '--service-account-token',
+    '--token',
+    '-t',
+    required=False,
+    help='Service account token for authentication (starts with ``sky_``).')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str], get_token: bool):
-    """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint, get_token)
+def api_login(endpoint: Optional[str], relogin: bool,
+              service_account_token: Optional[str]):
+    """Logs into a SkyPilot API server.
+
+    If your remote API server has enabled OAuth2 authentication, you can use
+    one of the following methods to login:
+
+    1. OAuth2 browser-based authentication (default)
+
+    2. Service account token via ``--token`` flag
+
+    3. Service account token in ``~/.sky/config.yaml``
+
+    Examples:
+
+    .. code-block:: bash
+
+      # OAuth2 browser login
+      sky api login -e https://api.example.com
+      \b
+      # Service account token login
+      sky api login -e https://api.example.com --token sky_abc123...
+
+    """
+    sdk.api_login(endpoint, relogin, service_account_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -5186,13 +5474,18 @@ def ssh():
               is_flag=True,
               hidden=True,
               help='Run the command asynchronously.')
-def ssh_up(infra: Optional[str], async_call: bool):
-    """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
+@click.option('--file',
+              '-f',
+              required=False,
+              help='The file containing the SSH targets.')
+def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
+    """Set up a cluster using SSH targets from a file. If not specified,
+    ~/.sky/ssh_node_pools.yaml will be used.
 
-    This command sets up a Kubernetes cluster on the machines specified in
-    ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
+    This command sets up a Kubernetes cluster on the machines specified in the
+    config file and configures SkyPilot to use it.
     """
-    request_id = sdk.ssh_up(infra=infra)
+    request_id = sdk.ssh_up(infra=infra, file=file)
     if async_call:
         print(f'Request submitted with ID: {request_id}')
     else:

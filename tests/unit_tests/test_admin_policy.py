@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import importlib
 import os
 import subprocess
@@ -30,9 +31,13 @@ if not os.path.exists(POLICY_PATH):
 
 
 @pytest.fixture
-def add_example_policy_paths():
-    # Add to path to be able to import
-    sys.path.append(os.path.join(POLICY_PATH, 'example_policy'))
+def add_example_policy_paths(monkeypatch):
+    # Patch sys.path in fixture scope to avoid interven the global path
+    test_path = copy.copy(sys.path)
+    test_path.append(os.path.join(POLICY_PATH, 'example_policy'))
+    with monkeypatch.context() as m:
+        m.setattr(sys, 'path', test_path)
+        yield
 
 
 @pytest.fixture
@@ -189,26 +194,29 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                                     idle_minutes_to_autostop=None)
 
 
-@mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
-            return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
 def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
-    dag, config = _load_task_and_apply_policy(
-        task,
-        os.path.join(POLICY_PATH, 'dynamic_kubernetes_contexts_update.yaml'))
+    with mock.patch(
+            'sky.provision.kubernetes.utils.get_all_kube_context_names',
+            return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3']):
+        dag, config = _load_task_and_apply_policy(
+            task,
+            os.path.join(POLICY_PATH,
+                         'dynamic_kubernetes_contexts_update.yaml'))
 
-    assert config.get_nested(
-        ('kubernetes', 'allowed_contexts'),
-        None) == ['kind-skypilot', 'kind-skypilot2'
-                 ], 'Kubernetes allowed contexts should be updated'
-
-    with admin_policy_utils.apply_and_use_config_in_current_request(dag):
-        assert skypilot_config.get_nested(
+        assert config.get_nested(
             ('kubernetes', 'allowed_contexts'),
             None) == ['kind-skypilot', 'kind-skypilot2'
-                     ], 'Global skypilot config should be updated'
-    assert skypilot_config.get_nested(
-        ('kubernetes', 'allowed_contexts'),
-        None) is None, 'Global skypilot config should be restored after request'
+                     ], 'Kubernetes allowed contexts should be updated'
+
+        with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+            assert skypilot_config.get_nested(
+                ('kubernetes', 'allowed_contexts'),
+                None) == ['kind-skypilot', 'kind-skypilot2'
+                         ], 'Global skypilot config should be updated'
+        assert skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'),
+            None) is None, ('Global skypilot config should be restored '
+                            'after request')
 
 
 def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
@@ -329,9 +337,40 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
         user_request = sky.UserRequest(task=fresh_task,
                                        skypilot_config=None,
                                        at_client_side=False)
-        mutated_request = policy.apply(user_request)
-        # Should skip the policy at client-side
-        assert mutated_request.task.file_mounts is None
+        # Should reject the request if it is not applied at client-side
+        with pytest.raises(RuntimeError,
+                           match='Policy UseLocalGcpCredentialsPolicy was not '
+                           'applied at client-side'):
+            policy.apply(user_request)
+
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mr = policy.apply(user_request)
+        mutated_user_request = sky.UserRequest(
+            task=mr.task,
+            skypilot_config=mr.skypilot_config,
+            at_client_side=False)
+        # Server accept the request if it is applied at client-side
+        policy.apply(mutated_user_request)
+
+    # Test server rejects request with mismatched policy version
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        fresh_task.envs['SKYPILOT_LOCAL_GCP_CREDENTIALS_SET'] = 'v0'
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=False)
+        # Should reject the request due to version mismatch
+        with pytest.raises(RuntimeError,
+                           match='Policy UseLocalGcpCredentialsPolicy at v0 '
+                           'was applied at client-side but the server '
+                           'requires v1 to be applied'):
+            policy.apply(user_request)
 
 
 def test_restful_policy(add_example_policy_paths, task):

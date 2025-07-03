@@ -45,18 +45,21 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-def _maybe_upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
-    """Maybe upload files to the controller.
+def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
+    """Upload files to the controller.
 
-    In consolidation mode, we don't need to upload files to the controller as
-    the API server and the controller are colocated.
+    In consolidation mode, we still need to upload files to the controller as
+    we should keep a separate workdir for each jobs. Assuming two jobs using
+    the same workdir, if there are some modifications to the workdir after job 1
+    is submitted, on recovery of job 1, the modifications should not be applied.
     """
     local_to_controller_file_mounts: Dict[str, str] = {}
 
-    if managed_job_utils.is_consolidation_mode():
-        return local_to_controller_file_mounts
-
-    if storage_lib.get_cached_enabled_storage_cloud_names_or_refresh():
+    # For consolidation mode, we don't need to use cloud storage,
+    # as uploading to the controller is only a local copy.
+    storage_clouds = (
+        storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+    if not managed_job_utils.is_consolidation_mode() and storage_clouds:
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -67,7 +70,7 @@ def _maybe_upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
         # directly to the controller, because the controller may not
         # even be up yet.
         for task_ in dag.tasks:
-            if task_.storage_mounts:
+            if task_.storage_mounts and not storage_clouds:
                 # Technically, we could convert COPY storage_mounts that
                 # have a local source and do not specify `store`, but we
                 # will not do that for now. Only plain file_mounts are
@@ -145,6 +148,7 @@ def launch(
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -154,8 +158,12 @@ def launch(
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
+    # TODO(aylei): use consolidated job controller instead of performing
+    # pre-mount operations when submitting jobs.
+    dag.pre_mount_volumes()
 
-    user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    user_dag_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
+        dag, redact_secrets=True)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
@@ -237,14 +245,14 @@ def launch(
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
 
-    local_to_controller_file_mounts = _maybe_upload_files_to_controller(dag)
+    local_to_controller_file_mounts = _upload_files_to_controller(dag)
 
     # Has to use `\` to avoid yapf issue.
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f, \
          tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
                                      mode='w') as original_user_yaml_path:
-        original_user_yaml_path.write(user_dag_str)
+        original_user_yaml_path.write(user_dag_str_redacted)
         original_user_yaml_path.flush()
 
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
@@ -348,13 +356,8 @@ def launch(
                 # Dump script for high availability recovery.
                 if controller_utils.high_availability_specified(
                         controller_name):
-                    dump_script_path = (
-                        managed_job_utils.get_ha_dump_script_path(
-                            consolidation_mode_job_id))
-                    dump_script_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(dump_script_path, 'w',
-                              encoding='utf-8') as script_f:
-                        script_f.write(run_script)
+                    managed_job_state.set_ha_recovery_script(
+                        consolidation_mode_job_id, run_script)
                 backend.run_on_head(local_handle, run_script)
                 return consolidation_mode_job_id, local_handle
 
