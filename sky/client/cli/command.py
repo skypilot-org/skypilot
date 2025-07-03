@@ -1878,7 +1878,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 return num_in_progress_jobs, msg
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
-                managed_jobs_query_interrupted = True
                 # Set to -1, so that the controller is not considered
                 # down, and the hint for showing sky jobs queue
                 # will still be shown.
