@@ -1,5 +1,4 @@
 """Utilities for REST API."""
-import asyncio
 import contextlib
 import dataclasses
 import enum
@@ -43,7 +42,6 @@ COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
-REQUESTS_GC_LOCK_PATH = '~/.sky/api_server/requests_gc.lock'
 DEFAULT_REQUESTS_GC_RETENTION_SECONDS = 60 * 60 * 24  # 1 day
 
 # TODO(zhwu): For scalability, there are several TODOs:
@@ -727,11 +725,11 @@ def clean_finished_requests_with_retention(retention_seconds: int) -> None:
         retention_seconds: Requests older than this many seconds will be
             deleted.
     """
-    reqs = get_request_tasks(
-        status=[
-            RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED
-        ],
-        created_before=time.time() - retention_seconds)
+    finished_statuses = [
+        RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED
+    ]
+    reqs = get_request_tasks(status=finished_statuses,
+                             created_before=time.time() - retention_seconds)
 
     for req in reqs:
         req.log_path.unlink(missing_ok=True)
@@ -747,21 +745,18 @@ def clean_finished_requests_with_retention(retention_seconds: int) -> None:
                 f'older than {retention_seconds} seconds')
 
 
-async def requests_gc_daemon():
+def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
-    lock_path = os.path.expanduser(REQUESTS_GC_LOCK_PATH)
-    pathlib.Path(lock_path).parent.mkdir(parents=True, exist_ok=True)
     retention_seconds = skypilot_config.get_nested(
         ['api_server', 'requests_gc_retention_seconds'],
         DEFAULT_REQUESTS_GC_RETENTION_SECONDS)
-    with filelock.FileLock(lock_path):
-        while True:
-            try:
-                # Negative value disables the requests GC
-                if retention_seconds >= 0:
-                    clean_finished_requests_with_retention(retention_seconds)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error running requests GC daemon: {e}')
-            # Run the daemon at most once every 60 seconds to avoid too frequent
-            # cleanup.
-            await asyncio.sleep(max(retention_seconds, 60))
+    while True:
+        try:
+            # Negative value disables the requests GC
+            if retention_seconds >= 0:
+                clean_finished_requests_with_retention(retention_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error running requests GC daemon: {e}')
+        # Run the daemon at most once every 60 seconds to avoid too frequent
+        # cleanup.
+        time.sleep(max(retention_seconds, 60))

@@ -1749,6 +1749,9 @@ if __name__ == '__main__':
                                                     cmd_args.metrics_port),
                                               daemon=True)
             metrics_thread.start()
+        gc_thread = threading.Thread(target=requests_lib.requests_gc_daemon,
+                                     daemon=True)
+        gc_thread.start()
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')

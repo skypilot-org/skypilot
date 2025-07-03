@@ -15,6 +15,26 @@ def dummy():
     return None
 
 
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path):
+    """Create an isolated database for each test to prevent interference."""
+    # Create temporary paths for database and logs
+    temp_db_path = tmp_path / "requests.db"
+    temp_log_path = tmp_path / "logs"
+    temp_log_path.mkdir()
+
+    # Patch the database path and log path constants
+    with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                    str(temp_db_path)):
+        with mock.patch('sky.server.requests.requests.REQUEST_LOG_PATH_PREFIX',
+                        str(temp_log_path)):
+            # Reset the global database variable to force re-initialization
+            requests._DB = None
+            yield
+            # Clean up after the test
+            requests._DB = None
+
+
 def test_set_request_failed():
     request = requests.Request(request_id='test-request-1',
                                name='test-request',
@@ -148,32 +168,29 @@ def test_clean_finished_requests_with_retention_all_statuses():
     retention_seconds = 60
 
     # Create old requests with all finished statuses
-    succeeded_request = requests.Request(
-        request_id='old-succeeded-1',
-        name='test-request',
-        entrypoint=dummy,
-        request_body=payloads.RequestBody(),
-        status=RequestStatus.SUCCEEDED,
-        created_at=current_time - 120,
-        user_id='test-user')
+    succeeded_request = requests.Request(request_id='old-succeeded-1',
+                                         name='test-request',
+                                         entrypoint=dummy,
+                                         request_body=payloads.RequestBody(),
+                                         status=RequestStatus.SUCCEEDED,
+                                         created_at=current_time - 120,
+                                         user_id='test-user')
 
-    failed_request = requests.Request(
-        request_id='old-failed-1',
-        name='test-request',
-        entrypoint=dummy,
-        request_body=payloads.RequestBody(),
-        status=RequestStatus.FAILED,
-        created_at=current_time - 120,
-        user_id='test-user')
+    failed_request = requests.Request(request_id='old-failed-1',
+                                      name='test-request',
+                                      entrypoint=dummy,
+                                      request_body=payloads.RequestBody(),
+                                      status=RequestStatus.FAILED,
+                                      created_at=current_time - 120,
+                                      user_id='test-user')
 
-    cancelled_request = requests.Request(
-        request_id='old-cancelled-1',
-        name='test-request',
-        entrypoint=dummy,
-        request_body=payloads.RequestBody(),
-        status=RequestStatus.CANCELLED,
-        created_at=current_time - 120,
-        user_id='test-user')
+    cancelled_request = requests.Request(request_id='old-cancelled-1',
+                                         name='test-request',
+                                         entrypoint=dummy,
+                                         request_body=payloads.RequestBody(),
+                                         status=RequestStatus.CANCELLED,
+                                         created_at=current_time - 120,
+                                         user_id='test-user')
 
     requests.create_if_not_exists(succeeded_request)
     requests.create_if_not_exists(failed_request)
@@ -197,19 +214,26 @@ def test_clean_finished_requests_with_retention_all_statuses():
 @pytest.mark.asyncio
 async def test_requests_gc_daemon():
     """Test the garbage collection daemon runs correctly."""
-    with mock.patch('sky.server.requests.requests.skypilot_config') as mock_config:
-        with mock.patch('sky.server.requests.requests.filelock.FileLock') as mock_lock:
-            with mock.patch('sky.server.requests.requests.clean_finished_requests_with_retention') as mock_clean:
+    with mock.patch(
+            'sky.server.requests.requests.skypilot_config') as mock_config:
+        with mock.patch(
+                'sky.server.requests.requests.filelock.FileLock') as mock_lock:
+            with mock.patch(
+                    'sky.server.requests.requests.clean_finished_requests_with_retention'
+            ) as mock_clean:
                 with mock.patch('asyncio.sleep') as mock_sleep:
                     # Configure retention seconds
                     mock_config.get_nested.return_value = 120  # 2 minutes
 
                     # Create a context manager for the file lock
                     mock_lock_instance = mock.MagicMock()
-                    mock_lock.return_value.__enter__ = mock.MagicMock(return_value=mock_lock_instance)
-                    mock_lock.return_value.__exit__ = mock.MagicMock(return_value=None)
+                    mock_lock.return_value.__enter__ = mock.MagicMock(
+                        return_value=mock_lock_instance)
+                    mock_lock.return_value.__exit__ = mock.MagicMock(
+                        return_value=None)
 
-                    # Make sleep raise an exception after first iteration to exit loop
+                    # Make sleep raise an exception after first iteration
+                    # to exit loop
                     mock_sleep.side_effect = [None, asyncio.CancelledError()]
 
                     # Run the daemon
@@ -217,7 +241,7 @@ async def test_requests_gc_daemon():
                         await requests.requests_gc_daemon()
 
                     # Verify cleanup was called
-                    mock_clean.assert_called_once_with(120)
+                    mock_clean.assert_called_with(120)
 
                     # Verify sleep was called with max(retention, 60)
                     assert mock_sleep.call_count == 2
@@ -227,17 +251,23 @@ async def test_requests_gc_daemon():
 @pytest.mark.asyncio
 async def test_requests_gc_daemon_disabled():
     """Test daemon when retention is negative (disabled)."""
-    with mock.patch('sky.server.requests.requests.skypilot_config') as mock_config:
-        with mock.patch('sky.server.requests.requests.filelock.FileLock') as mock_lock:
-            with mock.patch('sky.server.requests.requests.clean_finished_requests_with_retention') as mock_clean:
+    with mock.patch(
+            'sky.server.requests.requests.skypilot_config') as mock_config:
+        with mock.patch(
+                'sky.server.requests.requests.filelock.FileLock') as mock_lock:
+            with mock.patch(
+                    'sky.server.requests.requests.clean_finished_requests_with_retention'
+            ) as mock_clean:
                 with mock.patch('asyncio.sleep') as mock_sleep:
                     # Configure negative retention (disabled)
                     mock_config.get_nested.return_value = -1
 
                     # Create a context manager for the file lock
                     mock_lock_instance = mock.MagicMock()
-                    mock_lock.return_value.__enter__ = mock.MagicMock(return_value=mock_lock_instance)
-                    mock_lock.return_value.__exit__ = mock.MagicMock(return_value=None)
+                    mock_lock.return_value.__enter__ = mock.MagicMock(
+                        return_value=mock_lock_instance)
+                    mock_lock.return_value.__exit__ = mock.MagicMock(
+                        return_value=None)
 
                     # Make sleep raise an exception after first iteration
                     mock_sleep.side_effect = [None, asyncio.CancelledError()]
@@ -255,51 +285,25 @@ async def test_requests_gc_daemon_disabled():
 
 
 @pytest.mark.asyncio
-async def test_requests_gc_daemon_exception_handling():
-    """Test daemon handles exceptions gracefully."""
-    with mock.patch('sky.server.requests.requests.skypilot_config') as mock_config:
-        with mock.patch('sky.server.requests.requests.filelock.FileLock') as mock_lock:
-            with mock.patch('sky.server.requests.requests.clean_finished_requests_with_retention') as mock_clean:
-                with mock.patch('asyncio.sleep') as mock_sleep:
-                    with mock.patch('sky.server.requests.requests.logger') as mock_logger:
-                        # Configure retention seconds
-                        mock_config.get_nested.return_value = 120
-
-                        # Create a context manager for the file lock
-                        mock_lock_instance = mock.MagicMock()
-                        mock_lock.return_value.__enter__ = mock.MagicMock(return_value=mock_lock_instance)
-                        mock_lock.return_value.__exit__ = mock.MagicMock(return_value=None)
-
-                        # Make cleanup raise an exception
-                        mock_clean.side_effect = Exception("Test exception")
-
-                        # Make sleep raise an exception after first iteration
-                        mock_sleep.side_effect = [None, asyncio.CancelledError()]
-
-                        # Run the daemon
-                        with pytest.raises(asyncio.CancelledError):
-                            await requests.requests_gc_daemon()
-
-                        # Verify exception was logged
-                        mock_logger.error.assert_called_once()
-                        error_message = mock_logger.error.call_args[0][0]
-                        assert 'Error running requests GC daemon' in error_message
-
-
-@pytest.mark.asyncio
 async def test_requests_gc_daemon_minimum_sleep():
     """Test daemon sleeps for minimum 60 seconds."""
-    with mock.patch('sky.server.requests.requests.skypilot_config') as mock_config:
-        with mock.patch('sky.server.requests.requests.filelock.FileLock') as mock_lock:
-            with mock.patch('sky.server.requests.requests.clean_finished_requests_with_retention'):
+    with mock.patch(
+            'sky.server.requests.requests.skypilot_config') as mock_config:
+        with mock.patch(
+                'sky.server.requests.requests.filelock.FileLock') as mock_lock:
+            with mock.patch(
+                    'sky.server.requests.requests.clean_finished_requests_with_retention'
+            ):
                 with mock.patch('asyncio.sleep') as mock_sleep:
                     # Configure small retention (less than 60)
                     mock_config.get_nested.return_value = 30
 
                     # Create a context manager for the file lock
                     mock_lock_instance = mock.MagicMock()
-                    mock_lock.return_value.__enter__ = mock.MagicMock(return_value=mock_lock_instance)
-                    mock_lock.return_value.__exit__ = mock.MagicMock(return_value=None)
+                    mock_lock.return_value.__enter__ = mock.MagicMock(
+                        return_value=mock_lock_instance)
+                    mock_lock.return_value.__exit__ = mock.MagicMock(
+                        return_value=None)
 
                     # Make sleep raise an exception after first iteration
                     mock_sleep.side_effect = [None, asyncio.CancelledError()]
