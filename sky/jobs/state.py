@@ -127,19 +127,23 @@ LATEST_SCHEMA_VERSION = 1  # Increment this when you add new migrations
 
 def _get_schema_version(session: orm.Session) -> int:
     # Ensure the schema_version table exists
-    session.execute(sqlalchemy.text(
-        'CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)'))
+    session.execute(
+        sqlalchemy.text('CREATE TABLE IF NOT EXISTS schema_version '
+                        '(version INTEGER PRIMARY KEY)'))
     session.commit()
-    result = session.execute(sqlalchemy.text('SELECT version FROM schema_version')).fetchone()
+    result = session.execute(
+        sqlalchemy.text('SELECT version FROM schema_version')).fetchone()
     if result is None:
-        session.execute(sqlalchemy.text('INSERT INTO schema_version (version) VALUES (0)'))
+        session.execute(
+            sqlalchemy.text('INSERT INTO schema_version (version) VALUES (0)'))
         session.commit()
         return 0
     return result[0]
 
 
 def _set_schema_version(session: orm.Session, version: int):
-    session.execute(sqlalchemy.text('UPDATE schema_version SET version = :v'), {'v': version})
+    session.execute(sqlalchemy.text('UPDATE schema_version SET version = :v'),
+                    {'v': version})
     session.commit()
 
 
@@ -158,21 +162,19 @@ def _run_migrations(session: orm.Session, current_version: int):
 
 def _migration_v1(session: orm.Session):
     # This is the current set of column additions (previously always run)
-    db_utils.add_column_to_table_sqlalchemy(session, 'spot',
-                                            'failure_reason',
+    db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'failure_reason',
                                             sqlalchemy.Text())
     db_utils.add_column_to_table_sqlalchemy(session,
                                             'spot',
                                             'spot_job_id',
                                             sqlalchemy.Integer(),
                                             copy_from='job_id')
-    db_utils.add_column_to_table_sqlalchemy(
-        session,
-        'spot',
-        'task_id',
-        sqlalchemy.Integer(),
-        default_statement='DEFAULT 0',
-        value_to_replace_existing_entries=0)
+    db_utils.add_column_to_table_sqlalchemy(session,
+                                            'spot',
+                                            'task_id',
+                                            sqlalchemy.Integer(),
+                                            default_statement='DEFAULT 0',
+                                            value_to_replace_existing_entries=0)
     db_utils.add_column_to_table_sqlalchemy(session,
                                             'spot',
                                             'task_name',
@@ -186,30 +188,25 @@ def _migration_v1(session: orm.Session):
         value_to_replace_existing_entries=json.dumps({
             'max_restarts_on_errors': 0,
         }))
-    db_utils.add_column_to_table_sqlalchemy(
-        session,
-        'spot',
-        'local_log_file',
-        sqlalchemy.Text(),
-        default_statement='DEFAULT NULL')
+    db_utils.add_column_to_table_sqlalchemy(session,
+                                            'spot',
+                                            'local_log_file',
+                                            sqlalchemy.Text(),
+                                            default_statement='DEFAULT NULL')
 
     db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                            'schedule_state',
-                                            sqlalchemy.Text())
-    db_utils.add_column_to_table_sqlalchemy(
-        session,
-        'job_info',
-        'controller_pid',
-        sqlalchemy.Integer(),
-        default_statement='DEFAULT NULL')
+                                            'schedule_state', sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session,
+                                            'job_info',
+                                            'controller_pid',
+                                            sqlalchemy.Integer(),
+                                            default_statement='DEFAULT NULL')
     db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                            'dag_yaml_path',
-                                            sqlalchemy.Text())
+                                            'dag_yaml_path', sqlalchemy.Text())
     db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                            'env_file_path',
+                                            'env_file_path', sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info', 'user_hash',
                                             sqlalchemy.Text())
-    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                            'user_hash', sqlalchemy.Text())
     db_utils.add_column_to_table_sqlalchemy(
         session,
         'job_info',
@@ -223,8 +220,8 @@ def _migration_v1(session: orm.Session):
         'priority',
         sqlalchemy.Integer(),
         value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
-    db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                            'entrypoint', sqlalchemy.Text())
+    db_utils.add_column_to_table_sqlalchemy(session, 'job_info', 'entrypoint',
+                                            sqlalchemy.Text())
     db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
                                             'original_user_yaml_path',
                                             sqlalchemy.Text())
@@ -1418,7 +1415,8 @@ async def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 
 
 @_init_db_async
-async def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
+async def get_local_log_file(job_id: int,
+                             task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
     assert _SQLALCHEMY_ENGINE is not None
 
