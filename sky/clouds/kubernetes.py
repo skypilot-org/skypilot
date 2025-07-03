@@ -17,12 +17,15 @@ from sky.adaptors import kubernetes
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.kubernetes.utils import is_tpu_on_gke
+from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -165,8 +168,11 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_workspace_cloud(
             'kubernetes').get('allowed_contexts', None)
         if allowed_contexts is None:
-            allowed_contexts = skypilot_config.get_nested(
-                ('kubernetes', 'allowed_contexts'), None)
+            allowed_contexts = skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=None,
+                keys=('allowed_contexts',),
+                default_value=None)
 
         # Exclude contexts starting with `ssh-`
         # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
@@ -251,22 +257,6 @@ class Kubernetes(clouds.Cloud):
         if instance_type is None:
             return regions
 
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if (autoscaler_type is not None and not kubernetes_utils.get_autoscaler(
-                autoscaler_type).can_query_backend):
-            # Unsupported autoscaler type. Rely on the autoscaler to
-            # provision the right instance type without running checks.
-            # Worst case, if autoscaling fails, the pod will be stuck in
-            # pending state until provision_timeout, after which failover
-            # will be triggered.
-            #
-            # Removing this if statement produces the same behavior,
-            # because can_create_new_instance_of_type() always returns True
-            # for unsupported autoscaler types.
-            # This check is here as a performance optimization to avoid
-            # further code executions that is known to return this result.
-            return regions
-
         regions_to_return = []
         for r in regions:
             context = r.name
@@ -283,6 +273,29 @@ class Kubernetes(clouds.Cloud):
                          'not fit in the existing Kubernetes cluster '
                          'with context: '
                          f'{context}. Reason: {reason}')
+
+            autoscaler_type = skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('autoscaler',),
+                default_value=None)
+            if (autoscaler_type is not None and
+                    not kubernetes_utils.get_autoscaler(
+                        autoscaler_type).can_query_backend):
+                # Unsupported autoscaler type. Rely on the autoscaler to
+                # provision the right instance type without running checks.
+                # Worst case, if autoscaling fails, the pod will be stuck in
+                # pending state until provision_timeout, after which failover
+                # will be triggered.
+                #
+                # Removing this if statement produces the same behavior,
+                # because can_create_new_instance_of_type() always returns True
+                # for unsupported autoscaler types.
+                # This check is here as a performance optimization to avoid
+                # further code executions that is known to return this result.
+                regions_to_return.append(r)
+                continue
+
             if autoscaler_type is None:
                 continue
             autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
@@ -392,7 +405,9 @@ class Kubernetes(clouds.Cloud):
         return 0
 
     @staticmethod
-    def _calculate_provision_timeout(num_nodes: int) -> int:
+    def _calculate_provision_timeout(
+            num_nodes: int,
+            volume_mounts: Optional[List['volume_lib.VolumeMount']]) -> int:
         """Calculate provision timeout based on number of nodes.
 
         The timeout scales linearly with the number of nodes to account for
@@ -407,19 +422,33 @@ class Kubernetes(clouds.Cloud):
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
+        if volume_mounts is not None:
+            for volume_mount in volume_mounts:
+                if (volume_mount.volume_config.type ==
+                        volume_lib.VolumeType.PVC.value):
+                    if (volume_mount.volume_config.config.get(
+                            'access_mode', '') ==
+                            volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
+                        # GKE may take several minutes to provision a PV
+                        # supporting READ_WRITE_MANY with filestore.
+                        base_timeout = 180
+                        max_timeout = 240
+                        break
 
         return int(
             min(base_timeout + (per_node_timeout * (num_nodes - 1)),
                 max_timeout))
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: 'resources_utils.ClusterName',
-            region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: 'resources_utils.ClusterName',
+        region: Optional['clouds.Region'],
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
@@ -440,8 +469,12 @@ class Kubernetes(clouds.Cloud):
         cpus = k.cpus
         mem = k.memory
         # Optionally populate accelerator information.
-        acc_count = k.accelerator_count if k.accelerator_count else 0
-        acc_type = k.accelerator_type if k.accelerator_type else None
+        acc_type = k.accelerator_type
+        acc_count = k.accelerator_count
+        if acc_type is not None and is_tpu_on_gke(acc_type):
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+        else:
+            acc_count = acc_count or 0
 
         def _get_image_id(resources: 'resources_lib.Resources') -> str:
             image_id_dict = resources.image_id
@@ -509,11 +542,13 @@ class Kubernetes(clouds.Cloud):
                 context)
             if len(avoid_label_keys) == 0:
                 avoid_label_keys = None
-        port_mode = network_utils.get_port_mode(None)
+        port_mode = network_utils.get_port_mode(None, context)
 
-        remote_identity = skypilot_config.get_nested(
-            ('kubernetes', 'remote_identity'),
-            schemas.get_default_remote_identity('kubernetes'))
+        remote_identity = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('remote_identity',),
+            default_value=schemas.get_default_remote_identity('kubernetes'))
 
         if isinstance(remote_identity, dict):
             # If remote_identity is a dict, use the service account for the
@@ -556,10 +591,12 @@ class Kubernetes(clouds.Cloud):
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
 
-        timeout = self._calculate_provision_timeout(num_nodes)
-        timeout = skypilot_config.get_nested(
-            ('kubernetes', 'provision_timeout'),
-            timeout,
+        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
+        timeout = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('provision_timeout',),
+            default_value=timeout,
             override_configs=resources.cluster_config_overrides)
 
         # Check if this cluster supports high performance networking and
@@ -591,10 +628,19 @@ class Kubernetes(clouds.Cloud):
         }
 
         # Get the storage class name for high availability controller's PVC
-        k8s_ha_storage_class_name = skypilot_config.get_nested(
-            ('kubernetes', 'high_availability', 'storage_class_name'),
-            None,
-            override_configs=resources.cluster_config_overrides)
+        k8s_ha_storage_class_name = (
+            skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('high_availability', 'storage_class_name'),
+                default_value=None))
+
+        k8s_kueue_local_queue_name = (
+            skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('kueue', 'local_queue_name'),
+                default_value=None))
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -604,7 +650,8 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_port_mode': port_mode.value,
-            'k8s_networking_mode': network_utils.get_networking_mode().value,
+            'k8s_networking_mode': network_utils.get_networking_mode(
+                None, context=context).value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
@@ -613,6 +660,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
+            'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
@@ -640,6 +688,10 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_SETUP_SCRIPT_PATH),
             'k8s_high_availability_deployment_run_script_dir':
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
+            'k8s_high_availability_restarting_signal_file':
+                (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
+            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
+            'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
@@ -772,7 +824,7 @@ class Kubernetes(clouds.Cloud):
         """Checks if the user has access credentials to
         Kubernetes."""
         # Check for port forward dependencies
-        logger.info(f'Checking compute credentials for {cls.canonical_name()}')
+        logger.debug(f'Checking compute credentials for {cls.canonical_name()}')
         reasons = kubernetes_utils.check_port_forward_mode_dependencies(False)
         if reasons is not None:
             formatted = '\n'.join(

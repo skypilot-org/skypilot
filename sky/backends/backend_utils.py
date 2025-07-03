@@ -28,10 +28,12 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -64,6 +66,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+    from sky.volumes import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -126,7 +129,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
 # If a cluster is less than LAUNCH_DOUBLE_CHECK_WINDOW seconds old, and we don't
-# see any instances in the cloud, the instances might be in the proccess of
+# see any instances in the cloud, the instances might be in the process of
 # being created. We will wait LAUNCH_DOUBLE_CHECK_DELAY seconds and then double
 # check to make sure there are still no instances. LAUNCH_DOUBLE_CHECK_DELAY
 # should be set longer than the delay between (sending the create instance
@@ -341,7 +344,13 @@ def path_size_megabytes(path: str) -> int:
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:
-        rsync_output = str(subprocess.check_output(rsync_command, shell=True))
+        # rsync sometimes fails `--dry-run` for MacOS' rsync build, however this function is only used to display
+        # a warning message to the user if the size of a file/directory is too
+        # large, so we can safely ignore the error.
+        rsync_output = str(
+            subprocess.check_output(rsync_command,
+                                    shell=True,
+                                    stderr=subprocess.DEVNULL))
     except subprocess.CalledProcessError:
         logger.debug('Command failed, proceeding without estimating size: '
                      f'{rsync_command}')
@@ -511,11 +520,51 @@ def get_expirable_clouds(
     expirable_clouds = []
     local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
     for cloud in enabled_clouds:
-        remote_identities = skypilot_config.get_nested(
-            (str(cloud).lower(), 'remote_identity'), None)
-        if remote_identities is None:
-            remote_identities = schemas.get_default_remote_identity(
-                str(cloud).lower())
+        # Kubernetes config might have context-specific properties
+        if isinstance(cloud, clouds.Kubernetes):
+            # get all custom contexts
+            contexts = kubernetes_utils.get_custom_config_k8s_contexts()
+            # add remote_identity of each context if it exists
+            remote_identities = None
+            for context in contexts:
+                context_remote_identity = skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    region=context,
+                    keys=('remote_identity',),
+                    default_value=None)
+                if context_remote_identity is not None:
+                    if remote_identities is None:
+                        remote_identities = []
+                    if isinstance(context_remote_identity, str):
+                        remote_identities.append(
+                            {context: context_remote_identity})
+                    elif isinstance(context_remote_identity, list):
+                        remote_identities.extend(context_remote_identity)
+            # add global kubernetes remote identity if it exists, if not, add default
+            global_remote_identity = skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=None,
+                keys=('remote_identity',),
+                default_value=None)
+            if global_remote_identity is not None:
+                if remote_identities is None:
+                    remote_identities = []
+                if isinstance(global_remote_identity, str):
+                    remote_identities.append({'*': global_remote_identity})
+                elif isinstance(global_remote_identity, list):
+                    remote_identities.extend(global_remote_identity)
+            if remote_identities is None:
+                remote_identities = schemas.get_default_remote_identity(
+                    str(cloud).lower())
+        else:
+            remote_identities = skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=None,
+                keys=('remote_identity',),
+                default_value=None)
+            if remote_identities is None:
+                remote_identities = schemas.get_default_remote_identity(
+                    str(cloud).lower())
 
         local_credential_expiring = cloud.can_credential_expire()
         if isinstance(remote_identities, str):
@@ -533,16 +582,18 @@ def get_expirable_clouds(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources_lib.Resources',
-        num_nodes: int,
-        cluster_config_template: str,
-        cluster_name: str,
-        local_wheel_path: pathlib.Path,
-        wheel_hash: str,
-        region: clouds.Region,
-        zones: Optional[List[clouds.Zone]] = None,
-        dryrun: bool = False,
-        keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+    to_provision: 'resources_lib.Resources',
+    num_nodes: int,
+    cluster_config_template: str,
+    cluster_name: str,
+    local_wheel_path: pathlib.Path,
+    wheel_hash: str,
+    region: clouds.Region,
+    zones: Optional[List[clouds.Zone]] = None,
+    dryrun: bool = False,
+    keep_launch_fields_in_existing_config: bool = True,
+    volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns:
@@ -590,12 +641,15 @@ def write_cluster_config(
         resources_utils.ClusterName(
             cluster_name,
             cluster_name_on_cloud,
-        ), region, zones, num_nodes, dryrun)
+        ), region, zones, num_nodes, dryrun, volume_mounts)
     config_dict = {}
 
     specific_reservations = set(
-        skypilot_config.get_nested(
-            (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
+        skypilot_config.get_effective_region_config(
+            cloud=str(to_provision.cloud).lower(),
+            region=to_provision.region,
+            keys=('specific_reservations',),
+            default_value=set()))
 
     # Remote identity handling can have 4 cases:
     # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
@@ -608,8 +662,11 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), None)
+    remote_identity_config = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('remote_identity',),
+        default_value=None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
@@ -638,21 +695,33 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
-            if skypilot_config.get_nested(
-                ('kubernetes', 'allowed_contexts'), None) is None:
+            if skypilot_config.get_effective_region_config(
+                    cloud='kubernetes',
+                    region=None,
+                    keys=('allowed_contexts',),
+                    default_value=None) is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_nested(
-            (cloud_str.lower(), 'remote_identity'), None)
+        remote_identity_config = skypilot_config.get_effective_region_config(
+            cloud=cloud_str.lower(),
+            region=region.name,
+            keys=('remote_identity',),
+            default_value=None)
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+
+    logging_agent = logs.get_logging_agent()
+    if logging_agent:
+        for k, v in logging_agent.get_credential_file_mounts().items():
+            assert k not in credentials, f'{k} already in credentials'
+            credentials[k] = v
 
     private_key_path, _ = auth.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
@@ -661,8 +730,11 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Retrieve the ssh_proxy_command for the given cloud / region.
-    ssh_proxy_command_config = skypilot_config.get_nested(
-        (str(cloud).lower(), 'ssh_proxy_command'), None)
+    ssh_proxy_command_config = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=None,
+        keys=('ssh_proxy_command',),
+        default_value=None)
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
@@ -688,7 +760,11 @@ def write_cluster_config(
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
-    labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
+    labels = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('labels',),
+        default_value={})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
@@ -717,6 +793,15 @@ def write_cluster_config(
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name)
 
+    volume_mount_vars = []
+    if volume_mounts is not None:
+        for vol in volume_mounts:
+            volume_mount_vars.append({
+                'name': vol.volume_name,
+                'path': vol.path,
+                'volume_name_on_cloud': vol.volume_config.name_on_cloud,
+            })
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -736,12 +821,17 @@ def write_cluster_config(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # Networking configs
-                'use_internal_ips': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'use_internal_ips'), False),
+                'use_internal_ips': skypilot_config.get_effective_region_config(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('use_internal_ips',),
+                    default_value=False),
                 'ssh_proxy_command': ssh_proxy_command,
-                'vpc_name': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'vpc_name'), None),
-
+                'vpc_name': skypilot_config.get_effective_region_config(
+                    cloud=str(cloud).lower(),
+                    region=region.name,
+                    keys=('vpc_name',),
+                    default_value=None),
                 # User-supplied labels.
                 'labels': labels,
                 # User-supplied remote_identity
@@ -807,6 +897,9 @@ def write_cluster_config(
 
                 # High availability
                 'high_availability': high_availability_specified,
+
+                # Volume mounts
+                'volume_mounts': volume_mount_vars,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -818,8 +911,9 @@ def write_cluster_config(
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path,
             cluster_config_overrides=cluster_config_overrides,
-            cloud=cloud)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+            cloud=cloud,
+            context=region.name)
+        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
@@ -933,6 +1027,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
+    elif isinstance(cloud, clouds.Hyperbolic):
+        config = auth.setup_hyperbolic_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(tmp_yaml_path, config)
@@ -2439,6 +2535,17 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    if (managed_job_utils.is_consolidation_mode() and
+            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+        cn = 'local-controller-consolidation'
+        return backends.LocalResourcesHandle(
+            cluster_name=cn,
+            cluster_name_on_cloud=cn,
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=sky.Resources(cloud=clouds.Cloud(),
+                                             instance_type=cn),
+        )
     if non_existent_message is None:
         non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name
@@ -2502,7 +2609,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -2660,27 +2767,29 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
-    def _update_record_with_resources(record: Optional[Dict[str, Any]]) -> None:
+    def _update_records_with_resources(
+            records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the resources to the record."""
-        if record is None:
-            return
-        handle = record['handle']
-        if handle is None:
-            return
-        record['nodes'] = handle.launched_nodes
-        if handle.launched_resources is None:
-            return
-        record['cloud'] = (f'{handle.launched_resources.cloud}'
-                           if handle.launched_resources.cloud else None)
-        record['region'] = (f'{handle.launched_resources.region}'
-                            if handle.launched_resources.region else None)
-        record['cpus'] = (f'{handle.launched_resources.cpus}'
-                          if handle.launched_resources.cpus else None)
-        record['memory'] = (f'{handle.launched_resources.memory}'
-                            if handle.launched_resources.memory else None)
-        record['accelerators'] = (f'{handle.launched_resources.accelerators}'
-                                  if handle.launched_resources.accelerators else
-                                  None)
+        for record in records:
+            if record is None:
+                continue
+            handle = record['handle']
+            if handle is None:
+                continue
+            record['nodes'] = handle.launched_nodes
+            if handle.launched_resources is None:
+                continue
+            record['cloud'] = (f'{handle.launched_resources.cloud}'
+                               if handle.launched_resources.cloud else None)
+            record['region'] = (f'{handle.launched_resources.region}'
+                                if handle.launched_resources.region else None)
+            record['cpus'] = (f'{handle.launched_resources.cpus}'
+                              if handle.launched_resources.cpus else None)
+            record['memory'] = (f'{handle.launched_resources.memory}'
+                                if handle.launched_resources.memory else None)
+            record['accelerators'] = (
+                f'{handle.launched_resources.accelerators}'
+                if handle.launched_resources.accelerators else None)
 
     # Add auth_config to the records
     for record in records:
@@ -2688,8 +2797,7 @@ def get_clusters(
 
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
-        for record in records:
-            _update_record_with_resources(record)
+        _update_records_with_resources(records)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -2766,8 +2874,7 @@ def get_clusters(
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
 
     # Add resources to the records
-    for record in kept_records:
-        _update_record_with_resources(record)
+    _update_records_with_resources(kept_records)
     return kept_records
 
 
@@ -3053,7 +3160,8 @@ def get_endpoints(cluster: str,
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
             if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
-                error_msg += (kubernetes_utils.get_endpoint_debug_message())
+                error_msg += kubernetes_utils.get_endpoint_debug_message(
+                    launched_resources.region)
             logger.warning(error_msg)
             return {}
         return {port: port_details[port][0].url()}
@@ -3071,8 +3179,8 @@ def get_endpoints(cluster: str,
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
                 if launched_resources.cloud.is_same_cloud(clouds.Kubernetes()):
                     # Add Kubernetes specific debugging info
-                    error_msg += \
-                        kubernetes_utils.get_endpoint_debug_message()
+                    error_msg += kubernetes_utils.get_endpoint_debug_message(
+                        launched_resources.region)
                 logger.warning(error_msg)
                 return {}
         return {

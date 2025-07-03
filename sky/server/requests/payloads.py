@@ -5,7 +5,6 @@ kwargs for the payloads, otherwise, we have to keep the default values the sync
 with the backend functions. The benefit of having the default values in the
 payloads is that a user can find the default values in the Restful API docs.
 """
-import getpass
 import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -58,8 +57,7 @@ def request_body_env_vars() -> dict:
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
-                                                 getpass.getuser())
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     # Remove the path to config file, as the config content is included in the
@@ -336,10 +334,61 @@ class ClusterJobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class UserCreateBody(RequestBody):
+    """The request body for the user create endpoint."""
+    username: str
+    password: str
+    role: Optional[str] = None
+
+
+class UserDeleteBody(RequestBody):
+    """The request body for the user delete endpoint."""
+    user_id: str
+
+
 class UserUpdateBody(RequestBody):
     """The request body for the user update endpoint."""
     user_id: str
+    role: Optional[str] = None
+    password: Optional[str] = None
+
+
+class UserImportBody(RequestBody):
+    """The request body for the user import endpoint."""
+    csv_content: str
+
+
+class ServiceAccountTokenCreateBody(RequestBody):
+    """The request body for creating a service account token."""
+    token_name: str
+    expires_in_days: Optional[int] = None
+
+
+class ServiceAccountTokenDeleteBody(RequestBody):
+    """The request body for deleting a service account token."""
+    token_id: str
+
+
+class UpdateRoleBody(RequestBody):
+    """The request body for updating a user role."""
     role: str
+
+
+class ServiceAccountTokenRoleBody(RequestBody):
+    """The request body for getting a service account token role."""
+    token_id: str
+
+
+class ServiceAccountTokenUpdateRoleBody(RequestBody):
+    """The request body for updating a service account token role."""
+    token_id: str
+    role: str
+
+
+class ServiceAccountTokenRotateBody(RequestBody):
+    """The request body for rotating a service account token."""
+    token_id: str
+    expires_in_days: Optional[int] = None
 
 
 class DownloadBody(RequestBody):
@@ -350,6 +399,22 @@ class DownloadBody(RequestBody):
 class StorageBody(RequestBody):
     """The request body for the storage endpoint."""
     name: str
+
+
+class VolumeApplyBody(RequestBody):
+    """The request body for the volume apply endpoint."""
+    name: str
+    volume_type: str
+    cloud: str
+    region: Optional[str] = None
+    zone: Optional[str] = None
+    size: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
+class VolumeDeleteBody(RequestBody):
+    """The request body for the volume delete endpoint."""
+    names: List[str]
 
 
 class EndpointsBody(RequestBody):
@@ -595,3 +660,8 @@ class UpdateConfigBody(RequestBody):
 class GetConfigBody(RequestBody):
     """The request body for getting the entire SkyPilot configuration."""
     pass
+
+
+class CostReportBody(RequestBody):
+    """The request body for the cost report endpoint."""
+    days: Optional[int] = 30

@@ -1802,7 +1802,8 @@ class S3Store(AbstractStore):
 
             # Add AWS tags configured in config.yaml to the bucket.
             # This is useful for cost tracking and external cleanup.
-            bucket_tags = skypilot_config.get_nested(('aws', 'labels'), {})
+            bucket_tags = skypilot_config.get_effective_region_config(
+                cloud='aws', region=None, keys=('labels',), default_value={})
             if bucket_tags:
                 s3_client.put_bucket_tagging(
                     Bucket=bucket_name,
@@ -2765,8 +2766,12 @@ class AzureBlobStore(AbstractStore):
         # Creates new resource group and storage account or use the
         # storage_account provided by the user through config.yaml
         else:
-            config_storage_account = skypilot_config.get_nested(
-                ('azure', 'storage_account'), None)
+            config_storage_account = (
+                skypilot_config.get_effective_region_config(
+                    cloud='azure',
+                    region=None,
+                    keys=('storage_account',),
+                    default_value=None))
             if config_storage_account is not None:
                 # using user provided storage account from config.yaml
                 storage_account_name = config_storage_account
@@ -3257,7 +3262,7 @@ class AzureBlobStore(AbstractStore):
             with rich_utils.safe_status(
                     ux_utils.spinner_message(
                         f'Deleting Azure container {container_name}')):
-                # Check for the existance of the container before deletion.
+                # Check for the existence of the container before deletion.
                 self.storage_client.blob_containers.get(
                     self.resource_group_name,
                     self.storage_account_name,
@@ -3734,7 +3739,7 @@ class R2Store(AbstractStore):
         Raises:
             StorageBucketDeleteError: If deleting the bucket fails.
         """
-        # Deleting objects is very slow programatically
+        # Deleting objects is very slow programmatically
         # (i.e. bucket.objects.all().delete() is slow).
         # In addition, standard delete operations (i.e. via `aws s3 rm`)
         # are slow, since AWS puts deletion markers.

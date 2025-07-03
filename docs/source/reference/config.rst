@@ -27,6 +27,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
+    :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -76,6 +77,16 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`kueue <config-yaml-kubernetes-kueue>`:
+      :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
@@ -151,6 +162,11 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
+  :ref:`logs <config-yaml-logs>`:
+    :ref:`store <config-yaml-logs-store>`: gcp
+    gcp:
+      project_id: my-project-id
+
 
 Fields
 ----------
@@ -180,6 +196,14 @@ Example:
 
   api_server:
     endpoint: http://xx.xx.xx.xx:8000
+
+.. _config-yaml-api-server-service-account-token:
+
+``api_server.service_account_token``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
+
 
 
 .. _config-yaml-jobs:
@@ -1073,6 +1097,47 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+.. _config-yaml-kubernetes-kueue:
+
+``kubernetes.kueue``
+~~~~~~~~~~~~~~~~~~~~~
+
+Kueue configuration (optional).
+
+.. _config-yaml-kubernetes-kueue-local-queue-name:
+
+``kubernetes.kueue.local_queue_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
+
+
+.. _config-yaml-kubernetes-context-configs:
+
+``kubernetes.context_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Context-specific configuration for Kubernetes resources (optional).
+
+When using multiple Kubernetes contexts, you can specify context-specific configuration for Kubernetes resources.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
+
+When a config field is specified for both the ``kubernetes`` and specific context ``kubernetes.context_configs.context-name``,
+the context-specific config overrides the general config according to the :ref:`config-overrides` rules.
+
 .. _config-yaml-ssh:
 
 ``ssh``
@@ -1246,7 +1311,7 @@ Default role for users (optional).  Either ``admin`` or ``user``.
 
 If not specified, the default role is ``admin``.
 
-Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` is configured.
+Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <api-server-basic-auth>` is configured.
 
 .. _config-yaml-db:
 
@@ -1266,6 +1331,12 @@ even if ``db`` is specified.
 
 .. note::
 
+  (available on nightly version 20250626 and later)
+
+  ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+
+.. note::
+
   If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
 
   Other configuration parameters can be set in the "Workspaces" tab of the web dashboard.
@@ -1280,3 +1351,29 @@ Example:
    :hidden:
 
    Configuration Sources <config-sources>
+
+.. _config-yaml-logs:
+
+``logs``
+~~~~~~~~
+
+External logging storage configuration (optional).
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp
+    gcp:
+      project_id: my-project-id
+
+.. _config-yaml-logs-store:
+
+``logs.store``
+~~~~~~~~~~~~~~
+
+The type of external logging storage to use. Each logging storage might have its own configuration options under ``logs.<store>`` structure. Refer to the :ref:`External Logging Storage <external-logging-storage>` for more details.
+
+.. code-block:: yaml
+
+  logs:
+    store: gcp

@@ -29,7 +29,7 @@ To schedule autostop for a cluster, set autostop in the SkyPilot YAML:
      autostop: true  # Stop after default idle minutes (5).
 
      # Or:
-     autostop: 10  # Stop after this many idle minutes.
+     autostop: 10m  # Stop after this many idle minutes.
 
 Alternatively, use :code:`sky autostop` or ``sky launch -i <idle minutes>``:
 

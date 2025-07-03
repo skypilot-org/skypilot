@@ -301,7 +301,6 @@ def test_skyserve_azure_http():
 
 @pytest.mark.kubernetes
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()
@@ -320,6 +319,7 @@ def test_skyserve_oci_http():
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
@@ -391,6 +391,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_kubernetes
 @pytest.mark.no_do
 @pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -427,8 +428,15 @@ def test_skyserve_dynamic_ondemand_fallback():
             'sleep 40',
             _check_replica_in_status(name, [
                 (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
             ]),
+
+            # a) The instance may still be in READY state when we check the
+            # status, before transitioning to SHUTTING_DOWN.
+            # b) And in SHUTTING_DOWN state, it may actually SHUTDOWN and
+            # disappear. So we check 1 instance instead of 2. Because it
+            # can be 1 or 2.
+            f'count=$(sky serve status {name} | grep "x(cpus=2, " | grep "{_SERVICE_LAUNCHING_STATUS_REGEX}\|SHUTTING_DOWN\|READY" | wc -l); '
+            f'[ "$count" -eq 1 ] || [ "$count" -eq 2 ] || {{ echo "Expected 1 or 2 instances, got $count"; exit 1; }}',
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -441,9 +449,14 @@ def test_skyserve_dynamic_ondemand_fallback():
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -q "1/3"',
             _check_replica_in_status(
-                name, [(1, True, 'READY'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+                name,
+                [
+                    # The newly launched instance may transition to READY status
+                    # quickly, so when checking status it could be either READY or
+                    # LAUNCHING.
+                    (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+                ]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -463,7 +476,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
-@pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -508,6 +521,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -579,8 +593,8 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -607,8 +621,8 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -631,6 +645,7 @@ def test_skyserve_streaming(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
@@ -656,8 +671,8 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
@@ -680,8 +695,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -717,8 +732,8 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -778,7 +793,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -821,8 +836,8 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -875,6 +890,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support spot instances
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -948,8 +964,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
@@ -1006,6 +1022,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
@@ -1044,7 +1061,7 @@ def test_skyserve_https(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.resource_heavy
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""
     name = _get_service_name()
@@ -1114,7 +1131,7 @@ def test_skyserve_ha_kill_after_ready():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
             # Kill controller and verify recovery
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Verify service remains accessible after controller recovery
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1148,7 +1165,7 @@ def test_skyserve_ha_kill_during_provision():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during provisioning
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Verify service eventually becomes ready
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1184,7 +1201,7 @@ def test_skyserve_ha_kill_during_pending():
             f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
             _check_replica_in_status(name, [(1, False, 'PENDING')]),
             # Kill controller during pending
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Verify service eventually becomes ready and accessible
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
@@ -1234,7 +1251,7 @@ def test_skyserve_ha_kill_during_shutdown():
             f'  s=$(sky serve status {name}); '
             'done; echo "$s"',
             # Kill controller during shutdown
-            _kill_and_wait_controller(),
+            smoke_tests_utils.kill_and_wait_controller('serve'),
             # Even after the pod ready, `serve status` may return `Failed to connect to serve controller, please try again later.`
             # So we need to wait for a while before checking the status again.
             'sleep 10',
@@ -1252,16 +1269,3 @@ def test_skyserve_ha_kill_during_shutdown():
             skypilot_config.ENV_VAR_GLOBAL_CONFIG: 'tests/skyserve/high_availability/config.yaml'
         })
     smoke_tests_utils.run_one_test(test)
-
-
-def _kill_and_wait_controller() -> str:
-    """Kill the controller pod and wait for a new one to be ready."""
-    return (
-        'initial_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}"); '
-        'echo "Killing controller pod: $initial_controller_pod"; '
-        'kubectl delete pod $initial_controller_pod; '
-        'until new_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}") && '
-        '[ "$new_controller_pod" != "$initial_controller_pod" ] && kubectl get pod $new_controller_pod | grep "1/1"; do '
-        '  echo "Waiting for new controller pod..."; sleep 5; '
-        'done; '
-        'echo "New controller pod ready: $new_controller_pod"')

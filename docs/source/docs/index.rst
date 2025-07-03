@@ -294,7 +294,7 @@ Read the research:
    :caption: User Guides
 
    ../reference/async
-   Secrets and Environment Variables <../running-jobs/environment-variables>
+   ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
    ../examples/ports
    ../reference/logging
@@ -306,9 +306,11 @@ Read the research:
    :caption: Administrator Guides
 
    ../reference/api-server/api-server
+   ../reference/auth
    ../admin/workspaces
    ../cloud-setup/cloud-permissions/index
    Admin Policies <../cloud-setup/policy>
+   External Logging Storage <../cloud-setup/external-logging>
 
 .. toctree::
    :hidden:

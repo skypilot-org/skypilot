@@ -106,6 +106,8 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
   to limitations in the RunPod API, so ensure that you choose a container with a
   default entrypoint (i.e. :code:`/bin/bash`).
 
+.. _docker-containers-private-registries:
+
 Private registries
 ^^^^^^^^^^^^^^^^^^
 
