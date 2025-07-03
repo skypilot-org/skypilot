@@ -71,6 +71,26 @@ const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All W
 // Define constant for "All Users" similar to workspaces
 const ALL_USERS_VALUE = '__ALL_USERS__';
 
+// Define filter options for the filter dropdown
+const FILTER_OPTIONS = [
+  {
+    label: 'Status',
+    value: 'status',
+  },
+  {
+    label: 'Cluster',
+    value: 'cluster',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
+  },
+];
+
 // Helper function to filter clusters by name
 export function filterClustersByName(clusters, nameFilter) {
   // If no name filter, return all clusters
