@@ -731,6 +731,21 @@ class Kubernetes(clouds.Cloud):
     def _get_dws_config(
         self, context: str, k8s_kueue_local_queue_name: Optional[str]
     ) -> Tuple[bool, bool, Optional[int]]:
+        """Get the DWS configuration for the given context.
+
+        Args:
+            context: The context to get the DWS configuration for.
+            k8s_kueue_local_queue_name: The name of the Kueue local queue.
+
+        Returns:
+            A tuple of (enable_flex_start,
+                        enable_flex_start_queued_provisioning,
+                        max_run_duration_seconds).
+
+        Raises:
+            ValueError: If k8s_kueue_local_queue_name is missing to enable
+                        flex start queued provisioning for the given context.
+        """
         dws_config = skypilot_config.get_effective_region_config(
             cloud='kubernetes', region=context, keys=('dws',), default_value={})
         enable_flex_start = False

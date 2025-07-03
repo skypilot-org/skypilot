@@ -1134,7 +1134,7 @@ Can be one of:
 Default: ``null``.
 
 ``kubernetes.dws.max_run_duration``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Maximum runtime of a node (optional), only used in ``flex-start-queued-provisioning`` mode.
 
