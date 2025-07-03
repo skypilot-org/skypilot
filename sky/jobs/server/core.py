@@ -101,6 +101,12 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
 
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
+
+    # Ensure dag.name is not None - it should be set by
+    # dag_utils.maybe_infer_and_fill_dag_and_task_names
+    if dag.name is None:
+        raise ValueError('DAG name must be set before submitting job')
+
     consolidation_mode_job_id = managed_job_state.set_job_info_without_job_id(
         dag.name,
         workspace=skypilot_config.get_active_workspace(
@@ -109,6 +115,14 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
     for task_id, task in enumerate(dag.tasks):
         resources_str = backend_utils.get_task_resources_str(
             task, is_managed_job=True)
+
+        # Ensure task.name is not None - it should be set by
+        # dag_utils.maybe_infer_and_fill_dag_and_task_names
+        if task.name is None:
+            raise ValueError(
+                f'Task name must be set before submitting job for task '
+                f'{task_id}')
+
         managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                       task.name, resources_str)
     return consolidation_mode_job_id
@@ -133,7 +147,7 @@ def launch(
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
-            chain dag.
+            chain dag or skypilot runtime version mismatch.
         sky.exceptions.NotSupportedError: the feature is not supported.
         sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
             is unavailable
@@ -161,6 +175,16 @@ def launch(
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
+
+    # Check version mismatch before launching
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                'Checking controller version compatibility')):
+        try:
+            _check_version_mismatch_and_non_terminal_jobs()
+        except exceptions.ClusterNotUpError:
+            # Controller is not up, that's fine for initial launch
+            pass
 
     user_dag_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
         dag, redact_secrets=True)
@@ -731,3 +755,75 @@ def download_logs(
                                               job_name=name,
                                               controller=controller,
                                               local_dir=local_dir)
+
+
+def _check_version_mismatch_and_non_terminal_jobs() -> None:
+    """Check if controller has version mismatch and non-terminal jobs exist.
+
+    Raises:
+        ValueError: If there's a version mismatch and non-terminal jobs exist.
+        sky.exceptions.ClusterNotUpError: If the controller is not accessible.
+    """
+    # Get the current local SKYLET_VERSION
+    local_version = skylet_constants.SKYLET_VERSION
+
+    # Get controller handle (works the same in both normal and
+    # consolidation mode)
+    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    handle = backend_utils.is_controller_accessible(
+        controller=jobs_controller_type,
+        stopped_message='Jobs controller is not running.')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    # Get controller version and raw job table
+    code = managed_job_utils.ManagedJobCodeGen.get_version_and_job_table()
+
+    returncode, output, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
+                                                     separate_stderr=True)
+
+    if returncode != 0:
+        logger.error(output + stderr)
+        raise ValueError('Failed to check controller version and jobs with '
+                         f'returncode: {returncode}.\n{output + stderr}')
+
+    # Parse the output to extract controller version (split only on first
+    # newline)
+    output_parts = output.strip().split('\n', 1)
+
+    # Extract controller version from first line
+    if len(output_parts) < 2 or not output_parts[0].startswith(
+            'controller_version:'):
+        raise ValueError(
+            f'Expected controller version in first line, got: {output}')
+
+    controller_version = output_parts[0].split(':', 1)[1]
+
+    # Rest is job table payload (preserving any newlines within it)
+    job_table_payload = output_parts[1]
+
+    # Process locally: check version match and filter non-terminal jobs
+    version_matches = controller_version == local_version
+
+    # Load and filter jobs locally using existing method
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    non_terminal_jobs = [job for job in jobs if not job['status'].is_terminal()]
+    has_non_terminal_jobs = len(non_terminal_jobs) > 0
+
+    if not version_matches and has_non_terminal_jobs:
+        # Format job table locally using the same method as queue()
+        formatted_job_table = managed_job_utils.format_job_table(
+            non_terminal_jobs, show_all=False, show_user=False)
+
+        error_msg = (
+            f'Controller SKYLET_VERSION ({controller_version}) does not match '
+            f'current version ({local_version}), and there are non-terminal '
+            'jobs on the controller. Please wait for all jobs to complete or '
+            'cancel them before launching new jobs with the updated version.'
+            f'\n\nCurrent non-terminal jobs:\n{formatted_job_table}')
+
+        raise ValueError(error_msg)

@@ -12,6 +12,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.backends import backend_utils
 from sky.server import constants
+from sky.skylet import constants as skylet_constants
 
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
@@ -41,13 +42,13 @@ class TestBackwardCompatibility:
 
     # Shorthand of switching to base environment and running a list of commands in environment.
     def _switch_to_base(self, *cmds: str) -> list[str]:
-        cmds = [smoke_tests_utils.SKY_API_RESTART] + list(cmds)
-        return [f'{self.ACTIVATE_BASE} && {c}' for c in cmds]
+        all_cmds = [smoke_tests_utils.SKY_API_RESTART] + list(cmds)
+        return [f'{self.ACTIVATE_BASE} && {c}' for c in all_cmds]
 
     # Shorthand of switching to current environment and running a list of commands in environment.
     def _switch_to_current(self, *cmds: str) -> list[str]:
-        cmds = [smoke_tests_utils.SKY_API_RESTART] + list(cmds)
-        return [f'{self.ACTIVATE_CURRENT} && {c}' for c in cmds]
+        all_cmds = [smoke_tests_utils.SKY_API_RESTART] + list(cmds)
+        return [f'{self.ACTIVATE_CURRENT} && {c}' for c in all_cmds]
 
     def _run_cmd(self, cmd: str):
         subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
@@ -61,6 +62,22 @@ class TestBackwardCompatibility:
                                      status: Sequence[sky.ManagedJobStatus]):
         return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
             job_name=job_name, job_status=status, timeout=300)
+
+    def _get_base_skylet_version(self) -> str:
+        """Get SKYLET_VERSION from the base environment directory."""
+        base_constants_file = self.BASE_SKY_DIR / 'sky' / 'skylet' / 'constants.py'
+        try:
+            with open(base_constants_file, 'r') as f:
+                content = f.read()
+                # Find the SKYLET_VERSION line
+                for line in content.split('\n'):
+                    if line.strip().startswith('SKYLET_VERSION = '):
+                        # Extract version string between quotes
+                        version = line.split('=')[1].strip().strip('\'"')
+                        return version
+            raise ValueError('SKYLET_VERSION not found in base constants.py')
+        except Exception as e:
+            raise ValueError(f'Failed to read base SKYLET_VERSION: {e}') from e
 
     @pytest.fixture(scope="session", autouse=True)
     def session_setup(self, request):
@@ -174,12 +191,12 @@ class TestBackwardCompatibility:
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=f"{cluster_name}",
-                job_id=2,
+                job_id="2",
                 job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=120,
                 all_users=True)} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=f"{cluster_name}",
-                job_id=3,
+                job_id="3",
                 job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=120,
                 all_users=True)}
@@ -307,6 +324,73 @@ class TestBackwardCompatibility:
                 timeout=600 if generic_cloud == 'kubernetes' else 300)
 
         blocking_seconds_for_cancel_job = 2000 if generic_cloud == 'kubernetes' else 1000
+
+        # Dynamically inspect versions from both environments
+        base_version = self._get_base_skylet_version()
+        current_version = skylet_constants.SKYLET_VERSION
+        expect_version_mismatch = base_version != current_version
+
+        # Build the current environment commands with version mismatch handling
+        # Common initial commands
+        common_initial_commands = [
+            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
+            f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
+            launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+        ]
+
+        # Version-specific job-3 handling
+        if expect_version_mismatch:
+            # Try to launch job-3, expect it to fail with version mismatch
+            version_specific_commands = [
+                (f'output=$({launch_job(f"{managed_job_name}-3", f"echo hi; sleep {blocking_seconds_for_cancel_job}")} 2>&1); '
+                 f'exit_code=$?; '
+                 f'echo "Launch exit code: $exit_code"; '
+                 f'echo "$output"; '
+                 f'if [ "$exit_code" -ne 0 ]; then '
+                 f'  echo "Launch failed as expected due to version mismatch"; '
+                 f'  echo "$output" | grep -q "non-terminal jobs on the controller" || {{ echo "ERROR: Expected version mismatch error message not found"; exit 1; }}; '
+                 f'  echo "$output" | grep -q "{managed_job_name}-0" || {{ echo "ERROR: Job name not found in error"; exit 1; }}; '
+                 f'  echo "$output" | grep -q "RUNNING" || {{ echo "ERROR: RUNNING status not found in error"; exit 1; }}; '
+                 f'  echo "Version mismatch confirmed"; '
+                 f'else '
+                 f'  echo "ERROR: Launch should have failed due to version mismatch"; exit 1; '
+                 f'fi'),
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
+                # Cancel job-0 first to resolve version conflict
+                f'sky jobs cancel -y -n {managed_job_name}-0',
+                # Now launch job-3 should succeed
+                launch_job(f'{managed_job_name}-3',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
+            ]
+        else:
+            # No version mismatch expected - direct launch
+            version_specific_commands = [
+                launch_job(f'{managed_job_name}-3',
+                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
+                f'sky jobs cancel -y -n {managed_job_name}-0',
+            ]
+
+        # Common final commands
+        common_final_commands = [
+            f'sky jobs cancel -y -n {managed_job_name}-3',
+            wait_for_status(f'{managed_job_name}-1',
+                            [sky.ManagedJobStatus.SUCCEEDED]),
+            wait_for_status(f'{managed_job_name}-2',
+                            [sky.ManagedJobStatus.SUCCEEDED]),
+            wait_for_status(f'{managed_job_name}-0', [
+                sky.ManagedJobStatus.CANCELLED, sky.ManagedJobStatus.CANCELLING
+            ]),
+            wait_for_status(f'{managed_job_name}-3', [
+                sky.ManagedJobStatus.CANCELLED, sky.ManagedJobStatus.CANCELLING
+            ]),
+            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
+            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
+        ]
+
+        # Combine all commands
+        current_commands = common_initial_commands + version_specific_commands + common_final_commands
+
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
@@ -331,31 +415,7 @@ class TestBackwardCompatibility:
                 wait_for_status(f'{managed_job_name}-1',
                                 [sky.ManagedJobStatus.RUNNING]),
             ),
-            *self._switch_to_current(
-                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
-                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
-                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
-                # Cover cancelling jobs launched in the new version
-                launch_job(f'{managed_job_name}-3',
-                           f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
-                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
-                f'sky jobs cancel -y -n {managed_job_name}-0',
-                f'sky jobs cancel -y -n {managed_job_name}-3',
-                wait_for_status(f'{managed_job_name}-1',
-                                [sky.ManagedJobStatus.SUCCEEDED]),
-                wait_for_status(f'{managed_job_name}-2',
-                                [sky.ManagedJobStatus.SUCCEEDED]),
-                wait_for_status(f'{managed_job_name}-0', [
-                    sky.ManagedJobStatus.CANCELLED,
-                    sky.ManagedJobStatus.CANCELLING
-                ]),
-                wait_for_status(f'{managed_job_name}-3', [
-                    sky.ManagedJobStatus.CANCELLED,
-                    sky.ManagedJobStatus.CANCELLING
-                ]),
-                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
-                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
-            ),
+            *self._switch_to_current(*current_commands),
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
