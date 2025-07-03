@@ -111,11 +111,12 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
     gpu_model = utils.skypilot_gpu_to_cudo_gpu(gpu_model)
     api = cudo.cudo.cudo_api.virtual_machines()
     types = api.list_vm_machine_types2()
-    types_dict = types.to_dict()['machine_types']
+    types_dict = types.to_dict()
+    machine_types = types_dict['machine_types']
 
     # Filter machine types based on requirements
     matching_types = []
-    for machine_type in types_dict:
+    for machine_type in machine_types:
         # Check if this machine type matches our requirements
         if (machine_type['data_center_id'] == data_center_id and
                 machine_type['gpu_model'] == gpu_model and
