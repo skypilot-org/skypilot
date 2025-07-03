@@ -2772,13 +2772,13 @@ def get_clusters(
         """Add the resources to the record."""
         for record in records:
             if record is None:
-                return
+                continue
             handle = record['handle']
             if handle is None:
-                return
+                continue
             record['nodes'] = handle.launched_nodes
             if handle.launched_resources is None:
-                return
+                continue
             record['cloud'] = (f'{handle.launched_resources.cloud}'
                                if handle.launched_resources.cloud else None)
             record['region'] = (f'{handle.launched_resources.region}'
