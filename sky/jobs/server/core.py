@@ -501,8 +501,8 @@ def queue(refresh: bool,
                 'region': (str) region of the cluster,
                 'user_name': (Optional[str]) job creator's user name,
                 'user_hash': (str) job creator's user hash,
-                'task_id': (int), id of the task in the job. Set to 0, except in pipelines.
-                'task_name': (str), name of the task in the job. Same as job_name, except in pipelines.
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
             }
         ]
     Raises:
