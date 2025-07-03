@@ -714,7 +714,6 @@ def get_gpu_direct_usable_vpcs_and_subnets(
 ) -> List[Tuple[str, 'google.cloud.compute_v1.types.compute.Subnetwork']]:
     """Return a list of usable VPCs and subnets for GPU Direct."""
     project_id = config.provider_config['project_id']
-    cluster_prefix = cluster_name
     vpc_subnet_pairs = []
 
     # TODO(hailong): Determine the num_vpcs per different GPU Direct types
@@ -722,10 +721,7 @@ def get_gpu_direct_usable_vpcs_and_subnets(
 
     cidr_prefix = constants.SKYPILOT_GPU_DIRECT_VPC_CIDR_PREFIX
     for i in range(num_vpcs):
-        if i == 0:
-            vpc_name = f'{cluster_prefix}-mgmt-net'
-        else:
-            vpc_name = f'{cluster_prefix}-data-net-{i}'
+        vpc_name = get_gpu_direct_vpc_name(cluster_name, i)
         subnet_name = f'{vpc_name}-sub'
         subnet_cidr_range = f'{cidr_prefix}.{i}.0/24'
         # Check if VPC exists
@@ -760,24 +756,37 @@ def get_gpu_direct_usable_vpcs_and_subnets(
     return vpc_subnet_pairs
 
 
+def get_gpu_direct_vpc_name(cluster_name: str, i: int) -> str:
+    """Get the name of the GPU Direct VPC."""
+    if i == 0:
+        return f'{cluster_name}-mgmt-net'
+    else:
+        return f'{cluster_name}-data-net-{i}'
+
+
 def delete_gpu_direct_vpcs_and_subnets(
     cluster_name: str,
     project_id: str,
     region: str,
-    failover: bool = False,
+    keep_global_resources: bool = False,
 ):
-    """Delete GPU Direct subnets, firewalls, and VPCs."""
+    """Delete GPU Direct subnets, firewalls, and VPCs.
+
+    Args:
+        cluster_name: The name of the cluster.
+        project_id: The ID of the project.
+        region: The region of the cluster.
+        keep_global_resources: Whether to keep the global resources. If True,
+            only delete the subnets. Otherwise, delete all the firewalls,
+            subnets, and VPCs.
+    """
     compute = _create_compute()
-    cluster_prefix = cluster_name
 
     # TODO(hailong): Determine the num_vpcs per different GPU Direct types
     num_vpcs = constants.SKYPILOT_GPU_DIRECT_VPC_NUM
 
     for i in range(num_vpcs):
-        if i == 0:
-            vpc_name = f'{cluster_prefix}-mgmt-net'
-        else:
-            vpc_name = f'{cluster_prefix}-data-net-{i}'
+        vpc_name = get_gpu_direct_vpc_name(cluster_name, i)
         # Check if VPC exists
         vpc_list = _list_vpcnets(project_id, compute, filter=f'name={vpc_name}')
         if not vpc_list:
@@ -791,8 +800,9 @@ def delete_gpu_direct_vpcs_and_subnets(
                 logger.info(f'Deleting subnet {subnet["name"]}')
                 _delete_subnet(project_id, region, compute, subnet['name'])
 
-            if not failover:
-                # For failover, we don't delete the rules and VPCs,
+            if not keep_global_resources:
+                # For failover, keep_global_resources would be true,
+                # we don't delete the rules and VPCs,
                 # which are global resources and can be reused.
                 _delete_rules(project_id, compute,
                               constants.FIREWALL_RULES_TEMPLATE, vpc['name'])
@@ -821,8 +831,7 @@ def _configure_placement_policy(region: str, cluster_name: str,
             constants.COMPACT_GROUP_PLACEMENT_POLICY or mig_configuration):
         return config
 
-    cluster_prefix = cluster_name
-    policy_name = f'{cluster_prefix}-placement-policy'
+    policy_name = f'{cluster_name}-placement-policy'
     resource_policy = {
         'name': policy_name,
         'groupPlacementPolicy': {

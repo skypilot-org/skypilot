@@ -4410,6 +4410,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         This method will handle the following cleanup steps:
         * Deleting the TPUs;
         * Removing ssh configs for the cluster;
+        * Deleting the open ports;
+        * Deleting the custom multi network infrastructure based on the
+          failover flag (e.g. delete firewalls, subnets, and VPCs for GPU
+          Direct if failover is False, otherwise, only delete the subnets);
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
         """
