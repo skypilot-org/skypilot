@@ -99,9 +99,9 @@ Here's how to set it up:
 
 * Set up your auth provider (pick one):
 
-  * :ref:`Setup in Okta <okta-oidc-setup>`
+  * :ref:`Set up in Okta <okta-oidc-setup>`
 
-  * :ref:`Setup Google Workspace login in GCP <google-oidc-setup>`
+  * :ref:`Set up Google Workspace login <google-oidc-setup>`
 
 * :ref:`Deploy in Helm <oidc-oauth2-proxy-helm>`
 
