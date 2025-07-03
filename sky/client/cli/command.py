@@ -1657,6 +1657,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if kubernetes:
         _status_kubernetes(verbose)
         return
+
     # Phase 1: Setup and determine what needs to be queried
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
@@ -1936,6 +1937,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     in_progress_hint.format(job_info=job_info))
 
         if show_services and not keyboard_interrupted:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Services{colorama.Style.RESET_ALL}')
             num_services, services_msg = services_future.result()
             click.echo(services_msg)
             if num_services is not None:
@@ -4100,7 +4103,6 @@ def volumes_ls(verbose: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_volume_name))
-@cli.command(cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -4496,7 +4498,6 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
     required=False,
     help='Query the latest job logs, restarting the jobs controller if stopped.'
 )
-@cli.command(cls=_DocumentedCodeCommand)
 @click.option('--sync-down',
               '-s',
               default=False,
