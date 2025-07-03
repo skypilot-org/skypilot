@@ -40,6 +40,7 @@ from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
+from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -219,12 +220,24 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
-    if 'X-Auth-Request-Email' not in request.headers:
+    header_name = os.environ.get(constants.ENV_VAR_SERVER_AUTH_USER_HEADER,
+                                 'X-Auth-Request-Email')
+    if header_name not in request.headers:
         return None
-    user_name = request.headers['X-Auth-Request-Email']
+    user_name = request.headers[header_name]
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
+
+
+class InitializeRequestAuthUserMiddleware(
+        starlette.middleware.base.BaseHTTPMiddleware):
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # Make sure that request.state.auth_user is set. Otherwise, we may get a
+        # KeyError while trying to read it.
+        request.state.auth_user = None
+        return await call_next(request)
 
 
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -278,29 +291,51 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        # Only process requests with Bearer token authorization header
+        """Make sure correct bearer token auth is present.
+
+        1. If the request has the X-Skypilot-Auth-Mode: token header, it must
+           have a valid bearer token.
+        2. For backwards compatibility, if the request has a Bearer token
+           beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
+           it must be a valid token.
+        3. If X-Skypilot-Auth-Mode is not set to "token", and there is no Bearer
+           token beginning with "sky_", allow the request to continue.
+
+        In conjunction with an auth proxy, the idea is to make the auth proxy
+        bypass requests with bearer tokens, instead setting the
+        X-Skypilot-Auth-Mode header. The auth proxy should either validate the
+        auth or set the header X-Skypilot-Auth-Mode: token.
+        """
+        has_skypilot_auth_header = (
+            request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')
-        if not auth_header or not auth_header.lower().startswith('bearer '):
+        has_bearer_token_starting_with_sky = (
+            auth_header and auth_header.lower().startswith('bearer ') and
+            auth_header.split(' ', 1)[1].startswith('sky_'))
+
+        if (not has_skypilot_auth_header and
+                not has_bearer_token_starting_with_sky):
+            # This is case #3 above. We do not need to validate the request.
             # No Bearer token, continue with normal processing (OAuth2 cookies,
             # etc.)
             return await call_next(request)
+        # After this point, all requests must be validated.
+
+        if auth_header is None:
+            return fastapi.responses.JSONResponse(
+                status_code=401, content={'detail': 'Authentication required'})
 
         # Extract token
-        sa_token = auth_header.split(' ', 1)[1]
+        split_header = auth_header.split(' ', 1)
+        if split_header[0].lower() != 'bearer':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid authentication method'})
+        sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
-        if sa_token.startswith('sky_'):
-            return await self._handle_service_account_token(
-                request, sa_token, call_next)
-
-        # Handle other Bearer tokens (OAuth2 access tokens, etc.)
-        # These requests bypassed OAuth2 proxy, so let the application decide
-        # how to handle them
-        # For now, we'll let them continue through normal processing
-        logger.debug(
-            'Non-SkyPilot Bearer token detected, continuing with normal '
-            'processing')
-        return await call_next(request)
+        return await self._handle_service_account_token(request, sa_token,
+                                                        call_next)
 
     async def _handle_service_account_token(self, request: fastapi.Request,
                                             sa_token: str, call_next):
@@ -385,6 +420,18 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     async def dispatch(self, request: fastapi.Request, call_next):
         auth_user = _get_auth_user_header(request)
 
+        if request.state.auth_user is not None:
+            # Previous middleware is trusted more than this middleware.  For
+            # instance, a client could set the Authorization and the
+            # X-Auth-Request-Email header. In that case, the auth proxy will be
+            # skipped and we should rely on the Bearer token to authenticate the
+            # user - but that means the user could set X-Auth-Request-Email to
+            # whatever the user wants. We should thus ignore it.
+            if auth_user is not None:
+                logger.debug('Warning: ignoring auth proxy header since the '
+                             'auth user was already set.')
+            return await call_next(request)
+
         # Add user to database if auth_user is present
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
@@ -395,8 +442,6 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
             request.state.auth_user = auth_user
-        else:
-            request.state.auth_user = None
 
         await _override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
@@ -515,10 +560,17 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+# Middleware wraps in the order defined here. E.g., given
+#   app.add_middleware(Middleware1)
+#   app.add_middleware(Middleware2)
+#   app.add_middleware(Middleware3)
+# The effect will be like:
+#   Middleware3(Middleware2(Middleware1(request)))
+# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
+#   3; 2; 1; <request>; 1; 2; 3
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
-app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
@@ -531,15 +583,26 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    # TODO(syang): remove X-Request-ID when v0.10.0 is released.
+    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
+app.add_middleware(RBACMiddleware)
+# AuthProxyMiddleware should precede BasicAuthMiddleware and
+# BearerTokenMiddleware, since it should be skipped if either of those set the
+# auth user.
+app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
 if str(enable_basic_auth).lower() == 'true':
     app.add_middleware(BasicAuthMiddleware)
 # Bearer token middleware should always be present to handle service account
 # authentication
 app.add_middleware(BearerTokenMiddleware)
-app.add_middleware(AuthProxyMiddleware)
+# InitializeRequestAuthUserMiddleware must be the last added middleware so that
+# request.state.auth_user is always set, but can be overridden by the auth
+# middleware above.
+app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -554,6 +617,16 @@ app.include_router(ssh_node_pools_rest.router,
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+
+# Increase the limit of files we can open to our hard limit. This fixes bugs
+# where we can not aquire file locks or open enough logs and the API server
+# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
+# TODO(luca) figure out what to do if we need to open more than 2^63 files.
+try:
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+except Exception:  # pylint: disable=broad-except
+    pass  # no issue, we will warn the user later if its too low
 
 
 @app.get('/token')
@@ -1556,6 +1629,38 @@ async def all_contexts(request: fastapi.Request) -> None:
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
+
+
+@app.get('/gpu-metrics')
+async def gpu_metrics() -> fastapi.Response:
+    """Gets the GPU metrics from multiple external k8s clusters"""
+    contexts = core.get_all_contexts()
+    all_metrics = []
+    successful_contexts = 0
+
+    tasks = [
+        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
+        for context in contexts
+        if context != 'in-cluster'
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(
+                f'Failed to get metrics for context {contexts[i]}: {result}')
+        else:
+            metrics_text = result
+            all_metrics.append(metrics_text)
+            successful_contexts += 1
+
+    combined_metrics = '\n\n'.join(all_metrics)
+
+    # Return as plain text for Prometheus compatibility
+    return fastapi.Response(
+        content=combined_metrics,
+        media_type='text/plain; version=0.0.4; charset=utf-8')
 
 
 # === Internal APIs ===
