@@ -212,9 +212,6 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
-  const [nameFilter, setNameFilter] = useState('');
   const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
 
@@ -223,31 +220,9 @@ export function Clusters() {
   // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
     if (router.isReady) {
-      if (router.query.workspace) {
-        const workspaceParam = Array.isArray(router.query.workspace)
-          ? router.query.workspace[0]
-          : router.query.workspace;
-        setWorkspaceFilter(workspaceParam);
-      }
-      if (router.query.user) {
-        const userParam = Array.isArray(router.query.user)
-          ? router.query.user[0]
-          : router.query.user;
-        setUserFilter(userParam);
-      }
-      if (router.query.name) {
-        const nameParam = Array.isArray(router.query.name)
-          ? router.query.name[0]
-          : router.query.name;
-        setNameFilter(nameParam);
-      }
+      updateFiltersByURLParams();
     }
-  }, [
-    router.isReady,
-    router.query.workspace,
-    router.query.user,
-    router.query.name,
-  ]);
+  }, [router.isReady]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -323,7 +298,6 @@ export function Clusters() {
       }
     };
 
-    updateFiltersByURLParams();
     fetchFilterData();
   }, []);
 
@@ -495,9 +469,6 @@ export function Clusters() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         filters={filters}
-        workspaceFilter={workspaceFilter}
-        userFilter={userFilter}
-        nameFilter={nameFilter}
         showHistory={showHistory}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
@@ -530,9 +501,6 @@ export function ClusterTable({
   setLoading,
   refreshDataRef,
   filters,
-  workspaceFilter,
-  userFilter,
-  nameFilter,
   showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
