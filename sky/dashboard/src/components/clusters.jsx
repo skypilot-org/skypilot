@@ -328,6 +328,42 @@ export function Clusters() {
     fetchFilterData();
   }, []);
 
+  // Helper function to update URL query parameters
+  const updateURLParams = (filters) => {
+    const query = { ...router.query };
+
+    console.table(filters);
+
+    let properties = [];
+    let operators = [];
+    let values = [];
+    let conjunctions = [];
+
+    filters.map((filter, _index) => {
+      properties.push(filter.property[0]);
+      operators.push(filter.operator);
+      values.push(filter.value);
+      conjunctions.push(filter.conjunction[0]);
+    });
+
+    query.p = properties;
+    query.o = operators;
+    query.v = values;
+    query.c = conjunctions;
+
+    console.table(query);
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
@@ -1237,7 +1273,7 @@ const Filters = ({ filters = [], setFilters }) => {
   return (
     <>
       <div className="flex items-center gap-4 p-2">
-        <div className="flex items-content gap-2">
+        <div className="flex flex-wrap items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem
               key={`filteritem-${_index}`}
