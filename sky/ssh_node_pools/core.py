@@ -1,8 +1,9 @@
 """SSH Node Pool management core functionality."""
-import colorama
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import colorama
 
 from sky import clouds
 from sky import sky_logging
@@ -46,7 +47,8 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     else:
         logger.info('')
         if cleanup:
-            logger.info(ux_utils.finishing_message(
+            logger.info(
+                ux_utils.finishing_message(
                     '🎉 SSH Node Pools cleaned up successfully.'))
         else:
             logger.info(
@@ -87,6 +89,7 @@ def get_all_clusters() -> List[models.SSHCluster]:
 
 def _validate_pool_config(config: Dict[str, Any]) -> None:
     """Validate SSH Node Pool configuration."""
+
     def _validate_field(data: dict, field: str, expected: type):
         if field not in data:
             raise InvalidSSHConfigError(

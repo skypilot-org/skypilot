@@ -611,13 +611,11 @@ class SSHNodeResponse(pydantic.BaseModel):
 
     @classmethod
     def from_ssh_node(cls, node: ssh_models.SSHNode) -> 'SSHNodeResponse':
-        return cls(
-            ip=node.ip,
-            user=node.user,
-            identity_file=node.identity_file,
-            password=node.password,
-            use_ssh_config=node.use_ssh_config
-        )
+        return cls(ip=node.ip,
+                   user=node.user,
+                   identity_file=node.identity_file,
+                   password=node.password,
+                   use_ssh_config=node.use_ssh_config)
 
 
 class SSHClusterResponse(pydantic.BaseModel):
@@ -630,12 +628,10 @@ class SSHClusterResponse(pydantic.BaseModel):
     @classmethod
     def from_ssh_cluster(cls, cluster: ssh_models.SSHCluster) -> 'SSHClusterResponse':  # pylint: disable=line-too-long
         nodes = cluster.update_nodes or cluster.current_nodes
-        return cls(
-            name=cluster.name,
-            status=cluster.status.name,
-            head_node_ip=cluster.head_node_ip,
-            hosts=[SSHNodeResponse.from_ssh_node(n) for n in nodes]
-        )
+        return cls(name=cluster.name,
+                   status=cluster.status.name,
+                   head_node_ip=cluster.head_node_ip,
+                   hosts=[SSHNodeResponse.from_ssh_node(n) for n in nodes])
 
 
 class ServeTerminateReplicaBody(RequestBody):

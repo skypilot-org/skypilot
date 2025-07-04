@@ -6,10 +6,12 @@ from typing import Any, Dict, List, Optional
 
 import sqlalchemy
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import mapped_column
 from sqlalchemy_json import mutable_json_type
 
 SSHBase = declarative_base()
+
 
 class SSHClusterStatus(Enum):
     PENDING = 'pending'
@@ -28,7 +30,7 @@ class SSHNode:
     use_ssh_config: bool
 
     def __repr__(self):
-        return (f'<SSHNode(ip={self.ip})>')
+        return f'<SSHNode(ip={self.ip})>'
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON storage"""
@@ -52,8 +54,8 @@ class SSHNode:
         )
 
     def __hash__(self):
-        return hash((self.ip, self.user, self.identity_file, 
-                     self.password, self.use_ssh_config))
+        return hash((self.ip, self.user, self.identity_file, self.password,
+                     self.use_ssh_config))
 
 
 @dataclasses.dataclass
@@ -63,21 +65,18 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
 
     name: Mapped[str] = mapped_column(sqlalchemy.Text, primary_key=True)
     status: Mapped[SSHClusterStatus] = mapped_column(
-        sqlalchemy.Enum(
-            SSHClusterStatus, 
-            name='cluster_status_enum', 
-            native_enum=False),
+        sqlalchemy.Enum(SSHClusterStatus,
+                        name='cluster_status_enum',
+                        native_enum=False),
         nullable=False,
         default=SSHClusterStatus.PENDING)
-    _head_node_ip: Mapped[Optional[str]] = mapped_column(
-        sqlalchemy.Text, nullable=True)
+    _head_node_ip: Mapped[Optional[str]] = mapped_column(sqlalchemy.Text,
+                                                         nullable=True)
 
     _current_state: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
-        mutable_json_type(dbtype=sqlalchemy.JSON, nested=True),
-        nullable=True)
+        mutable_json_type(dbtype=sqlalchemy.JSON, nested=True), nullable=True)
     _update_state: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
-        mutable_json_type(dbtype=sqlalchemy.JSON, nested=True),
-        nullable=True)
+        mutable_json_type(dbtype=sqlalchemy.JSON, nested=True), nullable=True)
 
     @property
     def current_nodes(self) -> List[SSHNode]:
@@ -94,7 +93,7 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
     @property
     def num_update_nodes(self) -> int:
         return len(self.update_nodes)
-    
+
     @property
     def head_node_ip(self) -> Optional[str]:
         return self._head_node_ip
@@ -121,7 +120,7 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
                              'does not have configured head node ip '
                              f'{self.head_node_ip}')
         return nodes
-    
+
     def set_head_node_ip(self, ip: str):
         """Set head node ip for SSHCluster. Note that head node ip is
         immutable, so we can only set it once."""

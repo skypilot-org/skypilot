@@ -1590,9 +1590,7 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     body = payloads.SSHUpBody(infra=infra, cleanup=True)
 
     response = server_common.make_authenticated_request(
-        'POST',
-        '/ssh_node_pools/down',
-        json=json.loads(body.model_dump_json()))
+        'POST', '/ssh_node_pools/down', json=json.loads(body.model_dump_json()))
 
     return server_common.get_request_id(response)
 

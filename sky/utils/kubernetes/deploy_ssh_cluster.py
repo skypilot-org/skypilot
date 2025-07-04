@@ -1,6 +1,5 @@
 """SSH-based Kubernetes Cluster Deployment"""
 # This is the python native function call method of creating an SSH Node Pool
-import subprocess
 import os
 from typing import Optional, Tuple
 
@@ -21,9 +20,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = sky_logging.init_logger(__name__)
 
 
-def deploy_cluster(cleanup: bool=False,
-                   infra: Optional[str]=None,
-                   kubeconfig_path: Optional[str]=None) -> Tuple[bool, str]:
+def deploy_cluster(cleanup: bool = False,
+                   infra: Optional[str] = None,
+                   kubeconfig_path: Optional[str] = None) -> Tuple[bool, str]:
     """Deploy a Kubernetes cluster on SSH targets.
 
     This function deploys a Kubernetes (k3s) cluster on the specified machines.
@@ -45,11 +44,5 @@ def deploy_cluster(cleanup: bool=False,
         kubeconfig_path = DEFAULT_KUBECONFIG_PATH
     else:
         kubeconfig_path = os.path.expanduser(kubeconfig_path)
-
-    import time
-    logger.info('Successfully reached step 1')
-    time.sleep(5)
-    logger.info('Successfully reached step 2')
-    time.sleep(5)
 
     return True, ''

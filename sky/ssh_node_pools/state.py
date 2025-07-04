@@ -93,12 +93,13 @@ def get_cluster(cluster_name: str) -> Optional[models.SSHCluster]:
     """Get a SSHCluster Configuration by Cluster Name"""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        return (session.query(models.SSHCluster)
-                       .filter_by(name=cluster_name).first())
+        return (session.query(
+            models.SSHCluster).filter_by(name=cluster_name).first())
 
 
 @_init_db
-def get_cluster_by_status(status: models.SSHClusterStatus) -> List[models.SSHCluster]:
+def get_cluster_by_status(
+        status: models.SSHClusterStatus) -> List[models.SSHCluster]:
     """Get SSHCluster Configurations by Status"""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -134,17 +135,16 @@ def remove_cluster(cluster_name: str):
 
 # TODO(kyuds): currently, we use unresolved IPs. We should use resolved IPs.
 
+
 @_init_db
 def add_ips_to_registry(cluster_name: str, ips: List[str]):
     """Add ips to cluster on IpRegistry"""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         existing_map = {
-            row.ip: row.cluster_name 
-            for row in (
-                session.query(_IpRegistry)
-                .filter(_IpRegistry.ip.in_(ips))
-                .all())
+            row.ip: row.cluster_name
+            for row in (session.query(_IpRegistry).filter(
+                _IpRegistry.ip.in_(ips)).all())
         }
 
         conflicting_ips = [
@@ -168,8 +168,7 @@ def remove_ips_from_registry(cluster_name: str, ips: List[str]):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(_IpRegistry).filter(
             _IpRegistry.cluster_name == cluster_name,
-            _IpRegistry.ip.in_(ips)
-        ).delete(synchronize_session=False)
+            _IpRegistry.ip.in_(ips)).delete(synchronize_session=False)
         session.commit()
 
 
@@ -187,11 +186,11 @@ def query_ip_from_registry(ip: str) -> Optional[str]:
 @_init_db
 def query_ips_from_registry(ips: List[str]) -> List[Optional[str]]:
     """Return cluster names of which ips are registered
-    
+
     Ips not registered will return None.
     len(ips) == len(return_value)"""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(_IpRegistry).filter(_IpRegistry.ip.in_(ips)).all()
-        ips_to_cluster = {row.ip : row.cluster_name for row in rows}
+        ips_to_cluster = {row.ip: row.cluster_name for row in rows}
         return [ips_to_cluster.get(ip) for ip in ips]
