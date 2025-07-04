@@ -3,6 +3,7 @@ import base64
 import collections
 import dataclasses
 import enum
+import io
 import os
 import pathlib
 import pickle
@@ -12,8 +13,8 @@ import shutil
 import threading
 import time
 import typing
-from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar, Union)
+from typing import (Any, Callable, DefaultDict, Deque, Dict, Generic, Iterator,
+                    List, Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -857,18 +858,46 @@ def _follow_logs_with_provision_expanding(
                                  idle_timeout_seconds=idle_timeout_seconds)
 
 
-def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+def _capped_follow_logs_with_provision_expanding(
+    file: TextIO,
+    cluster_name: str,
+    *,
+    should_stop: Callable[[], bool],
+    idle_timeout_seconds: Optional[int] = None,
+    line_cap: int = 100,
+) -> Iterator[str]:
+    """Same _follow_logs_with_provision_expanding, but last `line_cap` lines."""
+    all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+
+    for line in _follow_logs_with_provision_expanding(
+            file=file,
+            cluster_name=cluster_name,
+            should_stop=should_stop,
+            stop_on_eof=True,
+            idle_timeout_seconds=idle_timeout_seconds):
+        all_lines.append(line)
+
+    yield from all_lines
+
+
+def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
+                        tail: Optional[int]) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-
+    total_lines_printed = 0
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
-        with open(log_file_name, 'r', encoding='utf-8') as f:
-            print(f.read(), flush=True)
+        if tail is not None:
+            lines = common_utils.read_last_n_lines(log_file_name, tail)
+            total_lines_printed += len(lines)
+            for line in lines:
+                print(line, end='', flush=True)
+        else:
+            with open(log_file_name, 'r', encoding='utf-8') as f:
+                print(f.read(), flush=True)
         return ''
 
     launch_log_file_name = generate_replica_launch_log_file_name(
@@ -891,14 +920,33 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
-    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_logs_with_provision_expanding(
-                f,
-                replica_cluster_name,
+
+    # Handle launch logs based on number parameter
+    if tail is not None:
+        if tail - total_lines_printed <= 0:
+            return ''
+        static_lines = common_utils.read_last_n_lines(
+            launch_log_file_name, tail - total_lines_printed)
+        temp_file = io.StringIO(''.join(static_lines))
+        lines = list(
+            _capped_follow_logs_with_provision_expanding(
+                file=temp_file,
+                cluster_name=replica_cluster_name,
                 should_stop=replica_provisioned,
-                stop_on_eof=not follow,
-        ):
+                line_cap=tail - total_lines_printed,
+            ))
+        total_lines_printed += len(lines)
+        for line in lines:
             print(line, end='', flush=True)
+    else:
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
+            for line in _follow_logs_with_provision_expanding(
+                    f,
+                    replica_cluster_name,
+                    should_stop=replica_provisioned,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
 
     if (not follow and
             _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
@@ -917,15 +965,24 @@ def stream_replica_logs(service_name: str, replica_id: int,
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
-    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
-    if returncode != 0:
-        return (f'{colorama.Fore.RED}Failed to stream logs for replica '
-                f'{replica_id}.{colorama.Style.RESET_ALL}')
+    if tail is None:
+        returncode = backend.tail_logs(handle, job_id=None, follow=follow)
+        if returncode != 0:
+            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                    f'{replica_id}.{colorama.Style.RESET_ALL}')
+    elif not follow and total_lines_printed < tail:
+        returncode = backend.tail_logs(handle,
+                                       job_id=None,
+                                       follow=follow,
+                                       tail=tail - total_lines_printed)
+        if returncode != 0:
+            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                    f'{replica_id}.{colorama.Style.RESET_ALL}')
     return ''
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool) -> str:
+                              follow: bool, tail: Optional[int]) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -940,14 +997,22 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
 
-    with open(os.path.expanduser(log_file), 'r', newline='',
-              encoding='utf-8') as f:
-        for line in log_utils.follow_logs(
-                f,
-                should_stop=_service_is_terminal,
-                stop_on_eof=not follow,
-        ):
+    if tail is not None:
+        lines = common_utils.read_last_n_lines(os.path.expanduser(log_file),
+                                               tail)
+        for line in lines:
             print(line, end='', flush=True)
+    else:
+        with open(os.path.expanduser(log_file),
+                  'r',
+                  newline='',
+                  encoding='utf-8') as f:
+            for line in log_utils.follow_logs(
+                    f,
+                    should_stop=_service_is_terminal,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
     return ''
 
 
@@ -1140,20 +1205,22 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            follow: bool, tail: Optional[int]) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
-                                  stream_controller: bool, follow: bool) -> str:
+                                  stream_controller: bool, follow: bool,
+                                  tail: Optional[int]) -> str:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
+            f'{stream_controller}, follow={follow}, tail={tail})',
+            'print(msg, flush=True)'
         ]
         return cls._build(code)
 
