@@ -1303,6 +1303,7 @@ const Filters = ({ filters = [], setFilters }) => {
         <div className="flex items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem
+              key={`filteritem-${_index}`}
               filter={filter}
               onConjuntionChange={(newValue) =>
                 onConjuntionChange(newValue, _index)
