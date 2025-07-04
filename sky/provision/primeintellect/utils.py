@@ -7,6 +7,7 @@ import typing
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common as catalog_common
@@ -26,6 +27,50 @@ MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
 logger = sky_logging.init_logger(__name__)
+
+
+class PrimeintellectAPIError(Exception):
+    """Base exception for Primeintellect API errors."""
+
+    def __init__(self, message: str, status_code: Optional[int] = None, response_data: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_data = response_data
+
+
+class PrimeintellectResourcesUnavailableError(PrimeintellectAPIError):
+    """Exception for when resources are unavailable on Primeintellect."""
+    pass
+
+
+def _parse_api_error(response: Any) -> tuple[str, bool]:
+    """Parse API error response to extract meaningful error messages."""
+    try:
+        if hasattr(response, 'json'):
+            error_data = response.json()
+        else:
+            error_data = response
+
+        if isinstance(error_data, dict):
+            # Try to extract error message from common error response fields
+            error_message = error_data.get('message', '')
+            if not error_message:
+                error_message = error_data.get('error', '')
+            if not error_message:
+                error_message = error_data.get('detail', '')
+
+            # Check if it's a resource unavailability error
+            if any(keyword in error_message.lower() for keyword in [
+                'no capacity', 'capacity', 'unavailable', 'out of stock',
+                'insufficient', 'not available', 'quota exceeded', 'limit exceeded'
+            ]):
+                return error_message, True
+
+            return error_message, False
+
+        return str(error_data), False
+    except Exception:
+        return f"HTTP {response.status_code} {response.reason}", False
 
 
 def _try_request_with_backoff(
@@ -55,9 +100,28 @@ def _try_request_with_backoff(
         if response.ok:
             return response.json()
         else:
-            raise Exception(
-                f"API request failed: {method} {url}: {response.status_code} {response.reason}"
-            )
+            # Parse the error response for meaningful messages
+            error_message, is_resource_unavailable = _parse_api_error(response)
+
+            # Create a more informative error message
+            if not error_message:
+                error_message = f"API request failed: {method} {url}: {response.status_code} {response.reason}"
+            else:
+                error_message = f"API request failed: {error_message}"
+
+            # Raise appropriate exception based on error type
+            if is_resource_unavailable:
+                raise PrimeintellectResourcesUnavailableError(
+                    error_message,
+                    status_code=response.status_code,
+                    response_data=response.json() if hasattr(response, 'json') else None
+                )
+            else:
+                raise PrimeintellectAPIError(
+                    error_message,
+                    status_code=response.status_code,
+                    response_data=response.json() if hasattr(response, 'json') else None
+                )
     return {}
 
 

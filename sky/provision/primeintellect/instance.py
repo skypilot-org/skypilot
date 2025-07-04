@@ -2,6 +2,7 @@
 import time
 from typing import Any, Dict, List, Optional
 
+from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.primeintellect import utils
@@ -128,9 +129,41 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             }
             response = client.launch(**params)
             instance_id = response['id']
+        except utils.PrimeintellectResourcesUnavailableError as e:
+            # Resource unavailability error - provide specific message
+            instance_type = config.node_config['InstanceType']
+            region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
+            error_msg = (
+                f'Resources are currently unavailable on Primeintellect. '
+                f'No {instance_type} instances are available{region_str}. '
+                f'Please try again later or consider using a different instance type or region. '
+                f'Details: {str(e)}'
+            )
+            logger.warning(f'Resource unavailability error: {e}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(error_msg) from e
+        except utils.PrimeintellectAPIError as e:
+            # Other API errors - provide specific message
+            instance_type = config.node_config['InstanceType']
+            region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
+            error_msg = (
+                f'Failed to launch {instance_type} instance on Primeintellect{region_str}. '
+                f'Details: {str(e)}'
+            )
+            logger.warning(f'API error during instance launch: {e}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(error_msg) from e
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'run_instances error: {e}')
-            raise e
+            # Generic error handling for unexpected errors
+            instance_type = config.node_config['InstanceType']
+            region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
+            error_msg = (
+                f'Unexpected error while launching {instance_type} instance on Primeintellect{region_str}. '
+                f'Details: {common_utils.format_exception(e, use_bracket=False)}'
+            )
+            logger.warning(f'Unexpected error during instance launch: {e}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(error_msg) from e
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance_id is None:
@@ -147,10 +180,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         time.sleep(POLL_INTERVAL)
     else:
         # Failed to launch config.count of instances after max retries
-        msg = ('run_instances: Failed to create the'
-               'instances due to capacity issue.')
-        logger.warning(msg)
-        raise RuntimeError(msg)
+        # Provide more specific error message
+        instance_type = config.node_config['InstanceType']
+        region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
+        active_instances = len(_filter_instances(cluster_name_on_cloud, ['ACTIVE']))
+        error_msg = (
+            f'Timed out waiting for {instance_type} instances to become ready on Primeintellect{region_str}. '
+            f'Only {active_instances} out of {config.count} instances became active. '
+            f'This may indicate capacity issues or slow provisioning. '
+            f'Please try again later or consider using a different instance type or region.'
+        )
+        logger.warning(error_msg)
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesUnavailableError(error_msg)
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
         provider_name='primeintellect',
