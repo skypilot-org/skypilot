@@ -66,11 +66,6 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 //   return cost.toFixed(2);
 // };
 
-const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
-
-// Define constant for "All Users" similar to workspaces
-const ALL_USERS_VALUE = '__ALL_USERS__';
-
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
   {
@@ -94,21 +89,6 @@ const PROPERTY_OPTIONS = [
     value: 'workspace',
   },
 ];
-
-// Helper function to filter clusters by name
-export function filterClustersByName(clusters, nameFilter) {
-  // If no name filter, return all clusters
-  if (!nameFilter || nameFilter.trim() === '') {
-    return clusters;
-  }
-
-  // Filter clusters by the name filter (case-insensitive partial match)
-  const filterLower = nameFilter.toLowerCase().trim();
-  return clusters.filter((cluster) => {
-    const clusterName = cluster.cluster || '';
-    return clusterName.toLowerCase().includes(filterLower);
-  });
-}
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -197,7 +177,6 @@ export function Clusters() {
   const isMobile = useMobile();
 
   const [filters, setFilters] = useState([]);
-  const [property, setProperty] = useState('status'); /// status | cluster | user | workspace | infra
   const [optionValues, setOptionValues] = useState({
     status: [],
     cluster: [],
@@ -598,12 +577,8 @@ export function ClusterTable({
     switch (operator) {
       case '=':
         return itemValue === filterValue;
-      case '!=':
-        return itemValue !== filterValue;
       case ':':
         return itemValue?.includes(filterValue);
-      case '!:':
-        return !itemValue?.includes(filterValue);
       default:
         return true;
     }
@@ -621,16 +596,10 @@ export function ClusterTable({
       for (let i = 0; i < filters.length; i++) {
         const filter = filters[i];
         const current = evaluateCondition(item, filter);
-        const conjunction = filter.conjunction?.toUpperCase();
 
         if (result === null) {
           result = current;
-        } else if (conjunction === 'AND') {
-          result = result && current;
-        } else if (conjunction === 'OR') {
-          result = result || current;
         } else {
-          // Default to AND if unknown conjunction
           result = result && current;
         }
       }
@@ -1271,25 +1240,6 @@ const FilterDropdown = ({
 };
 
 const Filters = ({ filters = [], setFilters, updateURLParams }) => {
-  const onConjuntionChange = (newValue, index) => {
-    setFilters((prevFilters) => {
-      const updatedFilters = prevFilters.map((filter, _index) => {
-        if (_index === index) {
-          return {
-            ...filter,
-            conjunction: newValue,
-          };
-        }
-
-        return filter;
-      });
-
-      updateURLParams(updatedFilters);
-
-      return updatedFilters;
-    });
-  };
-
   const onRemove = (index) => {
     setFilters((prevFilters) => {
       const updatedFilters = prevFilters.filter(
@@ -1315,11 +1265,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
             <FilterItem
               key={`filteritem-${_index}`}
               filter={filter}
-              onConjuntionChange={(newValue) =>
-                onConjuntionChange(newValue, _index)
-              }
               onRemove={() => onRemove(_index)}
-              index={_index}
             />
           ))}
         </div>
@@ -1340,74 +1286,11 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
   );
 };
 
-const FilterItem = ({ filter, onConjuntionChange, onRemove, index }) => {
-  const CONJUCTION_OPTIONS = ['AND', 'OR'];
-
-  const [showDropdown, setShowDropdown] = useState(false);
-
+const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
       <div className="flex items-center border-2 border-blue-600 rounded-lg">
-        <div className="relative">
-          {index > 0 && (
-            <button
-              onClick={() => setShowDropdown((prev) => !prev)}
-              className="px-2 py-1 flex items-center border-r-2 border-r-blue-600"
-            >
-              <div>{filter.conjunction}</div>
-              {showDropdown ? (
-                <svg
-                  className="h-4 w-4 ml-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 15l7-7 7 7"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="h-4 w-4 ml-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              )}
-            </button>
-          )}
-
-          {showDropdown && (
-            <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded shadow">
-              {CONJUCTION_OPTIONS.map((option, idx) => (
-                <li
-                  key={idx}
-                  onClick={() => {
-                    onConjuntionChange(option);
-                    setShowDropdown(false);
-                  }}
-                  className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
-                >
-                  {option}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div
-          className={`flex items-center px-2 py-1 border-r-2 border-r-blue-600 bg-blue-50 ${index == 0 ? 'rounded-l-lg' : ''}`}
-        >
+        <div className="flex items-center px-2 py-1 border-r-2 border-r-blue-600 bg-blue-50 rounded-l-lg">
           {filter.property}
           {` ${filter.operator} `}
           {filter.value}
