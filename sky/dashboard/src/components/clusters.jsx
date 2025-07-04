@@ -1125,23 +1125,25 @@ const FilterDropdown = ({
   const handleSetFilters = () => {
     const filterValue = operateValue ? value.split(operateValue)[1] : value;
 
-    if(filterValue !== ''){
-      setFilters((prevFilters) => {
-        const updatedFilters = [
-          ...prevFilters,
-          {
-            property: operateValue ? propertyValue : '',
-            operator: operateValue,
-            value: filterValue,
-            conjunction: 'AND',
-          },
-        ];
-  
-        updateURLParams(updatedFilters);
-  
-        return updatedFilters;
-      });
+    if (filterValue === '') {
+      return;
     }
+
+    setFilters((prevFilters) => {
+      const updatedFilters = [
+        ...prevFilters,
+        {
+          property: operateValue ? propertyValue : '',
+          operator: operateValue,
+          value: filterValue,
+          conjunction: 'AND',
+        },
+      ];
+
+      updateURLParams(updatedFilters);
+
+      return updatedFilters;
+    });
 
     setStep(1);
     handleRemoveFilterValue();
