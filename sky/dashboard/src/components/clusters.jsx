@@ -331,8 +331,6 @@ export function Clusters() {
   const updateURLParams = (filters) => {
     const query = { ...router.query };
 
-    console.table(filters);
-
     let properties = [];
     let operators = [];
     let values = [];
@@ -349,8 +347,6 @@ export function Clusters() {
     query.o = operators;
     query.v = values;
     query.c = conjunctions;
-
-    console.table(query);
 
     // Use replace to avoid adding to browser history for filter changes
     router.replace(
@@ -498,6 +494,7 @@ export function Clusters() {
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        filters={filters}
         workspaceFilter={workspaceFilter}
         userFilter={userFilter}
         nameFilter={nameFilter}
@@ -532,6 +529,7 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  filters,
   workspaceFilter,
   userFilter,
   nameFilter,
@@ -598,29 +596,73 @@ export function ClusterTable({
     setIsInitialLoad(false);
   }, [setLoading, showHistory]);
 
+  // Utility: checks a condition based on operator
+  const evaluateCondition = (item, filter) => {
+    const { property, operator, value } = filter;
+
+    if (!value) return true; // skip empty filters
+
+    // Global search: check all values
+    if (!property) {
+      const strValue = value.toLowerCase();
+      return Object.values(item).some((val) =>
+        val?.toString().toLowerCase().includes(strValue)
+      );
+    }
+
+    const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
+    const filterValue = value.toString().toLowerCase();
+
+    switch (operator) {
+      case '=':
+        return itemValue === filterValue;
+      case '!=':
+        return itemValue !== filterValue;
+      case ':':
+        return itemValue?.includes(filterValue);
+      case '!:':
+        return !itemValue?.includes(filterValue);
+      default:
+        return true;
+    }
+  };
+
+  // Main filter function
+  const filterData = (data, filters) => {
+    if (filters.length === 0) {
+      return data;
+    }
+
+    return data.filter((item) => {
+      let result = null;
+
+      for (let i = 0; i < filters.length; i++) {
+        const filter = filters[i];
+        const current = evaluateCondition(item, filter);
+        const conjunction = filter.conjunction?.toUpperCase();
+
+        if (result === null) {
+          result = current;
+        } else if (conjunction === 'AND') {
+          result = result && current;
+        } else if (conjunction === 'OR') {
+          result = result || current;
+        } else {
+          // Default to AND if unknown conjunction
+          result = result && current;
+        }
+      }
+
+      return result;
+    });
+  };
+
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
-    let filteredData = data;
-    // Filter by workspace if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
-    if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
-      filteredData = filteredData.filter((item) => {
-        const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
-        return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
-      });
-    }
-    // Filter by user if userFilter is set and not 'ALL_USERS_VALUE'
-    if (userFilter && userFilter !== ALL_USERS_VALUE) {
-      filteredData = filteredData.filter((item) => {
-        const itemUserId = item.user_hash || item.user;
-        return itemUserId === userFilter;
-      });
-    }
-    // Filter by name if nameFilter is set
-    if (nameFilter) {
-      filteredData = filterClustersByName(filteredData, nameFilter);
-    }
+    const filteredData = filterData(data, filters);
+
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, workspaceFilter, userFilter, nameFilter]);
+  }, [data, sortConfig, filters]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
