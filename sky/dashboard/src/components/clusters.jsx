@@ -449,6 +449,7 @@ export function Clusters() {
             propertyOptions={PROPERTY_OPTIONS}
             operatorOptions={OPERATORS_OPTIONS}
             setFilters={setFilters}
+            updateURLParams={updateURLParams}
             placeholder="Filter clusters"
           />
 
@@ -542,7 +543,11 @@ export function Clusters() {
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} />
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
 
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
@@ -1133,6 +1138,7 @@ const FilterDropdown = ({
   onRemoveFilterChange,
   filterValue,
   setFilters,
+  updateURLParams,
   placeholder = 'Filter clusters',
 }) => {
   const inputRef = useRef(null);
@@ -1169,6 +1175,8 @@ const FilterDropdown = ({
                     conjunction: 'AND',
                   },
                 ];
+
+                updateURLParams(updatedFilters);
 
                 return updatedFilters;
               });
@@ -1246,10 +1254,10 @@ const FilterDropdown = ({
   );
 };
 
-const Filters = ({ filters = [], setFilters }) => {
+const Filters = ({ filters = [], setFilters, updateURLParams }) => {
   const onConjuntionChange = (newValue, index) => {
-    setFilters((prevFilters) =>
-      prevFilters.map((filter, _index) => {
+    setFilters((prevFilters) => {
+      const updatedFilters = prevFilters.map((filter, _index) => {
         if (_index === index) {
           return {
             ...filter,
@@ -1258,17 +1266,28 @@ const Filters = ({ filters = [], setFilters }) => {
         }
 
         return filter;
-      })
-    );
+      });
+
+      updateURLParams(updatedFilters);
+
+      return updatedFilters;
+    });
   };
 
   const onRemove = (index) => {
-    setFilters((prevFilters) =>
-      prevFilters.filter((_, _index) => _index !== index)
-    );
+    setFilters((prevFilters) => {
+      const updatedFilters = prevFilters.filter(
+        (_, _index) => _index !== index
+      );
+
+      updateURLParams(updatedFilters);
+
+      return updatedFilters;
+    });
   };
 
   const clearFilters = () => {
+    updateURLParams([]);
     setFilters([]);
   };
 
