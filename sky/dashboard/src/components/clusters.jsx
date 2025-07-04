@@ -449,7 +449,6 @@ export function Clusters() {
             propertyOptions={PROPERTY_OPTIONS}
             operatorOptions={OPERATORS_OPTIONS}
             setFilters={setFilters}
-            filters={filters}
             placeholder="Filter clusters"
           />
 
@@ -1134,7 +1133,6 @@ const FilterDropdown = ({
   onRemoveFilterChange,
   filterValue,
   setFilters,
-  filters,
   placeholder = 'Filter clusters',
 }) => {
   const inputRef = useRef(null);
@@ -1161,15 +1159,19 @@ const FilterDropdown = ({
           onFocus={() => setIsOpen(true)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              setFilters([
-                ...filters,
-                {
-                  property: parameterFilter,
-                  operator: operateFilter,
-                  value: filterValue,
-                  conjunction: 'AND',
-                },
-              ]);
+              setFilters((prevFilters) => {
+                const updatedFilters = [
+                  ...prevFilters,
+                  {
+                    property: parameterFilter,
+                    operator: operateFilter,
+                    value: filterValue,
+                    conjunction: 'AND',
+                  },
+                ];
+
+                return updatedFilters;
+              });
               setStep(1);
               onRemoveFilterChange();
               inputRef.current.blur();
