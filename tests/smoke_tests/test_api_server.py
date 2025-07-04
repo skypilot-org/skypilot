@@ -4,7 +4,6 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
-from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 
 
@@ -112,7 +111,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
     # Only enable controller related tests for non-consolidation mode.
     # For consolidation mode, the controller is the same with API server,
     # hence no `sky status` output is available nor controller down is supported.
-    if not managed_job_utils.is_consolidation_mode():
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
         controller_related_test_cmds = [
             'echo "==== Test jobs controller cluster user ===="',
             f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
