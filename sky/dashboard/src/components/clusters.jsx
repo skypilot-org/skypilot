@@ -35,7 +35,7 @@ import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
+import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -92,29 +92,6 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Workspace',
     value: 'workspace',
-  },
-];
-
-const PROPERTY_VALUES = [
-  {
-    property: 'status',
-    options: ['status1', 'status2', 'status3', 'status4'],
-  },
-  {
-    property: 'cluster',
-    options: ['cluster1', 'cluster2', 'cluster3', 'cluster4'],
-  },
-  {
-    property: 'user',
-    options: ['user1', 'user2', 'user3', 'user4'],
-  },
-  {
-    property: 'infra',
-    options: ['infra1', 'infra2', 'infra3', 'infra4'],
-  },
-  {
-    property: 'workspace',
-    options: ['workspace1', 'workspace2', 'workspace3', 'workspace4'],
   },
 ];
 
@@ -220,6 +197,14 @@ export function Clusters() {
   const isMobile = useMobile();
 
   const [filters, setFilters] = useState([]);
+  const [property, setProperty] = useState('status'); /// status | cluster | user | workspace | infra
+  const [optionValues, setOptionValues] = useState({
+    status: [],
+    cluster: [],
+    user: [],
+    workspace: [],
+    infra: [],
+  }); /// Option values for properties
 
   // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
@@ -427,8 +412,8 @@ export function Clusters() {
           </div>
 
           <FilterDropdown
-            propertyOptions={PROPERTY_OPTIONS}
-            propertyValues={PROPERTY_VALUES}
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
             placeholder="Filter clusters"
@@ -472,6 +457,7 @@ export function Clusters() {
           setSelectedCluster(cluster);
           setIsVSCodeModalOpen(true);
         }}
+        setOptionValues={setOptionValues}
       />
 
       {/* SSH Instructions Modal */}
@@ -498,6 +484,7 @@ export function ClusterTable({
   showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  setOptionValues,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -508,6 +495,32 @@ export function ClusterTable({
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  const fetchOptionValuesFromClusters = (clusters) => {
+    let optionValues = {
+      status: [],
+      cluster: [],
+      user: [],
+      workspace: [],
+      infra: [],
+    };
+
+    const pushWithoutDuplication = (array, item) => {
+      if (array.includes(item)) return;
+
+      array.push(item);
+    };
+
+    clusters.map((cluster) => {
+      pushWithoutDuplication(optionValues.status, cluster.status);
+      pushWithoutDuplication(optionValues.cluster, cluster.cluster);
+      pushWithoutDuplication(optionValues.user, cluster.user);
+      pushWithoutDuplication(optionValues.workspace, cluster.workspace);
+      pushWithoutDuplication(optionValues.infra, cluster.infra);
+    });
+
+    return optionValues;
+  };
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -539,6 +552,9 @@ export function ClusterTable({
             combinedData.push(histCluster);
           }
         });
+
+        setOptionValues(fetchOptionValuesFromClusters(combinedData));
+
         setData(combinedData);
       } else {
         // Mark active clusters for consistency
@@ -546,10 +562,14 @@ export function ClusterTable({
           ...cluster,
           isHistorical: false,
         }));
+
+        setOptionValues(fetchOptionValuesFromClusters(markedActiveClusters));
+
         setData(markedActiveClusters);
       }
     } catch (error) {
       console.error('Error fetching cluster data:', error);
+      setOptionValues(fetchOptionValuesFromClusters([]));
       setData([]);
     }
 
@@ -1078,25 +1098,55 @@ export function Status2Actions({
 }
 
 const FilterDropdown = ({
-  propertyOptions = [],
-  propertyValues = [],
+  propertyList = [],
+  valueList,
   setFilters,
   updateURLParams,
   placeholder = 'Filter clusters',
 }) => {
   const inputRef = useRef(null);
 
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(false);
   const [value, setValue] = useState('');
   const [propertyValue, setPropertValue] = useState('cluster');
+  const [valueOptions, setValueOptions] = useState([]);
 
-  const filteredOptions = propertyValue
-    ? propertyValues.find((item) => item.property === propertyValue).options
-    : [];
+  let filteredOptions = [];
 
-  const filteredValue = filteredOptions.filter((item) =>
-    item.includes(value.toLowerCase())
-  );
+  useEffect(() => {
+    let updatedValueOptions = [];
+
+    switch (propertyValue) {
+      case 'status':
+        updatedValueOptions = valueList.status;
+        break;
+
+      case 'user':
+        updatedValueOptions = valueList.user;
+        break;
+
+      case 'cluster':
+        updatedValueOptions = valueList.cluster;
+        break;
+
+      case 'workspace':
+        updatedValueOptions = valueList.workspace;
+        break;
+
+      case 'infra':
+        updatedValueOptions = valueList.infra;
+        break;
+
+      default:
+        break;
+    }
+
+    updatedValueOptions = updatedValueOptions.filter((item) =>
+      item.includes(value.toLowerCase())
+    );
+
+    setValueOptions(updatedValueOptions);
+  }, [propertyValue, valueList, value]);
 
   const handleValueChange = (e) => {
     setValue(e.target.value);
@@ -1117,8 +1167,10 @@ const FilterDropdown = ({
               <SelectValue placeholder="Select Property" />
             </SelectTrigger>
             <SelectContent>
-              {propertyOptions.map((item, index) => (
-                <SelectItem value={item.value}>{item.label}</SelectItem>
+              {propertyList.map((item, index) => (
+                <SelectItem key={`property-item-${index}`} value={item.value}>
+                  {item.label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -1148,9 +1200,9 @@ const FilterDropdown = ({
 
                   return updatedFilters;
                 });
-                setValue('')
-                setIsOpen(false)
-                inputRef.current.blur()
+                setValue('');
+                setIsOpen(false);
+                inputRef.current.blur();
               }
             }}
             className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
@@ -1180,9 +1232,9 @@ const FilterDropdown = ({
               </svg>
             </button>
           )}
-          {isOpen && filteredValue.length > 0 && (
+          {isOpen && valueOptions.length > 0 && (
             <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
-              {filteredValue.map((option, index) => (
+              {valueOptions.map((option, index) => (
                 <div
                   key={option}
                   className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
@@ -1202,9 +1254,9 @@ const FilterDropdown = ({
 
                       return updatedFilters;
                     });
-                    setIsOpen(false)
-                    setValue('')
-                    inputRef.current.blur()
+                    setIsOpen(false);
+                    setValue('');
+                    inputRef.current.blur();
                   }}
                 >
                   <span className="text-sm text-gray-600">{option}</span>
