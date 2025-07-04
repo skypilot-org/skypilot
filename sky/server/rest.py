@@ -12,6 +12,8 @@ import colorama
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.server import constants
+from sky.server import versions
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -27,6 +29,11 @@ else:
 F = TypeVar('F', bound=Callable[..., Any])
 
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+_session = requests.Session()
+_session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
+_session.headers[constants.VERSION_HEADER] = (
+    versions.get_local_readable_version())
 
 
 class RetryContext:
@@ -132,13 +139,17 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 def request(method, url, **kwargs) -> 'requests.Response':
     """Send a request to the API server, retry on server temporarily
     unavailable."""
-    response = requests.request(method, url, **kwargs)
-    handle_server_unavailable(response)
-    return response
+    return request_without_retry(method, url, **kwargs)
 
 
 def request_without_retry(method, url, **kwargs) -> 'requests.Response':
     """Send a request to the API server without retry."""
-    response = requests.request(method, url, **kwargs)
+    response = _session.request(method, url, **kwargs)
     handle_server_unavailable(response)
+    remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
+    remote_version = response.headers.get(constants.VERSION_HEADER)
+    if remote_api_version is not None:
+        versions.set_remote_api_version(int(remote_api_version))
+    if remote_version is not None:
+        versions.set_remote_version(remote_version)
     return response
