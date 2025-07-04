@@ -188,7 +188,6 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         max_time = -1.
         if not path.exists():
             return max_time
-        changed_file = ''
         for root, dirs, files in os.walk(path):
             # Prune __pycache__ directories to prevent walking into them and
             # exclude them from processing
@@ -203,12 +202,10 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                     mtime = os.path.getmtime(entry_path)
                     if mtime > max_time:
                         max_time = mtime
-                        changed_file = entry_path
                 except OSError:
                     # Handle cases where file might have been deleted after
                     # listing
                     return None
-        logger.info(f'changed_file: {changed_file}, time: {max_time}')
         return max_time
 
     # This lock prevents that the wheel is updated while being copied.
