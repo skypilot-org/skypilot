@@ -26,7 +26,6 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 
 
-# TODO(kyuds): remove this function
 def check_ssh_cluster_dependencies(
         raise_error: bool = True) -> Optional[List[str]]:
     """Checks if the dependencies for ssh cluster are installed.

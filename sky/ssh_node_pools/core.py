@@ -8,12 +8,12 @@ from sky import clouds
 from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import models
-from sky.ssh_node_pools import ssh_deploy
 from sky.ssh_node_pools import state
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+from sky.utils.kubernetes import deploy_ssh_cluster
 
 logger = sky_logging.init_logger(__name__)
 
@@ -34,8 +34,8 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     msg = f'{action} SSH Node Pool(s)...'
 
     with rich_utils.safe_status(ux_utils.spinner_message(msg)):
-        success, reason = ssh_deploy.deploy_cluster(cleanup=cleanup, 
-                                                    infra=infra)
+        success, reason = deploy_ssh_cluster.deploy_cluster(cleanup=cleanup,
+                                                            infra=infra)
 
     if not success:
         with ux_utils.print_exception_no_traceback():

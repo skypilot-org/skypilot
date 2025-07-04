@@ -1,12 +1,24 @@
 """SSH-based Kubernetes Cluster Deployment"""
 # This is the python native function call method of creating an SSH Node Pool
-
+import subprocess
 import os
 from typing import Optional, Tuple
 
-from sky.ssh_node_pools import ssh_deploy_utils
+from sky import sky_logging
+from sky.utils.kubernetes import kubernetes_deploy_utils
+
+# Colors for nicer UX
+RED = '\033[0;31m'
+GREEN = '\033[0;32m'
+YELLOW = '\033[1;33m'
+WARNING_YELLOW = '\x1b[33m'
+NC = '\033[0m'  # No color
 
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
+# Get the directory of this script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+logger = sky_logging.init_logger(__name__)
 
 
 def deploy_cluster(cleanup: bool=False,
@@ -26,10 +38,18 @@ def deploy_cluster(cleanup: bool=False,
     assert cleanup or infra is not None
 
     # check requirements
-    ssh_deploy_utils.check_ssh_cluster_dependencies()
+    kubernetes_deploy_utils.check_ssh_cluster_dependencies()
 
     # get kubeconfig paths
     if not kubeconfig_path:
         kubeconfig_path = DEFAULT_KUBECONFIG_PATH
     else:
         kubeconfig_path = os.path.expanduser(kubeconfig_path)
+
+    import time
+    logger.info('Successfully reached step 1')
+    time.sleep(5)
+    logger.info('Successfully reached step 2')
+    time.sleep(5)
+
+    return True, ''
