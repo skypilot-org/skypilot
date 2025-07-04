@@ -138,7 +138,7 @@ class SSHKeyManager:
     """Manager for SSH Node Pool Key Files"""
 
     def __init__(self):
-        self.keys_dir = Path(constants.SKYSSH_KEY_DIR)
+        self.keys_dir = Path(os.path.expanduser(constants.SKYSSH_KEY_DIR))
         self.keys_dir.mkdir(parents=True, exist_ok=True)
 
     def save_ssh_key(self, key_name: str, key_content: str) -> str:

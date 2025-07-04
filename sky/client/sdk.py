@@ -1554,7 +1554,7 @@ def ssh_up(file: Optional[str] = None) -> server_common.RequestId:
         request_id: The request ID of the SSH cluster deployment request.
     """
     if file is None:
-        file = os.path.expanduser(ssh_constants.SKYSSH_DEFAULT_YAML)
+        file = ssh_constants.SKYSSH_DEFAULT_YAML
 
     infra = _update_remote_ssh_node_pools(file)
 
