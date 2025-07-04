@@ -311,17 +311,15 @@ export function Clusters() {
 
     let filters = [];
 
+    const length = Array.isArray(properties) ? properties.length : 1;
+
     const propertyMap = new Map();
     propertyMap.set('', '');
-    propertyMap.set('S', 'Status');
-    propertyMap.set('C', 'Cluster');
-    propertyMap.set('U', 'User');
-    propertyMap.set('W', 'Workspace');
-    propertyMap.set('I', 'Infra');
-
-    const conjunctionMap = new Map();
-    conjunctionMap.set('A', 'AND');
-    conjunctionMap.set('O', 'OR');
+    propertyMap.set('s', 'Status');
+    propertyMap.set('c', 'Cluster');
+    propertyMap.set('u', 'User');
+    propertyMap.set('w', 'Workspace');
+    propertyMap.set('i', 'Infra');
 
     if (length === 1) {
       filters.push({
