@@ -242,6 +242,10 @@ Bump the `API_VERSION` when adding a new API. Then:
     ```python
     from sky.server import versions
 
+    # check_server_healthy_or_start is necessary to check and get server's API version,
+    # this decorator is typically added to all the SDK methods and will be omitted in the
+    # following examples.
+    @server_common.check_server_healthy_or_start
     @versions.minimal_api_version(12)
     def new_feature_method():
         """This method requires server API version 12 or higher."""

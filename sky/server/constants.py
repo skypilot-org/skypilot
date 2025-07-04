@@ -4,21 +4,24 @@ import os
 
 from sky.skylet import constants
 
+# pylint: disable=line-too-long
 # The SkyPilot API version that the code currently use.
 # Bump this version when the API is changed and special compatibility handling
 # based on version info is needed.
-# Refer to CONTRIBUTING.md for detailed guidelines.
+# For more details and code guidelines, refer to:
+# https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
 API_VERSION = 11
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
-# - This value is maintained by the CI pipeline, DO NOT update this manually.
+# - This value is maintained by the CI pipeline, DO NOT EDIT this manually.
 # - Compatibility code for versions lower than this can be safely removed.
+# Refer to API_VERSION for more details.
 MIN_COMPATIBLE_API_VERSION = 11
 
 # The semantic version of the minimum compatible API version.
 # Refer to MIN_COMPATIBLE_API_VERSION for more details.
-# Note (dev): DO NOT edit this constant manually.
+# Note (dev): DO NOT EDIT this constant manually.
 MIN_COMPATIBLE_VERSION = '0.10.0'
 
 # The HTTP header name for the API version of the sender.

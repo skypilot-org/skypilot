@@ -32,8 +32,8 @@ _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
 
 _session = requests.Session()
 _session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
-_session.headers[constants.VERSION_HEADER] = \
-    versions.get_local_readable_version()
+_session.headers[constants.VERSION_HEADER] = (
+    versions.get_local_readable_version())
 
 
 class RetryContext:
