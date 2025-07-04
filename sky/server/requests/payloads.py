@@ -597,7 +597,7 @@ class LocalUpBody(RequestBody):
 
 class SSHUpBody(RequestBody):
     """The request body for the SSH up/down endpoints."""
-    infra: str
+    infra: Optional[str] = None
     cleanup: bool = False
 
 
