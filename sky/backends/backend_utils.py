@@ -249,7 +249,6 @@ def _optimize_file_mounts(tmp_yaml_path: str) -> None:
 
     # Local tmp dir holding runtime files.
     local_runtime_files_dir = tempstore.mkdtemp()
-    logger.info(f'local_runtime_files_dir: {local_runtime_files_dir}')
     new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
 
     # Generate local_src -> unique_name.
