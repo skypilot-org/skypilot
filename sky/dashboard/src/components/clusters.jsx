@@ -72,7 +72,7 @@ const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All W
 const ALL_USERS_VALUE = '__ALL_USERS__';
 
 // Define filter options for the filter dropdown
-const FILTER_OPTIONS = [
+const PROPERTY_OPTIONS = [
   {
     label: 'Status',
     value: 'status',
@@ -479,7 +479,7 @@ export function Clusters() {
             filters = {filters}
             placeholder="Filter clusters"
           />
-          
+
           {/* <div className="relative ml-4 mr-2">
             <input
               type="text"
@@ -510,7 +510,7 @@ export function Clusters() {
               </button>
             )}
           </div> */}
-          
+
           <Select
             value={workspaceFilter}
             onValueChange={handleWorkspaceFilterChange}
@@ -569,6 +569,9 @@ export function Clusters() {
           </button>
         </div>
       </div>
+      
+      <Filters filters={filters} setFilters={setFilters} />
+
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
@@ -1251,6 +1254,162 @@ const FilterDropdown = ({
             ))}
           </div>
         )}
+      </div>
+    </>
+  );
+};
+
+
+const Filters = ({ filters = [], setFilters }) => {
+  const onConjuntionChange = (newValue, index) => {
+    setFilters((prevFilters) =>
+      prevFilters.map((filter, _index) => {
+        if (_index === index) {
+          return {
+            ...filter,
+            conjunction: newValue,
+          };
+        }
+
+        return filter;
+      })
+    );
+  };
+
+  const onRemove = (index) => {
+    setFilters((prevFilters) =>
+      prevFilters.filter((_, _index) => _index !== index)
+    );
+  };
+
+  const clearFilters = () => {
+    setFilters([]);
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-4 p-2">
+        <div className="flex items-content gap-2">
+          {filters.map((filter, _index) => (
+            <FilterItem
+              filter={filter}
+              onConjuntionChange={(newValue) =>
+                onConjuntionChange(newValue, _index)
+              }
+              onRemove={() => onRemove(_index)}
+              index={_index}
+            />
+          ))}
+        </div>
+
+        {filters.length > 0 && (
+          <>
+            <div className="border border-gray-400 h-8"></div>
+            <button
+              onClick={clearFilters}
+              className="border-2 border-blue-600 rounded-full px-4 py-1 text-blue-600 hover:bg-blue-50"
+            >
+              Clear filters
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+};
+
+const FilterItem = ({ filter, onConjuntionChange, onRemove, index }) => {
+  const CONJUCTION_OPTIONS = ['AND', 'OR'];
+
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  return (
+    <>
+      <div className="flex items-center border-2 border-blue-600 rounded-lg">
+        <div className="relative">
+          {index > 0 && (
+            <button
+              onClick={() => setShowDropdown((prev) => !prev)}
+              className="px-2 py-1 flex items-center border-r-2 border-r-blue-600"
+            >
+              <div>{filter.conjunction}</div>
+              {showDropdown ? (
+                <svg
+                  className="h-4 w-4 ml-1"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 15l7-7 7 7"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  className="h-4 w-4 ml-1"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              )}
+            </button>
+          )}
+
+          {showDropdown && (
+            <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded shadow">
+              {CONJUCTION_OPTIONS.map((option, idx) => (
+                <li
+                  key={idx}
+                  onClick={() => {
+                    onConjuntionChange(option);
+                    setShowDropdown(false);
+                  }}
+                  className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                >
+                  {option}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div
+          className={`flex items-center px-2 py-1 border-r-2 border-r-blue-600 bg-blue-50 ${index == 0 ? 'rounded-l-lg' : ''}`}
+        >
+          {filter.property}
+          {` ${filter.operator} `}
+          {filter.value}
+        </div>
+
+        <button
+          onClick={() => onRemove()}
+          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-50 rounded-r-lg"
+          title="Clear filter"
+        >
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
       </div>
     </>
   );
