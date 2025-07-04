@@ -1268,17 +1268,17 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
           ))}
         </div>
 
-        {filters.length > 0 && (
+        {/* {filters.length > 0 && (
           <>
             <div className="border border-gray-400 h-8"></div>
             <button
               onClick={clearFilters}
-              className="border-2 border-blue-600 rounded-full px-4 py-1 text-blue-600 hover:bg-blue-50"
+              className="rounded-full px-4 py-1 text-blue-600 bg-blue-100 hover:bg-blue-200"
             >
               Clear filters
             </button>
           </>
-        )}
+        )} */}
       </div>
     </>
   );
@@ -1287,28 +1287,27 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center border-2 border-blue-600 rounded-lg">
-        <div className="flex items-center px-2 py-1 border-r-2 border-r-blue-600 bg-blue-50 rounded-l-lg">
-          {filter.property}
-          {` ${filter.operator} `}
-          {filter.value}
+      <div className="flex items-center gap-2 text-blue-600 bg-blue-100 px-2 rounded-full">
+        <div className="flex items-center gap-1 px-2 py-1 rounded-l-lg">
+          <span>{`${filter.property} `}</span>
+          <span className="font-bold">{`${filter.operator} ${filter.value}`}</span>
         </div>
 
         <button
           onClick={() => onRemove()}
-          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-50 rounded-r-lg"
+          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg
-            className="h-6 w-6"
+            className="h-3 w-3"
             fill="none"
-            stroke="currentColor"
+            stroke="white"
             viewBox="0 0 24 24"
           >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth={2}
+              strokeWidth={5}
               d="M6 18L18 6M6 6l12 12"
             />
           </svg>
