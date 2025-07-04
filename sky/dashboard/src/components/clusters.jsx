@@ -322,6 +322,8 @@ export function Clusters() {
         console.error('Error fetching data for filters:', error);
       }
     };
+
+    updateFiltersByURLParams();
     fetchFilterData();
   }, []);
 
@@ -337,7 +339,7 @@ export function Clusters() {
     let conjunctions = [];
 
     filters.map((filter, _index) => {
-      properties.push(filter.property[0]);
+      properties.push(filter.property[0] ?? '');
       operators.push(filter.operator);
       values.push(filter.value);
       conjunctions.push(filter.conjunction[0]);
@@ -359,6 +361,52 @@ export function Clusters() {
       undefined,
       { shallow: true }
     );
+  };
+
+  const updateFiltersByURLParams = () => {
+    const query = { ...router.query };
+
+    const properties = query.p;
+    const operators = query.o;
+    const values = query.v;
+    const conjunctions = query.c;
+
+    if (properties === undefined) {
+      return;
+    }
+
+    let filters = [];
+    const minLength = Math.min(
+      properties.length,
+      operators.length,
+      values.length,
+      conjunctions.length
+    );
+
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('S', 'Status');
+    propertyMap.set('C', 'Cluster');
+    propertyMap.set('U', 'User');
+    propertyMap.set('W', 'Workspace');
+    propertyMap.set('I', 'Infra');
+
+    const conjunctionMap = new Map();
+    conjunctionMap.set('A', 'AND');
+    conjunctionMap.set('O', 'OR');
+
+    for (let i = 0; i < minLength; i++) {
+      filters.push({
+        property: propertyMap.get(properties[i]),
+        operator: operators[i],
+        value: values[i],
+        conjunction: conjunctionMap.get(conjunctions[i]),
+      });
+    }
+
+    console.table(filters);
+
+    setFilters(filters);
   };
 
   const handleRefresh = () => {
