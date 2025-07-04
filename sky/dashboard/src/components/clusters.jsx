@@ -506,7 +506,11 @@ export function Clusters() {
         </div>
       </div>
 
-      <Filters filters={filters} setFilters={setFilters} updateURLParams={updateURLParams} />
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
 
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
@@ -1100,46 +1104,47 @@ const FilterDropdown = ({
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState(1);
 
-  const [value, setValue] = useState('')
-  const [propertyValue, setPropertValue] = useState('')
-  const [operateValue, setOperateValue] = useState('')
+  const [value, setValue] = useState('');
+  const [propertyValue, setPropertValue] = useState('');
+  const [operateValue, setOperateValue] = useState('');
 
   const filteredOptions = !propertyValue
-    ? propertyOptions.filter((item) => item?.value?.includes(value.toLowerCase()))
-    : operatorOptions
+    ? propertyOptions.filter((item) =>
+        item?.value?.includes(value.toLowerCase())
+      )
+    : operatorOptions;
 
-  
   const handleValueChange = (e) => {
-    const newValue = e.target.value
-    if(!propertyValue) {
-      setValue(newValue)
+    const newValue = e.target.value;
+    if (!propertyValue) {
+      setValue(newValue);
     } else {
-      if(!operateValue) {
-        console.log("check input", newValue, propertyValue)
-        if(newValue !== propertyValue) {
-          setPropertValue('')
-          setValue(newValue)
-          setIsOpen(true)
-          setStep(1)
+      if (!operateValue) {
+        console.log('check input', newValue, propertyValue);
+        if (newValue !== propertyValue) {
+          setPropertValue('');
+          setValue(newValue);
+          setIsOpen(true);
+          setStep(1);
         }
       } else {
-        if(newValue.length < (propertyValue.length + operateValue.length)) {
-          setOperateValue('')
-          setValue(propertyValue)
-          setIsOpen(true)
-          setStep(2)
+        if (newValue.length < propertyValue.length + operateValue.length) {
+          setOperateValue('');
+          setValue(propertyValue);
+          setIsOpen(true);
+          setStep(2);
         } else {
-          setValue(newValue)
+          setValue(newValue);
         }
       }
     }
-  }
+  };
 
   const handleRemoveFilterValue = () => {
-    setValue('')
-    setPropertValue('')
-    setOperateValue('')
-  }
+    setValue('');
+    setPropertValue('');
+    setOperateValue('');
+  };
 
   const handleSetFilters = () => {
     setFilters((prevFilters) => {
@@ -1158,9 +1163,9 @@ const FilterDropdown = ({
       return updatedFilters;
     });
     setStep(1);
-    handleRemoveFilterValue()
+    handleRemoveFilterValue();
     inputRef.current.blur();
-  }
+  };
 
   return (
     <>
@@ -1175,7 +1180,7 @@ const FilterDropdown = ({
           onFocus={() => setIsOpen(true)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              handleSetFilters()
+              handleSetFilters();
             }
           }}
           className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
@@ -1209,10 +1214,13 @@ const FilterDropdown = ({
         {isOpen && (
           <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
             {value && (
-              <span className="px-2 py-2 border-b font-semibold text-sm hover:cursor-pointer" onMouseDown={(e) => {
-                e.preventDefault()
-                handleSetFilters()
-              }}>
+              <span
+                className="px-2 py-2 border-b font-semibold text-sm hover:cursor-pointer"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handleSetFilters();
+                }}
+              >
                 Use: "{value}"
               </span>
             )}
@@ -1228,13 +1236,13 @@ const FilterDropdown = ({
                 onMouseDown={(e) => {
                   e.preventDefault();
                   if (step === 1) {
-                    setValue(option.label)
-                    setPropertValue(option.label)
+                    setValue(option.label);
+                    setPropertValue(option.label);
                     setStep(2);
                   } else if (step === 2) {
-                    const updatedValue = value + option.label
-                    setValue(updatedValue)
-                    setOperateValue(option.label)
+                    const updatedValue = value + option.label;
+                    setValue(updatedValue);
+                    setOperateValue(option.label);
                     setIsOpen(false);
                     setStep(3);
                   }
