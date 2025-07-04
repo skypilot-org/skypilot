@@ -371,17 +371,13 @@ export function Clusters() {
     const values = query.v;
     const conjunctions = query.c;
 
-    if (properties === undefined) {
+    if (conjunctions === undefined) {
       return;
     }
 
     let filters = [];
-    const minLength = Math.min(
-      properties.length,
-      operators.length,
-      values.length,
-      conjunctions.length
-    );
+
+    const length = Array.isArray(conjunctions) ? conjunctions.length : 1;
 
     const propertyMap = new Map();
     propertyMap.set('', '');
@@ -395,13 +391,22 @@ export function Clusters() {
     conjunctionMap.set('A', 'AND');
     conjunctionMap.set('O', 'OR');
 
-    for (let i = 0; i < minLength; i++) {
+    if (length === 1) {
       filters.push({
-        property: propertyMap.get(properties[i]),
-        operator: operators[i],
-        value: values[i],
-        conjunction: conjunctionMap.get(conjunctions[i]),
+        property: propertyMap.get(properties),
+        operator: operators,
+        value: values,
+        conjunction: conjunctionMap.get(conjunctions),
       });
+    } else {
+      for (let i = 0; i < length; i++) {
+        filters.push({
+          property: propertyMap.get(properties[i]),
+          operator: operators[i],
+          value: values[i],
+          conjunction: conjunctionMap.get(conjunctions[i]),
+        });
+      }
     }
 
     console.table(filters);
