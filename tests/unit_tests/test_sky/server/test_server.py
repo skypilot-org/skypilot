@@ -212,3 +212,49 @@ async def test_logs():
             request_id=mock.ANY,
             logs_path=mock_request_task.log_path,
             background_tasks=mock_background_tasks)
+
+
+@mock.patch('sky.utils.context_utils.hijack_sys_attrs')
+@mock.patch('asyncio.run')
+def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
+    """Test that Server.run uses uvloop event loop policy."""
+    from sky.server.uvicorn import Server
+
+    config = uvicorn.Config(app='sky.server.server:app',
+                            host='127.0.0.1',
+                            port=8000)
+    server_instance = Server(config)
+    original_setup = config.setup_event_loop
+
+    uvloop_policy_set = False
+    uvloop_available = True
+
+    def setup_and_check():
+        # Call original setup to configure event loop
+        original_setup()
+        # Check if uvloop policy is now set
+        nonlocal uvloop_policy_set, uvloop_available
+        import asyncio
+        try:
+            import uvloop
+            policy = asyncio.get_event_loop_policy()
+            uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
+        except ImportError:
+            # uvloop not available
+            uvloop_available = False
+
+    with mock.patch.object(config,
+                           'setup_event_loop',
+                           side_effect=setup_and_check):
+        # Call server.run
+        server_instance.run()
+
+    mock_asyncio_run.assert_called_once()
+
+    # Check uvloop policy was set (if uvloop is available)
+    if uvloop_available:
+        assert uvloop_policy_set, (
+            "Expected uvloop event loop policy to be set when uvloop "
+            "is available")
+    else:
+        pytest.skip("uvloop not available, skipping uvloop policy check")

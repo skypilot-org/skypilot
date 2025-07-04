@@ -233,8 +233,13 @@ def test_validate_api(num_requests):
     run_concurrent_api_requests(num_requests, validate, 'API /validate')
 
 
+def test_api_status(num_requests):
+    print(f"Testing {num_requests} API status requests")
+    run_concurrent_api_requests(num_requests, sdk.api_status, 'API /status')
+
+
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status', 'tail_logs', 'validate']
+all_apis = ['status', 'cli_status', 'tail_logs', 'validate', 'api_status']
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -318,6 +323,9 @@ if __name__ == '__main__':
                                           args=(args.n, cloud))
             elif api == 'validate':
                 thread = threading.Thread(target=test_validate_api,
+                                          args=(args.n,))
+            elif api == 'api_status':
+                thread = threading.Thread(target=test_api_status,
                                           args=(args.n,))
             if thread:
                 test_threads.append(thread)
