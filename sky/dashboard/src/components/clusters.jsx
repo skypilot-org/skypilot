@@ -1141,6 +1141,27 @@ const FilterDropdown = ({
     setOperateValue('')
   }
 
+  const handleSetFilters = () => {
+    setFilters((prevFilters) => {
+      const updatedFilters = [
+        ...prevFilters,
+        {
+          property: operateValue ? propertyValue : '',
+          operator: operateValue,
+          value: operateValue ? value.split(operateValue)[1] : value,
+          conjunction: 'AND',
+        },
+      ];
+
+      updateURLParams(updatedFilters);
+
+      return updatedFilters;
+    });
+    setStep(1);
+    handleRemoveFilterValue()
+    inputRef.current.blur();
+  }
+
   return (
     <>
       <div className="relative ml-4 mr-2">
@@ -1154,24 +1175,7 @@ const FilterDropdown = ({
           onFocus={() => setIsOpen(true)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              setFilters((prevFilters) => {
-                const updatedFilters = [
-                  ...prevFilters,
-                  {
-                    property: operateValue ? propertyValue : '',
-                    operator: operateValue,
-                    value: operateValue ? value.split(operateValue)[1] : value,
-                    conjunction: 'AND',
-                  },
-                ];
-
-                updateURLParams(updatedFilters);
-
-                return updatedFilters;
-              });
-              setStep(1);
-              handleRemoveFilterValue()
-              inputRef.current.blur();
+              handleSetFilters()
             }
           }}
           className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
@@ -1205,13 +1209,18 @@ const FilterDropdown = ({
         {isOpen && (
           <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
             {value && (
-              <span className="px-2 py-2 border-b font-semibold text-sm">
-                Use "{value}"
+              <span className="px-2 py-2 border-b font-semibold text-sm hover:cursor-pointer" onMouseDown={(e) => {
+                e.preventDefault()
+                handleSetFilters()
+              }}>
+                Use: "{value}"
               </span>
             )}
-            <span className="px-2 py-2 border-b font-semibold text-sm">
-              {step == 1 ? 'Property' : 'Operator'}
-            </span>
+            {filteredOptions.length && (
+              <span className="px-2 py-2 border-b font-semibold text-sm">
+                {step == 1 ? 'Property' : 'Operator'}
+              </span>
+            )}
             {filteredOptions.map((option, index) => (
               <div
                 key={option.value}
