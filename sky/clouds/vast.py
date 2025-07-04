@@ -35,6 +35,9 @@ class Vast(clouds.Cloud):
             ('Mounting object stores is not supported on Vast.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Vast.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on Vast.'
+            ),
     }
     #
     # Vast doesn't have a max cluster name limit. This number

@@ -512,8 +512,9 @@ class GCP(clouds.Cloud):
             default_value=False,
             override_configs=resources.cluster_config_overrides)
         resources_vars['enable_gpu_direct'] = enable_gpu_direct
-        network_tier = r.network_tier
-        resources_vars['network_tier'] = network_tier
+        network_tier = (r.network_tier if r.network_tier is not None else
+                        resources_utils.NetworkTier.STANDARD)
+        resources_vars['network_tier'] = network_tier.value
         accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
