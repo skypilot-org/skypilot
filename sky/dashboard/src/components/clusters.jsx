@@ -379,8 +379,6 @@ export function Clusters() {
       }
     }
 
-    console.table(filters);
-
     setFilters(filters);
   };
 
