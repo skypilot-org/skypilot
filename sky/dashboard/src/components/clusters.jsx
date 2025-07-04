@@ -91,6 +91,25 @@ const FILTER_OPTIONS = [
   },
 ];
 
+const OPERATORS_OPTIONS = [
+  {
+    label: '=',
+    value: 'Equals',
+  },
+  {
+    label: '!=',
+    value: 'Does not equal',
+  },
+  {
+    label: ':',
+    value: 'Contains',
+  },
+  {
+    label: '!:',
+    value: 'Does not contain',
+  },
+];
+
 // Helper function to filter clusters by name
 export function filterClustersByName(clusters, nameFilter) {
   // If no name filter, return all clusters
@@ -196,6 +215,11 @@ export function Clusters() {
   const [users, setUsers] = useState([]);
   const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
+  
+  const [parameterFilter, setParameterFilter] = useState('');
+  const [operateFilter, setOperatorFilter] = useState('');
+  const [filterValue, setFilterValue] = useState('')
+  const [filters, setFilters] = useState([])
 
   // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
@@ -378,6 +402,36 @@ export function Clusters() {
     }
   };
 
+  const handleFilterChange = (newName, type) => {
+    if(type === 'property') {
+      setParameterFilter(newName);
+      setFilterValue('')
+    } else if (type === 'operator') {
+      setOperatorFilter(newName)
+      setFilterValue('')
+    } else if (type === 'value') {
+      if(operateFilter){
+        const filterValue = newName.split(operateFilter)[1]
+        if(filterValue == undefined) {
+          setFilterValue(parameterFilter)
+          setParameterFilter('')
+          setOperatorFilter('')
+        } else {
+          setFilterValue(filterValue)
+        }
+      } else {
+        setFilterValue(newName)
+      }
+    }
+    updateURLParams(workspaceFilter, userFilter, newName);
+  };
+
+  const handleRemoveFilterChange = () => {
+    setParameterFilter('')
+    setOperatorFilter('')
+    setFilterValue('')
+  }
+
   return (
     <>
       <div className="flex items-center justify-between mb-4 h-5">
@@ -412,7 +466,21 @@ export function Clusters() {
               </span>
             </label>
           </div>
-          <div className="relative ml-4 mr-2">
+
+          <FilterDropdown
+            parameterFilter={parameterFilter}
+            operateFilter={operateFilter}
+            onFilterChange={handleFilterChange}
+            onRemoveFilterChange={handleRemoveFilterChange}
+            filterValue = {filterValue}
+            propertyOptions={PROPERTY_OPTIONS}
+            operatorOptions={OPERATORS_OPTIONS}
+            setFilters = {setFilters}
+            filters = {filters}
+            placeholder="Filter clusters"
+          />
+          
+          {/* <div className="relative ml-4 mr-2">
             <input
               type="text"
               placeholder="Filter by cluster name"
@@ -441,7 +509,8 @@ export function Clusters() {
                 </svg>
               </button>
             )}
-          </div>
+          </div> */}
+          
           <Select
             value={workspaceFilter}
             onValueChange={handleWorkspaceFilterChange}
@@ -1079,3 +1148,110 @@ export function Status2Actions({
     </>
   );
 }
+
+const FilterDropdown = ({
+  propertyOptions = [],
+  operatorOptions = [],
+  parameterFilter,
+  operateFilter,
+  onFilterChange,
+  onRemoveFilterChange,
+  filterValue,
+  setFilters,
+  filters,
+  placeholder = 'Filter clusters',
+}) => {
+  const inputRef = useRef(null)
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [step, setStep] = useState(1)
+
+  const filteredOptions = !parameterFilter ? propertyOptions.filter(item => item?.value?.includes(filterValue)) : !operateFilter ? operatorOptions : []
+
+  return (
+    <>
+      <div className="relative ml-4 mr-2">
+        <input
+          type="text"
+          ref={inputRef}
+          placeholder={placeholder}
+          value={parameterFilter + operateFilter + filterValue}
+          onChange={(e) => onFilterChange(e.target.value, 'value')}
+          onBlur={() => setIsOpen(false)}
+          onFocus={() => setIsOpen(true)}
+          onKeyDown={(e) => {
+            if(e.key === 'Enter') {
+              setFilters([...filters, {
+                property: parameterFilter,
+                operator: operateFilter,
+                value: filterValue,
+                conjunction: 'AND'
+              }])
+              setStep(1)
+              onRemoveFilterChange()
+              inputRef.current.blur();
+            }
+          }}
+          className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+          autoComplete="off"
+        />
+        {parameterFilter && (
+          <button
+            onClick={() => {
+              onRemoveFilterChange()
+              setStep(1)
+            }}
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear filter"
+            tabIndex={-1}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        )}
+        {isOpen && filteredOptions.length && (
+          <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
+            <span className='px-2 py-2 border-b font-semibold text-sm'>{step == 1 ? "Property" : "Operator"}</span>
+            {filteredOptions.map((option, index) => (
+              <div
+                key={option.value}
+                className={`flex flex-col pl-6 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length-1} && border-b`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if(step === 1) {
+                    onFilterChange(option.label, 'property');
+                    setStep(2)
+                  } else if(step === 2) {
+                    onFilterChange(option.label, 'operator')
+                    setIsOpen(false);
+                    setStep(3)
+                  }
+                }}
+              >
+                <span>
+                  {parameterFilter && (<span className='text-blue-500 font-semibold'>{parameterFilter}{" "}</span>)}{option.label}
+                </span>
+                {step == 2 && (
+                  <span className='text-xs text-gray-600'>
+                    {option.value}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
