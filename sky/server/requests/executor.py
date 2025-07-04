@@ -396,11 +396,9 @@ def _request_execution_wrapper(request_id: str,
                         f'{common_utils.format_exception(e)}')
             return
         else:
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.SUCCEEDED
-                if not ignore_return_value:
-                    request_task.set_return_value(return_value)
+            api_requests.set_request_succeeded(
+                request_id,
+                return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 

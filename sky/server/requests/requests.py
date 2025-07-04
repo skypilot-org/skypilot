@@ -26,7 +26,7 @@ from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import common
+from sky.utils import common, subprocess_utils
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
@@ -40,6 +40,7 @@ COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
+COL_FINISHED_AT = 'finished_at'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_GC_RETENTION_SECONDS = 60 * 60 * 24  # 1 day
@@ -91,6 +92,7 @@ REQUEST_COLUMNS = [
     COL_USER_ID,
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
+    COL_FINISHED_AT,
 ]
 
 
@@ -123,6 +125,8 @@ class Request:
     status_msg: Optional[str] = None
     # Whether the request should be retried.
     should_retry: bool = False
+    # When the request finished.
+    finished_at: Optional[float] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -209,6 +213,7 @@ class Request:
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
             should_retry=self.should_retry,
+            finished_at=self.finished_at,
         )
 
     def encode(self) -> payloads.RequestPayload:
@@ -231,6 +236,7 @@ class Request:
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
+                finished_at=self.finished_at,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -263,6 +269,7 @@ class Request:
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
+                finished_at=payload.finished_at,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -442,6 +449,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 #   process for each request.
                 os.kill(request_record.pid, signal.SIGTERM)
             request_record.status = RequestStatus.CANCELLED
+            request_record.finished_at = time.time()
             cancelled_request_ids.append(request_id)
     return cancelled_request_ids
 
@@ -478,12 +486,15 @@ def create_table(cursor, conn):
         {COL_USER_ID} TEXT,
         {COL_STATUS_MSG} TEXT,
         {COL_SHOULD_RETRY} INTEGER
+        {COL_FINISHED_AT} REAL,
         )""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_SHOULD_RETRY,
                                  'INTEGER')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
+                                 'REAL')
 
 
 _DB = None
@@ -586,7 +597,7 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
-    created_before: Optional[float] = None,
+    finishied_before: Optional[float] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -599,7 +610,7 @@ def get_request_tasks(
             If None, all users are included.
         include_request_names: a list of request names to filter on.
             Mutually exclusive with exclude_request_names.
-        created_before: if provided, only include requests created before this
+        finished_before: if provided, only include requests finished before this
             timestamp.
 
     Raises:
@@ -630,9 +641,9 @@ def get_request_tasks(
         request_names_str = ','.join(
             repr(name) for name in include_request_names)
         filters.append(f'name IN ({request_names_str})')
-    if created_before is not None:
-        filters.append('created_at < ?')
-        filter_params.append(created_before)
+    if finishied_before is not None:
+        filters.append('finished_at < ?')
+        filter_params.append(finishied_before)
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -674,21 +685,25 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
         request_task.set_error(e)
 
 
-def set_request_succeeded(request_id: str, result: Any) -> None:
+def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
-        request_task.set_return_value(result)
+        request_task.finished_at = time.time()
+        if result is not None:
+            request_task.set_return_value(result)
 
 
 def set_request_cancelled(request_id: str) -> None:
     """Set a request to cancelled."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
+        request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
 
 
@@ -707,10 +722,12 @@ def clean_finished_requests_with_retention(retention_seconds: int) -> None:
         RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED
     ]
     reqs = get_request_tasks(status=finished_statuses,
-                             created_before=time.time() - retention_seconds)
+                             finished_before=time.time() - retention_seconds)
 
-    for req in reqs:
-        req.log_path.unlink(missing_ok=True)
+    subprocess_utils.run_in_parallel(
+        func=lambda req: req.log_path.unlink(missing_ok=True),
+        args=reqs,
+        num_threads=len(reqs))
 
     id_list_str = ','.join(repr(req.request_id) for req in reqs)
     assert _DB is not None
@@ -726,7 +743,7 @@ def clean_finished_requests_with_retention(retention_seconds: int) -> None:
 def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
     retention_seconds = skypilot_config.get_nested(
-        ['api_server', 'requests_gc_retention_seconds'],
+        ('api_server', 'requests_gc_retention_seconds'),
         DEFAULT_REQUESTS_GC_RETENTION_SECONDS)
     while True:
         try:
