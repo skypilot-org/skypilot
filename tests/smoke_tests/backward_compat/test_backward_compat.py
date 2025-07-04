@@ -335,14 +335,13 @@ class TestBackwardCompatibility:
         common_initial_commands = [
             f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
             f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
-            launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
         ]
 
-        # Version-specific job-3 handling
+        # Version-specific job-2 and job-3 handling
         if expect_version_mismatch:
-            # Try to launch job-3, expect it to fail with version mismatch
+            # Try to launch job-2, expect it to fail with version mismatch
             version_specific_commands = [
-                (f'output=$({launch_job(f"{managed_job_name}-3", f"echo hi; sleep {blocking_seconds_for_cancel_job}")} 2>&1); '
+                (f'output=$({launch_job(f"{managed_job_name}-2", "echo hi; sleep 400")} 2>&1); '
                  f'exit_code=$?; '
                  f'echo "Launch exit code: $exit_code"; '
                  f'echo "$output"; '
@@ -351,45 +350,69 @@ class TestBackwardCompatibility:
                  f'  echo "$output" | grep -q "non-terminal jobs on the controller" || {{ echo "ERROR: Expected version mismatch error message not found"; exit 1; }}; '
                  f'  echo "$output" | grep -q "{managed_job_name}-0" || {{ echo "ERROR: Job name not found in error"; exit 1; }}; '
                  f'  echo "$output" | grep -q "RUNNING" || {{ echo "ERROR: RUNNING status not found in error"; exit 1; }}; '
-                 f'  echo "Version mismatch confirmed"; '
+                 f'  echo "Version mismatch confirmed for job-2"; '
                  f'else '
                  f'  echo "ERROR: Launch should have failed due to version mismatch"; exit 1; '
                  f'fi'),
-                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
-                # Cancel job-0 first to resolve version conflict
+                # Cancel both job-0 and job-1 to clear all running jobs
                 f'sky jobs cancel -y -n {managed_job_name}-0',
-                # Now launch job-3 should succeed
+                # Job-1 could already be succeeded, so we don't want to fail the test
+                f'sky jobs cancel -y -n {managed_job_name}-1 || true',
+                # Wait for job-0 to be cancelled
+                wait_for_status(f'{managed_job_name}-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                # Wait for job-1 to reach terminal state (succeeded/cancelled)
+                wait_for_status(f'{managed_job_name}-1', [
+                    sky.ManagedJobStatus.SUCCEEDED,
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                # Now launch job-2 should succeed
+                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
+                # Now launch job-3 should succeed (simple launch without error handling)
                 launch_job(f'{managed_job_name}-3',
                            f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
+                # Cancel job-3 and wait for final states
+                f'sky jobs cancel -y -n {managed_job_name}-3',
+                wait_for_status(f'{managed_job_name}-2',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-3', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
             ]
         else:
             # No version mismatch expected - direct launch
             version_specific_commands = [
+                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 launch_job(f'{managed_job_name}-3',
                            f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
-                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 f'sky jobs cancel -y -n {managed_job_name}-0',
+                # Cancel job-3 and wait for final states
+                f'sky jobs cancel -y -n {managed_job_name}-3',
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-2',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                wait_for_status(f'{managed_job_name}-3', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                # Final count checks - job-0,3 cancelled, job-1,2 succeeded, old jobs have their own states
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
             ]
 
-        # Common final commands
-        common_final_commands = [
-            f'sky jobs cancel -y -n {managed_job_name}-3',
-            wait_for_status(f'{managed_job_name}-1',
-                            [sky.ManagedJobStatus.SUCCEEDED]),
-            wait_for_status(f'{managed_job_name}-2',
-                            [sky.ManagedJobStatus.SUCCEEDED]),
-            wait_for_status(f'{managed_job_name}-0', [
-                sky.ManagedJobStatus.CANCELLED, sky.ManagedJobStatus.CANCELLING
-            ]),
-            wait_for_status(f'{managed_job_name}-3', [
-                sky.ManagedJobStatus.CANCELLED, sky.ManagedJobStatus.CANCELLING
-            ]),
-            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
-            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
-        ]
-
         # Combine all commands
-        current_commands = common_initial_commands + version_specific_commands + common_final_commands
+        current_commands = common_initial_commands + version_specific_commands
 
         commands = [
             *self._switch_to_base(
