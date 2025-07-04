@@ -97,24 +97,24 @@ const PROPERTY_OPTIONS = [
 
 const PROPERTY_VALUES = [
   {
-    property: "status",
-    options: ["status1", "status2", "status3", "status4"]
+    property: 'status',
+    options: ['status1', 'status2', 'status3', 'status4'],
   },
   {
-    property: "cluster",
-    options: ["cluster1", "cluster2", "cluster3", "cluster4"]
+    property: 'cluster',
+    options: ['cluster1', 'cluster2', 'cluster3', 'cluster4'],
   },
   {
-    property: "user",
-    options: ["user1", "user2", "user3", "user4"]
+    property: 'user',
+    options: ['user1', 'user2', 'user3', 'user4'],
   },
   {
-    property: "infra",
-    options: ["infra1", "infra2", "infra3", "infra4"]
+    property: 'infra',
+    options: ['infra1', 'infra2', 'infra3', 'infra4'],
   },
   {
-    property: "workspace",
-    options: ["workspace1", "workspace2", "workspace3", "workspace4"]
+    property: 'workspace',
+    options: ['workspace1', 'workspace2', 'workspace3', 'workspace4'],
   },
 ];
 
@@ -1087,24 +1087,24 @@ const FilterDropdown = ({
   const inputRef = useRef(null);
 
   const [value, setValue] = useState('');
-  const [propertyValue, setPropertValue] = useState('');
+  const [propertyValue, setPropertValue] = useState('cluster');
 
   const filteredOptions = propertyValue
-    ? propertyValues.find((item) =>
-        item.property === propertyValue
-      ).options
+    ? propertyValues.find((item) => item.property === propertyValue).options
     : [];
 
-  const filteredValue = filteredOptions.filter(item => item.includes(value.toLowerCase()))
+  const filteredValue = filteredOptions.filter((item) =>
+    item.includes(value.toLowerCase())
+  );
 
   const handleValueChange = (e) => {
-    setValue(e.target.value)
+    setValue(e.target.value);
   };
 
   return (
     <>
       <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md">
-        <div className='border-r'>
+        <div className="border-r">
           <Select
             onValueChange={(value) => setPropertValue(value)}
             value={propertyValue}
@@ -1122,7 +1122,7 @@ const FilterDropdown = ({
             </SelectContent>
           </Select>
         </div>
-        <div className='relative'>
+        <div className="relative">
           <input
             type="text"
             ref={inputRef}
@@ -1136,7 +1136,7 @@ const FilterDropdown = ({
                     ...prevFilters,
                     {
                       property: propertyValue,
-                      operator: ":",
+                      operator: ':',
                       value: value,
                     },
                   ];
@@ -1153,7 +1153,7 @@ const FilterDropdown = ({
           {value && (
             <button
               onClick={() => {
-                setValue('')
+                setValue('');
               }}
               className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
               title="Clear filter"
@@ -1174,7 +1174,7 @@ const FilterDropdown = ({
               </svg>
             </button>
           )}
-          {(value && filteredValue.length>0) && (
+          {value && filteredValue.length > 0 && (
             <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
               {filteredValue.map((option, index) => (
                 <div
@@ -1187,7 +1187,7 @@ const FilterDropdown = ({
                         ...prevFilters,
                         {
                           property: propertyValue,
-                          operator: "=",
+                          operator: '=',
                           value: option,
                         },
                       ];
@@ -1198,9 +1198,7 @@ const FilterDropdown = ({
                     });
                   }}
                 >
-                  <span className='text-sm text-gray-600'>
-                    {option}
-                  </span>
+                  <span className="text-sm text-gray-600">{option}</span>
                 </div>
               ))}
             </div>
