@@ -36,6 +36,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
+from sky.jobs import scheduler
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -1997,6 +1998,17 @@ def api_stop() -> None:
 
     # Remove the database for requests.
     server_common.clear_local_api_server_database()
+
+    try:
+        with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
+                  'r',
+                  encoding='utf-8') as f:
+            pid = int(f.read())
+            if psutil.pid_exists(pid):
+                subprocess_utils.kill_children_processes(parent_pids=pid,
+                                                         force=True)
+    except Exception:  # pylint: disable=broad-except
+        pass
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'

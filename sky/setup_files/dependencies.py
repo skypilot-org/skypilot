@@ -57,7 +57,10 @@ install_requires = [
     'httpx',
     'setproctitle',
     'sqlalchemy',
+    'aiosqlite',
+    'aiosqlite',
     'psycopg2-binary',
+    'asyncpg',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
     'casbin',
