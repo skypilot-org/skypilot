@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
+from sky.exceptions import InvalidSSHConfigError
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import models
 from sky.ssh_node_pools import state
@@ -88,26 +89,28 @@ def _validate_pool_config(config: Dict[str, Any]) -> None:
     """Validate SSH Node Pool configuration."""
     def _validate_field(data: dict, field: str, expected: type):
         if field not in data:
-            raise ValueError(f'Pool configuration must include `{field}`')
+            raise InvalidSSHConfigError(
+                f'Pool configuration must include `{field}`')
         if not isinstance(data[field], expected):
-            raise ValueError(f'Pool configuration field {field} must be '
-                                f'of type {expected.__name__}, got '
-                                f'{type(data[field].__name__)}')
+            raise InvalidSSHConfigError(
+                f'Pool configuration field {field} must be of type '
+                f'{expected.__name__}, got {type(data[field]).__name__}')
 
     _validate_field(config, 'hosts', list)
     if not config['hosts']:
-        raise ValueError('`hosts` must be a non-empty list')
+        raise InvalidSSHConfigError('`hosts` must be a non-empty list')
 
-    # TODO(kyuds): stricter validation (eg: non-empty ip?)
+    # TODO(kyuds): stricter validation
     for host_config in config['hosts']:
         if not isinstance(host_config, dict):
-            raise ValueError('Each host configuration must be a dictionary, '
-                                f'got {type(host_config).__name__}')
-        _validate_field(host_config, 'user', str)
-        _validate_field(host_config, 'ip', str)
-        _validate_field(host_config, 'password', str)
-        _validate_field(host_config, 'identity_file', str)
-        _validate_field(host_config, 'use_ssh_config', bool)
+            raise InvalidSSHConfigError(
+                'Each host configuration must be a dictionary, got '
+                f'{type(host_config).__name__}')
+        # _validate_field(host_config, 'user', str)
+        # _validate_field(host_config, 'ip', str)
+        # _validate_field(host_config, 'password', str)
+        # _validate_field(host_config, 'identity_file', str)
+        # _validate_field(host_config, 'use_ssh_config', bool)
 
 
 def update_pool(pool_config: Dict[str, Any]) -> None:

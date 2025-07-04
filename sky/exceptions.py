@@ -139,6 +139,11 @@ class InvalidSkyPilotConfigError(ValueError):
     pass
 
 
+class InvalidSSHConfigError(ValueError):
+    """Raised when SSH Node Pools config is invalid."""
+    pass
+
+
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable.
 

@@ -1506,9 +1506,13 @@ def _update_remote_ssh_node_pools(file: str) -> str:
     hosts_info = ssh_utils.prepare_hosts_info(
         infra, config, upload_ssh_key_func=_upload_ssh_key_and_wait)
     pool_config = {infra: {'hosts': hosts_info}}
-    server_common.make_authenticated_request('POST',
-                                             '/ssh_node_pools',
-                                             json=pool_config)
+    response = server_common.make_authenticated_request('POST',
+                                                        '/ssh_node_pools',
+                                                        json=pool_config)
+    if response.status_code == 400:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to upload SSH Node Pool config. '
+                             f'Reason: {response.json().get("detail", "")}')
     return infra
 
 
