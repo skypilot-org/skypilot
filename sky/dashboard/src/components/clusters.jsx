@@ -915,8 +915,7 @@ export function ClusterTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {`${startIndex + 1} - ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`}
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -1211,24 +1210,25 @@ const FilterDropdown = ({
           <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
             {value && (
               <span
-                className="px-2 py-2 border-b font-semibold text-sm hover:cursor-pointer"
+                className="px-3 py-2 border-b hover:cursor-pointer"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   handleSetFilters();
                 }}
               >
-                Use: "{value}"
+                <span className="font-semibold text-md">Use:</span>
+                <span className="text-sm">{` "${value}"`}</span>
               </span>
             )}
             {filteredOptions.length > 0 && (
-              <span className="px-2 py-2 border-b font-semibold text-sm">
+              <span className="px-3 py-2 border-b font-semibold text-md">
                 {step == 1 ? 'Property' : 'Operator'}
               </span>
             )}
             {filteredOptions.map((option, index) => (
               <div
                 key={option.value}
-                className={`flex flex-col pl-6 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
+                className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   if (step === 1) {
@@ -1247,7 +1247,7 @@ const FilterDropdown = ({
                 <span>
                   {propertyValue && (
                     <span className="text-blue-500 font-semibold">
-                      {propertyValue}{' '}
+                      {`${propertyValue} `}
                     </span>
                   )}
                   {option.label}
