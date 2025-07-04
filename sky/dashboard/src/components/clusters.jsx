@@ -95,22 +95,26 @@ const PROPERTY_OPTIONS = [
   },
 ];
 
-const OPERATORS_OPTIONS = [
+const PROPERTY_VALUES = [
   {
-    label: '=',
-    value: 'Equals',
+    property: "status",
+    options: ["status1", "status2", "status3", "status4"]
   },
   {
-    label: '!=',
-    value: 'Does not equal',
+    property: "cluster",
+    options: ["cluster1", "cluster2", "cluster3", "cluster4"]
   },
   {
-    label: ':',
-    value: 'Contains',
+    property: "user",
+    options: ["user1", "user2", "user3", "user4"]
   },
   {
-    label: '!:',
-    value: 'Does not contain',
+    property: "infra",
+    options: ["infra1", "infra2", "infra3", "infra4"]
+  },
+  {
+    property: "workspace",
+    options: ["workspace1", "workspace2", "workspace3", "workspace4"]
   },
 ];
 
@@ -308,19 +312,16 @@ export function Clusters() {
     let properties = [];
     let operators = [];
     let values = [];
-    let conjunctions = [];
 
     filters.map((filter, _index) => {
       properties.push(filter.property[0] ?? '');
       operators.push(filter.operator);
       values.push(filter.value);
-      conjunctions.push(filter.conjunction[0]);
     });
 
     query.p = properties;
     query.o = operators;
     query.v = values;
-    query.c = conjunctions;
 
     // Use replace to avoid adding to browser history for filter changes
     router.replace(
@@ -339,15 +340,12 @@ export function Clusters() {
     const properties = query.p;
     const operators = query.o;
     const values = query.v;
-    const conjunctions = query.c;
 
-    if (conjunctions === undefined) {
+    if (properties === undefined) {
       return;
     }
 
     let filters = [];
-
-    const length = Array.isArray(conjunctions) ? conjunctions.length : 1;
 
     const propertyMap = new Map();
     propertyMap.set('', '');
@@ -366,7 +364,6 @@ export function Clusters() {
         property: propertyMap.get(properties),
         operator: operators,
         value: values,
-        conjunction: conjunctionMap.get(conjunctions),
       });
     } else {
       for (let i = 0; i < length; i++) {
@@ -374,7 +371,6 @@ export function Clusters() {
           property: propertyMap.get(properties[i]),
           operator: operators[i],
           value: values[i],
-          conjunction: conjunctionMap.get(conjunctions[i]),
         });
       }
     }
@@ -432,7 +428,7 @@ export function Clusters() {
 
           <FilterDropdown
             propertyOptions={PROPERTY_OPTIONS}
-            operatorOptions={OPERATORS_OPTIONS}
+            propertyValues={PROPERTY_VALUES}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
             placeholder="Filter clusters"
@@ -1083,182 +1079,133 @@ export function Status2Actions({
 
 const FilterDropdown = ({
   propertyOptions = [],
-  operatorOptions = [],
+  propertyValues = [],
   setFilters,
   updateURLParams,
   placeholder = 'Filter clusters',
 }) => {
   const inputRef = useRef(null);
 
-  const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState(1);
-
   const [value, setValue] = useState('');
   const [propertyValue, setPropertValue] = useState('');
-  const [operateValue, setOperateValue] = useState('');
 
-  const filteredOptions = !propertyValue
-    ? propertyOptions.filter((item) =>
-        item?.value?.includes(value.toLowerCase())
-      )
-    : operatorOptions;
+  const filteredOptions = propertyValue
+    ? propertyValues.find((item) =>
+        item.property === propertyValue
+      ).options
+    : [];
+
+  const filteredValue = filteredOptions.filter(item => item.includes(value.toLowerCase()))
 
   const handleValueChange = (e) => {
-    const newValue = e.target.value;
-    if (!propertyValue) {
-      setValue(newValue);
-    } else {
-      if (!operateValue) {
-        if (newValue !== propertyValue) {
-          setPropertValue('');
-          setValue(newValue);
-          setIsOpen(true);
-          setStep(1);
-        }
-      } else {
-        if (newValue.length < propertyValue.length + operateValue.length) {
-          setOperateValue('');
-          setValue(propertyValue);
-          setIsOpen(true);
-          setStep(2);
-        } else {
-          setValue(newValue);
-        }
-      }
-    }
-  };
-
-  const handleRemoveFilterValue = () => {
-    setValue('');
-    setPropertValue('');
-    setOperateValue('');
-  };
-
-  const handleSetFilters = () => {
-    const filterValue = operateValue ? value.split(operateValue)[1] : value;
-
-    if (filterValue === '') {
-      return;
-    }
-
-    setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property: operateValue ? propertyValue : '',
-          operator: operateValue,
-          value: filterValue,
-          conjunction: 'AND',
-        },
-      ];
-
-      updateURLParams(updatedFilters);
-
-      return updatedFilters;
-    });
-
-    setStep(1);
-    handleRemoveFilterValue();
-    inputRef.current.blur();
+    setValue(e.target.value)
   };
 
   return (
     <>
-      <div className="relative ml-4 mr-2">
-        <input
-          type="text"
-          ref={inputRef}
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => handleValueChange(e)}
-          onBlur={() => setIsOpen(false)}
-          onFocus={() => setIsOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              handleSetFilters();
-            }
-          }}
-          className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-          autoComplete="off"
-        />
-        {value && (
-          <button
-            onClick={() => {
-              handleRemoveFilterValue();
-              setStep(1);
-            }}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            title="Clear filter"
-            tabIndex={-1}
+      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md">
+        <div className='border-r'>
+          <Select
+            onValueChange={(value) => setPropertValue(value)}
+            value={propertyValue}
           >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+            <SelectTrigger
+              aria-label="Node"
+              className="focus:ring-0 focus:ring-offset-0 border-none w-36"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        )}
-        {isOpen && (
-          <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
-            {value && (
-              <span
-                className="px-3 py-2 border-b hover:cursor-pointer"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  handleSetFilters();
-                }}
+              <SelectValue placeholder="Select Property" />
+            </SelectTrigger>
+            <SelectContent>
+              {propertyOptions.map((item, index) => (
+                <SelectItem value={item.value}>{item.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className='relative'>
+          <input
+            type="text"
+            ref={inputRef}
+            placeholder={placeholder}
+            value={value}
+            onChange={(e) => handleValueChange(e)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && value !== '') {
+                setFilters((prevFilters) => {
+                  const updatedFilters = [
+                    ...prevFilters,
+                    {
+                      property: propertyValue,
+                      operator: ":",
+                      value: value,
+                    },
+                  ];
+
+                  updateURLParams(updatedFilters);
+
+                  return updatedFilters;
+                });
+              }
+            }}
+            className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
+            autoComplete="off"
+          />
+          {value && (
+            <button
+              onClick={() => {
+                setValue('')
+              }}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              title="Clear filter"
+              tabIndex={-1}
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <span className="font-semibold text-md">Use:</span>
-                <span className="text-sm">{` "${value}"`}</span>
-              </span>
-            )}
-            {filteredOptions.length > 0 && (
-              <span className="px-3 py-2 border-b font-semibold text-md">
-                {step == 1 ? 'Property' : 'Operator'}
-              </span>
-            )}
-            {filteredOptions.map((option, index) => (
-              <div
-                key={option.value}
-                className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  if (step === 1) {
-                    setValue(option.label);
-                    setPropertValue(option.label);
-                    setStep(2);
-                  } else if (step === 2) {
-                    const updatedValue = value + option.label;
-                    setValue(updatedValue);
-                    setOperateValue(option.label);
-                    setIsOpen(false);
-                    setStep(3);
-                  }
-                }}
-              >
-                <span>
-                  {propertyValue && (
-                    <span className="text-blue-500 font-semibold">
-                      {`${propertyValue} `}
-                    </span>
-                  )}
-                  {option.label}
-                </span>
-                {step == 2 && (
-                  <span className="text-xs text-gray-600">{option.value}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+          {(value && filteredValue.length>0) && (
+            <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
+              {filteredValue.map((option, index) => (
+                <div
+                  key={option}
+                  className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setFilters((prevFilters) => {
+                      const updatedFilters = [
+                        ...prevFilters,
+                        {
+                          property: propertyValue,
+                          operator: "=",
+                          value: option,
+                        },
+                      ];
+
+                      updateURLParams(updatedFilters);
+
+                      return updatedFilters;
+                    });
+                  }}
+                >
+                  <span className='text-sm text-gray-600'>
+                    {option}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
