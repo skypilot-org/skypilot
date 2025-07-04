@@ -89,6 +89,10 @@ const PROPERTY_OPTIONS = [
     label: 'Infra',
     value: 'infra',
   },
+  {
+    label: 'Workspace',
+    value: 'workspace'
+  }
 ];
 
 const OPERATORS_OPTIONS = [
@@ -511,7 +515,7 @@ export function Clusters() {
             )}
           </div> */}
 
-          <Select
+          {/* <Select
             value={workspaceFilter}
             onValueChange={handleWorkspaceFilterChange}
           >
@@ -550,7 +554,7 @@ export function Clusters() {
                 </SelectItem>
               ))}
             </SelectContent>
-          </Select>
+          </Select> */}
         </div>
         <div className="flex items-center">
           {loading && (
