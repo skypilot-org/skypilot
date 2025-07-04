@@ -86,6 +86,7 @@ class PrimeintellectAPIClient:
             self._credentials = json.load(f)
         self.api_key = self._credentials['api_key']
         self.base_url = self._credentials['base_url']
+        self.team_id = self._credentials.get('team_id', None)
         self.headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -141,6 +142,9 @@ class PrimeintellectAPIClient:
                 'type': provider,
             }
         }
+
+        if self.team_id is not None:
+            payload['team'] = {"teamId": self.team_id}
 
         response = _try_request_with_backoff(
             'post',
