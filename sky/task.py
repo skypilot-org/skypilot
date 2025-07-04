@@ -1057,6 +1057,18 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+
+        priority = None
+        for r in resources:
+            if r.priority is None:
+                continue
+            if priority is None:
+                priority = r.priority
+            else:
+                if priority != r.priority:
+                    raise ValueError('Priority is not consistent '
+                                     f'across resources: {resources}')
+
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
                                                    self.secrets)
