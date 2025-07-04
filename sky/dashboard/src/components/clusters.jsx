@@ -91,8 +91,8 @@ const PROPERTY_OPTIONS = [
   },
   {
     label: 'Workspace',
-    value: 'workspace'
-  }
+    value: 'workspace',
+  },
 ];
 
 const OPERATORS_OPTIONS = [
@@ -254,60 +254,6 @@ export function Clusters() {
     router.query.name,
   ]);
 
-  // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser, newName) => {
-    const query = { ...router.query };
-
-    // Update workspace parameter
-    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
-      query.workspace = newWorkspace;
-    } else {
-      delete query.workspace;
-    }
-
-    // Update user parameter
-    if (newUser && newUser !== ALL_USERS_VALUE) {
-      query.user = newUser;
-    } else {
-      delete query.user;
-    }
-
-    // Update name parameter
-    if (newName && newName.trim() !== '') {
-      query.name = newName.trim();
-    } else {
-      delete query.name;
-    }
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Handle workspace filter change
-  const handleWorkspaceFilterChange = (newWorkspace) => {
-    setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter, nameFilter);
-  };
-
-  // Handle user filter change
-  const handleUserFilterChange = (newUser) => {
-    setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser, nameFilter);
-  };
-
-  // Handle name filter change
-  const handleNameFilterChange = (newName) => {
-    setNameFilter(newName);
-    updateURLParams(workspaceFilter, userFilter, newName);
-  };
-
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
@@ -427,7 +373,6 @@ export function Clusters() {
         setFilterValue(newName);
       }
     }
-    updateURLParams(workspaceFilter, userFilter, newName);
   };
 
   const handleRemoveFilterChange = () => {
