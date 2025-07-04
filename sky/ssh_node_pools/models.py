@@ -136,7 +136,7 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
         self._current_state = self._update_state
         self._update_state = None
 
-    def set_update_nodes(self, nodes: List['SSHNode']):
+    def set_update_nodes(self, nodes: List[SSHNode]):
         """Set SSHCluster with update configurations. Note that current
         state can only be set using the `commit` function, which transfers
         the update state to the current state."""
@@ -160,3 +160,16 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
     def get_update_ips(self) -> List[str]:
         """Get ip addresses for updating SSH nodes"""
         return [node.ip for node in self.update_nodes]
+
+    def get_update_head_node(self) -> SSHNode:
+        """Get the update head node config"""
+        for node in self._get_nodes(True):
+            if node.ip == self.head_node_ip:
+                return node
+        raise ValueError(f'Could not find head node config '
+                         f'for {self.name}')
+
+    def get_update_worker_nodes(self) -> List[SSHNode]:
+        """Get the update worker node configs"""
+        return list(filter(lambda n: n.ip != self.head_node_ip, 
+                           self._get_nodes(True)))
