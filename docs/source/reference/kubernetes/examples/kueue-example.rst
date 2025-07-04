@@ -178,6 +178,8 @@ Here, a cluster queue and a local queue are created.
             nominalQuota: 32Gi
           - name: "nvidia.com/gpu"
             nominalQuota: 1000000 # "Infinite" quota
+      preemption:
+        withinClusterQueue: LowerPriority
     ---
     apiVersion: kueue.x-k8s.io/v1beta1
     kind: LocalQueue
