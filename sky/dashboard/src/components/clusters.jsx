@@ -215,11 +215,11 @@ export function Clusters() {
   const [users, setUsers] = useState([]);
   const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
-  
+
   const [parameterFilter, setParameterFilter] = useState('');
   const [operateFilter, setOperatorFilter] = useState('');
-  const [filterValue, setFilterValue] = useState('')
-  const [filters, setFilters] = useState([])
+  const [filterValue, setFilterValue] = useState('');
+  const [filters, setFilters] = useState([]);
 
   // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
@@ -403,34 +403,34 @@ export function Clusters() {
   };
 
   const handleFilterChange = (newName, type) => {
-    if(type === 'property') {
+    if (type === 'property') {
       setParameterFilter(newName);
-      setFilterValue('')
+      setFilterValue('');
     } else if (type === 'operator') {
-      setOperatorFilter(newName)
-      setFilterValue('')
+      setOperatorFilter(newName);
+      setFilterValue('');
     } else if (type === 'value') {
-      if(operateFilter){
-        const filterValue = newName.split(operateFilter)[1]
-        if(filterValue == undefined) {
-          setFilterValue(parameterFilter)
-          setParameterFilter('')
-          setOperatorFilter('')
+      if (operateFilter) {
+        const filterValue = newName.split(operateFilter)[1];
+        if (filterValue == undefined) {
+          setFilterValue(parameterFilter);
+          setParameterFilter('');
+          setOperatorFilter('');
         } else {
-          setFilterValue(filterValue)
+          setFilterValue(filterValue);
         }
       } else {
-        setFilterValue(newName)
+        setFilterValue(newName);
       }
     }
     updateURLParams(workspaceFilter, userFilter, newName);
   };
 
   const handleRemoveFilterChange = () => {
-    setParameterFilter('')
-    setOperatorFilter('')
-    setFilterValue('')
-  }
+    setParameterFilter('');
+    setOperatorFilter('');
+    setFilterValue('');
+  };
 
   return (
     <>
@@ -472,11 +472,11 @@ export function Clusters() {
             operateFilter={operateFilter}
             onFilterChange={handleFilterChange}
             onRemoveFilterChange={handleRemoveFilterChange}
-            filterValue = {filterValue}
+            filterValue={filterValue}
             propertyOptions={PROPERTY_OPTIONS}
             operatorOptions={OPERATORS_OPTIONS}
-            setFilters = {setFilters}
-            filters = {filters}
+            setFilters={setFilters}
+            filters={filters}
             placeholder="Filter clusters"
           />
 
@@ -569,7 +569,7 @@ export function Clusters() {
           </button>
         </div>
       </div>
-      
+
       <Filters filters={filters} setFilters={setFilters} />
 
       <ClusterTable
@@ -1164,12 +1164,16 @@ const FilterDropdown = ({
   filters,
   placeholder = 'Filter clusters',
 }) => {
-  const inputRef = useRef(null)
+  const inputRef = useRef(null);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState(1)
+  const [step, setStep] = useState(1);
 
-  const filteredOptions = !parameterFilter ? propertyOptions.filter(item => item?.value?.includes(filterValue)) : !operateFilter ? operatorOptions : []
+  const filteredOptions = !parameterFilter
+    ? propertyOptions.filter((item) => item?.value?.includes(filterValue))
+    : !operateFilter
+      ? operatorOptions
+      : [];
 
   return (
     <>
@@ -1183,15 +1187,18 @@ const FilterDropdown = ({
           onBlur={() => setIsOpen(false)}
           onFocus={() => setIsOpen(true)}
           onKeyDown={(e) => {
-            if(e.key === 'Enter') {
-              setFilters([...filters, {
-                property: parameterFilter,
-                operator: operateFilter,
-                value: filterValue,
-                conjunction: 'AND'
-              }])
-              setStep(1)
-              onRemoveFilterChange()
+            if (e.key === 'Enter') {
+              setFilters([
+                ...filters,
+                {
+                  property: parameterFilter,
+                  operator: operateFilter,
+                  value: filterValue,
+                  conjunction: 'AND',
+                },
+              ]);
+              setStep(1);
+              onRemoveFilterChange();
               inputRef.current.blur();
             }
           }}
@@ -1201,8 +1208,8 @@ const FilterDropdown = ({
         {parameterFilter && (
           <button
             onClick={() => {
-              onRemoveFilterChange()
-              setStep(1)
+              onRemoveFilterChange();
+              setStep(1);
             }}
             className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
             title="Clear filter"
@@ -1225,30 +1232,35 @@ const FilterDropdown = ({
         )}
         {isOpen && filteredOptions.length && (
           <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
-            <span className='px-2 py-2 border-b font-semibold text-sm'>{step == 1 ? "Property" : "Operator"}</span>
+            <span className="px-2 py-2 border-b font-semibold text-sm">
+              {step == 1 ? 'Property' : 'Operator'}
+            </span>
             {filteredOptions.map((option, index) => (
               <div
                 key={option.value}
-                className={`flex flex-col pl-6 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length-1} && border-b`}
+                className={`flex flex-col pl-6 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  if(step === 1) {
+                  if (step === 1) {
                     onFilterChange(option.label, 'property');
-                    setStep(2)
-                  } else if(step === 2) {
-                    onFilterChange(option.label, 'operator')
+                    setStep(2);
+                  } else if (step === 2) {
+                    onFilterChange(option.label, 'operator');
                     setIsOpen(false);
-                    setStep(3)
+                    setStep(3);
                   }
                 }}
               >
                 <span>
-                  {parameterFilter && (<span className='text-blue-500 font-semibold'>{parameterFilter}{" "}</span>)}{option.label}
+                  {parameterFilter && (
+                    <span className="text-blue-500 font-semibold">
+                      {parameterFilter}{' '}
+                    </span>
+                  )}
+                  {option.label}
                 </span>
                 {step == 2 && (
-                  <span className='text-xs text-gray-600'>
-                    {option.value}
-                  </span>
+                  <span className="text-xs text-gray-600">{option.value}</span>
                 )}
               </div>
             ))}
@@ -1258,7 +1270,6 @@ const FilterDropdown = ({
     </>
   );
 };
-
 
 const Filters = ({ filters = [], setFilters }) => {
   const onConjuntionChange = (newValue, index) => {
