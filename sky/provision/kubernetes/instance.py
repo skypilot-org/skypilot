@@ -876,6 +876,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
+        # Add GPU toleration if GPU is requested.
+        # The nodes provisioned by DWS with flex start with queued provisioning
+        # mode have the GPU taint, so we have to add the GPU toleration.
+        # No need to check if DWS is enabled here since this has no side effect
+        # to the non-DWS case.
         if needs_gpus:
             gpu_toleration = {
                 'key': kubernetes_utils.get_gpu_resource_key(),

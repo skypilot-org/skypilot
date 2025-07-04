@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from sky.clouds import kubernetes
+from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 
@@ -782,65 +783,62 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
                 os.unlink(tmp_path)
 
 
-class TestKubernetesDWSConfig(unittest.TestCase):
-    """Test cases for Kubernetes._get_dws_config method."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.k8s_cloud = kubernetes.Kubernetes()
+class TestGKEDWSConfig(unittest.TestCase):
+    """Test cases for gcp_utils.get_dws_config method."""
 
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_no_dws_config(self, mock_get_config):
         """Test when no DWS config is provided."""
         mock_get_config.return_value = {}
         enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
-            self.k8s_cloud._get_dws_config('test-context', None))
+            gcp_utils.get_dws_config('test-context', None))
 
         self.assertFalse(enable_flex_start)
         self.assertFalse(enable_flex_start_queued_provisioning)
         self.assertIsNone(max_run_duration)
 
     @patch('sky.skypilot_config.get_effective_region_config')
-    def test_flex_start_mode(self, mock_get_config):
-        """Test FLEX_START mode configuration."""
-        mock_get_config.return_value = {'mode': 'flex-start'}
+    def test_dws_not_enabled(self, mock_get_config):
+        """Test when DWS is configured but not enabled."""
+        mock_get_config.return_value = {'enabled': False}
         enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
-            self.k8s_cloud._get_dws_config('test-context', None))
+            gcp_utils.get_dws_config('test-context', None))
+
+        self.assertFalse(enable_flex_start)
+        self.assertFalse(enable_flex_start_queued_provisioning)
+        self.assertIsNone(max_run_duration)
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_dws_enabled_without_kueue(self, mock_get_config):
+        """Test when DWS is enabled without Kueue queue name."""
+        mock_get_config.return_value = {'enabled': True}
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', None))
 
         self.assertTrue(enable_flex_start)
         self.assertFalse(enable_flex_start_queued_provisioning)
         self.assertIsNone(max_run_duration)
 
     @patch('sky.skypilot_config.get_effective_region_config')
-    def test_flex_start_queued_provisioning_mode(self, mock_get_config):
-        """Test FLEX_START_QUEUED_PROVISIONING mode configuration."""
-        mock_get_config.return_value = {
-            'mode': 'flex-start-queued-provisioning'
-        }
-
-        # Should raise error when k8s_kueue_local_queue_name is not provided
-        with self.assertRaises(ValueError) as context:
-            self.k8s_cloud._get_dws_config('test-context', None)
-        self.assertIn('kubernetes.kueue.local_queue_name is required',
-                      str(context.exception))
-
-        # Should work when k8s_kueue_local_queue_name is provided
+    def test_dws_enabled_with_kueue(self, mock_get_config):
+        """Test when DWS is enabled with Kueue queue name."""
+        mock_get_config.return_value = {'enabled': True}
         enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
-            self.k8s_cloud._get_dws_config('test-context', 'test-queue'))
+            gcp_utils.get_dws_config('test-context', 'test-queue'))
 
         self.assertFalse(enable_flex_start)
         self.assertTrue(enable_flex_start_queued_provisioning)
         self.assertIsNone(max_run_duration)
 
     @patch('sky.skypilot_config.get_effective_region_config')
-    def test_max_run_duration_config(self, mock_get_config):
-        """Test configuration with max_run_duration."""
+    def test_dws_enabled_with_max_duration(self, mock_get_config):
+        """Test when DWS is enabled with max run duration."""
         mock_get_config.return_value = {
-            'mode': 'flex-start-queued-provisioning',
+            'enabled': True,
             'max_run_duration': '2h'
         }
         enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
-            self.k8s_cloud._get_dws_config('test-context', 'test-queue'))
+            gcp_utils.get_dws_config('test-context', 'test-queue'))
 
         self.assertFalse(enable_flex_start)
         self.assertTrue(enable_flex_start_queued_provisioning)
@@ -848,31 +846,23 @@ class TestKubernetesDWSConfig(unittest.TestCase):
         self.assertEqual(max_run_duration, 7200)
 
     @patch('sky.skypilot_config.get_effective_region_config')
-    def test_kueue_name_overrides_flex_start(self, mock_get_config):
-        """Test that providing k8s_kueue_local_queue_name overrides to queued provisioning mode."""
-        mock_get_config.return_value = {'mode': 'flex-start'}
+    def test_dws_with_cluster_overrides(self, mock_get_config):
+        """Test DWS config with cluster overrides."""
+        mock_get_config.return_value = {'enabled': False}
+        cluster_overrides = {'dws': {'enabled': False}}
         enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
-            self.k8s_cloud._get_dws_config('test-context', 'test-queue'))
+            gcp_utils.get_dws_config('test-context', None, cluster_overrides))
 
-        # When queue name is provided, should switch to queued provisioning mode
         self.assertFalse(enable_flex_start)
-        self.assertTrue(enable_flex_start_queued_provisioning)
-        self.assertIsNone(max_run_duration)
-
-    @patch('sky.skypilot_config.get_effective_region_config')
-    def test_max_run_duration_ignored_in_flex_start(self, mock_get_config):
-        """Test that max_run_duration is ignored in FLEX_START mode."""
-        mock_get_config.return_value = {
-            'mode': 'flex-start',
-            'max_run_duration': '2h'
-        }
-        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
-            self.k8s_cloud._get_dws_config('test-context', None))
-
-        self.assertTrue(enable_flex_start)
         self.assertFalse(enable_flex_start_queued_provisioning)
-        # max_run_duration should be None even though it's set in config
         self.assertIsNone(max_run_duration)
+        # Verify the override_configs parameter was passed
+        mock_get_config.assert_called_once_with(
+            cloud='kubernetes',
+            region='test-context',
+            keys=('dws',),
+            default_value={},
+            override_configs=cluster_overrides)
 
 
 if __name__ == '__main__':

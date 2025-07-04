@@ -1089,13 +1089,10 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'mode': {
-                'type': 'string',
-                'case_sensitive_enum': [
-                    type.value for type in kubernetes_enums.DWSMode
-                ],
+            'enabled': {
+                'type': 'boolean',
             },
-            # Only used for queued provisioning.
+            # Only used when Kueue is enabled.
             'max_run_duration': {
                 'anyOf': [{
                     'type': 'string',
