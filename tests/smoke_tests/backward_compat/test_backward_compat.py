@@ -506,6 +506,14 @@ class TestBackwardCompatibility:
         """Test client server compatibility across versions"""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
+            if self.BASE_API_VERSION < 11:
+                pytest.skip(
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                )
+            if self.CURRENT_API_VERSION < 11:
+                pytest.skip(
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
             # our new version strategy that adjacent minor versions must be
