@@ -215,8 +215,6 @@ export function Clusters() {
   const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
   const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
   const [nameFilter, setNameFilter] = useState('');
-  const [workspaces, setWorkspaces] = useState([]);
-  const [users, setUsers] = useState([]);
   const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
 
@@ -288,8 +286,6 @@ export function Clusters() {
           finalWorkspaces.add(wsName)
         );
 
-        setWorkspaces(Array.from(finalWorkspaces).sort());
-
         // Fetch users for the filter dropdown
         const fetchedUsers = await dashboardCache.get(getUsers);
         const uniqueClusterUsers = [
@@ -325,16 +321,8 @@ export function Clusters() {
             });
           }
         });
-
-        setUsers(
-          Array.from(finalUsers.values()).sort((a, b) =>
-            a.display.localeCompare(b.display)
-          )
-        );
       } catch (error) {
         console.error('Error fetching data for filters:', error);
-        setWorkspaces(['default']); // Fallback or error state
-        setUsers([]); // Fallback or error state
       }
     };
     fetchFilterData();
