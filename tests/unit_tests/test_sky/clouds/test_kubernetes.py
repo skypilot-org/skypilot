@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from sky.clouds import kubernetes
+from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 
@@ -780,6 +781,88 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
             import os
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+
+class TestGKEDWSConfig(unittest.TestCase):
+    """Test cases for gcp_utils.get_dws_config method."""
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_no_dws_config(self, mock_get_config):
+        """Test when no DWS config is provided."""
+        mock_get_config.return_value = {}
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', None))
+
+        self.assertFalse(enable_flex_start)
+        self.assertFalse(enable_flex_start_queued_provisioning)
+        self.assertIsNone(max_run_duration)
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_dws_not_enabled(self, mock_get_config):
+        """Test when DWS is configured but not enabled."""
+        mock_get_config.return_value = {'enabled': False}
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', None))
+
+        self.assertFalse(enable_flex_start)
+        self.assertFalse(enable_flex_start_queued_provisioning)
+        self.assertIsNone(max_run_duration)
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_dws_enabled_without_kueue(self, mock_get_config):
+        """Test when DWS is enabled without Kueue queue name."""
+        mock_get_config.return_value = {'enabled': True}
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', None))
+
+        self.assertTrue(enable_flex_start)
+        self.assertFalse(enable_flex_start_queued_provisioning)
+        self.assertIsNone(max_run_duration)
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_dws_enabled_with_kueue(self, mock_get_config):
+        """Test when DWS is enabled with Kueue queue name."""
+        mock_get_config.return_value = {'enabled': True}
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', 'test-queue'))
+
+        self.assertFalse(enable_flex_start)
+        self.assertTrue(enable_flex_start_queued_provisioning)
+        self.assertIsNone(max_run_duration)
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_dws_enabled_with_max_duration(self, mock_get_config):
+        """Test when DWS is enabled with max run duration."""
+        mock_get_config.return_value = {
+            'enabled': True,
+            'max_run_duration': '2h'
+        }
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', 'test-queue'))
+
+        self.assertFalse(enable_flex_start)
+        self.assertTrue(enable_flex_start_queued_provisioning)
+        # 2h = 120 minutes = 7200 seconds
+        self.assertEqual(max_run_duration, 7200)
+
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_dws_with_cluster_overrides(self, mock_get_config):
+        """Test DWS config with cluster overrides."""
+        mock_get_config.return_value = {'enabled': False}
+        cluster_overrides = {'dws': {'enabled': False}}
+        enable_flex_start, enable_flex_start_queued_provisioning, max_run_duration = (
+            gcp_utils.get_dws_config('test-context', None, cluster_overrides))
+
+        self.assertFalse(enable_flex_start)
+        self.assertFalse(enable_flex_start_queued_provisioning)
+        self.assertIsNone(max_run_duration)
+        # Verify the override_configs parameter was passed
+        mock_get_config.assert_called_once_with(
+            cloud='kubernetes',
+            region='test-context',
+            keys=('dws',),
+            default_value={},
+            override_configs=cluster_overrides)
 
 
 if __name__ == '__main__':

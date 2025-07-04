@@ -109,6 +109,8 @@ The following fields are supported in SkyPilot YAML inline configuration:
 * :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
 * :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`
 * :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+* :ref:`kubernetes.dws <config-yaml-kubernetes-dws>`
+* :ref:`kubernetes.kueue <config-yaml-kubernetes-kueue>`
 * :ref:`gcp.managed_instance_group <config-yaml-gcp-managed-instance-group>`
 
 Example:
@@ -122,6 +124,8 @@ Example:
     kubernetes:
       pod_config: ...
       provision_timeout: ...
+      dws: ...
+      kueue: ...
     gcp:
       managed_instance_group: ...
     nvidia_gpus:
