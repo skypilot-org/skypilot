@@ -32,7 +32,7 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
     assert cleanup or infra is not None
 
     action = 'Cleaning up' if cleanup else 'Deploying'
-    msg = f'{action} SSH Node Pool(s)...'
+    msg = f'{action} SSH Node Pool(s){" `" + infra + "`" if infra else ""}...'
 
     with rich_utils.safe_status(ux_utils.spinner_message(msg)):
         success, reason = deploy_ssh_cluster.deploy_cluster(cleanup=cleanup,
