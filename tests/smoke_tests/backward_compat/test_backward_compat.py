@@ -407,7 +407,7 @@ class TestBackwardCompatibility:
                     sky.ManagedJobStatus.CANCELLING
                 ]),
                 # Now launch job-2 should succeed
-                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 150'),
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 # Now launch job-3 should succeed (simple launch without error handling)
                 launch_job(f'{managed_job_name}-3',
@@ -424,7 +424,7 @@ class TestBackwardCompatibility:
         else:
             # No version mismatch expected - direct launch
             version_specific_commands = [
-                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 150'),
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 launch_job(f'{managed_job_name}-3',
                            f'echo hi; sleep {blocking_seconds_for_cancel_job}'),
