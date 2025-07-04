@@ -17,4 +17,5 @@ Welcome to SkyPilot!
    Docs <docs/index>
    Blog <https://blog.skypilot.co/>
    Community <https://blog.skypilot.co/community/>
+   Case Studies <https://blog.skypilot.co/case-studies/>
 
