@@ -89,6 +89,7 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
             raise ValueError(f'Error loading SSH Node Pools file: {e}') from e
 
 
+# TODO(kyuds): remove this function
 def get_cluster_config(
         targets: Dict[str, Any],
         cluster_name: Optional[str] = None,
