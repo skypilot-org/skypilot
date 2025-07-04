@@ -1224,7 +1224,7 @@ const FilterDropdown = ({
                 Use: "{value}"
               </span>
             )}
-            {filteredOptions.length && (
+            {filteredOptions.length > 0 && (
               <span className="px-2 py-2 border-b font-semibold text-sm">
                 {step == 1 ? 'Property' : 'Operator'}
               </span>
