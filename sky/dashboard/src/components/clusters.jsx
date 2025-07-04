@@ -1097,7 +1097,6 @@ const FilterDropdown = ({
       setValue(newValue);
     } else {
       if (!operateValue) {
-        console.log('check input', newValue, propertyValue);
         if (newValue !== propertyValue) {
           setPropertValue('');
           setValue(newValue);
@@ -1124,21 +1123,26 @@ const FilterDropdown = ({
   };
 
   const handleSetFilters = () => {
-    setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property: operateValue ? propertyValue : '',
-          operator: operateValue,
-          value: operateValue ? value.split(operateValue)[1] : value,
-          conjunction: 'AND',
-        },
-      ];
+    const filterValue = operateValue ? value.split(operateValue)[1] : value;
 
-      updateURLParams(updatedFilters);
+    if(filterValue !== ''){
+      setFilters((prevFilters) => {
+        const updatedFilters = [
+          ...prevFilters,
+          {
+            property: operateValue ? propertyValue : '',
+            operator: operateValue,
+            value: filterValue,
+            conjunction: 'AND',
+          },
+        ];
+  
+        updateURLParams(updatedFilters);
+  
+        return updatedFilters;
+      });
+    }
 
-      return updatedFilters;
-    });
     setStep(1);
     handleRemoveFilterValue();
     inputRef.current.blur();
