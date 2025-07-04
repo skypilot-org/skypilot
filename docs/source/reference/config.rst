@@ -80,7 +80,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
     :ref:`dws <config-yaml-kubernetes-dws>`:
-      mode: flex-start or flex-start-queued-provisioning
+      enabled: true
       max_run_duration: 10m
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
@@ -1121,17 +1121,16 @@ Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`
 
 GKE DWS configuration (optional).
 
-``kubernetes.dws.mode``
-~~~~~~~~~~~~~~~~~~~~~~~
+Refer to :ref:`Using DWS on GKE <dws-on-gke>` for more details.
 
-Mode of the DWS (optional), see `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
+``kubernetes.dws.enabled``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Can be one of:
+Whether to enable DWS (optional).
 
-- ``flex-start``: Flex start mode. If ``kubernetes.kueue.local_queue_name`` is set, this mode is automatically set to ``flex-start-queued-provisioning``.
-- ``flex-start-queued-provisioning``: Flex start with queued provisioning mode.
+When ``enabled`` is set to ``true``, SkyPilot will automatically enable the flex-start with queued provisioning mode if ``kubernetes.kueue.local_queue_name`` is set, otherwise it will use the flex-start mode.
 
-Default: ``null``.
+Default: ``false``.
 
 ``kubernetes.dws.max_run_duration``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1146,7 +1145,7 @@ Example:
 
   kubernetes:
     dws:
-      mode: flex-start-queued-provisioning
+      enabled: true
       max_run_duration: 10m
 
 .. _config-yaml-kubernetes-context-configs:
