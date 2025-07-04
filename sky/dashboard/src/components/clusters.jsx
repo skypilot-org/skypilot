@@ -383,6 +383,7 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
+
           <div className="flex items-center ml-6 space-x-3">
             <label className="flex items-center cursor-pointer">
               <input
@@ -415,78 +416,6 @@ export function Clusters() {
             updateURLParams={updateURLParams}
             placeholder="Filter clusters"
           />
-
-          {/* <div className="relative ml-4 mr-2">
-            <input
-              type="text"
-              placeholder="Filter by cluster name"
-              value={nameFilter}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-32 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {nameFilter && (
-              <button
-                onClick={() => handleNameFilterChange('')}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear filter"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div> */}
-
-          {/* <Select
-            value={workspaceFilter}
-            onValueChange={handleWorkspaceFilterChange}
-          >
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE
-                  ? 'All Workspaces'
-                  : workspaceFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>
-                All Workspaces
-              </SelectItem>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={userFilter} onValueChange={handleUserFilterChange}>
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by user...">
-                {userFilter === ALL_USERS_VALUE
-                  ? 'All Users'
-                  : users.find((u) => u.userId === userFilter)?.display ||
-                    userFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.userId} value={user.userId}>
-                  {user.display}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select> */}
         </div>
         <div className="flex items-center">
           {loading && (
