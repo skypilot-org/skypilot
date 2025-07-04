@@ -1086,6 +1086,7 @@ const FilterDropdown = ({
 }) => {
   const inputRef = useRef(null);
 
+  const [isOpen, setIsOpen] = useState(false)
   const [value, setValue] = useState('');
   const [propertyValue, setPropertValue] = useState('cluster');
 
@@ -1129,6 +1130,8 @@ const FilterDropdown = ({
             placeholder={placeholder}
             value={value}
             onChange={(e) => handleValueChange(e)}
+            onFocus={() => setIsOpen(true)}
+            onBlur={() => setIsOpen(false)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && value !== '') {
                 setFilters((prevFilters) => {
@@ -1145,6 +1148,9 @@ const FilterDropdown = ({
 
                   return updatedFilters;
                 });
+                setValue('')
+                setIsOpen(false)
+                inputRef.current.blur()
               }
             }}
             className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
@@ -1174,7 +1180,7 @@ const FilterDropdown = ({
               </svg>
             </button>
           )}
-          {value && filteredValue.length > 0 && (
+          {isOpen && filteredValue.length > 0 && (
             <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
               {filteredValue.map((option, index) => (
                 <div
@@ -1196,6 +1202,9 @@ const FilterDropdown = ({
 
                       return updatedFilters;
                     });
+                    setIsOpen(false)
+                    setValue('')
+                    inputRef.current.blur()
                   }}
                 >
                   <span className="text-sm text-gray-600">{option}</span>
