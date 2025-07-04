@@ -450,7 +450,11 @@ def override_sky_config(
 
 def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
-    subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
+    if is_remote_server_test():
+        test.commands.insert(0, 'sky status')
+    else:
+        subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
+
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:
         write = test.echo
@@ -843,6 +847,12 @@ def server_side_is_consolidation_mode() -> bool:
     postgres. Here we manually retrieve the config from the server side to
     check if the consolidation mode is enabled.
     """
+    if is_remote_server_test():
+        # The buildkite pre_command setup does not affect the remote server
+        # config. So --postgres and --jobs-consolidation will not be enabled
+        # even if they are specified.
+        # (TODO: zeping) support this in the future.
+        return False
     response = requests.get(f'{get_api_server_url()}/workspaces/config')
     request_id = server_common.get_request_id(response)
     config = config_utils.Config.from_dict(sdk.get(request_id))

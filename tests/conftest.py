@@ -196,6 +196,18 @@ def pytest_configure(config):
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
+    # Validate incompatible option combinations
+    if config.getoption('--remote-server'):
+        if config.getoption('--jobs-consolidation'):
+            raise ValueError(
+                '--remote-server and --jobs-consolidation are not compatible. '
+                'Jobs consolidation mode is not supported with remote server testing.'
+            )
+        if config.getoption('--postgres'):
+            raise ValueError(
+                '--remote-server and --postgres are not compatible. '
+                'Postgres backend is not supported with remote server testing.')
+
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 

@@ -358,7 +358,7 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
                            trigger_command)
 
 
-def _convert_quick_tests_core(test_files: List[str], args: List[str],
+def _convert_quick_tests_core(test_files: List[str], args: str,
                               trigger_command: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     output_file_pipelines = []
@@ -380,12 +380,27 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str],
 @click.option('--args',
               type=str,
               help='Args to pass to pytest, e.g., --managed-jobs --aws')
-def main(args):
+@click.option('--file_pattern',
+              type=str,
+              help='File pattern to run, e.g., test_cluster_job.py')
+def main(args: str, file_pattern: str):
+    # parse arguments from command line and environment variables
+    args = args or os.getenv('ARGS', '')
+    print(f'args: {args}')
+    file_pattern = file_pattern or os.getenv('FILE_PATTERN', '')
+    print(f'file_pattern: {file_pattern}')
+    # If trigger via buildkite, TRIGGER_COMMAND should be set.
+    # Otherwise, use the args passed in for local testing.
+    trigger_command = os.getenv('TRIGGER_COMMAND', '') or args or '/smoke-test'
+
     test_files = []
     for root, _, files in os.walk('tests/smoke_tests'):
         for file in files:
             if file.endswith('.py') and file.startswith('test_'):
+                if file_pattern and file_pattern not in file:
+                    continue
                 test_files.append(os.path.join(root, file))
+
     release_files = []
     quick_tests_core_files = []
     for test_file in test_files:
@@ -394,13 +409,7 @@ def main(args):
         else:
             release_files.append(test_file)
 
-    args = args or os.getenv('ARGS', '')
-    print(f'args: {args}')
-    # If trigger via buildkite, TRIGGER_COMMAND should be set.
-    # Otherwise, use the args passed in for local testing.
-    trigger_command = os.getenv('TRIGGER_COMMAND', '') or args or '/smoke-test'
     print(f'trigger_command: {trigger_command}')
-
     _convert_release(release_files, args, trigger_command)
     _convert_quick_tests_core(quick_tests_core_files, args, trigger_command)
 
