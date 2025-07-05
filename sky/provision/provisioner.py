@@ -140,9 +140,12 @@ def bulk_provision(
             logger.debug(f'SkyPilot version: {sky.__version__}; '
                          f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
-            logger.debug(
-                'Provision config:\n'
-                f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
+            config_json = json.dumps(dataclasses.asdict(bootstrap_config) if
+                                     dataclasses.is_dataclass(bootstrap_config)
+                                     else str(bootstrap_config),
+                                     indent=2)
+            logger.debug('Provision config:\n'
+                         f'{config_json}')
             return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
         except exceptions.NoClusterLaunchedError:
@@ -434,11 +437,19 @@ def _post_provision_setup(
         logger.debug('For per-instance logs, run: '
                      f'tail -n 100 -f {per_instance_log_dir}/*.log')
 
-    logger.debug(
-        'Provision record:\n'
-        f'{json.dumps(dataclasses.asdict(provision_record), indent=2)}\n'
-        'Cluster info:\n'
-        f'{json.dumps(dataclasses.asdict(cluster_info), indent=2)}')
+        provision_record_json = json.dumps(
+            dataclasses.asdict(provision_record)
+            if dataclasses.is_dataclass(provision_record) else
+            str(provision_record),
+            indent=2)
+
+        cluster_info_json = json.dumps(
+            dataclasses.asdict(cluster_info)
+            if dataclasses.is_dataclass(cluster_info) else str(cluster_info),
+            indent=2)
+
+        logger.debug(f'Provision record:\n{provision_record_json}\n'
+                     f'Cluster info:\n{cluster_info_json}')
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
         e = RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
