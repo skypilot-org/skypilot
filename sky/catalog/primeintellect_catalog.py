@@ -97,7 +97,7 @@ def list_accelerators(
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Prime Intellect offering GPUs."""
     del require_price  # Unused.
-    return common.list_accelerators_impl('Prime Intellect', _df, gpus_only,
+    return common.list_accelerators_impl('PrimeIntellect', _df, gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,
                                          all_regions)

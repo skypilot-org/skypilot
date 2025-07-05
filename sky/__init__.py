@@ -138,7 +138,7 @@ Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
-PrimeIntellect = clouds.Primeintellect
+PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
@@ -158,7 +158,7 @@ __all__ = [
     'Lambda',
     'OCI',
     'Paperspace',
-    'Prime Intellect',
+    'PrimeIntellect',
     'RunPod',
     'Vast',
     'SCP',

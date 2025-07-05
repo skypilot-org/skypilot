@@ -25,7 +25,7 @@ _CREDENTIAL_FILES = [
 
 
 @registry.CLOUD_REGISTRY.register
-class Prime Intellect(clouds.Cloud):
+class PrimeIntellect(clouds.Cloud):
     """Prime Intellect GPU Cloud"""
     _REPR = 'Prime Intellect'
     _CLOUD_UNSUPPORTED_FEATURES = {
@@ -128,7 +128,7 @@ class Prime Intellect(clouds.Cloud):
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Prime Intellect)
+        return isinstance(other, PrimeIntellect)
 
     @classmethod
     def get_default_instance_type(
