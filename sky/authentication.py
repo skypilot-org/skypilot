@@ -603,7 +603,7 @@ def setup_primeintellect_authentication(
         data = json.load(f)
         public_key_path = data.get('ssh_key_path') + ".pub"
 
-    client = primeintellect_utils.PrimeintellectAPIClient()
+    client = primeintellect_utils.PrimeIntellectAPIClient()
     public_key = None
     with open(public_key_path, 'r', encoding='UTF-8') as f:
         public_key = f.read().strip()

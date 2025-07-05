@@ -24,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    client = utils.PrimeintellectAPIClient()
+    client = utils.PrimeIntellectAPIClient()
     instances = client.list_instances()
     # TODO: verify names are we using it?
     possible_names = [
@@ -45,7 +45,7 @@ def _filter_instances(cluster_name_on_cloud: str,
 
 
 def _get_instance_info(instance_id: str) -> Dict[str, Any]:
-    client = utils.PrimeintellectAPIClient()
+    client = utils.PrimeIntellectAPIClient()
     return client.get_instance_details(instance_id)
 
 
@@ -68,7 +68,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     ]
     newly_started_instances = _filter_instances(cluster_name_on_cloud,
                                                 pending_status)
-    client = utils.PrimeintellectAPIClient()
+    client = utils.PrimeIntellectAPIClient()
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -226,7 +226,7 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
-    client = utils.PrimeintellectAPIClient()
+    client = utils.PrimeIntellectAPIClient()
     instances = _filter_instances(cluster_name_on_cloud, None)
 
     # Log if no instances found

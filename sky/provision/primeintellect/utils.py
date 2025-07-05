@@ -140,7 +140,7 @@ def get_upstream_cloud_id(instance_type: str) -> Optional[str]:
     return _lookup_dict.get(instance_type)
 
 
-class PrimeintellectAPIClient:
+class PrimeIntellectAPIClient:
     """Wrapper functions for Prime Intellect API."""
 
     def __init__(self) -> None:

@@ -247,7 +247,7 @@ class PrimeIntellect(clouds.Cloud):
                 print("API key is missing or empty")
 
         # TODO: implement API endpoint for checking key capabilities
-        client = utils.PrimeintellectAPIClient()
+        client = utils.PrimeIntellectAPIClient()
 
         try:
             client.list_instances()
