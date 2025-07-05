@@ -34,6 +34,8 @@ export async function getVolumes() {
           access_mode: volume.config?.access_mode || '-',
           namespace: volume.config?.namespace || '-',
           name_on_cloud: volume.name_on_cloud,
+          usedby_pods: volume.usedby_pods,
+          usedby_clusters: volume.usedby_clusters,
         };
       }) || [];
 

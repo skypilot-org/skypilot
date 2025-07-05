@@ -337,9 +337,40 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
         user_request = sky.UserRequest(task=fresh_task,
                                        skypilot_config=None,
                                        at_client_side=False)
-        mutated_request = policy.apply(user_request)
-        # Should skip the policy at client-side
-        assert mutated_request.task.file_mounts is None
+        # Should reject the request if it is not applied at client-side
+        with pytest.raises(RuntimeError,
+                           match='Policy UseLocalGcpCredentialsPolicy was not '
+                           'applied at client-side'):
+            policy.apply(user_request)
+
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=True)
+        mr = policy.apply(user_request)
+        mutated_user_request = sky.UserRequest(
+            task=mr.task,
+            skypilot_config=mr.skypilot_config,
+            at_client_side=False)
+        # Server accept the request if it is applied at client-side
+        policy.apply(mutated_user_request)
+
+    # Test server rejects request with mismatched policy version
+    with mock.patch.dict(os.environ,
+                         {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
+        fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
+        fresh_task.envs['SKYPILOT_LOCAL_GCP_CREDENTIALS_SET'] = 'v0'
+        user_request = sky.UserRequest(task=fresh_task,
+                                       skypilot_config=None,
+                                       at_client_side=False)
+        # Should reject the request due to version mismatch
+        with pytest.raises(RuntimeError,
+                           match='Policy UseLocalGcpCredentialsPolicy at v0 '
+                           'was applied at client-side but the server '
+                           'requires v1 to be applied'):
+            policy.apply(user_request)
 
 
 def test_restful_policy(add_example_policy_paths, task):

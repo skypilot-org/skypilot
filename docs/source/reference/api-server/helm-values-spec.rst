@@ -38,6 +38,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
     :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
     :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
+    :ref:`authUserHeaderName <helm-values-apiService-authUserHeaderName>`: null
     :ref:`preDeployHook <helm-values-apiService-preDeployHook>`: \|-
       # Run commands before deploying the API server, e.g. installing an admin
       # policy. Remember to set the admin policy in the config section below.
@@ -270,6 +271,22 @@ Default: ``null``
 
   apiService:
     initialBasicAuthSecret: null
+
+.. _helm-values-apiService-authUserHeaderName:
+
+``apiService.authUserHeaderName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Custom header name for user authentication with auth proxies. This overrides the default ``X-Auth-Request-Email`` header. 
+
+This setting is useful when integrating with auth proxies that use different header names for user identification, such as ``X-Remote-User``, ``X-Auth-User``, or custom headers specific to your organization's auth infrastructure.
+
+Default: ``null`` (uses ``X-Auth-Request-Email``)
+
+.. code-block:: yaml
+
+  apiService:
+    authUserHeaderName: X-Custom-User-Header
 
 .. _helm-values-apiService-preDeployHook:
 

@@ -65,12 +65,14 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
+    'pyjwt',
 ]
 
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
+    'pyjwt',
 ]
 
 local_ray = [

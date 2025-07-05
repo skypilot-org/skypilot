@@ -3209,9 +3209,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self._open_ports(handle)
 
         # Capture task YAML and command
-        task_config = None
+        task_config_redacted = None
         if task is not None:
-            task_config = task.to_yaml_config(redact_secrets=True)
+            task_config_redacted = task.to_yaml_config(redact_secrets=True)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3220,7 +3220,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
-                task_config=task_config,
+                task_config=task_config_redacted,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)

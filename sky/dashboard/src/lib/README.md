@@ -29,6 +29,7 @@ The preloader manages these functions across all pages:
 - `getManagedJobs` - Used by: jobs, infra, workspaces, users
 - `getWorkspaces` - Used by: clusters, jobs, workspaces
 - `getUsers` - Used by: users
+- `getVolumes` - Used by: volumes
 
 **Dynamic Functions (with arguments):**
 
@@ -42,6 +43,7 @@ The preloader manages these functions across all pages:
 - **Infra**: getClusters, getManagedJobs, getInfraData (composite: GPU + Cloud data)
 - **Workspaces**: getWorkspaces, getClusters, getManagedJobs, getEnabledClouds
 - **Users**: getUsers, getClusters, getManagedJobs
+- **Volumes**: getVolumes
 
 ### Usage
 

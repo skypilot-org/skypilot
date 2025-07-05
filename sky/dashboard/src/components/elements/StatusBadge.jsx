@@ -19,6 +19,7 @@ export const getStatusStyle = (status) => {
     case 'LAUNCHING':
       return 'bg-blue-100 text-sky-blue';
     case 'RUNNING':
+    case 'IN_USE':
       return 'bg-green-50 text-green-700';
     case 'STOPPED':
       return 'bg-yellow-100 text-yellow-800';
@@ -37,6 +38,7 @@ export const getStatusStyle = (status) => {
     case 'RECOVERING':
       return 'bg-orange-50 text-orange-700';
     case 'SUBMITTED':
+    case 'READY':
       return 'bg-indigo-50 text-indigo-700';
     case 'STARTING':
       return 'bg-cyan-50 text-cyan-700';
@@ -63,6 +65,7 @@ export const getStatusIcon = (status) => {
     case 'STARTING':
       return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
     case 'RUNNING':
+    case 'IN_USE':
       return <FilledCircleIcon className="w-3 h-3 mr-1" />;
     case 'STOPPED':
       return <PauseIcon className="w-3 h-3 mr-1" />;
@@ -80,6 +83,7 @@ export const getStatusIcon = (status) => {
     case 'FAILED_PRECHECKS':
     case 'FAILED_NO_RESOURCE':
     case 'FAILED_CONTROLLER':
+    case 'READY':
       return <CircleIcon className="w-3 h-3 mr-1" />;
     default:
       return <FilledCircleIcon className="w-3 h-3 mr-1" />;

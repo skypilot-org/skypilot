@@ -1,0 +1,11 @@
+apiVersion: v2
+name: skypilot-prometheus-server
+description: A Helm chart for deploying Prometheus Server
+type: application
+version: 0.0.0
+appVersion: "0.0"
+dependencies:
+  - name: prometheus
+    version: 27.20.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled

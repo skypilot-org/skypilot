@@ -298,7 +298,7 @@ class Cudo(clouds.Cloud):
         from cudo_compute import cudo_api
         from cudo_compute.rest import ApiException
         try:
-            _, error = cudo_api.client()
+            _, error = cudo_api.make_client()
         except FileNotFoundError as e:
             return False, (
                 'Cudo credentials are not set. '

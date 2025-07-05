@@ -178,7 +178,7 @@ Then build the local changes and deploy the new changes to the API Server:
 
 ```bash
 DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
-docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile_local .
+docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
 
 # Build the local changes
 helm dependency build ./charts/skypilot
@@ -210,4 +210,149 @@ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
 echo $ENDPOINT
 ```
 
+### Backward compatibility guidelines
 
+SkyPilot adopts a client-server achitecture and maintains backward compatibility between client and server to ensure smooth upgrades for users. Starting from `0.10.0`, SkyPilot guarantees compatibility between adjacent minor versions. That is:
+
+- Changes should always be added in a backward compatible manner, otherwise the compatibility for the previous minor version will be broken.
+- It is an opportunity to remove legacy compatibility code when a new minor version is released, e.g. when we release `0.12.0`, we can [remove the legacy compatibility code](#removing-compatibility-code) for `0.10.0` in our codebase.
+
+The general guideline to keep backward compatibility is to bump the `API_VERSION` constant in [`sky/server/constants.py`](https://github.com/skypilot-org/skypilot/blob/master/sky/server/constants.py) when introducing an API change and handle backward compatibility based on the `API_VERSION` of the remote peer:
+
+```diff
+# sky/server/constants.py
+- API_VERSION = 11
++ API_VERSION = 12
+
+# Application code
++ from sky.server import versions
++ # Handle the case where the remote peer runs in an API version older than 12
++ if versions.get_remote_api_version() < 12:
++   ...
+```
+
+Some concrete examples are listed below.
+
+#### Adding new APIs
+
+Bump the `API_VERSION` when adding a new API. Then:
+
+- For new SDK methods that calls the new API, add the `@versions.minimal_api_version(API_VERSION)` decorator to the method:
+
+    ```python
+    from sky.server import versions
+
+    # check_server_healthy_or_start is necessary to check and get server's API version,
+    # this decorator is typically added to all the SDK methods and will be omitted in the
+    # following examples.
+    @server_common.check_server_healthy_or_start
+    @versions.minimal_api_version(12)
+    def new_feature_method():
+        """This method requires server API version 12 or higher."""
+        pass
+    ```
+
+- For existing SDK methods that will be modified to call the new API, the business logic should handle backward compatibility based on the server's API version:
+
+    ```python
+    from sky.server import versions
+
+    def existing_sdk_method():
+        if versions.get_remote_api_version() >= 12:
+            # Call the new API
+        else:
+            # Proceed without the new API. Usually we just keep the same behavior
+            # as before the new API is introduced.
+    ```
+
+#### Adding new fields to API payload
+
+By convention, we define API payloads in `sky/server/api/payloads.py` and there are test cases to enforce the newly added fields must have a default value to keep backward compatibility at API level:
+
+- When receiving a payload from an older version without the new field, the default value is used for the missing new field.
+- When receiving a payload from a newer version with a new field, the value of the new field is ignored.
+
+However, when the value of the new field is taken from an user input (e.g. CLI flag), we should add a warning message to inform the user that the new field is ignored. An API version bump is required in this case. For example:
+
+```python
+from sky.server import versions
+
+@click.option('--newflag', default=None)
+def cli_entry_point(newflag: Optional[str] = None):
+    # The new flag is set but the server does not support the new field yet
+    if newflag is not None and versions.get_remote_api_version() < 12:
+        logger.warning('The new flag is ignored because the server does not support it yet.')
+```
+
+#### Refactoring existing APIs
+
+Refactoring existing APIs can be tricky. It is recommended to add an new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:
+
+- `constants.py`:
+
+    ```diff
+    - API_VERSION = 11
+    + API_VERSION = 12
+    ```
+
+- `server.py`:
+
+    ```python
+    @app.post('/api')
+    async def api():
+        ...
+
+    @app.post('/api_v2')
+    async def api_v2():
+        ...
+    ```
+
+- `sdk.py`:
+
+    ```python
+    from sky.server import versions
+
+    def sdk_method():
+        if versions.get_remote_api_version() >= 12:
+            # call /api_v2
+        else:
+            # call /api
+    ```
+
+If the refactoring is happen to be simple (e.g. just change the response payload structure), we can also directly modify the existing API. For example:
+
+- `server.py`:
+
+    ```python
+    from sky.server import versions
+
+    @app.post('/api')
+    async def api() -> Union[Response, ResponseV1]:
+        if versions.get_remote_api_version() >= 12:
+            return ResponseV2()
+        else:
+            return Response()
+    ```
+
+#### Removing compatibility code
+
+To reduce the maintenance burden, the SkyPilot CI pipeline automatically updates the `MIN_COMPATIBLE_API_VERSION` field in `sky/server/constants.py` when a new minor version is released.
+The SkyPilot CLI/SDK or API server will raise an error if the remote peer runs in an API version lower than `MIN_COMPATIBLE_API_VERSION`.
+Therefore, compatible code below this version can be safely removed in our codebase.
+
+For example, if we have added the example changes metioned in [Refactoring existing APIs](#refactoring-existing-apis) and now the `MIN_COMPATIBLE_API_VERSION` is bumped to 13 by the CI pipeline (which means we can drop compatibility for API version 12), then the following codes can be removed:
+
+```diff
+# sdk.py
+def sdk_method():
+- if versions.get_remote_api_version() >= 12:
+-     # call /api_v2
+- else:
+-     # call /api
++ # call /api_v2
+
+# server.py
+- @app.post('/api')
+- async def api():
+-    ...
+```

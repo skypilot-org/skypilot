@@ -35,7 +35,6 @@ from sky import jobs
 from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import storage as storage_lib
-from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -949,7 +948,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     region_validation_timeout_for_consolidation = 30
     # Only apply to non-trivial region validation commands.
     if region_validation_base_cmd != 'true':
-        if managed_job_utils.is_consolidation_mode():
+        if smoke_tests_utils.server_side_is_consolidation_mode():
             region_validation_cmd = (
                 'start_time=$SECONDS; '
                 'while true; do '

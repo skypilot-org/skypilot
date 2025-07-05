@@ -12,6 +12,9 @@ _GOOGLE_APPLICATION_CREDENTIALS_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
 _GOOGLE_APPLICATION_CREDENTIALS_PATH = (
     '~/.config/gcloud/application_default_credentials.json')
 
+_LOCAL_GCP_CREDENTIALS_SET_ENV_VAR = 'SKYPILOT_LOCAL_GCP_CREDENTIALS_SET'
+_POLICY_VERSION = 'v1'
+
 
 class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
     """Example policy: use local GCP credentials in the task."""
@@ -21,6 +24,16 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         # Only apply the policy at client-side.
         if not user_request.at_client_side:
+            if not _LOCAL_GCP_CREDENTIALS_SET_ENV_VAR in user_request.task.envs:
+                raise RuntimeError(
+                    f'Policy {cls.__name__} was not applied at client-side. '
+                    'Please install the policy and retry.')
+            cv = user_request.task.envs[_LOCAL_GCP_CREDENTIALS_SET_ENV_VAR]
+            if (cv != _POLICY_VERSION):
+                raise RuntimeError(
+                    f'Policy {cls.__name__} at {cv} was applied at client-side '
+                    f'but the server requires {_POLICY_VERSION} to be applied. '
+                    'Please upgrade the policy and retry.')
             return sky.MutatedUserRequest(user_request.task,
                                           user_request.skypilot_config)
 
@@ -47,4 +60,5 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
             # Otherwise upload the entire default credential directory to get
             # consistent identity in the task and the local environment.
             task.file_mounts['~/.config/gcloud'] = '~/.config/gcloud'
+        task.envs[_LOCAL_GCP_CREDENTIALS_SET_ENV_VAR] = _POLICY_VERSION
         return sky.MutatedUserRequest(task, user_request.skypilot_config)

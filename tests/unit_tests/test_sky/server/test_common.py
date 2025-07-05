@@ -81,7 +81,7 @@ def test_local_client_server_mismatch(mock_is_local, mock_get_status):
             common.check_server_healthy()
 
         # Correct error message
-        assert 'Client and local API server version mismatch' in str(
+        assert 'The local SkyPilot API server is not compatible with the client' in str(
             exc_info.value)
         # Should hint user to restart local API server
         assert 'sky api stop; sky api start' in str(exc_info.value)
@@ -121,17 +121,14 @@ def test_remote_server_older(mock_is_local, mock_get_status):
         status=ApiServerStatus.VERSION_MISMATCH,
         api_version='0',
         version='1.0.0-dev20250415',
-        commit='abc123')
+        commit='abc123',
+        error='SkyPilot API server is too old')
 
     with pytest.raises(RuntimeError) as exc_info:
         common.check_server_healthy()
 
     # Correct error message
     assert 'SkyPilot API server is too old' in str(exc_info.value)
-    # Should hint user to upgrade remote server
-    assert 'Contact your administrator to upgrade the remote API server' in str(
-        exc_info.value)
-    assert 'or downgrade your local client with' in str(exc_info.value)
 
 
 @mock.patch('sky.server.common.get_api_server_status')
@@ -143,66 +140,14 @@ def test_client_older(mock_is_local, mock_get_status):
         status=ApiServerStatus.VERSION_MISMATCH,
         api_version=str(sys.maxsize),
         version='1.0.0-dev20250415',
-        commit='abc123')
+        commit='abc123',
+        error='Your SkyPilot client is too old')
 
     with pytest.raises(RuntimeError) as exc_info:
         common.check_server_healthy()
 
     # Correct error message
     assert 'Your SkyPilot client is too old' in str(exc_info.value)
-    # Should hint user to upgrade client
-    assert 'Upgrade your client with' in str(exc_info.value)
-
-
-def test_get_version_info_hint():
-    """Test the version info hint."""
-    # Test dev version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0-dev0',
-                                commit='abc123')
-    with mock.patch('sky.__version__', '1.0.0-dev0'), \
-         mock.patch('sky.__commit__', 'def456'):
-        hint = common._get_version_info_hint(server_info)
-        assert 'client version: v1.0.0-dev0 with commit def456' in hint
-        assert 'server version: v1.0.0-dev0 with commit abc123' in hint
-
-    # Test stable version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0',
-                                commit='abc123')
-    with mock.patch('sky.__version__', '1.1.0'):
-        hint = common._get_version_info_hint(server_info)
-        assert 'client version: v1.1.0' in hint
-        assert 'server version: v1.0.0' in hint
-
-
-def test_install_server_version_command():
-    """Test the install server version command."""
-    # Test dev version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0-dev0',
-                                commit='abc123')
-    cmd = common._install_server_version_command(server_info)
-    assert cmd == 'pip install git+https://github.com/skypilot-org/skypilot@abc123'
-
-    # Test nightly version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0-dev20250415',
-                                commit='abc123')
-    cmd = common._install_server_version_command(server_info)
-    assert cmd == 'pip install -U "skypilot-nightly==1.0.0-dev20250415"'
-
-    # Test stable version
-    server_info = ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                api_version='1',
-                                version='1.0.0',
-                                commit='abc123')
-    cmd = common._install_server_version_command(server_info)
-    assert cmd == 'pip install -U "skypilot==1.0.0"'
 
 
 @pytest.fixture

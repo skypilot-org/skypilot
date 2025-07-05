@@ -181,7 +181,6 @@ exclude_patterns = [
     '_gallery_original',
     'generated-examples',
 ]
-myst_heading_anchors = 3
 myst_url_schemes = {
     'http': None,
     'https': None,
