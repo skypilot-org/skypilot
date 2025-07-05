@@ -590,9 +590,9 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_primeintellect_authentication(
         config: Dict[str, Any]) -> Dict[str, Any]:
-    """Sets up SSH authentication for Primeintellect.
+    """Sets up SSH authentication for Prime Intellect.
     - Generates a new SSH key pair if one does not exist.
-    - Adds the public SSH key to the user's Primeintellect account.
+    - Adds the public SSH key to the user's Prime Intellect account.
     """
     prime_config = '~/.prime/config.json'
     if not os.path.isfile(os.path.expanduser(prime_config)):

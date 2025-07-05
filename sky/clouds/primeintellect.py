@@ -1,4 +1,4 @@
-""" Primeintellect Cloud. """
+""" Prime Intellect Cloud. """
 import json
 import os
 import typing
@@ -25,9 +25,9 @@ _CREDENTIAL_FILES = [
 
 
 @registry.CLOUD_REGISTRY.register
-class Primeintellect(clouds.Cloud):
-    """Primeintellect GPU Cloud"""
-    _REPR = 'Primeintellect'
+class Prime Intellect(clouds.Cloud):
+    """Prime Intellect GPU Cloud"""
+    _REPR = 'Prime Intellect'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
@@ -36,7 +36,7 @@ class Primeintellect(clouds.Cloud):
         ),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trivial on Primeintellect.'),
+             'are non-trivial on Prime Intellect.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -63,7 +63,7 @@ class Primeintellect(clouds.Cloud):
         region: Optional[str],
         zone: Optional[str],
     ) -> List[clouds.Region]:
-        assert zone is None, 'Primeintellect does not support zones.'
+        assert zone is None, 'Prime Intellect does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
             return []
@@ -128,7 +128,7 @@ class Primeintellect(clouds.Cloud):
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Primeintellect)
+        return isinstance(other, Prime Intellect)
 
     @classmethod
     def get_default_instance_type(
@@ -137,7 +137,7 @@ class Primeintellect(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
-        """Returns the default instance type for Primeintellect."""
+        """Returns the default instance type for Prime Intellect."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
@@ -233,7 +233,7 @@ class Primeintellect(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for Primeintellect. """
+        """ Verify that the user has valid credentials for Prime Intellect. """
 
         primeintellect_config_file = '~/.prime/config.json'
         if not os.path.isfile(os.path.expanduser(primeintellect_config_file)):
@@ -262,7 +262,7 @@ class Primeintellect(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
-        """Checks if the user has access credentials to Primeintellect's compute service."""
+        """Checks if the user has access credentials to Prime Intellect's compute service."""
         return cls._check_credentials()
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

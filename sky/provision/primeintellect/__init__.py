@@ -1,4 +1,4 @@
-"""Primeintellect provisioner for SkyPilot."""
+"""Prime Intellect provisioner for SkyPilot."""
 
 from sky.provision.primeintellect.config import bootstrap_instances
 from sky.provision.primeintellect.instance import cleanup_ports

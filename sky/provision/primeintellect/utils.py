@@ -1,4 +1,4 @@
-"""Primeintellect library wrapper for SkyPilot."""
+"""Prime Intellect library wrapper for SkyPilot."""
 
 import json
 import os
@@ -30,7 +30,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 class PrimeintellectAPIError(Exception):
-    """Base exception for Primeintellect API errors."""
+    """Base exception for Prime Intellect API errors."""
 
     def __init__(self, message: str, status_code: Optional[int] = None, response_data: Optional[Dict[str, Any]] = None):
         super().__init__(message)
@@ -39,7 +39,7 @@ class PrimeintellectAPIError(Exception):
 
 
 class PrimeintellectResourcesUnavailableError(PrimeintellectAPIError):
-    """Exception for when resources are unavailable on Primeintellect."""
+    """Exception for when resources are unavailable on Prime Intellect."""
     pass
 
 
@@ -141,7 +141,7 @@ def get_upstream_cloud_id(instance_type: str) -> Optional[str]:
 
 
 class PrimeintellectAPIClient:
-    """Wrapper functions for Primeintellect API."""
+    """Wrapper functions for Prime Intellect API."""
 
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)

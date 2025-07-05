@@ -44,7 +44,7 @@ __all__ = [
     'Lambda',
     'DO',
     'Paperspace',
-    'Primeintellect',
+    'Prime Intellect',
     'SCP',
     'RunPod',
     'Vast',

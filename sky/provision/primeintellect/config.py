@@ -1,4 +1,4 @@
-"""Primeintellect configuration bootstrapping."""
+"""Prime Intellect configuration bootstrapping."""
 
 from sky.provision import common
 

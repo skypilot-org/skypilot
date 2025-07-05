@@ -1,4 +1,4 @@
-"""Primeintellect instance provisioning."""
+"""Prime Intellect instance provisioning."""
 import time
 from typing import Any, Dict, List, Optional
 
@@ -38,7 +38,8 @@ def _filter_instances(cluster_name_on_cloud: str,
         if status_filters is not None and instance[
                 'status'] not in status_filters:
             continue
-        if instance.get('name') in possible_names:
+        instance_name = instance.get('name')
+        if instance_name and instance_name in possible_names:
             filtered_instances[instance_id] = instance
     return filtered_instances
 
@@ -134,7 +135,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             instance_type = config.node_config['InstanceType']
             region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
             error_msg = (
-                f'Resources are currently unavailable on Primeintellect. '
+                f'Resources are currently unavailable on Prime Intellect. '
                 f'No {instance_type} instances are available{region_str}. '
                 f'Please try again later or consider using a different instance type or region. '
                 f'Details: {str(e)}'
@@ -147,7 +148,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             instance_type = config.node_config['InstanceType']
             region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
             error_msg = (
-                f'Failed to launch {instance_type} instance on Primeintellect{region_str}. '
+                f'Failed to launch {instance_type} instance on Prime Intellect{region_str}. '
                 f'Details: {str(e)}'
             )
             logger.warning(f'API error during instance launch: {e}')
@@ -158,7 +159,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             instance_type = config.node_config['InstanceType']
             region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
             error_msg = (
-                f'Unexpected error while launching {instance_type} instance on Primeintellect{region_str}. '
+                f'Unexpected error while launching {instance_type} instance on Prime Intellect{region_str}. '
                 f'Details: {common_utils.format_exception(e, use_bracket=False)}'
             )
             logger.warning(f'Unexpected error during instance launch: {e}')
@@ -185,7 +186,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         region_str = f" in region {region}" if region != "PLACEHOLDER" else ""
         active_instances = len(_filter_instances(cluster_name_on_cloud, ['ACTIVE']))
         error_msg = (
-            f'Timed out waiting for {instance_type} instances to become ready on Primeintellect{region_str}. '
+            f'Timed out waiting for {instance_type} instances to become ready on Prime Intellect{region_str}. '
             f'Only {active_instances} out of {config.count} instances became active. '
             f'This may indicate capacity issues or slow provisioning. '
             f'Please try again later or consider using a different instance type or region.'
@@ -227,18 +228,71 @@ def terminate_instances(
     del provider_config  # unused
     client = utils.PrimeintellectAPIClient()
     instances = _filter_instances(cluster_name_on_cloud, None)
-    for inst_id, inst in instances.items():
-        logger.debug(f'Terminating instance {inst_id}')
+
+    # Log if no instances found
+    if not instances:
+        logger.info(f'No instances found for cluster {cluster_name_on_cloud}')
+        return
+
+    # Filter out already terminated instances
+    non_terminated_instances = {
+        inst_id: inst for inst_id, inst in instances.items()
+        if inst['status'] not in ['TERMINATED', 'DELETING']
+    }
+
+    if not non_terminated_instances:
+        logger.info(f'All instances for cluster {cluster_name_on_cloud} are already terminated or being deleted')
+        return
+
+    # Log what we're about to terminate
+    instance_names = [inst['name'] for inst in non_terminated_instances.values()]
+    logger.info(f'Terminating {len(non_terminated_instances)} instances for cluster {cluster_name_on_cloud}: {instance_names}')
+
+    # Terminate each instance
+    terminated_instances = []
+    for inst_id, inst in non_terminated_instances.items():
+        logger.debug(f'Terminating instance {inst_id} (status: {inst["status"]})')
         if worker_only and inst['name'].endswith('-head'):
             continue
         try:
             client.remove(inst_id)
+            terminated_instances.append(inst_id)
+            logger.info(f'Successfully initiated termination of instance {inst_id} ({inst["name"]})')
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
+
+    # Wait for instances to be terminated
+    if not terminated_instances:
+        logger.info('No instances were terminated (worker_only=True and only head node found)')
+        return
+
+    logger.info(f'Waiting for {len(terminated_instances)} instances to be terminated...')
+    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
+        remaining_instances = _filter_instances(cluster_name_on_cloud, None)
+
+        # Check if all terminated instances are gone
+        still_exist = [inst_id for inst_id in terminated_instances if inst_id in remaining_instances]
+        if not still_exist:
+            logger.info('All instances have been successfully terminated')
+            break
+
+        # Log status of remaining instances
+        remaining_statuses = [(inst_id, remaining_instances[inst_id]['status'])
+                            for inst_id in still_exist]
+        logger.info(f'Waiting for termination... {len(still_exist)} instances still exist: {remaining_statuses}')
+        time.sleep(POLL_INTERVAL)
+    else:
+        # Timeout reached
+        remaining_instances = _filter_instances(cluster_name_on_cloud, None)
+        still_exist = [inst_id for inst_id in terminated_instances if inst_id in remaining_instances]
+        if still_exist:
+            logger.warning(f'Timeout reached. {len(still_exist)} instances may still be terminating: {still_exist}')
+        else:
+            logger.info('All instances have been successfully terminated')
 
 
 def get_cluster_info(
@@ -313,11 +367,11 @@ def query_instances(
 
     status_map = {
         'PENDING': status_lib.ClusterStatus.INIT,
+        'ERROR': status_lib.ClusterStatus.INIT,
         'ACTIVE': status_lib.ClusterStatus.UP,
         'STOPPED': status_lib.ClusterStatus.STOPPED,
-        'ERROR': status_lib.ClusterStatus.INIT,
-        'DELETING': status_lib.ClusterStatus.INIT,
-        'TERMINATED': status_lib.ClusterStatus.STOPPED,
+        'DELETING': None,  # Being deleted - should be filtered out
+        'TERMINATED': None,  # Already terminated - should be filtered out
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for inst_id, inst in instances.items():

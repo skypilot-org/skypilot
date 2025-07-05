@@ -25,7 +25,7 @@ def validate_region_zone(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Primeintellect does not support zones.')
+            raise ValueError('Prime Intellect does not support zones.')
     return common.validate_region_zone_impl('primeintellect', _df, region, zone)
 
 
@@ -36,7 +36,7 @@ def get_hourly_cost(instance_type: str,
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Primeintellect does not support zones.')
+            raise ValueError('Prime Intellect does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -70,7 +70,7 @@ def get_instance_type_for_accelerator(
     """Returns a list of instance types that have the given accelerator."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Primeintellect does not support zones.')
+            raise ValueError('Prime Intellect does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
@@ -95,9 +95,9 @@ def list_accelerators(
         case_sensitive: bool = True,
         all_regions: bool = False,
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in Primeintellect offering GPUs."""
+    """Returns all instance types in Prime Intellect offering GPUs."""
     del require_price  # Unused.
-    return common.list_accelerators_impl('Primeintellect', _df, gpus_only,
+    return common.list_accelerators_impl('Prime Intellect', _df, gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,
                                          all_regions)
