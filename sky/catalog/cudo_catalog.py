@@ -10,7 +10,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_PULL_FREQUENCY_HOURS = 1
+_PULL_FREQUENCY_HOURS = 7
 _df = common.read_catalog(cudo_mt.VMS_CSV,
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
