@@ -27,7 +27,7 @@ _CREDENTIAL_FILES = [
 @registry.CLOUD_REGISTRY.register
 class PrimeIntellect(clouds.Cloud):
     """Prime Intellect GPU Cloud"""
-    _REPR = 'primeintellect'
+    _REPR = 'Prime Intellect'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
