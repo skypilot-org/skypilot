@@ -190,7 +190,7 @@ class PrimeIntellect(clouds.Cloud):
             resource_list = []
             for instance_type in instance_list:
                 r = resources.copy(
-                    cloud=Primeintellect(),
+                    cloud=PrimeIntellect(),
                     instance_type=instance_type,
                     accelerators=None,
                     cpus=None,
@@ -202,7 +202,7 @@ class PrimeIntellect(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # Return a default instance type
-            default_instance_type = Primeintellect.get_default_instance_type(
+            default_instance_type = PrimeIntellect.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
