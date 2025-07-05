@@ -207,7 +207,7 @@ class PrimeIntellectAPIClient:
             }
         }
 
-        if self.team_id is not None:
+        if self.team_id is not None and self.team_id != "":
             payload['team'] = {"teamId": self.team_id}
 
         response = _try_request_with_backoff(
