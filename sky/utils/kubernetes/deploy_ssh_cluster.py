@@ -1,16 +1,16 @@
 """SSH-based Kubernetes Cluster Deployment"""
 # This is the python native function call method of creating an SSH Node Pool
-import concurrent.futures as cf
 import base64
-import subprocess
-import sys
+import concurrent.futures as cf
+import os
+import random
+import re
 import shlex
 import shutil
-import re
-import random
-import os
+import subprocess
+import sys
 import tempfile
-from typing import Set, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from sky import sky_logging
 from sky.ssh_node_pools import constants as ssh_constants
@@ -211,7 +211,12 @@ def start_agent_node(node,
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
     cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
-    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config, silent=True)
+    result = run_remote(node,
+                        cmd,
+                        user,
+                        ssh_key,
+                        use_ssh_config=use_ssh_config,
+                        silent=True)
     return result is not None
 
 
@@ -401,7 +406,8 @@ def cleanup_kubectl_ssh_tunnel(context_name):
 
         success_message(f'SSH tunnel for context {context_name} cleaned up')
     else:
-        logger.warning(f'{YELLOW}Cleanup script not found: {cleanup_script}{NC}')
+        logger.warning(
+            f'{YELLOW}Cleanup script not found: {cleanup_script}{NC}')
 
 
 def deploy_cluster(cleanup: bool = False,
@@ -450,13 +456,14 @@ def deploy_cluster(cleanup: bool = False,
                                    f'. Skipping...{NC}')
                     continue
                 if (status != SSHClusterStatus.ACTIVE or
-                    status != SSHClusterStatus.PENDING):
+                        status != SSHClusterStatus.PENDING):
                     # might have an update cluster status, but it is not being started.
                     logger.warning(f'{YELLOW}Skipping clean up of non-active '
                                    f'cluster {cluster_name!r}. Current '
                                    f'cluster status: {status.name}.{NC}')
                     continue
-                ssh_state.update_cluster_status(ssh_cluster, SSHClusterStatus.TERMINATING)
+                ssh_state.update_cluster_status(ssh_cluster,
+                                                SSHClusterStatus.TERMINATING)
                 status = SSHClusterStatus.TERMINATING
             else:
                 if not ssh_cluster.update_nodes:
@@ -467,12 +474,12 @@ def deploy_cluster(cleanup: bool = False,
                     reason = f'not a pending cluster. Current status: {status.name}'
                     failed_clusters.append((cluster_name, reason))
                     continue
-                ssh_state.update_cluster_status(ssh_cluster, SSHClusterStatus.STARTING)
+                ssh_state.update_cluster_status(ssh_cluster,
+                                                SSHClusterStatus.STARTING)
                 status = SSHClusterStatus.STARTING
 
             unsuccessful_workers = _deploy_internal(ssh_cluster,
-                                                    kubeconfig_path,
-                                                    cleanup)
+                                                    kubeconfig_path, cleanup)
 
             if not cleanup:
                 successful_nodes = []
@@ -484,15 +491,15 @@ def deploy_cluster(cleanup: bool = False,
                 ssh_cluster.commit()
                 ssh_state.add_or_update_cluster(ssh_cluster)
             else:
-                ssh_state.update_cluster_status(
-                    ssh_cluster, SSHClusterStatus.TERMINATED)
+                ssh_state.update_cluster_status(ssh_cluster,
+                                                SSHClusterStatus.TERMINATED)
 
             action = 'clean up' if cleanup else 'deployment'
             success_message(f'==== Completed {action} for '
                             f'cluster: {cluster_name} ====')
             successful_clusters.append(cluster_name)
 
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             failed_clusters.append((cluster_name, str(e)))
 
     if failed_clusters:
@@ -500,16 +507,15 @@ def deploy_cluster(cleanup: bool = False,
         msg = (f'{GREEN}Successfully {action}ed {len(successful_clusters)} '
                f'cluster(s) ({", ".join(successful_clusters)}). {NC}')
         msg += (f'{RED}Failed to {action} {len(failed_clusters)} '
-                f'cluster(s): ({", ".join(failed_clusters)}){NC}')
+                f'cluster(s):{NC}')
         for cluster_name, reason in failed_clusters:
             msg += f'\n  {cluster_name}: {reason}'
         return False, msg
     return True, ''
 
 
-def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
-                     kubeconfig_path: str,
-                     cleanup: bool) -> Set[str]:
+def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
+                     cleanup: bool) -> List[str]:
     """Deploy or clean up a single Kubernetes cluster.
 
     Returns: Set of unsuccessful worker ips.
@@ -526,31 +532,33 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
     worker_nodes = ssh_cluster.get_update_worker_nodes()
 
     # Some files
-    cert_file_path = os.path.expanduser(os.path.join(
-        ssh_constants.SKYSSH_METADATA_DIR, f'{context_name}-cert.pem'))
-    key_file_path = os.path.expanduser(os.path.join(
-        ssh_constants.SKYSSH_METADATA_DIR, f'{context_name}-key.pem'))
-    tunnel_log_file_path = os.path.expanduser(os.path.join(
-        ssh_constants.SKYSSH_METADATA_DIR, f'{context_name}-tunnel.log'))
+    cert_file_path = os.path.expanduser(
+        os.path.join(ssh_constants.SKYSSH_METADATA_DIR,
+                     f'{context_name}-cert.pem'))
+    key_file_path = os.path.expanduser(
+        os.path.join(ssh_constants.SKYSSH_METADATA_DIR,
+                     f'{context_name}-key.pem'))
+    tunnel_log_file_path = os.path.expanduser(
+        os.path.join(ssh_constants.SKYSSH_METADATA_DIR,
+                     f'{context_name}-tunnel.log'))
 
     # Generate the askpass block if password is provided
     askpass_block = create_askpass_script(head_node.password)
 
     # Pre-flight checks
     logger.info(f'{YELLOW}Checking SSH connection to head node...{NC}')
-    result = run_remote(
-        head_node.ip,
-        f'echo \'SSH connection successful ({head_node.ip})\'',
-        head_node.user,
-        head_node.identity_file,
-        use_ssh_config=head_node.use_ssh_config,
-        print_output=True)
+    result = run_remote(head_node.ip,
+                        f'echo \'SSH connection successful ({head_node.ip})\'',
+                        head_node.user,
+                        head_node.identity_file,
+                        use_ssh_config=head_node.use_ssh_config,
+                        print_output=True)
     if not cleanup and result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Failed to SSH to head node ({head_node.ip}). Please '
                 f'check the SSH configuration and logs for more details.')
-    
+
     # Prepare node cleanup
     worker_nodes_to_cleanup = []
     remove_worker_cmds = []
@@ -585,9 +593,11 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
                      worker_nodes_to_cleanup)
 
     with cf.ThreadPoolExecutor() as executor:
+
         def run_cleanup_cmd(cmd):
             logger.info('Cleaning up worker nodes:', cmd)
             run_command(cmd, shell=True)
+
         executor.map(run_cleanup_cmd, remove_worker_cmds)
 
     # Actual cleanup
@@ -607,7 +617,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
             contexts = run_command([
                 'kubectl', 'config', 'view', '-o',
                 'jsonpath=\'{.contexts[0].name}\''
-            ], shell=False)
+            ],
+                                   shell=False)
 
             if contexts:
                 run_command(['kubectl', 'config', 'use-context', contexts],
@@ -630,7 +641,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
 
         # Remove from DB
         ssh_state.remove_cluster(ssh_cluster.name)
-        logger.info(f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
+        logger.info(
+            f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
         return []
 
     logger.info(f'{YELLOW}Checking TCP Forwarding Options...{NC}')
@@ -761,12 +773,13 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
 
         # Get the kubeconfig from remote server
         if head_node.use_ssh_config:
-            scp_cmd = ['scp', head_node + ':~/.kube/config', temp_kubeconfig]
+            scp_cmd = ['scp', head_node.ip + ':~/.kube/config', temp_kubeconfig]
         else:
             scp_cmd = [
                 'scp', '-o', 'StrictHostKeyChecking=no', '-o',
                 'IdentitiesOnly=yes', '-i', head_node.identity_file,
-                f'{head_node.user}@{head_node.ip}:~/.kube/config', temp_kubeconfig
+                f'{head_node.user}@{head_node.ip}:~/.kube/config',
+                temp_kubeconfig
             ]
         run_command(scp_cmd, shell=False)
 
@@ -879,7 +892,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
                                     f'{YELLOW}Warning: Certificate may not be in proper PEM format{NC}'
                                 )
                         else:
-                            logger.error(f'{RED}Error: Certificate file is empty{NC}')
+                            logger.error(
+                                f'{RED}Error: Certificate file is empty{NC}')
                     except Exception as e:  # pylint: disable=broad-except
                         logger.error(
                             f'{RED}Error processing certificate data: {e}{NC}')
@@ -1067,7 +1081,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
     logger.info(
         '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
     )
-    logger.info('  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
+    logger.info(
+        '  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
 
     if unsuccessful_workers:
         quoted_unsuccessful_workers = [
@@ -1079,4 +1094,4 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster,
             f'{", ".join(quoted_unsuccessful_workers)}. Please check '
             f'the logs for more details.{NC}')
 
-    return unsuccessful_workers
+    return [worker.ip for worker in unsuccessful_workers]

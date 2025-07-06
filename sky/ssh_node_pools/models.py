@@ -168,10 +168,11 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
                 return node
         raise ValueError(f'Could not find head node config '
                          f'for {self.name}')
-    
+
     def _get_worker_nodes(self, current: bool) -> List[SSHNode]:
-        return list(filter(lambda n: n.ip != self.head_node_ip, 
-                           self._get_nodes(current)))
+        return list(
+            filter(lambda n: n.ip != self.head_node_ip,
+                   self._get_nodes(current)))
 
     def get_update_head_node(self) -> SSHNode:
         """Get the update head node config"""
