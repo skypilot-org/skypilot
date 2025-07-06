@@ -34,8 +34,7 @@ To start a managed job, use :code:`sky jobs launch`:
   ├── To cancel the job:                sky jobs cancel 1
   ├── To stream job logs:               sky jobs logs 1
   ├── To stream controller logs:        sky jobs logs --controller 1
-  ├── To view all managed jobs:         sky jobs queue
-  └── To view managed job dashboard:    sky dashboard
+  └── To view all managed jobs:         sky jobs queue
 
 The job is launched on a temporary SkyPilot cluster, managed end-to-end, and automatically cleaned up.
 
