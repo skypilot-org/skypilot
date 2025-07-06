@@ -296,7 +296,7 @@ Some commands to try:
 * ``sky show-gpus`` to show available GPUs
 * ``sky status`` to see SkyPilot status and infra available
 
-✨ Bonus: Infiniband, Nebius shared filesystem, and PVC volumes
+✨ Bonus: Infiniband, Nebius shared filesystem, and volumes
 ---------------------------------------------------------------
 
 Configuring Infiniband on Nebius Kubernetes cluster
@@ -377,10 +377,12 @@ Here's an example of how to use the shared filesystem in a SkyPilot job:
 .. note::
    Add the above ``config`` field to the SkyPilot config (``~/.sky/config.yaml`` `global config <https://docs.skypilot.co/en/latest/reference/config.html#config-yaml>`_ or ``.sky.yaml`` `project config <https://docs.skypilot.co/en/latest/reference/config-sources.html#config-client-project-config>`_) to have the shared filesystem mounted automatically for all your jobs.
 
-PVC volumes support
-~~~~~~~~~~~~~~~~~~~
+Volumes on top of Nebius shared filesystem
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters.
+The above guide allows you to mount the entire Nebius shared filesystem to all SkyPilot clusters. Additionally, SkyPilot supports creating and managing volumes on top of the shared filesystem using Kubernetes Persistent Volume Claims.
+
+Volumes help isolate data per partition.
 
 1. Prepare a volume YAML file:
 
@@ -393,8 +395,8 @@ SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on
      size: 10Gi
      config:
        namespace: default  # optional
-       storage_class_name: csi-mounted-fs-path-sc  # optional
-       access_mode: ReadWriteMany  # optional
+       storage_class_name: csi-mounted-fs-path-sc
+       access_mode: ReadWriteMany
 
 2. Create the volume with ``sky volumes apply volume.yaml``:
 
