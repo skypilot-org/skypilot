@@ -97,6 +97,15 @@ def get_cluster(cluster_name: str) -> Optional[models.SSHCluster]:
             models.SSHCluster).filter_by(name=cluster_name).first())
 
 
+def get_one_or_all_clusters(cluster_name: Optional[str] = None) -> List[models.SSHCluster]:
+    """Helper method. Get all clsuters or one cluster, depending
+    on whether the cluster_name argument is passed."""
+    if cluster_name is not None:
+        found = get_cluster(cluster_name)
+        return [found] if found is not None else []
+    return get_all_clusters()
+        
+
 @_init_db
 def get_cluster_by_status(
         status: models.SSHClusterStatus) -> List[models.SSHCluster]:
@@ -113,6 +122,13 @@ def add_or_update_cluster(cluster: models.SSHCluster):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.merge(cluster)
         session.commit()
+
+
+def update_cluster_status(cluster: models.SSHCluster, status: models.SSHClusterStatus):
+    """Update SSH Cluster Status"""
+    if cluster.status != status:
+        cluster.status = status
+        add_or_update_cluster(cluster)
 
 
 @_init_db

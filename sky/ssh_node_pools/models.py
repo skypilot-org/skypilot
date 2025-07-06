@@ -18,6 +18,7 @@ class SSHClusterStatus(Enum):
     STARTING = 'starting'
     ACTIVE = 'active'
     TERMINATING = 'terminating'
+    TERMINATED = 'terminated'
 
 
 @dataclasses.dataclass
@@ -161,15 +162,29 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
         """Get ip addresses for updating SSH nodes"""
         return [node.ip for node in self.update_nodes]
 
-    def get_update_head_node(self) -> SSHNode:
-        """Get the update head node config"""
-        for node in self._get_nodes(True):
+    def _get_head_node(self, current: bool) -> SSHNode:
+        for node in self._get_nodes(current):
             if node.ip == self.head_node_ip:
                 return node
         raise ValueError(f'Could not find head node config '
                          f'for {self.name}')
+    
+    def _get_worker_nodes(self, current: bool) -> List[SSHNode]:
+        return list(filter(lambda n: n.ip != self.head_node_ip, 
+                           self._get_nodes(current)))
+
+    def get_update_head_node(self) -> SSHNode:
+        """Get the update head node config"""
+        return self._get_head_node(False)
 
     def get_update_worker_nodes(self) -> List[SSHNode]:
         """Get the update worker node configs"""
-        return list(filter(lambda n: n.ip != self.head_node_ip, 
-                           self._get_nodes(True)))
+        return self._get_worker_nodes(False)
+
+    def get_current_head_node(self) -> SSHNode:
+        """Get the current head node config"""
+        return self._get_head_node(True)
+
+    def get_current_worker_nodes(self) -> List[SSHNode]:
+        """Get the current worker node configs"""
+        return self._get_worker_nodes(True)
