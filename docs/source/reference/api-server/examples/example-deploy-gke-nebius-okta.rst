@@ -297,7 +297,7 @@ Some commands to try:
 * ``sky status`` to see SkyPilot status and infra available
 
 ✨ Bonus: Infiniband, Nebius shared filesystem, and volumes
----------------------------------------------------------------
+-----------------------------------------------------------
 
 Configuring Infiniband on Nebius Kubernetes cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
