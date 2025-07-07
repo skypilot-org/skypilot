@@ -136,8 +136,9 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
+        cluster_ips = handle.cached_external_ips
 
-        if not (handle is not None and handle.cached_external_ips is not None
+        if not (handle is not None and cluster_ips is not None
                 and 'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
@@ -173,9 +174,16 @@ def _get_cluster_records_and_set_ssh_config(
                 f'{handle.cluster_name}\'')
             credentials['ssh_proxy_command'] = proxy_command
 
+            # For Kubernetes, the connection is always proxied. The HostName
+            # in the SSH config must be 127.0.0.1. Using the pod's real IP
+            # is incorrect, as the IP can become stale, which is especially
+            # true for High-Availability services where pods are recreated.
+            if cluster_ips is not None:
+                cluster_ips = ['127.0.0.1'] * len(cluster_ips)
+
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
-            handle.cached_external_ips,
+            cluster_ips,
             credentials,
             handle.cached_external_ssh_ports,
             handle.docker_user,
