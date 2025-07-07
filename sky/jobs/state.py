@@ -1374,9 +1374,21 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
             jobs.append(job_dict)
         return jobs
 
+@_init_db
+def get_task_name(job_id: int, task_id: int) -> str:
+    """Get the task name of a job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        task_name = session.execute(
+            sqlalchemy.select(spot_table.c.task_name).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                ))).fetchone()
+        return task_name[0]
 
 @_init_db_async
-async def get_task_name(job_id: int, task_id: int) -> str:
+async def get_task_name_async(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
     assert _SQLALCHEMY_ENGINE is not None
     async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
