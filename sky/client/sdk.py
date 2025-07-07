@@ -1503,9 +1503,10 @@ def _update_remote_ssh_node_pools(file: str) -> str:
             raise ValueError(msg)
 
     infra, config = next(iter(config.items()))
+    head_node_ip = config.get('head_node', None)
     hosts_info = ssh_utils.prepare_hosts_info(
         infra, config, upload_ssh_key_func=_upload_ssh_key_and_wait)
-    pool_config = {infra: {'hosts': hosts_info}}
+    pool_config = {infra: {'hosts': hosts_info, 'head_node': head_node_ip}}
     response = server_common.make_authenticated_request('POST',
                                                         '/ssh_node_pools',
                                                         json=pool_config)

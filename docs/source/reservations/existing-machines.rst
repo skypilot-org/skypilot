@@ -127,6 +127,7 @@ Example:
       user: root
       identity_file: ~/.ssh/id_rsa
       password:  # Optional; if passwordless sudo is not enabled.
+      head_node: # Optional; allow to manually specify the head node.
 
       # Override defaults for a specific node.
       hosts:

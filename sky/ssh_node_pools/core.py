@@ -123,18 +123,26 @@ def update_pool(pool_config: Dict[str, Any]) -> None:
                          'SSH Node Pool configuration.')
     infra, config = next(iter(pool_config.items()))
     _validate_pool_config(config)
+    head_node_ip = config.get('head_node', None)
     nodes = [models.SSHNode.from_dict(d) for d in config['hosts']]
 
     updating_cluster = state.get_cluster(infra)
     if updating_cluster is not None:
         # there is a pre-existing ssh cluster
         logger.debug(f'Updating ssh cluster config: {infra}')
+        if head_node_ip is not None:
+            # intentionally do this to throw an error
+            # and validate that head_node_ip is identical.
+            updating_cluster.set_head_node_ip(head_node_ip)
         updating_cluster.set_update_nodes(nodes)
     else:
         logger.debug(f'Creating new ssh cluster config: {infra}')
+        if head_node_ip is None:
+            logger.debug('No head node specified. Defaulting to first ip.')
+            head_node_ip = nodes[0].ip
         updating_cluster = models.SSHCluster()
         updating_cluster.name = infra
-        updating_cluster.set_head_node_ip(nodes[0].ip)
+        updating_cluster.set_head_node_ip(head_node_ip)
         updating_cluster.set_update_nodes(nodes)
     updating_cluster.status = models.SSHClusterStatus.PENDING
     state.add_or_update_cluster(updating_cluster)

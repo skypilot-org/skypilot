@@ -579,8 +579,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         update_ips = set(ssh_cluster.get_update_ips())
         for node in ssh_cluster.current_nodes:
             if node.ip not in update_ips:
-                logger.info(f'{YELLOW}Worker node {node.ip} not found in YAML '
-                            f'config. Removing from history...{NC}')
+                logger.info(f'{YELLOW}Worker node {node.ip} not found in '
+                            f'previous config. Removing from history...{NC}')
                 worker_nodes_to_cleanup.append(node)
                 remove_worker_cmds.append(
                     f'kubectl delete node -l skypilot-ip={node.ip}')
@@ -690,6 +690,7 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     else:
         effective_master_ip = head_node.ip
 
+    # TODO (kyuds): skip if head node already deployed
     # Step 1: Install k3s on the head node
     # Check if head node has a GPU
     install_gpu = False
