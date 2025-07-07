@@ -678,9 +678,6 @@ def get_service_schema():
                             }
                         ]
                     },
-                    'use_instance_type_aware': {
-                        'type': 'boolean',
-                    },
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
                     },

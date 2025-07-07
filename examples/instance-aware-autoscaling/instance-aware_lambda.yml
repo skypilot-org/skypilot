@@ -18,7 +18,6 @@ service:
   replica_policy:
     min_replicas: 1
     max_replicas: 3
-    use_instance_type_aware: true
     # load_balancing_policy will also use 'load_balancing_policy' for normalized load-balancing
     target_qps_per_replica:
       "H100:1": 2.5

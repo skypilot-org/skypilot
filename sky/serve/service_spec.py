@@ -43,7 +43,6 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
-        use_instance_type_aware: Optional[bool] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -98,7 +97,6 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
-        self._use_instance_type_aware: Optional[bool] = use_instance_type_aware
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -173,7 +171,6 @@ class SkyServiceSpec:
             service_config['target_qps_per_replica'] = None
             service_config['upscale_delay_seconds'] = None
             service_config['downscale_delay_seconds'] = None
-            service_config['use_instance_type_aware'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -193,27 +190,18 @@ class SkyServiceSpec:
                 'dynamic_ondemand_fallback', None)
             service_config['spot_placer'] = policy_section.get(
                 'spot_placer', None)
-            service_config['use_instance_type_aware'] = policy_section.get(
-                'use_instance_type_aware', None)
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
 
         # Validate instance-aware settings
-        use_instance_type_aware = service_config['use_instance_type_aware']
         target_qps_per_replica = service_config['target_qps_per_replica']
         load_balancing_policy = service_config['load_balancing_policy']
 
-        if use_instance_type_aware:
-            if not isinstance(target_qps_per_replica, dict):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'When use_instance_type_aware is True, '
-                        'target_qps_per_replica must be a dictionary mapping '
-                        'accelerator types to QPS values.')
+        if isinstance(target_qps_per_replica, dict):
             if load_balancing_policy != 'instance_aware_least_load':
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('When use_instance_type_aware is True, '
+                    raise ValueError('When using dict type target_qps_per_replica, '
                                      'load_balancing_policy must be '
                                      '"instance_aware_least_load".')
 
@@ -285,8 +273,6 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
-        add_if_not_none('replica_policy', 'use_instance_type_aware',
-                        self._use_instance_type_aware)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
         add_if_not_none('ports', None, int(self.ports) if self.ports else None)
@@ -366,7 +352,6 @@ class SkyServiceSpec:
             TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
             Load Balancing Policy:            {self.load_balancing_policy}
-            Instance Type Aware:              {self.use_instance_type_aware}
         """)
 
     @property
@@ -448,7 +433,3 @@ class SkyServiceSpec:
     def load_balancing_policy(self) -> str:
         return lb_policies.LoadBalancingPolicy.make_policy_name(
             self._load_balancing_policy)
-
-    @property
-    def use_instance_type_aware(self) -> Optional[bool]:
-        return self._use_instance_type_aware

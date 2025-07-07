@@ -18,7 +18,6 @@ The key configuration is in the `replica_policy` section and load_balancing poli
 ```yaml
 load_balancing_policy: instance_aware_least_load
 replica_policy:
-  use_instance_type_aware: true
   target_qps_per_replica:
     "H100:1": 2.5    # H100 can handle 2.5 QPS
     "A100:1": 1.25   # A100 can handle 1.25 QPS
@@ -74,4 +73,4 @@ The system supports flexible GPU type matching:
 
 ## Backward Compatibility
 
-This feature is backward compatible. Configurations with `use_instance_type_aware` and dictionary type target_qps_pre_replica will only activate instance-aware autoscaling / load-balancing
+This feature is backward compatible. Configurations with "instance_aware_least_load" load balancing policy and dictionary type target_qps_pre_replica will only activate instance-aware autoscaling / load-balancing
