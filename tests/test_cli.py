@@ -248,36 +248,51 @@ class TestConcurrentStatus:
 
     def test_concurrent_api_calls_same_results(self, monkeypatch):
         """Test that concurrent API calls produce same results as sequential."""
-        import time
         import concurrent.futures
-        from unittest.mock import MagicMock, patch
+        import time
+        from unittest.mock import MagicMock
+        from unittest.mock import patch
 
         # Track call order and timing
         call_times = {}
 
         def track_call(func_name):
+
             def wrapper(*args, **kwargs):
                 call_times[func_name] = time.time()
                 return f'{func_name}_request_id'
+
             return wrapper
 
         # Mock all the SDK calls
         monkeypatch.setattr('sky.client.sdk.status', track_call('status'))
-        monkeypatch.setattr('sky.client.sdk.workspaces', track_call('workspaces'))
+        monkeypatch.setattr('sky.client.sdk.workspaces',
+                            track_call('workspaces'))
         monkeypatch.setattr('sky.managed_jobs.queue', track_call('jobs_queue'))
         monkeypatch.setattr('sky.serve_lib.status', track_call('serve_status'))
-        
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', 
-                           lambda x: [{'name': 'test-cluster', 'handle': None, 'credentials': {}}])
-        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request', 
-                           lambda *args, **kwargs: (0, 'No jobs'))
-        monkeypatch.setattr('sky.client.cli.command._handle_services_request', 
-                           lambda *args, **kwargs: (0, 'No services'))
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.add_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.remove_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names', lambda: [])
-        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra', lambda *args: None)
-        
+
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get', lambda x: [{
+                'name': 'test-cluster',
+                'handle': None,
+                'credentials': {}
+            }])
+        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
+                            lambda *args, **kwargs: (0, 'No jobs'))
+        monkeypatch.setattr('sky.client.cli.command._handle_services_request',
+                            lambda *args, **kwargs: (0, 'No services'))
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names',
+            lambda: [])
+        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra',
+                            lambda *args: None)
+
         # Mock click.echo to capture output
         output_lines = []
         monkeypatch.setattr('click.echo', lambda x: output_lines.append(x))
@@ -303,32 +318,50 @@ class TestConcurrentStatus:
         from unittest.mock import MagicMock
 
         # Mock basic setup
-        monkeypatch.setattr('sky.client.sdk.status', lambda *args, **kwargs: 'cluster_request_id')
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', 
-                           lambda x: [{'name': 'test-cluster', 'handle': None, 'credentials': {}}])
-        monkeypatch.setattr('sky.managed_jobs.queue', lambda *args, **kwargs: 'jobs_request_id')
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'cluster_request_id')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get', lambda x: [{
+                'name': 'test-cluster',
+                'handle': None,
+                'credentials': {}
+            }])
+        monkeypatch.setattr('sky.managed_jobs.queue',
+                            lambda *args, **kwargs: 'jobs_request_id')
         monkeypatch.setattr('sky.client.sdk.workspaces', lambda: ['default'])
-        monkeypatch.setattr('sky.serve_lib.status', lambda *args, **kwargs: 'services_request_id')
+        monkeypatch.setattr('sky.serve_lib.status',
+                            lambda *args, **kwargs: 'services_request_id')
 
         # Mock KeyboardInterrupt in jobs handling
         def mock_handle_jobs(*args, **kwargs):
             raise KeyboardInterrupt()
-        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request', mock_handle_jobs)
-        
-        monkeypatch.setattr('sky.client.cli.command._handle_services_request', 
-                           lambda *args, **kwargs: (0, 'No services'))
+
+        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
+                            mock_handle_jobs)
+
+        monkeypatch.setattr('sky.client.cli.command._handle_services_request',
+                            lambda *args, **kwargs: (0, 'No services'))
 
         # Mock api_cancel to track if it gets called
         cancel_calls = []
+
         def mock_cancel(request_id, silent=False):
             cancel_calls.append((request_id, silent))
+
         monkeypatch.setattr('sky.client.sdk.api_cancel', mock_cancel)
 
         # Mock other dependencies
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.add_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.remove_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names', lambda: [])
-        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra', lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names',
+            lambda: [])
+        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra',
+                            lambda *args: None)
         monkeypatch.setattr('click.echo', lambda x: None)
 
         # Run the status command
@@ -355,21 +388,35 @@ class TestConcurrentStatus:
             calls_made.append('serve_status')
             return 'services_request_id'
 
-        monkeypatch.setattr('sky.client.sdk.status', lambda *args, **kwargs: 'cluster_request_id')
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', 
-                           lambda x: [{'name': 'test-cluster', 'handle': MagicMock(), 'credentials': {}}])
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'cluster_request_id')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get', lambda x: [{
+                'name': 'test-cluster',
+                'handle': MagicMock(),
+                'credentials': {}
+            }])
         monkeypatch.setattr('sky.managed_jobs.queue', track_jobs_queue)
         monkeypatch.setattr('sky.serve_lib.status', track_serve_status)
 
         # Mock _show_endpoint to simulate IP mode
         endpoint_calls = []
+
         def mock_show_endpoint(*args, **kwargs):
             endpoint_calls.append(args)
-        monkeypatch.setattr('sky.client.cli.command._show_endpoint', mock_show_endpoint)
-        
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.add_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.remove_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names', lambda: [])
+
+        monkeypatch.setattr('sky.client.cli.command._show_endpoint',
+                            mock_show_endpoint)
+
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names',
+            lambda: [])
 
         # Test with IP mode - should not query jobs or services
         cli_runner = cli_testing.CliRunner()
@@ -387,11 +434,12 @@ class TestConcurrentStatus:
 
         # Test with normal mode - should query jobs and services
         monkeypatch.setattr('sky.client.sdk.workspaces', lambda: ['default'])
-        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request', 
-                           lambda *args, **kwargs: (0, 'No jobs'))
-        monkeypatch.setattr('sky.client.cli.command._handle_services_request', 
-                           lambda *args, **kwargs: (0, 'No services'))
-        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra', lambda *args: None)
+        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
+                            lambda *args, **kwargs: (0, 'No jobs'))
+        monkeypatch.setattr('sky.client.cli.command._handle_services_request',
+                            lambda *args, **kwargs: (0, 'No services'))
+        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra',
+                            lambda *args: None)
         monkeypatch.setattr('click.echo', lambda x: None)
 
         result = cli_runner.invoke(command.status, ['--refresh'])
@@ -404,19 +452,32 @@ class TestConcurrentStatus:
 
     def test_workspace_backwards_compatibility(self, monkeypatch):
         """Test backwards compatibility when workspace API is not available."""
-        monkeypatch.setattr('sky.client.sdk.status', lambda *args, **kwargs: 'cluster_request_id')
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', 
-                           lambda x: [{'name': 'test-cluster', 'handle': None, 'credentials': {}}])
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'cluster_request_id')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get', lambda x: [{
+                'name': 'test-cluster',
+                'handle': None,
+                'credentials': {}
+            }])
 
         # Mock workspace API raising RuntimeError (old server)
         def mock_workspaces():
             raise RuntimeError("Old server")
+
         monkeypatch.setattr('sky.client.sdk.workspaces', mock_workspaces)
 
-        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.add_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.remove_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names', lambda: [])
+        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra',
+                            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names',
+            lambda: [])
         monkeypatch.setattr('click.echo', lambda x: None)
 
         # Should complete successfully even with old server
@@ -426,25 +487,40 @@ class TestConcurrentStatus:
 
     def test_error_handling_in_concurrent_execution(self, monkeypatch):
         """Test that errors in one concurrent task don't affect others."""
-        monkeypatch.setattr('sky.client.sdk.status', lambda *args, **kwargs: 'cluster_request_id')
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', 
-                           lambda x: [{'name': 'test-cluster', 'handle': None, 'credentials': {}}])
+        monkeypatch.setattr('sky.client.sdk.status',
+                            lambda *args, **kwargs: 'cluster_request_id')
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get', lambda x: [{
+                'name': 'test-cluster',
+                'handle': None,
+                'credentials': {}
+            }])
 
         # Mock workspace API to raise an error
         def mock_workspaces():
             raise RuntimeError("Network error")
+
         monkeypatch.setattr('sky.client.sdk.workspaces', mock_workspaces)
 
-        monkeypatch.setattr('sky.managed_jobs.queue', lambda *args, **kwargs: 'jobs_request_id')
-        monkeypatch.setattr('sky.serve_lib.status', lambda *args, **kwargs: 'services_request_id')
-        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request', 
-                           lambda *args, **kwargs: (0, 'No jobs'))
-        monkeypatch.setattr('sky.client.cli.command._handle_services_request', 
-                           lambda *args, **kwargs: (0, 'No services'))
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.add_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.remove_cluster', lambda *args: None)
-        monkeypatch.setattr('sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names', lambda: [])
-        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra', lambda *args: None)
+        monkeypatch.setattr('sky.managed_jobs.queue',
+                            lambda *args, **kwargs: 'jobs_request_id')
+        monkeypatch.setattr('sky.serve_lib.status',
+                            lambda *args, **kwargs: 'services_request_id')
+        monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
+                            lambda *args, **kwargs: (0, 'No jobs'))
+        monkeypatch.setattr('sky.client.cli.command._handle_services_request',
+                            lambda *args, **kwargs: (0, 'No services'))
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.add_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.remove_cluster',
+            lambda *args: None)
+        monkeypatch.setattr(
+            'sky.utils.cluster_utils.SSHConfigHelper.list_cluster_names',
+            lambda: [])
+        monkeypatch.setattr('sky.client.cli.command._show_enabled_infra',
+                            lambda *args: None)
         monkeypatch.setattr('click.echo', lambda x: None)
 
         # Should complete successfully even with workspace error
@@ -459,6 +535,7 @@ class TestApiServerStatusCaching:
     def setup_method(self):
         """Set up test fixtures before each test method."""
         from sky.server import common
+
         # Clear any cached results before each test
         if hasattr(common.get_api_server_status, 'cache_clear'):
             common.get_api_server_status.cache_clear()
@@ -466,6 +543,7 @@ class TestApiServerStatusCaching:
     def teardown_method(self):
         """Clean up after each test method."""
         from sky.server import common
+
         # Clear cache after each test to avoid interference
         if hasattr(common.get_api_server_status, 'cache_clear'):
             common.get_api_server_status.cache_clear()
@@ -473,6 +551,7 @@ class TestApiServerStatusCaching:
     def test_cache_decorator_applied(self):
         """Test that the cache decorator is properly applied."""
         from sky.server import common
+
         # Verify that the function has cache-related attributes
         assert hasattr(common.get_api_server_status, 'cache_info') or \
                hasattr(common.get_api_server_status, 'cache_clear'), \
@@ -480,8 +559,9 @@ class TestApiServerStatusCaching:
 
     def test_cache_hit_reduces_api_calls(self, monkeypatch):
         """Test that cache hits reduce the number of actual API calls."""
-        from sky.server import common
         from unittest.mock import MagicMock
+
+        from sky.server import common
 
         # Mock the HTTP response
         mock_response = MagicMock()
@@ -492,6 +572,7 @@ class TestApiServerStatusCaching:
         }
 
         call_count = [0]
+
         def mock_get(*args, **kwargs):
             call_count[0] += 1
             return mock_response
@@ -512,8 +593,9 @@ class TestApiServerStatusCaching:
 
     def test_cache_with_different_endpoints(self, monkeypatch):
         """Test that different endpoints are cached separately."""
-        from sky.server import common
         from unittest.mock import MagicMock
+
+        from sky.server import common
 
         # Mock the HTTP response
         mock_response = MagicMock()
@@ -524,6 +606,7 @@ class TestApiServerStatusCaching:
         }
 
         call_count = [0]
+
         def mock_get(*args, **kwargs):
             call_count[0] += 1
             return mock_response
@@ -544,8 +627,9 @@ class TestApiServerStatusCaching:
 
     def test_cache_clearing_functionality(self, monkeypatch):
         """Test that cache can be manually cleared."""
-        from sky.server import common
         from unittest.mock import MagicMock
+
+        from sky.server import common
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -555,6 +639,7 @@ class TestApiServerStatusCaching:
         }
 
         call_count = [0]
+
         def mock_get(*args, **kwargs):
             call_count[0] += 1
             return mock_response
@@ -579,10 +664,12 @@ class TestApiServerStatusCaching:
 
     def test_cache_handles_exceptions(self, monkeypatch):
         """Test that exceptions are not cached."""
-        from sky.server import common
         import pytest
 
+        from sky.server import common
+
         call_count = [0]
+
         def mock_get(*args, **kwargs):
             call_count[0] += 1
             raise Exception("Network error")

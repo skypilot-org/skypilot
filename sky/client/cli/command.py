@@ -1957,6 +1957,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if hints:
         click.echo('\n' + '\n'.join(hints))
 
+
 @cli.command()
 @flags.config_option(expose_value=False)
 @flags.all_option('Show all cluster information.')
