@@ -5527,7 +5527,6 @@ def ssh_down(infra: Optional[str], async_call: bool, force: bool):
 #     """Show status of SSH Node Pool clusters."""
 #     raise NotImplementedError()  # TODO(kyuds)
 
-
 # @ssh.command('ls', cls=_DocumentedCodeCommand)
 # def ssh_list():
 #     """List the names of all SSH Node Pools that were launched.

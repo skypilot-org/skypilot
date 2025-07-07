@@ -1604,7 +1604,6 @@ def ssh_down(infra: Optional[str] = None,
 # def ssh_status(infra: Optional[str] = None) -> server_common.RequestId:
 #     raise NotImplementedError()  # TODO(kyuds)
 
-
 # @usage_lib.entrypoint
 # @server_common.check_server_healthy_or_start
 # @annotations.client_api
