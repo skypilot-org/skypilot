@@ -111,8 +111,6 @@ class SSH(kubernetes.Kubernetes):
 
         Override the Kubernetes implementation to only return contexts that
         start with 'ssh-', which are created by `sky ssh up`.
-
-        Returns contexts based on clusters defined in ~/.sky/ssh_node_pools.yaml
         """
         # Get all contexts from the Kubernetes implementation
         all_contexts = kubernetes_utils.get_all_kube_context_names()
