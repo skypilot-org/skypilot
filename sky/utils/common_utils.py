@@ -374,17 +374,10 @@ def read_last_n_lines(file_path: str,
     Returns:
         A list of the last N lines, preserving newlines where applicable.
     """
-    if n < 0:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'n must be non-negative. Got {n}')
 
-    if chunk_size <= 0:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'chunk_size must be positive. Got {chunk_size}')
-
-    if not os.path.exists(file_path):
-        with ux_utils.print_exception_no_traceback():
-            raise FileNotFoundError(f'File not found: {file_path}')
+    assert n >= 0, f'n must be non-negative. Got {n}'
+    assert chunk_size > 0, f'chunk_size must be positive. Got {chunk_size}'
+    assert os.path.exists(file_path), f'File not found: {file_path}'
 
     if n == 0:
         return []

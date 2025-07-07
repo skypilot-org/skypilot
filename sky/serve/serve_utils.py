@@ -3,7 +3,6 @@ import base64
 import collections
 import dataclasses
 import enum
-import io
 import os
 import pathlib
 import pickle
@@ -783,6 +782,54 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
+def _process_line(line: str,
+                  cluster_name: str,
+                  stop_on_eof: bool = False) -> Iterator[str]:
+    # The line might be directing users to view logs, like
+    # `✓ Cluster launched: new-http.  View logs at: *.log`
+    # We should tail the detailed logs for user.
+    def cluster_is_up() -> bool:
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        if cluster_record is None:
+            return False
+        return cluster_record['status'] == status_lib.ClusterStatus.UP
+
+    provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
+    log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
+
+    if provision_log_prompt is not None:
+        nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
+
+        try:
+            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
+                # We still exit if more than 10 seconds without new content
+                # to avoid any internal bug that causes the launch to fail
+                # while cluster status remains INIT.
+                yield from log_utils.follow_logs(f,
+                                                 should_stop=cluster_is_up,
+                                                 stop_on_eof=stop_on_eof,
+                                                 idle_timeout_seconds=10)
+        except FileNotFoundError:
+            yield line
+
+            yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
+                   f'Try to expand log file {nested_log_path} but not '
+                   f'found. Skipping...{colorama.Style.RESET_ALL}')
+            pass
+        return
+
+    if log_prompt is not None:
+        # Now we skip other logs (file sync logs) since we lack
+        # utility to determine when these log files are finished
+        # writing.
+        # TODO(tian): We should not skip these logs since there are
+        # small chance that error will happen in file sync. Need to
+        # find a better way to do this.
+        return
+
+    yield line
+
+
 def _follow_logs_with_provision_expanding(
     file: TextIO,
     cluster_name: str,
@@ -805,51 +852,8 @@ def _follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
 
-    def cluster_is_up() -> bool:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return False
-        return cluster_record['status'] == status_lib.ClusterStatus.UP
-
     def process_line(line: str) -> Iterator[str]:
-        # The line might be directing users to view logs, like
-        # `✓ Cluster launched: new-http.  View logs at: *.log`
-        # We should tail the detailed logs for user.
-        provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-        log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
-
-        if provision_log_prompt is not None:
-            nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
-
-            try:
-                with open(nested_log_path, 'r', newline='',
-                          encoding='utf-8') as f:
-                    # We still exit if more than 10 seconds without new content
-                    # to avoid any internal bug that causes the launch to fail
-                    # while cluster status remains INIT.
-                    yield from log_utils.follow_logs(f,
-                                                     should_stop=cluster_is_up,
-                                                     stop_on_eof=stop_on_eof,
-                                                     idle_timeout_seconds=10)
-            except FileNotFoundError:
-                yield line
-
-                yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
-                       f'Try to expand log file {nested_log_path} but not '
-                       f'found. Skipping...{colorama.Style.RESET_ALL}')
-                pass
-            return
-
-        if log_prompt is not None:
-            # Now we skip other logs (file sync logs) since we lack
-            # utility to determine when these log files are finished
-            # writing.
-            # TODO(tian): We should not skip these logs since there are
-            # small chance that error will happen in file sync. Need to
-            # find a better way to do this.
-            return
-
-        yield line
+        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -859,23 +863,28 @@ def _follow_logs_with_provision_expanding(
 
 
 def _capped_follow_logs_with_provision_expanding(
-    file: TextIO,
+    log_list: List[str],
     cluster_name: str,
     *,
-    should_stop: Callable[[], bool],
-    idle_timeout_seconds: Optional[int] = None,
     line_cap: int = 100,
 ) -> Iterator[str]:
-    """Same _follow_logs_with_provision_expanding, but last `line_cap` lines."""
+    """Follows logs and expands any provision.log references found.
+
+    Args:
+        log_list: List of Log Lines to read from.
+        cluster_name: Name of the cluster being launched.
+        line_cap: Number of last lines to return
+
+    Yields:
+        Log lines, including expanded content from referenced provision logs.
+    """
     all_lines: Deque[str] = collections.deque(maxlen=line_cap)
 
-    for line in _follow_logs_with_provision_expanding(
-            file=file,
-            cluster_name=cluster_name,
-            should_stop=should_stop,
-            stop_on_eof=True,
-            idle_timeout_seconds=idle_timeout_seconds):
-        all_lines.append(line)
+    for line in log_list:
+        for processed in _process_line(line=line,
+                                       cluster_name=cluster_name,
+                                       stop_on_eof=False):
+            all_lines.append(processed)
 
     yield from all_lines
 
@@ -887,12 +896,10 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    total_lines_printed = 0
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
         if tail is not None:
             lines = common_utils.read_last_n_lines(log_file_name, tail)
-            total_lines_printed += len(lines)
             for line in lines:
                 print(line, end='', flush=True)
         else:
@@ -922,18 +929,15 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
 
     # Handle launch logs based on number parameter
+    total_lines_printed = 0
     if tail is not None:
-        if tail - total_lines_printed <= 0:
-            return ''
-        static_lines = common_utils.read_last_n_lines(
-            launch_log_file_name, tail - total_lines_printed)
-        temp_file = io.StringIO(''.join(static_lines))
+        static_lines = common_utils.read_last_n_lines(launch_log_file_name,
+                                                      tail)
         lines = list(
             _capped_follow_logs_with_provision_expanding(
-                file=temp_file,
+                log_list=static_lines,
                 cluster_name=replica_cluster_name,
-                should_stop=replica_provisioned,
-                line_cap=tail - total_lines_printed,
+                line_cap=tail,
             ))
         total_lines_printed += len(lines)
         for line in lines:
