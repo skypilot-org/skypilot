@@ -1,6 +1,5 @@
 """Constants used for SSH Node Pools."""
 
-# Using SSHNP (SSH Node Pools) as abbreviation
 # SKYSSH_METADATA_DIR is also used in ssh-tunnel.sh script.
 SKYSSH_METADATA_DIR = '~/.sky/ssh_node_pools_info'
 
