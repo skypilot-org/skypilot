@@ -418,7 +418,8 @@ def cleanup_kubectl_ssh_tunnel(context_name):
 
 def deploy_cluster(cleanup: bool = False,
                    infra: Optional[str] = None,
-                   kubeconfig_path: Optional[str] = None) -> Tuple[bool, str]:
+                   kubeconfig_path: Optional[str] = None,
+                   force: bool = False) -> Tuple[bool, str]:
     """Deploy a Kubernetes cluster on SSH targets.
 
     This function deploys a Kubernetes (k3s) cluster on the specified machines.
@@ -441,13 +442,13 @@ def deploy_cluster(cleanup: bool = False,
     else:
         kubeconfig_path = os.path.expanduser(kubeconfig_path)
 
-    clusters_config = ssh_state.get_one_or_all_clusters(infra)
+    ssh_clusters = ssh_state.get_one_or_all_clusters(infra)
 
     failed_clusters = []
     successful_clusters = []
 
     # Process each cluster
-    for ssh_cluster in clusters_config:
+    for ssh_cluster in ssh_clusters:
         cluster_name = ssh_cluster.name
         try:
             status = ssh_cluster.status
@@ -509,6 +510,11 @@ def deploy_cluster(cleanup: bool = False,
 
         except Exception as e:  # pylint: disable=broad-except
             failed_clusters.append((cluster_name, str(e)))
+            if cleanup and force:
+                logger.error(f'{RED}Failed to cleanup {cluster_name}. Will '
+                             'clear ssh node pool state and stored identity '
+                             f'files as --force is set.{NC}')
+                _clear_cluster_state(ssh_cluster)
 
     if failed_clusters:
         action = 'clean' if cleanup else 'deploy'
@@ -520,6 +526,17 @@ def deploy_cluster(cleanup: bool = False,
             msg += f'\n  {cluster_name}: {reason}'
         return False, msg
     return True, ''
+
+
+def _clear_cluster_state(ssh_cluster: ssh_models.SSHCluster):
+    """Clear skypilot state for a specific ssh cluster"""
+    # Remove unused ssh files in current.
+    for ssh_node in ssh_cluster.current_nodes:
+        ssh_core.remove_ssh_key_by_path(ssh_node.identity_file)
+    for ssh_node in ssh_cluster.update_nodes:
+        ssh_core.remove_ssh_key_by_path(ssh_node.identity_file)
+    # Remove from DB
+    ssh_state.remove_cluster(ssh_cluster.name)
 
 
 def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
@@ -654,12 +671,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         # will restart the ssh tunnel if it's not running.
         cleanup_kubectl_ssh_tunnel(context_name)
 
-        # Remove unused ssh files
-        for ssh_node in ssh_cluster.current_nodes:
-            ssh_core.remove_ssh_key_by_path(ssh_node.identity_file)
+        _clear_cluster_state(ssh_cluster)
 
-        # Remove from DB
-        ssh_state.remove_cluster(ssh_cluster.name)
         logger.info(
             f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
         return []

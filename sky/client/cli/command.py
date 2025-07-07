@@ -5499,13 +5499,18 @@ def ssh_up(async_call: bool, file: Optional[str]):
               is_flag=True,
               hidden=True,
               help='Run the command asynchronously.')
-def ssh_down(infra: Optional[str], async_call: bool):
+@click.option('--force',
+              'force',
+              is_flag=True,
+              help='Remove cluster config from the database, regardless '
+              'of command success.')
+def ssh_down(infra: Optional[str], async_call: bool, force: bool):
     """Clean up a cluster set up with 'sky ssh up'.
 
     This command removes the Kubernetes (k3s) installation from the
     machines that were specified by target files.
     """
-    request_id = sdk.ssh_down(infra=infra)
+    request_id = sdk.ssh_down(infra=infra, force=force)
     if async_call:
         click.echo(f'Request submitted with ID: {request_id}')
     else:

@@ -21,7 +21,9 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
+def ssh_up(infra: Optional[str] = None,
+           cleanup: bool = False,
+           force: bool = False) -> None:
     """Deploys or tears down a Kubernetes cluster on SSH targets.
 
     Args:
@@ -31,19 +33,24 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup: If True, clean up the cluster instead of deploying.
     """
     assert cleanup or infra is not None
+    assert cleanup or not force  # you can't force a deploy
 
     action = 'Cleaning up' if cleanup else 'Deploying'
     msg = f'{action} SSH Node Pool(s){" `" + infra + "`" if infra else ""}...'
 
     with rich_utils.safe_status(ux_utils.spinner_message(msg)):
         success, reason = deploy_ssh_cluster.deploy_cluster(cleanup=cleanup,
-                                                            infra=infra)
+                                                            infra=infra,
+                                                            force=force)
 
     if not success:
         with ux_utils.print_exception_no_traceback():
             action = 'cleanup' if cleanup else 'deploy'
-            raise RuntimeError(f'Failed to {action} SkyPilot '
-                               f'on some Node Pools. {reason}')
+            msg = f'Failed to {action} SkyPilot on some Node Pools. {reason}.'
+            if cleanup and force:
+                msg += (' `--force` flag is set, so SkyPilot ssh node pool '
+                        'state is cleared.')
+            raise RuntimeError(msg)
     else:
         logger.info('')
         if cleanup:

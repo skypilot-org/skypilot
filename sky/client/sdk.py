@@ -1564,7 +1564,7 @@ def ssh_up(file: Optional[str] = None) -> server_common.RequestId:
     infra = _update_remote_ssh_node_pools(file)
 
     # Use SSH node pools router endpoint
-    body = payloads.SSHUpBody(infra=infra, cleanup=False)
+    body = payloads.SSHUpBody(infra=infra, cleanup=False, force=False)
 
     response = server_common.make_authenticated_request(
         'POST',
@@ -1577,7 +1577,8 @@ def ssh_up(file: Optional[str] = None) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_down(infra: Optional[str] = None,
+             force: bool = False) -> server_common.RequestId:
     """Tears down a Kubernetes cluster on SSH targets.
 
     Args:
@@ -1588,7 +1589,7 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
         request_id: The request ID of the SSH cluster teardown request.
     """
     # Use SSH node pools router endpoint
-    body = payloads.SSHUpBody(infra=infra, cleanup=True)
+    body = payloads.SSHUpBody(infra=infra, cleanup=True, force=force)
 
     response = server_common.make_authenticated_request(
         'POST', '/ssh_node_pools/down', json=json.loads(body.model_dump_json()))

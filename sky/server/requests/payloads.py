@@ -599,6 +599,7 @@ class SSHUpBody(RequestBody):
     """The request body for the SSH up/down endpoints."""
     infra: Optional[str] = None
     cleanup: bool = False
+    force: bool = False
 
 
 class SSHNodeResponse(pydantic.BaseModel):
