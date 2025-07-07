@@ -1266,19 +1266,19 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
               onRemove={() => onRemove(_index)}
             />
           ))}
-        </div>
 
-        {/* {filters.length > 0 && (
-          <>
-            <div className="border border-gray-400 h-8"></div>
-            <button
-              onClick={clearFilters}
-              className="rounded-full px-4 py-1 text-blue-600 bg-blue-100 hover:bg-blue-200"
-            >
-              Clear filters
-            </button>
-          </>
-        )} */}
+          {filters.length > 0 && (
+            <>
+              <div className="border border-gray-400 h-8"></div>
+              <button
+                onClick={clearFilters}
+                className="rounded-full px-4 py-1 text-blue-600 bg-blue-100 hover:bg-blue-200"
+              >
+                Clear filters
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </>
   );
