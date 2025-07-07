@@ -462,7 +462,7 @@ def deploy_cluster(cleanup: bool = False,
                                    f'. Skipping...{NC}')
                     continue
                 if (status != SSHClusterStatus.ACTIVE and
-                    status != SSHClusterStatus.PENDING):
+                        status != SSHClusterStatus.PENDING):
                     # might have an update cluster status, but it is not being started.
                     logger.warning(f'{YELLOW}Skipping clean up of non-active '
                                    f'cluster {cluster_name!r}. Current '
@@ -610,13 +610,9 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
             worker.user,
             worker.identity_file,
             create_askpass_script(worker.password),
-            use_ssh_config=worker.use_ssh_config
-        ),
-        worker_nodes_to_cleanup)
+            use_ssh_config=worker.use_ssh_config), worker_nodes_to_cleanup)
 
-    subprocess_utils.run_in_parallel(
-        run_cleanup_cmd,
-        remove_worker_cmds)
+    subprocess_utils.run_in_parallel(run_cleanup_cmd, remove_worker_cmds)
 
     # Actual cleanup
     if cleanup:
@@ -635,14 +631,17 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
             contexts = run_command([
                 'kubectl', 'config', 'view', '-o',
                 'jsonpath=\'{.contexts[0].name}\''
-            ], shell=False)
-            contexts = contexts.strip("'")
+            ],
+                                   shell=False)
+            contexts = contexts.strip('\'')
 
             if contexts:
-                run_command(['kubectl', 'config', 'use-context', contexts], shell=False)
+                run_command(['kubectl', 'config', 'use-context', contexts],
+                            shell=False)
             else:
                 # If no context is available, simply unset the current context
-                run_command(['kubectl', 'config', 'unset', 'current-context'], shell=False)
+                run_command(['kubectl', 'config', 'unset', 'current-context'],
+                            shell=False)
 
             success_message(
                 f'Context {context_name!r} removed from local kubeconfig.')
@@ -700,7 +699,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     # Step 1: Install k3s on the head node
     install_gpu = False
     if ssh_cluster.is_initial_deploy():
-        progress_message(f'Deploying Kubernetes on head node ({head_node.ip})...')
+        progress_message(
+            f'Deploying Kubernetes on head node ({head_node.ip})...')
         cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_TOKEN={K3S_TOKEN} K3S_NODE_NAME={head_node.ip} sudo -E -A sh - &&
@@ -731,7 +731,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                     f'Failed to deploy K3s on head node ({head_node.ip}).')
         success_message(f'K3s deployed on head node ({head_node.ip}).')
     else:
-        success_message(f'K3s already deployed on head node ({head_node.ip}). Skipping...')
+        success_message(
+            f'K3s already deployed on head node ({head_node.ip}). Skipping...')
 
     # Check if head node has a GPU
     install_gpu = False
@@ -773,11 +774,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     # Deploy workers in parallel using thread pool
     current_ips = set(ssh_cluster.get_current_ips())
     results = subprocess_utils.run_in_parallel(
-        lambda worker: deploy_worker(
-            worker,
-            master_addr,
-            worker.ip not in current_ips),
-        worker_nodes)
+        lambda worker: deploy_worker(worker, master_addr, worker.ip not in
+                                     current_ips), worker_nodes)
 
     for node, suc, has_gpu in results:
         install_gpu = install_gpu or has_gpu
@@ -1003,11 +1001,14 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         # TODO(kyuds): Should we move context check way up and
         # error out before setting up on any node?
         run_command(['kubectl', 'config', 'delete-context', context_name],
-                    shell=False, silent=True)
+                    shell=False,
+                    silent=True)
         run_command(['kubectl', 'config', 'delete-cluster', context_name],
-                    shell=False, silent=True)
+                    shell=False,
+                    silent=True)
         run_command(['kubectl', 'config', 'delete-user', context_name],
-                    shell=False, silent=True)
+                    shell=False,
+                    silent=True)
 
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, 'merged_config')
