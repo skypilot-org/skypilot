@@ -193,3 +193,8 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
         """Check if cluster is being deployed for the first time"""
         # this is before state is "committed"
         return self._current_state is None
+
+    def is_deployed(self) -> bool:
+        """Check if cluster is deployed"""
+        return (self._current_state is not None and
+                self.status == SSHClusterStatus.ACTIVE)

@@ -1,16 +1,13 @@
 """SSH Node Pools"""
-
-import os
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
-
-import yaml
 
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.ssh_node_pools import state as ssh_state
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -20,8 +17,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-
-SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 
 
 @registry.CLOUD_REGISTRY.register()
@@ -52,31 +47,20 @@ class SSH(kubernetes.Kubernetes):
 
     @classmethod
     def get_ssh_node_pool_contexts(cls) -> List[str]:
-        """Get context names from ssh_node_pools.yaml file.
+        """Get context names from the database.
 
         Reads the SSH node pools configuration file and returns
         a list of context names by prepending 'ssh-' to each Node Pool name.
 
         Returns:
-            A list of SSH Kubernetes context names derived from the Node Pools
-            in the SSH node pools file.
+            A list of SSH Kubernetes context names derived from active
+            SSH Node Pools.
         """
         contexts = []
 
-        if os.path.exists(SSH_NODE_POOLS_PATH):
-            try:
-                with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
-                    ssh_config = yaml.safe_load(f)
-                    if ssh_config:
-                        # Get cluster names and prepend 'ssh-' to match
-                        # context naming convention
-                        contexts = [
-                            f'ssh-{cluster_name}'
-                            for cluster_name in ssh_config.keys()
-                        ]
-            except Exception:  # pylint: disable=broad-except
-                # If there's an error reading the file, return empty list
-                pass
+        for ssh_cluster in ssh_state.get_all_clusters():
+            if ssh_cluster.is_deployed():
+                contexts.append(f'ssh-{ssh_cluster.name}')
 
         return contexts
 
@@ -113,13 +97,12 @@ class SSH(kubernetes.Kubernetes):
         """
         if skipped_contexts:
             count = len(set(skipped_contexts))
-            is_singular = count == 1
+            singular = count == 1
             logger.warning(
-                f'SSH Node {("Pool" if is_singular else "Pools")} '
-                f'{set(skipped_contexts)!r} specified in '
-                f'{SSH_NODE_POOLS_PATH} {("has" if is_singular else "have")} '
+                f'SSH Node {("Pool" if singular else "Pools")} '
+                f'{set(skipped_contexts)!r} {("has" if singular else "have")} '
                 'not been set up. Skipping '
-                f'{("that pool" if is_singular else "those pools")}. '
+                f'{("that pool" if singular else "those pools")}. '
                 'Run `sky ssh up` to set up.')
 
     @classmethod
@@ -201,8 +184,7 @@ class SSH(kubernetes.Kubernetes):
 
         if not existing_allowed_contexts:
             return (False,
-                    'No SSH Node Pools are up. Run `sky ssh up` to set up '
-                    f'Node Pools from {SSH_NODE_POOLS_PATH}.')
+                    'No SSH Node Pools are up. Run `sky ssh up` to set up.')
 
         # Check credentials for each context
         ctx2text = {}
@@ -236,8 +218,7 @@ class SSH(kubernetes.Kubernetes):
 
         if not existing_allowed_contexts:
             return (False,
-                    'No SSH Node Pools are up. Run `sky ssh up` to set up '
-                    f'Node Pools from {SSH_NODE_POOLS_PATH}.')
+                    'No SSH Node Pools are up. Run `sky ssh up` to set up .')
 
         if context not in existing_allowed_contexts:
             return (False, f'SSH Node Pool {context} is not set up. '
