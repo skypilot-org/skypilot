@@ -708,6 +708,7 @@ def set_request_cancelled(request_id: str) -> None:
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
 
+
 @init_db
 def _delete_requests(requests: List[Request]):
     """Clean up requests by their IDs."""
@@ -717,7 +718,6 @@ def _delete_requests(requests: List[Request]):
         cursor = _DB.conn.cursor()
         cursor.execute(
             f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
-
 
 
 def clean_finished_requests_with_retention(retention_seconds: int):
@@ -747,7 +747,6 @@ def clean_finished_requests_with_retention(retention_seconds: int):
     # request task in the database.
     logger.info(f'Cleaned up {len(reqs)} finished requests '
                 f'older than {retention_seconds} seconds')
-
 
 
 async def requests_gc_daemon():

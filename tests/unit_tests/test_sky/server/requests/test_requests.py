@@ -1,4 +1,5 @@
 """Unit tests for sky.server.requests.requests module."""
+import asyncio
 import pathlib
 import time
 import unittest.mock as mock
@@ -218,54 +219,56 @@ def test_clean_finished_requests_with_retention_all_statuses():
     assert 'Cleaned up 3 finished requests' in log_message
 
 
-def test_requests_gc_daemon():
+@pytest.mark.asyncio
+async def test_requests_gc_daemon():
     """Test the garbage collection daemon runs correctly."""
     with mock.patch(
             'sky.server.requests.requests.skypilot_config') as mock_config:
         with mock.patch(
                 'sky.server.requests.requests.clean_finished_requests_with_retention'
         ) as mock_clean:
-            with mock.patch('time.sleep') as mock_sleep:
+            with mock.patch('asyncio.sleep') as mock_sleep:
                 # Configure retention seconds
                 mock_config.get_nested.return_value = 120  # 2 minutes
 
-                # Make sleep raise an exception after first iteration
+                # Make sleep raise CancelledError after first iteration
                 # to exit loop
-                mock_sleep.side_effect = [None, KeyboardInterrupt()]
+                mock_sleep.side_effect = [None, asyncio.CancelledError()]
 
                 # Run the daemon
-                with pytest.raises(KeyboardInterrupt):
-                    requests.requests_gc_daemon()
+                with pytest.raises(asyncio.CancelledError):
+                    await requests.requests_gc_daemon()
 
                 # Verify cleanup was called
                 mock_clean.assert_called_with(120 * 3600)
 
-                # Verify sleep was called with max(retention, 60)
+                # Verify sleep was called with max(retention, 3600)
                 assert mock_sleep.call_count == 2
                 mock_sleep.assert_any_call(120 * 3600)
 
 
-def test_requests_gc_daemon_disabled():
+@pytest.mark.asyncio
+async def test_requests_gc_daemon_disabled():
     """Test daemon when retention is negative (disabled)."""
     with mock.patch(
             'sky.server.requests.requests.skypilot_config') as mock_config:
         with mock.patch(
                 'sky.server.requests.requests.clean_finished_requests_with_retention'
         ) as mock_clean:
-            with mock.patch('time.sleep') as mock_sleep:
+            with mock.patch('asyncio.sleep') as mock_sleep:
                 # Configure negative retention (disabled)
                 mock_config.get_nested.return_value = -1
 
-                # Make sleep raise an exception after first iteration
-                mock_sleep.side_effect = [None, KeyboardInterrupt()]
+                # Make sleep raise CancelledError after first iteration
+                mock_sleep.side_effect = [None, asyncio.CancelledError()]
 
                 # Run the daemon
-                with pytest.raises(KeyboardInterrupt):
-                    requests.requests_gc_daemon()
+                with pytest.raises(asyncio.CancelledError):
+                    await requests.requests_gc_daemon()
 
                 # Verify cleanup was NOT called due to negative retention
                 mock_clean.assert_not_called()
 
-                # Verify sleep was called with max(-1, 60) = 60
+                # Verify sleep was called with max(-1, 3600) = 3600
                 assert mock_sleep.call_count == 2
                 mock_sleep.assert_any_call(3600)

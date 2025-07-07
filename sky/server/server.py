@@ -1782,15 +1782,14 @@ if __name__ == '__main__':
 
     queue_server: Optional[multiprocessing.Process] = None
     workers: List[executor.RequestWorker] = []
-    background_tasks: List[asyncio.Task] = []
+    global_tasks: List[asyncio.Task] = []
     try:
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
-            background_tasks.append(
-                background.create_task(metrics_server.serve()))
-        background_tasks.append(
+            global_tasks.append(background.create_task(metrics_server.serve()))
+        global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
@@ -1811,8 +1810,8 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
 
-        for task in background_tasks:
-            task.cancel()
+        for gt in global_tasks:
+            gt.cancel()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))

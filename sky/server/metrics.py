@@ -1,6 +1,5 @@
 """Instrumentation for the API server."""
 
-import asyncio
 import os
 import time
 
