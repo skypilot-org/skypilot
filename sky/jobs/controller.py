@@ -17,12 +17,12 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
+from sky.jobs import constants as jobs_constants
 from sky.jobs import controller_server
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
-from sky.jobs.constants import JOBS_CONTROLLER_LOGS_DIR
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -796,7 +796,7 @@ async def start_job(job_id: int, dag_yaml: str):
         dag_yaml: Path to the YAML file containing the DAG definition.
     """
     # Create a job-specific logger
-    log_dir = os.path.expanduser(JOBS_CONTROLLER_LOGS_DIR)
+    log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f'{job_id}.log')
 
@@ -836,7 +836,7 @@ async def start_job(job_id: int, dag_yaml: str):
 async def cancel_job():
     """Cancel an existing job."""
     while True:
-        cancels = os.listdir(controller_server.SIGNAL_PATH)
+        cancels = os.listdir(jobs_constants.SIGNAL_PATH)
         for cancel in cancels:
             if int(cancel) in job_tasks:
                 job_id = int(cancel)
@@ -866,7 +866,7 @@ async def cancel_job():
                 asyncio.create_task(_cancel_task(task, job_id))
                 logger.info(f'Job {job_id} cancelled successfully')
 
-                os.remove(f'{controller_server.SIGNAL_PATH}/{job_id}')
+                os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
         await asyncio.sleep(1)
 
 

@@ -1310,15 +1310,15 @@ def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     return status
 
 
-@_init_db_async
-async def get_failure_reason(job_id: int) -> Optional[str]:
+@_init_db
+def get_failure_reason(job_id: int) -> Optional[str]:
     """Get the failure reason of a job.
 
     If the job has multiple tasks, we return the first failure reason.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        reason = await session.execute(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        reason = session.execute(
             sqlalchemy.select(spot_table.c.failure_reason).where(
                 spot_table.c.spot_job_id == job_id).order_by(
                     spot_table.c.task_id.asc())).fetchall()
@@ -1415,11 +1415,11 @@ def get_latest_job_id() -> Optional[int]:
         return job_id[0] if job_id else None
 
 
-@_init_db_async
-async def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        task_specs = await session.execute(
+@_init_db
+def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        task_specs = session.execute(
             sqlalchemy.select(spot_table.c.specs).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
@@ -1428,17 +1428,16 @@ async def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
         return json.loads(task_specs[0])
 
 
-@_init_db_async
-async def get_local_log_file(job_id: int,
-                             task_id: Optional[int]) -> Optional[str]:
+@_init_db
+def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
     assert _SQLALCHEMY_ENGINE is not None
 
-    async with orm.Session(_SQLALCHEMY_ENGINE_ASYNC) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
             where_conditions.append(spot_table.c.task_id == task_id)
-        local_log_file = await session.execute(
+        local_log_file = session.execute(
             sqlalchemy.select(spot_table.c.local_log_file).where(
                 sqlalchemy.and_(*where_conditions))).fetchone()
         return local_log_file[-1] if local_log_file else None

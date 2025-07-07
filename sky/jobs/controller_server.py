@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 import uvicorn
 
+from sky.jobs import constants
 from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
@@ -18,15 +19,13 @@ from sky.jobs import state
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
-
 app = FastAPI()
 
 
 @app.on_event('startup')
 async def startup_event():
     # Will happen multiple times, who cares though
-    os.makedirs(SIGNAL_PATH, exist_ok=True)
+    os.makedirs(constants.SIGNAL_PATH, exist_ok=True)
 
     # Will loop forever, do it in the background
     asyncio.create_task(controller.cancel_job())
@@ -67,7 +66,8 @@ async def cancel_job(job_id: int):
     """Cancel an existing job."""
     logger.info(f'Cancelling job {job_id}')
     try:
-        with open(f'{SIGNAL_PATH}/{job_id}', 'w', encoding='utf-8') as f:
+        with open(f'{constants.SIGNAL_PATH}/{job_id}', 'w',
+                  encoding='utf-8') as f:
             f.write('')
         return {'status': 'success', 'message': f'Job {job_id} cancelled'}
     except ValueError as e:
