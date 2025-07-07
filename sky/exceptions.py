@@ -514,6 +514,11 @@ class APIVersionMismatchError(RuntimeError):
     pass
 
 
+class APINotSupportedError(RuntimeError):
+    """Raised when the API is not supported by the remote peer."""
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 
