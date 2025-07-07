@@ -14,6 +14,7 @@ from typing import List, Optional, Set, Tuple
 
 from sky import sky_logging
 from sky.ssh_node_pools import constants as ssh_constants
+from sky.ssh_node_pools import core as ssh_core
 from sky.ssh_node_pools import models as ssh_models
 from sky.ssh_node_pools import state as ssh_state
 from sky.ssh_node_pools.models import SSHClusterStatus
@@ -489,13 +490,14 @@ def deploy_cluster(cleanup: bool = False,
                 for node in ssh_cluster.update_nodes:
                     if node.ip not in unsuccessful_workers:
                         successful_nodes.append(node)
+                    else:
+                        ssh_core.remove_ssh_key_by_path(node.identity_file)
+                for node in ssh_cluster.current_nodes:
+                    ssh_core.remove_ssh_key_by_path(node.identity_file)
                 ssh_cluster.status = SSHClusterStatus.ACTIVE
                 ssh_cluster.set_update_nodes(successful_nodes)
                 ssh_cluster.commit()
                 ssh_state.add_or_update_cluster(ssh_cluster)
-            else:
-                ssh_state.update_cluster_status(ssh_cluster,
-                                                SSHClusterStatus.TERMINATED)
 
             action = 'clean up' if cleanup else 'deployment'
             success_message(f'==== Completed {action} for '
@@ -642,10 +644,13 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         # will restart the ssh tunnel if it's not running.
         cleanup_kubectl_ssh_tunnel(context_name)
 
+        # Remove unused ssh files
+        for ssh_node in ssh_cluster.current_nodes:
+            ssh_core.remove_ssh_key_by_path(ssh_node.identity_file)
+
         # Remove from DB
         ssh_state.remove_cluster(ssh_cluster.name)
-        logger.info(
-            f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
+        logger.info(f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
         return []
 
     logger.info(f'{YELLOW}Checking TCP Forwarding Options...{NC}')

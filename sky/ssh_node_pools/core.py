@@ -193,3 +193,8 @@ def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
     manager = SSHKeyManager()
     return manager.list_ssh_keys()
+
+def remove_ssh_key_by_path(key_path: str):
+    """Remove ssh key"""
+    manager = SSHKeyManager()
+    manager.remove_ssh_key_by_path(key_path)

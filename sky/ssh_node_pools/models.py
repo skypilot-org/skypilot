@@ -18,7 +18,6 @@ class SSHClusterStatus(Enum):
     STARTING = 'starting'
     ACTIVE = 'active'
     TERMINATING = 'terminating'
-    TERMINATED = 'terminated'
 
 
 @dataclasses.dataclass
