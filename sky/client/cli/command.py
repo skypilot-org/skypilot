@@ -138,8 +138,8 @@ def _get_cluster_records_and_set_ssh_config(
         handle = record['handle']
         cluster_ips = handle.cached_external_ips
 
-        if not (handle is not None and cluster_ips is not None
-                and 'credentials' in record):
+        if not (handle is not None and cluster_ips is not None and
+                'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
             cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
