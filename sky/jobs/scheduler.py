@@ -157,28 +157,28 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         with open(JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
             f.write(str(pid))
 
-    max_retries = 5
-    base_delay = 1
     req = controller_server.JobRequest(
         job_id=str(job_id),
         dag_yaml_path=dag_yaml_path,
         env_file_path=env_file_path,
     )
+    backoff = common_utils.Backoff()
+    max_retries = 5
     for attempt in range(max_retries):
         try:
             res = requests.post('http://localhost:8000/create',
-                                json=req.model_dump())
+                                json=req.model_dump(),
+                                timeout=30)
             break
         except requests.exceptions.RequestException:
-            if attempt == max_retries - 1:
-                raise
-            delay = base_delay * (2**attempt)
+            delay = backoff.current_backoff()
             logger.warning('Failed to connect to controller server (attempt '
                            f'{attempt + 1}/{max_retries}). Retrying in '
                            f'{delay} seconds...')
             time.sleep(delay)
+    if res.status_code != 200:
+        raise RuntimeError(f'Failed to start job {job_id}')
     logger.debug(f'Job {job_id} started with pid {pid}')
-    logger.debug(f'Response: {res.json()}')
 
 
 def maybe_schedule_next_jobs() -> None:
