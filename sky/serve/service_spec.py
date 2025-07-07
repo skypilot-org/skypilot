@@ -201,9 +201,10 @@ class SkyServiceSpec:
         if isinstance(target_qps_per_replica, dict):
             if load_balancing_policy != 'instance_aware_least_load':
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('When using dict type target_qps_per_replica, '
-                                     'load_balancing_policy must be '
-                                     '"instance_aware_least_load".')
+                    raise ValueError(
+                        'When using dict type target_qps_per_replica, '
+                        'load_balancing_policy must be '
+                        '"instance_aware_least_load".')
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
