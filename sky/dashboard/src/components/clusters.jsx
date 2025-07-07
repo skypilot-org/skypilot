@@ -582,32 +582,32 @@ export function ClusterTable({
     }
   };
 
-  // Main filter function
-  const filterData = (data, filters) => {
-    if (filters.length === 0) {
-      return data;
-    }
-
-    return data.filter((item) => {
-      let result = null;
-
-      for (let i = 0; i < filters.length; i++) {
-        const filter = filters[i];
-        const current = evaluateCondition(item, filter);
-
-        if (result === null) {
-          result = current;
-        } else {
-          result = result && current;
-        }
-      }
-
-      return result;
-    });
-  };
-
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
+    // Main filter function
+    const filterData = (data, filters) => {
+      if (filters.length === 0) {
+        return data;
+      }
+
+      return data.filter((item) => {
+        let result = null;
+
+        for (let i = 0; i < filters.length; i++) {
+          const filter = filters[i];
+          const current = evaluateCondition(item, filter);
+
+          if (result === null) {
+            result = current;
+          } else {
+            result = result && current;
+          }
+        }
+
+        return result;
+      });
+    };
+
     const filteredData = filterData(data, filters);
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
