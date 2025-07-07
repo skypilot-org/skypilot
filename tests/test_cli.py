@@ -109,44 +109,6 @@ class TestWithNoCloudEnabled:
         assert isinstance(result.exception, ValueError)
 
 
-<<<<<<< HEAD
-class TestServerVersion:
-
-    def test_cli_low_version_server_high_version(self, monkeypatch,
-                                                 mock_client_requests):
-        # Clear cache to ensure mock is used
-        from sky.server import common
-        common.get_api_server_status.cache_clear()  # type: ignore
-
-        mock_server_api_version(monkeypatch, '2')
-        monkeypatch.setattr(server.constants, 'API_VERSION', 3)
-        cli_runner = cli_testing.CliRunner()
-
-        result = cli_runner.invoke(command.status, [])
-        assert "Client and local API server version mismatch" in str(
-            result.exception)
-        assert result.exit_code == 1
-
-    def test_cli_high_version_server_low_version(self, monkeypatch,
-                                                 mock_client_requests):
-        # Clear cache to ensure mock is used
-        from sky.server import common
-        common.get_api_server_status.cache_clear()  # type: ignore
-
-        mock_server_api_version(monkeypatch, '3')
-        monkeypatch.setattr(server.constants, 'API_VERSION', 2)
-        cli_runner = cli_testing.CliRunner()
-
-        result = cli_runner.invoke(command.status, [])
-
-        # Verify the error message contains correct versions
-        assert "Client and local API server version mismatch" in str(
-            result.exception)
-        assert result.exit_code == 1
-
-
-=======
->>>>>>> master
 class TestHelperFunctions:
 
     def test_get_cluster_records_and_set_ssh_config(self, monkeypatch):
