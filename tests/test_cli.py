@@ -311,7 +311,6 @@ class TestWithNoCloudEnabled:
 
         result = cli_runner.invoke(command.check, ['notarealcloud'])
         assert isinstance(result.exception, ValueError)
-        
 
 class TestHelperFunctions:
 
