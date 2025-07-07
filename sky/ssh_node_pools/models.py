@@ -188,3 +188,8 @@ class SSHCluster(SSHBase):  # type: ignore[valid-type, misc]
     def get_current_worker_nodes(self) -> List[SSHNode]:
         """Get the current worker node configs"""
         return self._get_worker_nodes(True)
+
+    def is_initial_deploy(self) -> bool:
+        """Check if cluster is being deployed for the first time"""
+        # this is before state is "committed"
+        return self._current_state is None

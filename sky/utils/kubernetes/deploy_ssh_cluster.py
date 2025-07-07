@@ -690,40 +690,41 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     else:
         effective_master_ip = head_node.ip
 
-    # TODO (kyuds): skip if head node already deployed
     # Step 1: Install k3s on the head node
-    # Check if head node has a GPU
     install_gpu = False
-    progress_message(f'Deploying Kubernetes on head node ({head_node.ip})...')
-    cmd = f"""
-        {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={K3S_TOKEN} K3S_NODE_NAME={head_node.ip} sudo -E -A sh - &&
-        mkdir -p ~/.kube &&
-        sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
-        sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
-        for i in {{1..3}}; do
-            if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
-                break
-            else
-                echo 'Waiting for nodes to be ready...'
-                sleep 5
+    if ssh_cluster.is_initial_deploy():
+        progress_message(f'Deploying Kubernetes on head node ({head_node.ip})...')
+        cmd = f"""
+            {askpass_block}
+            curl -sfL https://get.k3s.io | K3S_TOKEN={K3S_TOKEN} K3S_NODE_NAME={head_node.ip} sudo -E -A sh - &&
+            mkdir -p ~/.kube &&
+            sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
+            sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
+            for i in {{1..3}}; do
+                if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
+                    break
+                else
+                    echo 'Waiting for nodes to be ready...'
+                    sleep 5
+                fi
+            done
+            if [ $i -eq 3 ]; then
+                echo 'Failed to wait for nodes to be ready after 3 attempts'
+                exit 1
             fi
-        done
-        if [ $i -eq 3 ]; then
-            echo 'Failed to wait for nodes to be ready after 3 attempts'
-            exit 1
-        fi
-    """
-    result = run_remote(head_node.ip,
-                        cmd,
-                        head_node.user,
-                        head_node.identity_file,
-                        use_ssh_config=head_node.use_ssh_config)
-    if result is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Failed to deploy K3s on head node ({head_node.ip}).')
-    success_message(f'K3s deployed on head node ({head_node.ip}).')
+        """
+        result = run_remote(head_node.ip,
+                            cmd,
+                            head_node.user,
+                            head_node.identity_file,
+                            use_ssh_config=head_node.use_ssh_config)
+        if result is None:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to deploy K3s on head node ({head_node.ip}).')
+        success_message(f'K3s deployed on head node ({head_node.ip}).')
+    else:
+        success_message(f'K3s already deployed on head node ({head_node.ip}). Skipping...')
 
     # Check if head node has a GPU
     install_gpu = False
