@@ -489,6 +489,13 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             raise e
 
+    high_availability: bool = config.get('high_availability', False)
+    print(f'high_availability: {high_availability}')
+    if high_availability:
+        target_kind = 'deployment'
+    else:
+        target_kind = 'pod'
+
     private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
@@ -503,7 +510,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             nodeport_mode,
             private_key_path=private_key_path,
             context=context,
-            namespace=namespace)
+            namespace=namespace,
+            target_kind=target_kind)
     elif network_mode == port_forward_mode:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
         # does not require a ssh jump pod.
@@ -522,7 +530,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             port_forward_mode,
             private_key_path=private_key_path,
             context=context,
-            namespace=namespace)
+            namespace=namespace,
+            target_kind=target_kind)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')

@@ -6,6 +6,8 @@ max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
+high_availability: {{high_availability}}
+
 
 # Kubernetes resources that need to be configured for the autoscaler to be
 # able to manage the Ray cluster. If any of the provided resources don't
