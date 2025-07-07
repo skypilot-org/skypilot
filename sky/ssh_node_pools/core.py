@@ -194,6 +194,7 @@ def list_ssh_keys() -> List[str]:
     manager = SSHKeyManager()
     return manager.list_ssh_keys()
 
+
 def remove_ssh_key_by_path(key_path: str):
     """Remove ssh key"""
     manager = SSHKeyManager()

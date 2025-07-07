@@ -485,6 +485,7 @@ def deploy_cluster(cleanup: bool = False,
             unsuccessful_workers = _deploy_internal(ssh_cluster,
                                                     kubeconfig_path, cleanup)
 
+            # if cleanup, all identity files and sql models are deleted in _deploy_internal
             if not cleanup:
                 successful_nodes = []
                 for node in ssh_cluster.update_nodes:
@@ -500,8 +501,8 @@ def deploy_cluster(cleanup: bool = False,
                 ssh_state.add_or_update_cluster(ssh_cluster)
 
             action = 'clean up' if cleanup else 'deployment'
-            success_message(f'==== Completed {action} for '
-                            f'cluster: {cluster_name} ====')
+            success_message(
+                f'==== Completed {action} for cluster: {cluster_name} ====')
             successful_clusters.append(cluster_name)
 
         except Exception as e:  # pylint: disable=broad-except
@@ -650,7 +651,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
 
         # Remove from DB
         ssh_state.remove_cluster(ssh_cluster.name)
-        logger.info(f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
+        logger.info(
+            f'{GREEN}Cleanup completed successfully `{ssh_cluster.name}`.{NC}')
         return []
 
     logger.info(f'{YELLOW}Checking TCP Forwarding Options...{NC}')
@@ -725,7 +727,7 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                  head_node.user,
                  head_node.identity_file,
                  use_ssh_config=head_node.use_ssh_config):
-        logger.info(f'{YELLOW}GPU detected on head node ({head_node}.ip).{NC}')
+        logger.info(f'{YELLOW}GPU detected on head node ({head_node.ip}).{NC}')
         install_gpu = True
 
     # Fetch the head node's internal IP (this will be passed to worker nodes)
@@ -736,7 +738,7 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                              use_ssh_config=head_node.use_ssh_config)
     if master_addr is None:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
+            raise RuntimeError(f'Failed to SSH to head node ({head_node.ip}). '
                                f'Please check the SSH configuration.')
     logger.info(f'{GREEN}Master node internal IP: {master_addr}{NC}')
 
@@ -865,8 +867,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
 
                         if not has_begin or not has_end:
                             logger.warning(
-                                f'{YELLOW}Warning: Certificate data missing PEM markers, attempting to fix...{NC}'
-                            )
+                                f'{YELLOW}Warning: Certificate data missing'
+                                f' PEM markers, attempting to fix...{NC}')
                             # Add PEM markers if missing
                             if not has_begin:
                                 cert_pem = f'-----BEGIN CERTIFICATE-----\n{cert_pem}'
@@ -881,8 +883,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                         # Verify the file was written correctly
                         if os.path.getsize(cert_file_path) > 0:
                             logger.info(
-                                f'{GREEN}Successfully saved certificate data ({len(cert_pem)} bytes){NC}'
-                            )
+                                f'{GREEN}Successfully saved certificate '
+                                f'data ({len(cert_pem)} bytes){NC}')
 
                             # Quick validation of PEM format
                             with open(cert_file_path, 'r',
@@ -893,12 +895,11 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                                 last_line = content[-1].strip(
                                 ) if content else ''
 
-                            if not first_line.startswith(
-                                    '-----BEGIN') or not last_line.startswith(
-                                        '-----END'):
+                            if (not first_line.startswith('-----BEGIN') or
+                                    not last_line.startswith('-----END')):
                                 logger.warning(
-                                    f'{YELLOW}Warning: Certificate may not be in proper PEM format{NC}'
-                                )
+                                    f'{YELLOW}Warning: Certificate '
+                                    f'may not be in proper PEM format{NC}')
                         else:
                             logger.error(
                                 f'{RED}Error: Certificate file is empty{NC}')
@@ -946,8 +947,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
 
                             if not has_begin or not has_end:
                                 logger.warning(
-                                    f'{YELLOW}Warning: Key data missing PEM markers, attempting to fix...{NC}'
-                                )
+                                    f'{YELLOW}Warning: Key data missing PEM '
+                                    f'markers, attempting to fix...{NC}')
                                 # Add PEM markers if missing
                                 if not has_begin:
                                     key_pem = f'-----BEGIN PRIVATE KEY-----\n{key_pem}'
@@ -965,9 +966,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
 
                         # Verify the file was written correctly
                         if os.path.getsize(key_file_path) > 0:
-                            logger.info(
-                                f'{GREEN}Successfully saved key data ({len(key_pem)} bytes){NC}'
-                            )
+                            logger.info(f'{GREEN}Successfully saved key '
+                                        f'data ({len(key_pem)} bytes){NC}')
 
                             # Quick validation of PEM format
                             with open(key_file_path, 'r',
@@ -978,12 +978,11 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                                 last_line = content[-1].strip(
                                 ) if content else ''
 
-                            if not first_line.startswith(
-                                    '-----BEGIN') or not last_line.startswith(
-                                        '-----END'):
+                            if (not first_line.startswith('-----BEGIN') or
+                                    not last_line.startswith('-----END')):
                                 logger.warning(
-                                    f'{YELLOW}Warning: Key may not be in proper PEM format{NC}'
-                                )
+                                    f'{YELLOW}Warning: Key may not be '
+                                    f'in proper PEM format{NC}')
                         else:
                             logger.error(f'{RED}Error: Key file is empty{NC}')
                     except Exception as e:  # pylint: disable=broad-except
@@ -1025,15 +1024,14 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
 
     success_message(f'kubectl configured with new context \'{context_name}\'.')
 
-    logger.info(
-        f'Cluster deployment completed. Kubeconfig saved to {kubeconfig_path}')
+    logger.info('Cluster deployment completed. Kubeconfig saved '
+                f'to {kubeconfig_path}')
     logger.info('You can now run \'kubectl get nodes\' to verify the setup.')
 
     # Install GPU operator if a GPU was detected on any node
     if install_gpu:
-        logger.info(
-            f'{YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...{NC}'
-        )
+        logger.info(f'{YELLOW}GPU detected in the cluster. Installing '
+                    f'Nvidia GPU Operator...{NC}')
         cmd = f"""
             {askpass_block}
             curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
