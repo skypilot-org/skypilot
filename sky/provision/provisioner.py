@@ -449,13 +449,6 @@ def _post_provision_setup(
         setattr(e, 'detailed_reason', str(cluster_info))
         raise e
 
-    # Check version compatibility for jobs controller clusters
-    if cluster_name.display_name.startswith(common.JOB_CONTROLLER_PREFIX):
-        with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    'Checking controller version compatibility')):
-            server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
-
     # TODO(suquark): Move wheel build here in future PRs.
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
@@ -510,6 +503,19 @@ def _post_provision_setup(
             logger.debug(f'Docker user: {docker_user}')
             logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
                         f'Docker container is up.{colorama.Style.RESET_ALL}')
+
+        # Check version compatibility for jobs controller clusters
+        if cluster_name.display_name.startswith(common.JOB_CONTROLLER_PREFIX):
+            status.update(
+                ux_utils.spinner_message(
+                    'Checking controller version compatibility'))
+            try:
+                server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
+            except exceptions.ClusterNotUpError:
+                # Controller is not up yet during initial provisioning, that
+                # also means no non-terminal jobs, so no incompatibility in
+                # this case.
+                pass
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
