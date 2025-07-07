@@ -28,11 +28,13 @@ from typing import Dict, List
 import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
+from smoke_tests.docker import docker_utils
 
 import sky
 from sky import AWS
 from sky import Azure
 from sky import GCP
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -1988,3 +1990,39 @@ def test_gcp_network_tier_with_gpu():
         timeout=15 * 60,  # 15 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_remote_server_api_login():
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('This test is only for remote server')
+
+    endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+    config_path = skypilot_config._GLOBAL_CONFIG_PATH
+    backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
+
+    test = smoke_tests_utils.Test(
+        'remote-server-api-login',
+        [
+            # Backup existing config file if it exists
+            f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
+            # Run sky api login
+            f'sky api login -e {endpoint}',
+            # Echo the config file content to see what was written
+            f'echo "Config file content after sky api login:" && cat {config_path}',
+            # Verify the config file is updated with the endpoint
+            f'grep -q "endpoint: {endpoint}" {config_path}',
+            # Verify the api_server section exists
+            f'grep -q "api_server:" {config_path}',
+        ],
+        # Restore original config file if backup exists
+        f'if [ -f {backup_path} ]; then mv {backup_path} {config_path}; fi',
+    )
+
+    with pytest.MonkeyPatch().context() as m:
+        m.setattr(docker_utils, 'get_api_server_endpoint_inside_docker',
+                  lambda: 'http://255.255.255.255:41540')
+        # Mock the environment config to return a non-existing endpoint.
+        # The sky api login command should not read from environment config
+        # when an explicit endpoint is provided as an argument.
+        smoke_tests_utils.run_one_test(test)
