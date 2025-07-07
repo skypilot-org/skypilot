@@ -22,11 +22,13 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
+from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
@@ -446,6 +448,13 @@ def _post_provision_setup(
                          f'status with: sky status -r; and retry provisioning.')
         setattr(e, 'detailed_reason', str(cluster_info))
         raise e
+
+    # Check version compatibility for jobs controller clusters
+    if cluster_name.display_name.startswith(common.JOB_CONTROLLER_PREFIX):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    'Checking controller version compatibility')):
+            server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
 
     # TODO(suquark): Move wheel build here in future PRs.
     # We don't set docker_user here, as we are configuring the VM itself.
