@@ -1,7 +1,6 @@
 """SSH-based Kubernetes Cluster Deployment"""
 # This is the python native function call method of creating an SSH Node Pool # pylint: disable=line-too-long
 import base64
-import concurrent.futures as cf
 import os
 import random
 import re
@@ -18,6 +17,7 @@ from sky.ssh_node_pools import core as ssh_core
 from sky.ssh_node_pools import models as ssh_models
 from sky.ssh_node_pools import state as ssh_state
 from sky.ssh_node_pools.models import SSHClusterStatus
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
 
@@ -196,6 +196,7 @@ def start_agent_node(node,
                      use_ssh_config=False):
     """Start a k3s agent node.
     Returns: if the start is successful, and if the node has a GPU."""
+    logger.info(f'{YELLOW}Deploying worker node ({node}).')
     cmd = f"""
             {askpass_block}
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
@@ -599,17 +600,23 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
                             use_ssh_config=head_node.use_ssh_config)
 
     # Clean up worker nodes
-    with cf.ThreadPoolExecutor() as executor:
-        executor.map(lambda kwargs: cleanup_agent_node(**kwargs),
-                     worker_nodes_to_cleanup)
+    def run_cleanup_cmd(cmd):
+        logger.info(f'Cleaning up worker nodes: {cmd}')
+        run_command(cmd, shell=True)
 
-    with cf.ThreadPoolExecutor() as executor:
+    subprocess_utils.run_in_parallel(
+        lambda worker: cleanup_agent_node(
+            worker.ip,
+            worker.user,
+            worker.identity_file,
+            create_askpass_script(worker.password),
+            use_ssh_config=worker.use_ssh_config
+        ),
+        worker_nodes_to_cleanup)
 
-        def run_cleanup_cmd(cmd):
-            logger.info(f'Cleaning up worker nodes: {cmd}')
-            run_command(cmd, shell=True)
-
-        executor.map(run_cleanup_cmd, remove_worker_cmds)
+    subprocess_utils.run_in_parallel(
+        run_cleanup_cmd,
+        remove_worker_cmds)
 
     # Actual cleanup
     if cleanup:
@@ -748,8 +755,7 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     logger.info(f'{GREEN}Master node internal IP: {master_addr}{NC}')
 
     # Step 2: Install k3s on worker nodes and join them to the master node
-    def deploy_worker(args):
-        (ssh_node, master_addr, deploy) = args
+    def deploy_worker(ssh_node, master_addr, deploy):
         if not deploy:
             logger.info(f'{YELLOW}Worker node ({ssh_node.ip}) already '
                         f'exists in history. Skipping...{NC}')
@@ -765,19 +771,18 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     unsuccessful_workers = []
 
     # Deploy workers in parallel using thread pool
-    with cf.ThreadPoolExecutor() as executor:
-        futures = []
-        current_ips = set(ssh_cluster.get_current_ips())
-        for node in worker_nodes:
-            args = (node, master_addr, node.ip not in current_ips)
-            futures.append(executor.submit(deploy_worker, args))
+    current_ips = set(ssh_cluster.get_current_ips())
+    results = subprocess_utils.run_in_parallel(
+        lambda worker: deploy_worker(
+            worker,
+            master_addr,
+            worker.ip not in current_ips),
+        worker_nodes)
 
-        # Check if worker node has a GPU
-        for future in cf.as_completed(futures):
-            node, suc, has_gpu = future.result()
-            install_gpu = install_gpu or has_gpu
-            if not suc:
-                unsuccessful_workers.append(node)
+    for node, suc, has_gpu in results:
+        install_gpu = install_gpu or has_gpu
+        if not suc:
+            unsuccessful_workers.append(node)
 
     # Step 3: Configure local kubectl to connect to the cluster
     progress_message('Configuring local kubectl to connect to the cluster...')
