@@ -1,22 +1,28 @@
 """Cudo catalog helper."""
 
 cudo_gpu_model = {
-    'NVIDIA V100': 'V100',
-    'NVIDIA A40': 'A40',
-    'RTX 3080': 'RTX3080',
-    'RTX A4000': 'RTXA4000',
-    'RTX A4500': 'RTXA4500',
+    'H100 NVL': 'H100',
+    'H100 SXM': 'H100-SXM',
+    'L40S (compute mode)': 'L40S',
+    'L40S (graphics mode)': 'L40S',
+    'A40 (compute mode)': 'A40',
+    'A40 (graphics mode)': 'A40',
     'RTX A5000': 'RTXA5000',
     'RTX A6000': 'RTXA6000',
+    'A100 80GB PCIe': 'A100',
+    'A800 PCIe': 'A800',
+    'V100': 'V100',
 }
 
 cudo_gpu_mem = {
-    'RTX3080': 12,
+    'H100': 94,
+    'H100-SXM': 80,
+    'L40S': 48,
     'A40': 48,
-    'RTXA4000': 16,
-    'RTXA4500': 20,
     'RTXA5000': 24,
     'RTXA6000': 48,
+    'A100': 80,
+    'A800': 80,
     'V100': 16,
 }
 

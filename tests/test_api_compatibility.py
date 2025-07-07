@@ -35,20 +35,28 @@ def fetch_master_api_version() -> str:
     with urllib.request.urlopen(MASTER_CONSTANTS_URL) as response:
         master_content = response.read().decode('utf-8')
 
+    return parse_api_version(master_content)
+
+
+def parse_api_version(content: str) -> str:
+    """Parse the API version from the content."""
     # Extract API_VERSION using regex
-    # Matches: API_VERSION = 'value' (pylint enforced format)
-    pattern = r"API_VERSION = '([^']+)'"
-    match = re.search(pattern, master_content)
+    # Matches: API_VERSION = value (pylint enforced format)
+    pattern = r"API_VERSION\s=\s(\d+)"
+    match = re.search(pattern, content)
 
     if match:
         return match.group(1)
     else:
-        raise ValueError("API_VERSION not found in master constants.py")
+        raise ValueError("API_VERSION not found in constants.py")
 
 
 def check_api_version_compatibility() -> bool:
     """Check if current and master API versions match."""
-    current_version = current_constants.API_VERSION
+    # Parse instead of read the constants directly to avoid regression breaking
+    # the test when the format on PR branch is changed.
+    current_content = inspect.getsource(current_constants)
+    current_version = parse_api_version(current_content)
     master_version = fetch_master_api_version()
 
     return current_version == master_version
