@@ -5,7 +5,6 @@ jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 from asyncio import events
-import asyncio
 import collections
 import contextvars
 import datetime

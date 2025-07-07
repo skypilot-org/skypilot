@@ -1374,6 +1374,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
             jobs.append(job_dict)
         return jobs
 
+
 @_init_db
 def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
@@ -1386,6 +1387,7 @@ def get_task_name(job_id: int, task_id: int) -> str:
                     spot_table.c.task_id == task_id,
                 ))).fetchone()
         return task_name[0]
+
 
 @_init_db_async
 async def get_task_name_async(job_id: int, task_id: int) -> str:
