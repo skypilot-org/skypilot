@@ -42,14 +42,17 @@ def mock_api_server_calls(monkeypatch):
     mock_api_info.commit = 'test_commit'
     mock_api_info.user = None
     mock_api_info.basic_auth_enabled = False
-    
-    monkeypatch.setattr('sky.server.common.get_api_server_status', lambda *args, **kwargs: mock_api_info)
-    
+
+    monkeypatch.setattr('sky.server.common.get_api_server_status',
+                        lambda *args, **kwargs: mock_api_info)
+
     # Mock other server functions that might trigger real calls
-    monkeypatch.setattr('sky.server.common.check_server_healthy', lambda *args, **kwargs: ('healthy', mock_api_info))
-    monkeypatch.setattr('sky.server.common.get_server_url', lambda *args, **kwargs: 'http://localhost:46580')
+    monkeypatch.setattr('sky.server.common.check_server_healthy',
+                        lambda *args, **kwargs: ('healthy', mock_api_info))
+    monkeypatch.setattr('sky.server.common.get_server_url',
+                        lambda *args, **kwargs: 'http://localhost:46580')
     monkeypatch.setattr('sky.server.common.is_api_server_local', lambda: True)
-    
+
     # Mock make_authenticated_request to prevent real HTTP calls
     def mock_make_authenticated_request(method, path, *args, **kwargs):
         mock_response = mock.MagicMock()
@@ -58,7 +61,7 @@ def mock_api_server_calls(monkeypatch):
             'X-Skypilot-Request-ID': 'test_request_id_12345'
         }
         mock_response.history = []
-        
+
         # Mock different endpoints
         if '/api/health' in path:
             mock_response.json.return_value = {
@@ -75,19 +78,30 @@ def mock_api_server_calls(monkeypatch):
             mock_response.json.return_value = {'status': 'success'}
             # Set the text attribute for request ID parsing
             mock_response.text = 'test_request_id_12345'
-        
+
         return mock_response
-    
-    monkeypatch.setattr('sky.server.common.make_authenticated_request', mock_make_authenticated_request)
-    
+
+    monkeypatch.setattr('sky.server.common.make_authenticated_request',
+                        mock_make_authenticated_request)
+
     # Mock high-level SDK functions to prevent API calls entirely
-    monkeypatch.setattr('sky.client.sdk.check', lambda *args, **kwargs: 'test_request_id')
-    
+    monkeypatch.setattr('sky.client.sdk.check',
+                        lambda *args, **kwargs: 'test_request_id')
+
     # Create mock accelerator items that have the _asdict method like dataclasses
     class MockAcceleratorItem:
-        def __init__(self, accelerator_name='V100', accelerator_count=1, cloud='AWS', 
-                     instance_type='p3.2xlarge', device_memory=16.0, cpu_count=8, 
-                     memory=61.0, price=1.0, spot_price=0.5, region='us-east-1'):
+
+        def __init__(self,
+                     accelerator_name='V100',
+                     accelerator_count=1,
+                     cloud='AWS',
+                     instance_type='p3.2xlarge',
+                     device_memory=16.0,
+                     cpu_count=8,
+                     memory=61.0,
+                     price=1.0,
+                     spot_price=0.5,
+                     region='us-east-1'):
             self.accelerator_name = accelerator_name
             self.accelerator_count = accelerator_count
             self.cloud = cloud
@@ -98,7 +112,7 @@ def mock_api_server_calls(monkeypatch):
             self.price = price
             self.spot_price = spot_price
             self.region = region
-        
+
         def _asdict(self):
             return {
                 'accelerator_name': self.accelerator_name,
@@ -112,13 +126,15 @@ def mock_api_server_calls(monkeypatch):
                 'spot_price': self.spot_price,
                 'region': self.region
             }
-    
+
     # Mock list_accelerators to return a request ID (for specific accelerator queries)
-    monkeypatch.setattr('sky.client.sdk.list_accelerators', lambda *args, **kwargs: 'accelerators_request_id')
-    
+    monkeypatch.setattr('sky.client.sdk.list_accelerators',
+                        lambda *args, **kwargs: 'accelerators_request_id')
+
     # Mock list_accelerator_counts to return a request ID (for --all queries)
-    monkeypatch.setattr('sky.client.sdk.list_accelerator_counts', lambda *args, **kwargs: 'accelerator_counts_request_id')
-    
+    monkeypatch.setattr('sky.client.sdk.list_accelerator_counts',
+                        lambda *args, **kwargs: 'accelerator_counts_request_id')
+
     # Mock stream_and_get to return appropriate data based on request ID
     def mock_stream_and_get(request_id):
         if 'accelerators_request_id' in str(request_id):
@@ -159,7 +175,7 @@ def mock_api_server_calls(monkeypatch):
             return []
 
     monkeypatch.setattr('sky.client.sdk.stream_and_get', mock_stream_and_get)
-    
+
     # Mock sdk.get to return appropriate data based on request ID
     def mock_get(request_id):
         if 'enabled_clouds_request_id' in str(request_id):
@@ -167,15 +183,22 @@ def mock_api_server_calls(monkeypatch):
         elif 'workspaces_request_id' in str(request_id):
             return ['default', 'workspace1']
         elif 'serve_status_request_id' in str(request_id):
-            return [{'name': 'service1', 'status': 'RUNNING', 'endpoint': 'http://localhost:8080'}]
+            return [{
+                'name': 'service1',
+                'status': 'RUNNING',
+                'endpoint': 'http://localhost:8080'
+            }]
         else:
             return []
-    
+
     monkeypatch.setattr('sky.client.sdk.get', mock_get)
-    monkeypatch.setattr('sky.client.sdk.enabled_clouds', lambda *args, **kwargs: 'enabled_clouds_request_id')
-    monkeypatch.setattr('sky.client.sdk.realtime_kubernetes_gpu_availability', lambda *args, **kwargs: 'k8s_gpu_request_id')
-    monkeypatch.setattr('sky.client.sdk.kubernetes_node_info', lambda *args, **kwargs: 'k8s_node_request_id')
-    
+    monkeypatch.setattr('sky.client.sdk.enabled_clouds',
+                        lambda *args, **kwargs: 'enabled_clouds_request_id')
+    monkeypatch.setattr('sky.client.sdk.realtime_kubernetes_gpu_availability',
+                        lambda *args, **kwargs: 'k8s_gpu_request_id')
+    monkeypatch.setattr('sky.client.sdk.kubernetes_node_info',
+                        lambda *args, **kwargs: 'k8s_node_request_id')
+
     # Mock requests.request as well for any direct usage
     def mock_requests_request(method, url, *args, **kwargs):
         mock_response = mock.MagicMock()
@@ -186,14 +209,15 @@ def mock_api_server_calls(monkeypatch):
         mock_response.text = 'test_request_id_12345'
         mock_response.json.return_value = {'status': 'success'}
         return mock_response
-    
+
     monkeypatch.setattr('requests.request', mock_requests_request)
     monkeypatch.setattr('requests.get', mock_requests_request)
     monkeypatch.setattr('requests.post', mock_requests_request)
-    
+
     # Mock usage tracking
-    monkeypatch.setattr('sky.usage.usage_lib.messages.usage.set_internal', lambda: None)
-    
+    monkeypatch.setattr('sky.usage.usage_lib.messages.usage.set_internal',
+                        lambda: None)
+
     # Mock the rest client to prevent real API calls
     def mock_rest_request(method, url, *args, **kwargs):
         mock_response = mock.MagicMock()
@@ -204,9 +228,10 @@ def mock_api_server_calls(monkeypatch):
         mock_response.text = 'test_request_id_12345'
         mock_response.json.return_value = {'status': 'success'}
         return mock_response
-    
+
     monkeypatch.setattr('sky.server.rest.request', mock_rest_request)
-    monkeypatch.setattr('sky.server.rest.request_without_retry', mock_rest_request)
+    monkeypatch.setattr('sky.server.rest.request_without_retry',
+                        mock_rest_request)
 
 
 class TestWithNoCloudEnabled:
@@ -229,7 +254,7 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda --all
         """
         mock_api_server_calls(monkeypatch)
-        
+
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.show_gpus, [])
         assert not result.exit_code
@@ -279,7 +304,7 @@ class TestWithNoCloudEnabled:
 
     def test_k8s_alias_check(self, monkeypatch):
         mock_api_server_calls(monkeypatch)
-        
+
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(command.check, ['k8s'])
@@ -300,7 +325,7 @@ class TestHelperFunctions:
     def test_get_cluster_records_and_set_ssh_config(self, monkeypatch):
         """Tests _get_cluster_records_and_set_ssh_config with mocked components."""
         mock_api_server_calls(monkeypatch)
-        
+
         # Mock cluster records that would be returned by stream_and_get
         mock_handle = mock.MagicMock()
         mock_handle.cluster_name = 'test-cluster'
@@ -437,7 +462,7 @@ class TestConcurrentStatus:
     def test_concurrent_api_calls_same_results(self, monkeypatch):
         """Test that concurrent API calls produce same results as sequential."""
         mock_api_server_calls(monkeypatch)
-        
+
         import concurrent.futures
         import time
         from unittest.mock import MagicMock
@@ -543,7 +568,7 @@ class TestConcurrentStatus:
         even if it's challenging to simulate exactly in a test environment.
         """
         mock_api_server_calls(monkeypatch)
-        
+
         # Since testing KeyboardInterrupt in concurrent execution is complex,
         # let's test the core functionality more directly
 
@@ -601,7 +626,7 @@ class TestConcurrentStatus:
     def test_selective_query_execution(self, monkeypatch):
         """Test that queries are only executed when needed."""
         mock_api_server_calls(monkeypatch)
-        
+
         from unittest.mock import MagicMock
 
         # Track which functions are called
@@ -699,7 +724,7 @@ class TestConcurrentStatus:
     def test_workspace_backwards_compatibility(self, monkeypatch):
         """Test backwards compatibility when workspace API is not available."""
         mock_api_server_calls(monkeypatch)
-        
+
         monkeypatch.setattr('sky.client.sdk.status',
                             lambda *args, **kwargs: 'cluster_request_id')
 
@@ -751,7 +776,7 @@ class TestConcurrentStatus:
     def test_error_handling_in_concurrent_execution(self, monkeypatch):
         """Test that errors in one concurrent task don't affect others."""
         mock_api_server_calls(monkeypatch)
-        
+
         monkeypatch.setattr('sky.client.sdk.status',
                             lambda *args, **kwargs: 'cluster_request_id')
 
