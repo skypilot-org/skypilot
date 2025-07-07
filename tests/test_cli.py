@@ -312,6 +312,7 @@ class TestWithNoCloudEnabled:
         result = cli_runner.invoke(command.check, ['notarealcloud'])
         assert isinstance(result.exception, ValueError)
 
+
 class TestHelperFunctions:
 
     def test_get_cluster_records_and_set_ssh_config(self, monkeypatch):
