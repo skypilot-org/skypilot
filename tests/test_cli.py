@@ -300,11 +300,16 @@ class TestConcurrentStatus:
             if 'workspaces_request_id' in request_id:
                 return ['default', 'workspace1']
             elif 'serve_status_request_id' in request_id:
-                return [{'name': 'service1', 'status': 'RUNNING', 'endpoint': 'http://localhost:8080'}]
+                return [{
+                    'name': 'service1',
+                    'status': 'RUNNING',
+                    'endpoint': 'http://localhost:8080'
+                }]
             else:
                 return []
 
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', mock_stream_and_get)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock_stream_and_get)
         monkeypatch.setattr('sky.client.sdk.get', mock_get)
         monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
                             lambda *args, **kwargs: (0, 'No jobs'))
@@ -350,31 +355,34 @@ class TestConcurrentStatus:
         """
         # Since testing KeyboardInterrupt in concurrent execution is complex,
         # let's test the core functionality more directly
-        
+
         # Mock the cancel function to track calls
         cancel_calls = []
+
         def mock_cancel(request_id, silent=False):
             cancel_calls.append((request_id, silent))
+
         monkeypatch.setattr('sky.client.sdk.api_cancel', mock_cancel)
-        
+
         # Test the handle_managed_jobs function directly
         import concurrent.futures
+
         from sky.client.cli import command
-        
+
         # Mock the _handle_jobs_queue_request to raise KeyboardInterrupt
         def mock_handle_jobs_queue_request(*args, **kwargs):
             raise KeyboardInterrupt("Test interrupt")
-        
+
         monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
                             mock_handle_jobs_queue_request)
-        
+
         # Create a mock executor context to test the handler directly
         # This simulates what would happen in the actual status command
         def test_handle_managed_jobs():
             request_id = 'test_jobs_request_id'
             show_managed_jobs = True
             all_users = False
-            
+
             if show_managed_jobs:
                 try:
                     command._handle_jobs_queue_request(
@@ -389,10 +397,10 @@ class TestConcurrentStatus:
                     command.sdk.api_cancel(request_id, silent=True)
                     return -1, 'KeyboardInterrupt'
             return None, ''
-        
+
         # Test the handler
         result = test_handle_managed_jobs()
-        
+
         # Verify the behavior
         assert result == (-1, 'KeyboardInterrupt')
         assert len(cancel_calls) == 1
@@ -416,6 +424,7 @@ class TestConcurrentStatus:
 
         monkeypatch.setattr('sky.client.sdk.status',
                             lambda *args, **kwargs: 'cluster_request_id')
+
         def mock_stream_and_get(request_id):
             if 'cluster_request_id' in request_id:
                 return [{
@@ -435,7 +444,9 @@ class TestConcurrentStatus:
                     'infra': 'AWS/us-east-1'
                 }]
             return []
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', mock_stream_and_get)
+
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock_stream_and_get)
         monkeypatch.setattr('sky.jobs.queue', track_jobs_queue)
         monkeypatch.setattr('sky.serve.status', track_serve_status)
 
@@ -474,7 +485,8 @@ class TestConcurrentStatus:
 
         # Test with normal mode - should query jobs and services
         monkeypatch.setattr('sky.client.sdk.workspaces', lambda: ['default'])
-        monkeypatch.setattr('sky.client.sdk.get', lambda request_id: ['default'])
+        monkeypatch.setattr('sky.client.sdk.get',
+                            lambda request_id: ['default'])
         monkeypatch.setattr('sky.client.cli.command._handle_jobs_queue_request',
                             lambda *args, **kwargs: (0, 'No jobs'))
         monkeypatch.setattr('sky.client.cli.command._handle_services_request',
@@ -495,6 +507,7 @@ class TestConcurrentStatus:
         """Test backwards compatibility when workspace API is not available."""
         monkeypatch.setattr('sky.client.sdk.status',
                             lambda *args, **kwargs: 'cluster_request_id')
+
         def mock_stream_and_get(request_id):
             return [{
                 'name': 'test-cluster',
@@ -512,7 +525,9 @@ class TestConcurrentStatus:
                 'resources_str_full': '1x t2.micro',
                 'infra': 'AWS/us-east-1'
             }]
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', mock_stream_and_get)
+
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock_stream_and_get)
 
         # Mock workspace API raising RuntimeError (old server)
         def mock_workspaces():
@@ -542,6 +557,7 @@ class TestConcurrentStatus:
         """Test that errors in one concurrent task don't affect others."""
         monkeypatch.setattr('sky.client.sdk.status',
                             lambda *args, **kwargs: 'cluster_request_id')
+
         def mock_stream_and_get(request_id):
             return [{
                 'name': 'test-cluster',
@@ -559,7 +575,9 @@ class TestConcurrentStatus:
                 'resources_str_full': '1x t2.micro',
                 'infra': 'AWS/us-east-1'
             }]
-        monkeypatch.setattr('sky.client.sdk.stream_and_get', mock_stream_and_get)
+
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock_stream_and_get)
 
         # Mock workspace API to raise an error
         def mock_workspaces():
@@ -651,16 +669,20 @@ class TestApiServerStatusCaching:
             return mock_response
 
         # Mock make_authenticated_request
-        monkeypatch.setattr('sky.server.common.make_authenticated_request', mock_make_authenticated_request)
-        
+        monkeypatch.setattr('sky.server.common.make_authenticated_request',
+                            mock_make_authenticated_request)
+
         # Mock get_cookies_from_response and set_api_cookie_jar
-        monkeypatch.setattr('sky.server.common.get_cookies_from_response', lambda x: {})
-        monkeypatch.setattr('sky.server.common.set_api_cookie_jar', lambda x, **kwargs: None)
-        
+        monkeypatch.setattr('sky.server.common.get_cookies_from_response',
+                            lambda x: {})
+        monkeypatch.setattr('sky.server.common.set_api_cookie_jar',
+                            lambda x, **kwargs: None)
+
         # Mock version checking
         mock_version_info = MagicMock()
         mock_version_info.error = None
-        monkeypatch.setattr('sky.server.versions.check_compatibility_at_client', lambda x: mock_version_info)
+        monkeypatch.setattr('sky.server.versions.check_compatibility_at_client',
+                            lambda x: mock_version_info)
 
         # First call should hit the API
         result1 = common.get_api_server_status()
@@ -702,16 +724,20 @@ class TestApiServerStatusCaching:
             return mock_response
 
         # Mock make_authenticated_request
-        monkeypatch.setattr('sky.server.common.make_authenticated_request', mock_make_authenticated_request)
-        
+        monkeypatch.setattr('sky.server.common.make_authenticated_request',
+                            mock_make_authenticated_request)
+
         # Mock get_cookies_from_response and set_api_cookie_jar
-        monkeypatch.setattr('sky.server.common.get_cookies_from_response', lambda x: {})
-        monkeypatch.setattr('sky.server.common.set_api_cookie_jar', lambda x, **kwargs: None)
-        
+        monkeypatch.setattr('sky.server.common.get_cookies_from_response',
+                            lambda x: {})
+        monkeypatch.setattr('sky.server.common.set_api_cookie_jar',
+                            lambda x, **kwargs: None)
+
         # Mock version checking
         mock_version_info = MagicMock()
         mock_version_info.error = None
-        monkeypatch.setattr('sky.server.versions.check_compatibility_at_client', lambda x: mock_version_info)
+        monkeypatch.setattr('sky.server.versions.check_compatibility_at_client',
+                            lambda x: mock_version_info)
 
         # Call with first endpoint
         result1 = common.get_api_server_status('http://localhost:8080')
@@ -752,16 +778,20 @@ class TestApiServerStatusCaching:
             return mock_response
 
         # Mock make_authenticated_request
-        monkeypatch.setattr('sky.server.common.make_authenticated_request', mock_make_authenticated_request)
-        
+        monkeypatch.setattr('sky.server.common.make_authenticated_request',
+                            mock_make_authenticated_request)
+
         # Mock get_cookies_from_response and set_api_cookie_jar
-        monkeypatch.setattr('sky.server.common.get_cookies_from_response', lambda x: {})
-        monkeypatch.setattr('sky.server.common.set_api_cookie_jar', lambda x, **kwargs: None)
-        
+        monkeypatch.setattr('sky.server.common.get_cookies_from_response',
+                            lambda x: {})
+        monkeypatch.setattr('sky.server.common.set_api_cookie_jar',
+                            lambda x, **kwargs: None)
+
         # Mock version checking
         mock_version_info = MagicMock()
         mock_version_info.error = None
-        monkeypatch.setattr('sky.server.versions.check_compatibility_at_client', lambda x: mock_version_info)
+        monkeypatch.setattr('sky.server.versions.check_compatibility_at_client',
+                            lambda x: mock_version_info)
 
         # First call
         common.get_api_server_status()
@@ -792,7 +822,8 @@ class TestApiServerStatusCaching:
             raise Exception("Network error")
 
         # Mock make_authenticated_request
-        monkeypatch.setattr('sky.server.common.make_authenticated_request', mock_make_authenticated_request)
+        monkeypatch.setattr('sky.server.common.make_authenticated_request',
+                            mock_make_authenticated_request)
 
         # First call raises exception
         with pytest.raises(Exception, match="Network error"):
