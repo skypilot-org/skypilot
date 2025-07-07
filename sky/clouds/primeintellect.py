@@ -92,7 +92,7 @@ class PrimeIntellect(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
+    ) -> Iterator[List[clouds.Zone]]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -100,7 +100,10 @@ class PrimeIntellect(clouds.Cloud):
                                             region=region,
                                             zone=None)
         for r in regions:
-            yield None
+            assert r.zones is not None, r
+            # PrimeIntellect provisioner currently takes 1 zone per request
+            for zone in r.zones:
+                yield [zone]
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -161,7 +164,8 @@ class PrimeIntellect(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[Union[str, bool]]]:
-        del dryrun, cluster_name, zones  # unused
+        del dryrun, cluster_name
+        assert zones is not None, (region, zones)
 
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -175,6 +179,8 @@ class PrimeIntellect(clouds.Cloud):
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'zones': zones[0].name,
+            'availability_zone': zones[0].name,
         }
 
     def _get_feasible_launchable_resources(

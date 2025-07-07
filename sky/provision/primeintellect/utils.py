@@ -169,18 +169,11 @@ class PrimeIntellectAPIClient:
             f'{self.base_url}/api/v1/pods/{instance_id}',
             headers=self.headers)
 
-    def launch(self, name: str, instance_type: str, region: str,
+    def launch(self, name: str, instance_type: str, region: str, availability_zone: str,
                disk_size: int) -> Dict[str, Any]:
         cloudId = get_upstream_cloud_id(instance_type)
         assert cloudId, "cloudId cannot be None"
-
-        if not region == 'PLACEHOLDER':
-            parts = region.split(' - ', 1)  # Split at most once
-            country = parts[0]
-            data_center_id = parts[1] if len(parts) > 1 else ''
-        else:
-            country = None
-            data_center_id = None
+        assert availability_zone, "availability_zone cannot be None"
 
         provider, gpu_parts, _, _ = instance_type.split('__', 3)
         if "CPU_NODE" in gpu_parts:
@@ -199,13 +192,16 @@ class PrimeIntellectAPIClient:
                 'gpuType': gpuType,
                 'gpuCount': int(gpuCount),
                 'diskSize': disk_size,
-                'country': country,
-                'dataCenterId': data_center_id,
             },
             'provider': {
                 'type': provider,
             }
         }
+
+        if region != 'UNSPECIFIED':
+            payload['pod']['country'] = region
+        if availability_zone != 'UNSPECIFIED':
+            payload['pod']['dataCenterId'] = availability_zone
 
         if self.team_id is not None and self.team_id != "":
             payload['team'] = {"teamId": self.team_id}
