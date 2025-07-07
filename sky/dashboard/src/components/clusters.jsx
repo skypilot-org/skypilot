@@ -278,14 +278,14 @@ export function Clusters() {
     let values = [];
 
     filters.map((filter, _index) => {
-      properties.push(filter.property[0] ?? '');
+      properties.push(filter.property.toLowerCase() ?? '');
       operators.push(filter.operator);
       values.push(filter.value);
     });
 
-    query.p = properties;
-    query.o = operators;
-    query.v = values;
+    query.property = properties;
+    query.operator = operators;
+    query.value = values;
 
     // Use replace to avoid adding to browser history for filter changes
     router.replace(
@@ -301,9 +301,9 @@ export function Clusters() {
   const updateFiltersByURLParams = () => {
     const query = { ...router.query };
 
-    const properties = query.p;
-    const operators = query.o;
-    const values = query.v;
+    const properties = query.property;
+    const operators = query.operator;
+    const values = query.value;
 
     if (properties === undefined) {
       return;
@@ -315,11 +315,11 @@ export function Clusters() {
 
     const propertyMap = new Map();
     propertyMap.set('', '');
-    propertyMap.set('s', 'Status');
-    propertyMap.set('c', 'Cluster');
-    propertyMap.set('u', 'User');
-    propertyMap.set('w', 'Workspace');
-    propertyMap.set('i', 'Infra');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('cluster', 'Cluster');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('infra', 'Infra');
 
     if (length === 1) {
       filters.push({
