@@ -1,4 +1,5 @@
 """Utilities for REST API."""
+import asyncio
 import contextlib
 import dataclasses
 import enum
@@ -26,10 +27,11 @@ from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import common, subprocess_utils
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -43,7 +45,7 @@ COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
-DEFAULT_REQUESTS_GC_RETENTION_SECONDS = 60 * 60 * 24  # 1 day
+DEFAULT_REQUESTS_GC_RETENTION_HOURS = 24  # 1 day
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -485,8 +487,8 @@ def create_table(cursor, conn):
         schedule_type TEXT,
         {COL_USER_ID} TEXT,
         {COL_STATUS_MSG} TEXT,
-        {COL_SHOULD_RETRY} INTEGER
-        {COL_FINISHED_AT} REAL,
+        {COL_SHOULD_RETRY} INTEGER,
+        {COL_FINISHED_AT} REAL
         )""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
@@ -597,7 +599,7 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
-    finishied_before: Optional[float] = None,
+    finished_before: Optional[float] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -641,9 +643,9 @@ def get_request_tasks(
         request_names_str = ','.join(
             repr(name) for name in include_request_names)
         filters.append(f'name IN ({request_names_str})')
-    if finishied_before is not None:
+    if finished_before is not None:
         filters.append('finished_at < ?')
-        filter_params.append(finishied_before)
+        filter_params.append(finished_before)
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -706,9 +708,19 @@ def set_request_cancelled(request_id: str) -> None:
         request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
 
-
 @init_db
-def clean_finished_requests_with_retention(retention_seconds: int) -> None:
+def _delete_requests(requests: List[Request]):
+    """Clean up requests by their IDs."""
+    id_list_str = ','.join(repr(req.request_id) for req in requests)
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(
+            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+
+
+
+def clean_finished_requests_with_retention(retention_seconds: int):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -729,29 +741,33 @@ def clean_finished_requests_with_retention(retention_seconds: int) -> None:
         args=reqs,
         num_threads=len(reqs))
 
-    id_list_str = ','.join(repr(req.request_id) for req in reqs)
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    _delete_requests(reqs)
 
+    # To avoid leakage of the log file, logs must be deleted before the
+    # request task in the database.
     logger.info(f'Cleaned up {len(reqs)} finished requests '
                 f'older than {retention_seconds} seconds')
 
 
-def requests_gc_daemon():
+
+async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
-    retention_seconds = skypilot_config.get_nested(
-        ('api_server', 'requests_gc_retention_seconds'),
-        DEFAULT_REQUESTS_GC_RETENTION_SECONDS)
     while True:
+        logger.info('Running requests GC daemon...')
+        # Use the latest config.
+        skypilot_config.reload_config()
+        retention_seconds = skypilot_config.get_nested(
+            ('api_server', 'requests_gc_retention_hours'),
+            DEFAULT_REQUESTS_GC_RETENTION_HOURS) * 3600
         try:
             # Negative value disables the requests GC
             if retention_seconds >= 0:
                 clean_finished_requests_with_retention(retention_seconds)
+        except asyncio.CancelledError:
+            logger.info('Requests GC daemon cancelled')
+            break
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running requests GC daemon: {e}')
-        # Run the daemon at most once every 60 seconds to avoid too frequent
+        # Run the daemon at most once every hour to avoid too frequent
         # cleanup.
-        time.sleep(max(retention_seconds, 60))
+        await asyncio.sleep(max(retention_seconds, 3600))

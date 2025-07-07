@@ -41,6 +41,7 @@ def test_set_request_failed():
                                request_body=payloads.RequestBody(),
                                status=RequestStatus.RUNNING,
                                created_at=0.0,
+                               finished_at=0.0,
                                user_id='test-user')
 
     requests.create_if_not_exists(request)
@@ -83,7 +84,8 @@ def test_clean_finished_requests_with_retention():
         entrypoint=dummy,
         request_body=payloads.RequestBody(),
         status=RequestStatus.SUCCEEDED,
-        created_at=current_time - 120,  # 2 minutes old
+        created_at=current_time - 180,
+        finished_at=current_time - 120,  # 2 minutes old
         user_id='test-user')
 
     recent_finished_request = requests.Request(
@@ -92,7 +94,8 @@ def test_clean_finished_requests_with_retention():
         entrypoint=dummy,
         request_body=payloads.RequestBody(),
         status=RequestStatus.FAILED,
-        created_at=current_time - 30,  # 30 seconds old
+        created_at=current_time - 180,
+        finished_at=current_time - 30,  # 30 seconds old
         user_id='test-user')
 
     old_running_request = requests.Request(
@@ -101,7 +104,8 @@ def test_clean_finished_requests_with_retention():
         entrypoint=dummy,
         request_body=payloads.RequestBody(),
         status=RequestStatus.RUNNING,
-        created_at=current_time - 120,  # 2 minutes old
+        created_at=current_time - 180,
+        finished_at=current_time - 120,  # 2 minutes old
         user_id='test-user')
 
     # Create the requests in the database
@@ -144,7 +148,8 @@ def test_clean_finished_requests_with_retention_no_old_requests():
         entrypoint=dummy,
         request_body=payloads.RequestBody(),
         status=RequestStatus.SUCCEEDED,
-        created_at=current_time - 30,  # 30 seconds old
+        created_at=current_time - 180,
+        finished_at=current_time - 30,  # 30 seconds old
         user_id='test-user')
 
     requests.create_if_not_exists(recent_request)
@@ -172,7 +177,8 @@ def test_clean_finished_requests_with_retention_all_statuses():
                                          entrypoint=dummy,
                                          request_body=payloads.RequestBody(),
                                          status=RequestStatus.SUCCEEDED,
-                                         created_at=current_time - 120,
+                                         created_at=current_time - 180,
+                                         finished_at=current_time - 120,
                                          user_id='test-user')
 
     failed_request = requests.Request(request_id='old-failed-1',
@@ -180,7 +186,8 @@ def test_clean_finished_requests_with_retention_all_statuses():
                                       entrypoint=dummy,
                                       request_body=payloads.RequestBody(),
                                       status=RequestStatus.FAILED,
-                                      created_at=current_time - 120,
+                                      created_at=current_time - 180,
+                                      finished_at=current_time - 120,
                                       user_id='test-user')
 
     cancelled_request = requests.Request(request_id='old-cancelled-1',
@@ -188,7 +195,8 @@ def test_clean_finished_requests_with_retention_all_statuses():
                                          entrypoint=dummy,
                                          request_body=payloads.RequestBody(),
                                          status=RequestStatus.CANCELLED,
-                                         created_at=current_time - 120,
+                                         created_at=current_time - 180,
+                                         finished_at=current_time - 120,
                                          user_id='test-user')
 
     requests.create_if_not_exists(succeeded_request)
@@ -230,11 +238,11 @@ def test_requests_gc_daemon():
                     requests.requests_gc_daemon()
 
                 # Verify cleanup was called
-                mock_clean.assert_called_with(120)
+                mock_clean.assert_called_with(120 * 3600)
 
                 # Verify sleep was called with max(retention, 60)
                 assert mock_sleep.call_count == 2
-                mock_sleep.assert_any_call(120)  # max(120, 60) = 120
+                mock_sleep.assert_any_call(120 * 3600)
 
 
 def test_requests_gc_daemon_disabled():
@@ -260,27 +268,4 @@ def test_requests_gc_daemon_disabled():
 
                 # Verify sleep was called with max(-1, 60) = 60
                 assert mock_sleep.call_count == 2
-                mock_sleep.assert_any_call(60)
-
-
-def test_requests_gc_daemon_minimum_sleep():
-    """Test daemon sleeps for minimum 60 seconds."""
-    with mock.patch(
-            'sky.server.requests.requests.skypilot_config') as mock_config:
-        with mock.patch(
-                'sky.server.requests.requests.clean_finished_requests_with_retention'
-        ):
-            with mock.patch('time.sleep') as mock_sleep:
-                # Configure small retention (less than 60)
-                mock_config.get_nested.return_value = 30
-
-                # Make sleep raise an exception after first iteration
-                mock_sleep.side_effect = [None, KeyboardInterrupt()]
-
-                # Run the daemon
-                with pytest.raises(KeyboardInterrupt):
-                    requests.requests_gc_daemon()
-
-                # Verify sleep was called with max(30, 60) = 60
-                assert mock_sleep.call_count == 2
-                mock_sleep.assert_any_call(60)
+                mock_sleep.assert_any_call(3600)

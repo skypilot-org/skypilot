@@ -207,19 +207,19 @@ Service account token for the SkyPilot API server (optional). For more details, 
 
 .. _config-yaml-api-server-requests-gc-retention-seconds:
 
-``api_server.requests_gc_retention_seconds``
+``api_server.requests_gc_retention_hours``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Retention period for finished requests in seconds (optional). Set to a negative value to disable requests GC.
 
-Default: ``86400`` (1 day).
+Default: ``24`` (1 day).
 
 Example:
 
 .. code-block:: yaml
 
   api_server:
-    requests_gc_retention_seconds: -1 # Disable requests GC
+    requests_gc_retention_hours: -1 # Disable requests GC
 
 .. _config-yaml-jobs:
 

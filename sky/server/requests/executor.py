@@ -397,8 +397,7 @@ def _request_execution_wrapper(request_id: str,
             return
         else:
             api_requests.set_request_succeeded(
-                request_id,
-                return_value if not ignore_return_value else None)
+                request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 
