@@ -109,6 +109,7 @@ class TestWithNoCloudEnabled:
         assert isinstance(result.exception, ValueError)
 
 
+<<<<<<< HEAD
 class TestServerVersion:
 
     def test_cli_low_version_server_high_version(self, monkeypatch,
@@ -144,6 +145,8 @@ class TestServerVersion:
         assert result.exit_code == 1
 
 
+=======
+>>>>>>> master
 class TestHelperFunctions:
 
     def test_get_cluster_records_and_set_ssh_config(self, monkeypatch):

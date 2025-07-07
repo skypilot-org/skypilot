@@ -799,7 +799,7 @@ def get_response_from_request_id(request_id: str) -> Any:
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
-            requests_lib.RequestPayload(**response.json()))
+            payloads.RequestPayload(**response.json()))
         return request_task.get_return_value()
     raise RuntimeError(f'Failed to get request {request_id}: '
                        f'{response.status_code} {response.text}')
