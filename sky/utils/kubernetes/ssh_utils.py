@@ -161,7 +161,7 @@ def prepare_hosts_info(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Identity file {identity_file} does not exist.')
-        key_name = f'{cluster_name}-{i}-{str(uuid.uuid4())[:4]}'
+        key_name = f'{cluster_name}-{i}-{str(uuid.uuid4())}'
         key_file_on_api_server = upload_ssh_key_func(key_name, identity_file)
         return key_file_on_api_server
 

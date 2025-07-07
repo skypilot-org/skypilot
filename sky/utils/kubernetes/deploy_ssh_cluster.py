@@ -36,7 +36,7 @@ K3S_TOKEN = 'mytoken'
 logger = sky_logging.init_logger(__name__)
 
 
-def run_command(cmd, shell=False):
+def run_command(cmd, shell=False, silent=False):
     """Run a local command and return the output."""
     process = subprocess.run(cmd,
                              shell=shell,
@@ -44,9 +44,10 @@ def run_command(cmd, shell=False):
                              text=True,
                              check=False)
     if process.returncode != 0:
-        logger.error(f'{RED}Error executing command: {cmd}{NC}')
-        logger.error(f'STDOUT: {process.stdout}')
-        logger.error(f'STDERR: {process.stderr}')
+        if not silent:
+            logger.error(f'{RED}Error executing command: {cmd}{NC}')
+            logger.error(f'STDOUT: {process.stdout}')
+            logger.error(f'STDERR: {process.stderr}')
         return None
     return process.stdout.strip()
 
@@ -459,8 +460,8 @@ def deploy_cluster(cleanup: bool = False,
                                    f'configurations found for {cluster_name!r}'
                                    f'. Skipping...{NC}')
                     continue
-                if (status != SSHClusterStatus.ACTIVE or
-                        status != SSHClusterStatus.PENDING):
+                if (status != SSHClusterStatus.ACTIVE and
+                    status != SSHClusterStatus.PENDING):
                     # might have an update cluster status, but it is not being started.
                     logger.warning(f'{YELLOW}Skipping clean up of non-active '
                                    f'cluster {cluster_name!r}. Current '
@@ -534,8 +535,12 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     # Check cluster ip
     context_name = f'ssh-{ssh_cluster.name}'
 
-    head_node = ssh_cluster.get_update_head_node()
-    worker_nodes = ssh_cluster.get_update_worker_nodes()
+    if cleanup:
+        head_node = ssh_cluster.get_current_head_node()
+        worker_nodes = ssh_cluster.get_current_worker_nodes()
+    else:
+        head_node = ssh_cluster.get_update_head_node()
+        worker_nodes = ssh_cluster.get_update_worker_nodes()
 
     # Some files
     cert_file_path = os.path.expanduser(
@@ -584,7 +589,7 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
             os.remove(tunnel_log_file_path)
     else:
         # Clean up entire cluster
-        worker_nodes_to_cleanup.extend(ssh_cluster.get_current_worker_nodes())
+        worker_nodes_to_cleanup = worker_nodes
 
         # Clean up head node
         cleanup_server_node(head_node.ip,
@@ -623,16 +628,14 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
             contexts = run_command([
                 'kubectl', 'config', 'view', '-o',
                 'jsonpath=\'{.contexts[0].name}\''
-            ],
-                                   shell=False)
+            ], shell=False)
+            contexts = contexts.strip("'")
 
             if contexts:
-                run_command(['kubectl', 'config', 'use-context', contexts],
-                            shell=False)
+                run_command(['kubectl', 'config', 'use-context', contexts], shell=False)
             else:
                 # If no context is available, simply unset the current context
-                run_command(['kubectl', 'config', 'unset', 'current-context'],
-                            shell=False)
+                run_command(['kubectl', 'config', 'unset', 'current-context'], shell=False)
 
             success_message(
                 f'Context {context_name!r} removed from local kubeconfig.')
@@ -993,11 +996,11 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         # TODO(kyuds): Should we move context check way up and
         # error out before setting up on any node?
         run_command(['kubectl', 'config', 'delete-context', context_name],
-                    shell=False)
+                    shell=False, silent=True)
         run_command(['kubectl', 'config', 'delete-cluster', context_name],
-                    shell=False)
+                    shell=False, silent=True)
         run_command(['kubectl', 'config', 'delete-user', context_name],
-                    shell=False)
+                    shell=False, silent=True)
 
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, 'merged_config')
