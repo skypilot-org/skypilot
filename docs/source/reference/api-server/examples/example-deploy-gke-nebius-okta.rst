@@ -382,7 +382,7 @@ Volumes on top of Nebius shared filesystem
 
 The above guide allows you to mount the entire Nebius shared filesystem to all SkyPilot clusters. Additionally, SkyPilot supports creating and managing volumes on top of the shared filesystem using Kubernetes Persistent Volume Claims.
 
-Volumes help isolate data per partition.
+Volumes on top of Nebius shared filesystem help isolate data or share data between different clusters or jobs.
 
 1. Prepare a volume YAML file:
 
