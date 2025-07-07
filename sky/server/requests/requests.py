@@ -26,7 +26,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import common as server_common
+from sky.server import common as server_common, state
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
@@ -51,8 +51,9 @@ COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
-COL_HOST = 'host'
+COL_HOST_ADDRESS = 'host_address'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+
 
 request_table = sqlalchemy.Table(
     REQUEST_TABLE,
@@ -71,7 +72,7 @@ request_table = sqlalchemy.Table(
     sqlalchemy.Column(COL_USER_ID, sqlalchemy.Text),
     sqlalchemy.Column(COL_STATUS_MSG, sqlalchemy.Text),
     sqlalchemy.Column(COL_SHOULD_RETRY, sqlalchemy.Boolean),
-    sqlalchemy.Column(COL_HOST, sqlalchemy.Text),
+    sqlalchemy.Column(COL_HOST_ADDRESS, sqlalchemy.Text),
 )
 
 
@@ -116,7 +117,7 @@ REQUEST_COLUMNS = [
     COL_USER_ID,
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
-    COL_HOST,
+    COL_HOST_ADDRESS,
 ]
 
 
@@ -149,8 +150,8 @@ class Request:
     status_msg: Optional[str] = None
     # Whether the request should be retried.
     should_retry: bool = False
-    # The host of the API server that serves the request.
-    host: Optional[str] = None
+    # The host address of the API server that serves the request.
+    host_address: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -242,7 +243,7 @@ class Request:
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
             should_retry=self.should_retry,
-            host=self.host,
+            host_address=self.host_address,
         )
 
     def encode(self) -> payloads.RequestPayload:
@@ -265,7 +266,7 @@ class Request:
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
-                host=self.host,
+                host_address=self.host_address,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -298,7 +299,7 @@ class Request:
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
-                host=payload.host,
+                host_address=payload.host_address,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -456,11 +457,20 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 exclude_request_names=['sky.api_cancel'])
         ]
     cancelled_request_ids = []
+    local_address = state.get_host_address()
+    remote_request_ids = []
     for request_id in request_ids:
         with update_request(request_id) as request_record:
             if request_record is None:
                 logger.debug(f'No request ID {request_id}')
                 continue
+            if (request_record.host_address is not None and
+                request_record.host_address != local_address):
+                # For requests that processed by other API servers, forward
+                # the cancel request.
+                remote_request_ids.append(request_id)
+                continue
+
             # Skip internal requests. The internal requests are scheduled with
             # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
             if request_record.request_id in set(
@@ -479,6 +489,8 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 os.kill(request_record.pid, signal.SIGTERM)
             request_record.status = RequestStatus.CANCELLED
             cancelled_request_ids.append(request_id)
+    if remote_request_ids:
+        logger.info(f'Forwarding cancel request to {remote_request_ids}')
     return cancelled_request_ids
 
 
@@ -520,7 +532,7 @@ def create_table():
         db_utils.add_column_to_table_sqlalchemy(
             session,
             REQUEST_TABLE,
-            COL_HOST,
+            COL_HOST_ADDRESS,
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
         session.commit()
@@ -740,7 +752,7 @@ def _add_or_update_request_no_lock(request: Request):
                     request_table.c.user_id: payload.user_id,
                     request_table.c.status_msg: payload.status_msg,
                     request_table.c.should_retry: payload.should_retry,
-                    request_table.c.host: payload.host,
+                    request_table.c.host_address: payload.host_address,
                 })
             session.execute(do_update_stmt)
 

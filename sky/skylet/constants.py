@@ -492,3 +492,7 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
+
+# The environment variable for the advertise host of the API server. Other
+# components will use the advertise host to access the server if specified.
+APISERVER_ADVERTISE_HOST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}APISERVER_ADVERTISE_HOST'

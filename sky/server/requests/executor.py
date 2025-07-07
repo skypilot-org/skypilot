@@ -38,7 +38,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import common as server_common
+from sky.server import common as server_common, state
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
@@ -505,7 +505,8 @@ def prepare_request(
                                    created_at=time.time(),
                                    schedule_type=schedule_type,
                                    user_id=user_id,
-                                   cluster_name=request_cluster_name)
+                                   cluster_name=request_cluster_name,
+                                   host_address=state.get_host_address())
 
     if not api_requests.create_if_not_exists(request):
         raise exceptions.RequestAlreadyExistsError(
