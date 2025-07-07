@@ -1992,7 +1992,6 @@ def test_gcp_network_tier_with_gpu():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.aws
 def test_remote_server_api_login():
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only for remote server')
