@@ -28,7 +28,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
-    :ref:`requests_gc_retention_seconds <config-yaml-api-server-requests-gc-retention-seconds>`: 86400
+    :ref:`requests_gc_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -205,7 +205,7 @@ Example:
 
 Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
 
-.. _config-yaml-api-server-requests-gc-retention-seconds:
+.. _config-yaml-api-server-requests-gc-retention-hours:
 
 ``api_server.requests_gc_retention_hours``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
