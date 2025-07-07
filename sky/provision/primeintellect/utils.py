@@ -170,7 +170,7 @@ class PrimeIntellectAPIClient:
             headers=self.headers)
 
     def launch(self, name: str, instance_type: str, region: str, availability_zone: str,
-               disk_size: int) -> Dict[str, Any]:
+               disk_size: int, vcpus: int = 0, memory: int = 0) -> Dict[str, Any]:
         cloudId = get_upstream_cloud_id(instance_type)
         assert cloudId, "cloudId cannot be None"
         assert availability_zone, "availability_zone cannot be None"
@@ -197,6 +197,11 @@ class PrimeIntellectAPIClient:
                 'type': provider,
             }
         }
+
+        if vcpus > 0:
+            payload['pod']['vcpus'] = vcpus
+        if memory > 0:
+            payload['pod']['memory'] = memory
 
         if region != 'UNSPECIFIED':
             payload['pod']['country'] = region

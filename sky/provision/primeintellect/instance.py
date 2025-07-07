@@ -122,13 +122,37 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
+            # Extract vCPUs and memory from instance type
+            # Format: provider__gpu_prefix_base_type__vcpus__memory[_SPOT]
+            instance_type = config.node_config['InstanceType']
+            vcpus = -1
+            memory = -1
+            try:
+                # Split by '__'
+                parts = instance_type.split('__')
+
+                # Format: provider__gpu_info__vcpus__memory[_SPOT]
+                # For: primecompute__8xH100_80GB__104__752_SPOT
+                # parts[0] = primecompute, parts[1] = 8xH100_80GB, parts[2] = 104, parts[3] = 752, parts[4] = SPOT
+                if len(parts) >= 4:
+                    vcpu_str = parts[2]
+                    memory_str = parts[3]
+                    vcpus = int(vcpu_str)
+                    memory = int(memory_str)
+            except (ValueError, IndexError) as e:
+                # If parsing fails, try to get from catalog
+                logger.warning(f'Failed to parse vCPUs/memory from instance type {instance_type}: {e}')
+
             params = {
                 "name": f'{cluster_name_on_cloud}-{node_type}',
                 "instance_type": config.node_config['InstanceType'],
                 "region": region,
                 "availability_zone": config.provider_config['zones'],
                 "disk_size": 120,
+                "vcpus": vcpus,
+                "memory": memory,
             }
+
             response = client.launch(**params)
             instance_id = response['id']
         except utils.PrimeintellectResourcesUnavailableError as e:
