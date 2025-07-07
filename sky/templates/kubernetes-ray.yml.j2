@@ -825,8 +825,6 @@ available_node_types:
             metadata:
               # should be replaced by pod metadata
             spec:
-              securityContext:
-                fsGroup: 1000
               # To prevent the home dir provided by the docker image from being overridden by pvc mounting,
               # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
               initContainers:
@@ -842,31 +840,33 @@ available_node_types:
                       DEST_PATH="/mnt/home"
 
                       # We only need to copy the initial home directory contents from the image
-                      # the *first* time a Pod uses a *new* PVC.
-                      # On subsequent Pod starts (e.g., after a crash or update), the PVC
-                      # already contains the necessary data (and potentially user modifications).
-                      # The presence of MARKER_FILE (created by the main container in a previous
-                      # successful run) indicates the PVC is already initialized. Checking for
-                      # it prevents unnecessary and time-consuming rsync operations on every restart.
+                      # the *first* time a Pod uses a *new* PVC. On subsequent restarts,
+                      # the presence of MARKER_FILE indicates the PVC is already initialized.
                       if [ ! -f "$MARKER_FILE" ]; then
                         echo "Marker '$MARKER_FILE' not found. PVC likely needs initialization."
+                        # Step 1: Copy files from the image to the PVC.
                         echo "Copying initial home directory from image ($SOURCE_PATH/) to PVC ($DEST_PATH)..."
 
-                        # Use rsync with -rl (recursive, links) instead of -a (archive).
-                        # This avoids preserving times (-t) and permissions (-p) implied by -a,
-                        # which caused 'Operation not permitted' errors on the PVC root directory (/mnt/home).
-                        # Owner/group preservation (-o, -g) is also skipped (default for -rl), ensuring
-                        # files are owned by the container's user/group.
+                        # We use 'rsync -rl' instead of '-a' (archive). The '-a' flag implies '-p'
+                        # (preserve permissions), which can cause "Operation not permitted" errors on
+                        # certain volume types (like NFS) when trying to set special permission bits.
+                        # This rsync command just focuses on copying the file content and structure.
                         rsync -rl "$SOURCE_PATH/" "$DEST_PATH"
 
-                        # Check if rsync failed
                         if [ $? -ne 0 ]; then
                            echo "ERROR: rsync failed during home directory initialization." >&2
                            exit 1 # Exit initContainer with error if copy fails
                         fi
-                        echo "Home directory initialization copy complete."
+
+                        # Step 2: Correct ownership and permissions using elevated privileges.
+                        # The volume mount point ($DEST_PATH) is owned by root. We must use sudo
+                        # to change its ownership to 'sky' to satisfy SSH strict modes.
+                        # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023
+                        sudo chown -R sky:sky "$DEST_PATH"
+                        sudo chmod 755 "$DEST_PATH"
+
+                        echo "Home directory initialization and permission fix complete."
                       else
-                        # If marker exists, skip the copy
                         echo "Marker '$MARKER_FILE' found. Skipping initial home directory copy."
                       fi
                       echo "Current contents of $DEST_PATH:"
