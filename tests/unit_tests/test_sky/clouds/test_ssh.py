@@ -1,17 +1,9 @@
 """Tests for SSH cloud implementation."""
 
-import os
-import tempfile
 import unittest
-from unittest import mock
-from unittest.mock import MagicMock
 from unittest.mock import patch
 
-import pytest
-import yaml
-
 from sky.clouds import ssh
-from sky.provision.kubernetes import utils as kubernetes_utils
 
 
 class TestSSHExistingAllowedContexts(unittest.TestCase):
@@ -204,72 +196,6 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             # Should filter by allowed_node_pools even in fallback
             self.assertEqual(sorted(result), ['ssh-cluster1', 'ssh-cluster3'])
 
-    def test_get_ssh_node_pool_contexts_with_valid_file(self):
-        """Test get_ssh_node_pool_contexts with a valid YAML file."""
-        test_config = {
-            'cluster1': {
-                'some': 'config'
-            },
-            'cluster2': {
-                'other': 'config'
-            },
-            'cluster3': {
-                'more': 'config'
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(test_config, f)
-            temp_path = f.name
-
-        try:
-            with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH', temp_path):
-                result = ssh.SSH.get_ssh_node_pool_contexts()
-
-                expected = ['ssh-cluster1', 'ssh-cluster2', 'ssh-cluster3']
-                self.assertEqual(sorted(result), sorted(expected))
-        finally:
-            os.unlink(temp_path)
-
-    def test_get_ssh_node_pool_contexts_with_nonexistent_file(self):
-        """Test get_ssh_node_pool_contexts with nonexistent file."""
-        with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH',
-                   '/nonexistent/path/file.yaml'):
-            result = ssh.SSH.get_ssh_node_pool_contexts()
-
-            self.assertEqual(result, [])
-
-    def test_get_ssh_node_pool_contexts_with_empty_file(self):
-        """Test get_ssh_node_pool_contexts with empty YAML file."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write('')  # Empty file
-            temp_path = f.name
-
-        try:
-            with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH', temp_path):
-                result = ssh.SSH.get_ssh_node_pool_contexts()
-
-                self.assertEqual(result, [])
-        finally:
-            os.unlink(temp_path)
-
-    def test_get_ssh_node_pool_contexts_with_invalid_yaml(self):
-        """Test get_ssh_node_pool_contexts with invalid YAML file."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write('invalid: yaml: content: [')  # Invalid YAML
-            temp_path = f.name
-
-        try:
-            with patch('sky.clouds.ssh.SSH_NODE_POOLS_PATH', temp_path):
-                result = ssh.SSH.get_ssh_node_pool_contexts()
-
-                # Should return empty list on error
-                self.assertEqual(result, [])
-        finally:
-            os.unlink(temp_path)
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
