@@ -196,7 +196,6 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
             # Should filter by allowed_node_pools even in fallback
             self.assertEqual(sorted(result), ['ssh-cluster1', 'ssh-cluster3'])
 
-
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
     @patch('sky.skypilot_config.get_effective_region_config')
