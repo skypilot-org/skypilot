@@ -343,5 +343,6 @@ Details: Prerequisites
 * Debian-based OS (tested on Debian 11)
 * SSH access from SkyPilot API server host to all remote machines
 * All nodes in a SSH Node Pool must have access to port 6443 on all nodes in the pool (e.g., same VPC)
+* Nodes can be added and removed from active ssh node pools except for the head node. To change the head node, bring the node pool down via `sky ssh down` and then redeploy with `sky ssh up`
 
 
