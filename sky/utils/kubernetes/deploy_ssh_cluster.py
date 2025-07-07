@@ -1,5 +1,5 @@
 """SSH-based Kubernetes Cluster Deployment"""
-# This is the python native function call method of creating an SSH Node Pool
+# This is the python native function call method of creating an SSH Node Pool # pylint: disable=line-too-long
 import base64
 import concurrent.futures as cf
 import os
@@ -75,7 +75,10 @@ def run_remote(node,
                print_output=False,
                use_shell=False,
                silent=False):
-    """Run a command on a remote machine via SSH."""
+    """Run a command on a remote machine via SSH.
+
+    silent is used for gpu checking (will error when no gpus are found)
+    """
     if use_ssh_config:
         # Use SSH config for connection parameters
         ssh_cmd = ['ssh', node, cmd]
@@ -595,7 +598,7 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     with cf.ThreadPoolExecutor() as executor:
 
         def run_cleanup_cmd(cmd):
-            logger.info('Cleaning up worker nodes:', cmd)
+            logger.info(f'Cleaning up worker nodes: {cmd}')
             run_command(cmd, shell=True)
 
         executor.map(run_cleanup_cmd, remove_worker_cmds)
@@ -1058,9 +1061,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         else:
             success_message('GPU Operator installed.')
     else:
-        logger.info(
-            f'{YELLOW}No GPUs detected. Skipping GPU Operator installation.{NC}'
-        )
+        logger.info(f'{YELLOW}No GPUs detected. Skipping '
+                    f'GPU Operator installation.{NC}')
 
     # Configure SkyPilot
     progress_message('Configuring SkyPilot...')
@@ -1072,17 +1074,15 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
     success_message('SkyPilot configured successfully.')
 
     # Display final success message
-    logger.info(
-        f'{GREEN}==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====${NC}'
-    )
-    logger.info(
-        'You can now interact with your Kubernetes cluster through SkyPilot: ')
+    logger.info(f'{GREEN}==== 🎉 Kubernetes cluster deployment '
+                f'completed successfully 🎉 ====${NC}')
+    logger.info('You can now interact with your Kubernetes '
+                'cluster through SkyPilot: ')
     logger.info('  • List available GPUs: sky show-gpus --cloud kubernetes')
-    logger.info(
-        '  • Launch a GPU development pod: sky launch -c devbox --cloud kubernetes'
-    )
-    logger.info(
-        '  • Connect to pod with VSCode: code --remote ssh-remote+devbox ')
+    logger.info('  • Launch a GPU development pod: '
+                'sky launch -c devbox --cloud kubernetes')
+    logger.info('  • Connect to pod with VSCode: '
+                'code --remote ssh-remote+devbox ')
 
     if unsuccessful_workers:
         quoted_unsuccessful_workers = [
@@ -1090,8 +1090,8 @@ def _deploy_internal(ssh_cluster: ssh_models.SSHCluster, kubeconfig_path: str,
         ]
 
         logger.warning(
-            f'{WARNING_YELLOW}Failed to deploy Kubernetes on the following nodes: '
-            f'{", ".join(quoted_unsuccessful_workers)}. Please check '
+            f'{WARNING_YELLOW}Failed to deploy Kubernetes on the following '
+            f'nodes: {", ".join(quoted_unsuccessful_workers)}. Please check '
             f'the logs for more details.{NC}')
 
     return [worker.ip for worker in unsuccessful_workers]
