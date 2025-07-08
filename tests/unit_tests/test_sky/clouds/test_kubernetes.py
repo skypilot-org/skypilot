@@ -296,9 +296,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.region = mock.MagicMock()
         self.region.name = "test-context"
 
-    @patch(
-        'sky.clouds.kubernetes.Kubernetes._cluster_supports_high_performance_networking'
-    )
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
@@ -366,9 +363,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(k8s_env_vars['NCCL_IB_HCA'], 'mlx5')
         self.assertIn('UCX_NET_DEVICES', k8s_env_vars)
 
-    @patch(
-        'sky.clouds.kubernetes.Kubernetes._cluster_supports_high_performance_networking'
-    )
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
@@ -435,9 +429,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertNotIn('NCCL_IB_HCA', k8s_env_vars)
         self.assertNotIn('UCX_NET_DEVICES', k8s_env_vars)
 
-    @patch(
-        'sky.clouds.kubernetes.Kubernetes._cluster_supports_high_performance_networking'
-    )
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
@@ -503,9 +494,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Verify that k8s_ipc_lock_capability is False
         self.assertFalse(deploy_vars['k8s_ipc_lock_capability'])
 
-    @patch(
-        'sky.clouds.kubernetes.Kubernetes._cluster_supports_high_performance_networking'
-    )
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
           )
