@@ -132,7 +132,7 @@ GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/co
 
 .. tip::
 
-    It has been observed that using DWS can significantly increase the chance of getting a high-end GPU resource, such as A100s and H100s, compared to using on-demand or spot instances.
+    It has been observed that using DWS can significantly increase the chance of getting a high-end GPU resource, such as H100s and H200s, compared to using on-demand or spot instances.
 
 
 Using DWS for VMs
@@ -196,7 +196,7 @@ using DWS on GKE:
 
   resources:
     infra: k8s
-    accelerators: L4:1
+    accelerators: H100:8
 
   num_nodes: 1
 
@@ -217,8 +217,9 @@ Using DWS with Kueue
 ^^^^^^^^^^^^^^^^^^^^
 
 You can combine a :ref:`Kueue setup <kubernetes-example-kueue>` with DWS on the GKE cluster. This enables gang-scheduling, i.e., all-or-nothing behavior: GKE allocates all resources of the same request at the same time (e.g., multiple nodes/pods of the same job). 
-See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_
-for more details.
+See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
+
+When using DWS with Kueue, you can additionally specify `max_run_duration`. With shorter duration, the resources are likely easier to get due to GCP's DWS scheduling behavior.
 
 .. code-block:: yaml
   :emphasize-lines: 7-7
@@ -241,7 +242,7 @@ Or, specify it in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml
 
     resources:
       infra: k8s
-      accelerators: L4:1
+      accelerators: H100:8
 
     num_nodes: 2
 
