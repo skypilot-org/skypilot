@@ -1081,7 +1081,7 @@ class JobLibCodeGen:
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
             '\nresult = None',
-            '\nif int(constants.SKYLET_VERSION) < 14: '
+            '\nif int(constants.SKYLET_VERSION) < 15: '
             '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'

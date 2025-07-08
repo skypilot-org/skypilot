@@ -605,6 +605,7 @@ class Task:
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
             volumes=config.pop('volumes', None),
+            metadata=config.pop('_metadata', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -1598,6 +1599,8 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
+        # we manually check if its empty to not clog up the generated yaml
+        add_if_not_none('_metadata', self.metadata if self.metadata else None)
         return config
 
     def get_required_cloud_features(
