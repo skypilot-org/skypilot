@@ -2141,16 +2141,52 @@ def cancel(
       \b
       # Cancel the latest running job on a cluster.
       sky cancel cluster_name
+      \b
+      # Cancel the latest running job on all matching clusters.
+      sky cancel cluster-glob*
+      \b
+      # Cancel all your jobs on all matching clusters.
+      sky cancel cluster-glob* -a
 
     Job IDs can be looked up by ``sky queue cluster_name``.
+    Cluster names support glob patterns (e.g., px* matches px1, px2).
     """
+    # Handle glob patterns in cluster names
+    matching_clusters = []
+    if '*' in cluster or '?' in cluster or '[' in cluster:
+        # This is a glob pattern, expand it
+        try:
+            # Get list of all available clusters
+            all_records = sdk.get(sdk.status(cluster_names=None,
+                                             all_users=True))
+            all_clusters = [record['name'] for record in all_records]
+            matching_clusters = [
+                c for c in all_clusters if fnmatch.fnmatch(c, cluster)
+            ]
+        except Exception:
+            raise click.UsageError(
+                f'No clusters match pattern: {cluster!r}') from None
+    else:
+        # Literal cluster name
+        matching_clusters = [cluster]
+
+    if not matching_clusters:
+        raise click.UsageError(f'No clusters match pattern: {cluster!r}')
+
+    # Don't allow job IDs when using glob patterns that match multiple clusters
+    if len(matching_clusters) > 1 and jobs:
+        raise click.UsageError(
+            'Cannot specify job IDs when cluster pattern '
+            'matches multiple clusters. '
+            f'Pattern {cluster!r} matches: {", ".join(matching_clusters)}')
+
     job_identity_str = ''
     job_ids_to_cancel = None
     if not jobs and not all and not all_users:
-        click.echo(
-            f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
-            'cancelling the latest running job.'
-            f'{colorama.Style.RESET_ALL}')
+        click.echo(f'{colorama.Fore.YELLOW}No job IDs or'
+                   ' --all/--all-users provided; '
+                   'cancelling the latest running job.'
+                   f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
     elif all_users:
         job_identity_str = 'all users\' jobs'
@@ -2163,7 +2199,8 @@ def cancel(
             connector = ' and ' if job_identity_str else ''
             job_identity_str += f'{connector}job{plural} {jobs_str}'
             job_ids_to_cancel = jobs
-    job_identity_str += f' on cluster {cluster!r}'
+
+    job_identity_str += f' on cluster(s): {", ".join(matching_clusters)}'
 
     if not yes:
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
@@ -2171,22 +2208,24 @@ def cancel(
                       abort=True,
                       show_default=True)
 
-    try:
-        request_id = sdk.cancel(cluster,
-                                all=all,
-                                all_users=all_users,
-                                job_ids=job_ids_to_cancel)
-        _async_call_or_wait(request_id, async_call, 'sky.cancel')
-    except exceptions.NotSupportedError as e:
-        controller = controller_utils.Controllers.from_name(cluster)
-        assert controller is not None, cluster
-        with ux_utils.print_exception_no_traceback():
-            raise click.UsageError(controller.value.decline_cancel_hint) from e
-    except ValueError as e:
-        raise click.UsageError(str(e))
-    except exceptions.ClusterNotUpError:
-        with ux_utils.print_exception_no_traceback():
-            raise
+    for cluster in matching_clusters:
+        try:
+            request_id = sdk.cancel(cluster,
+                                    all=all,
+                                    all_users=all_users,
+                                    job_ids=job_ids_to_cancel)
+            _async_call_or_wait(request_id, async_call, 'sky.cancel')
+        except exceptions.NotSupportedError as e:
+            controller = controller_utils.Controllers.from_name(cluster)
+            assert controller is not None, cluster
+            with ux_utils.print_exception_no_traceback():
+                raise click.UsageError(
+                    controller.value.decline_cancel_hint) from e
+        except ValueError as e:
+            raise click.UsageError(str(e))
+        except exceptions.ClusterNotUpError:
+            with ux_utils.print_exception_no_traceback():
+                raise
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -3176,7 +3215,11 @@ def show_gpus(
         cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
     # TODO(romilb): We should move this to the backend.
-    kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
+    kubernetes_autoscaling = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=region,
+        keys=('autoscaler',),
+        default_value=None) is not None
     kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
     ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
@@ -3981,8 +4024,7 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                                 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
-                         f'{common_utils.format_exception(e, use_bracket=True)}'
-                         f'{colorama.Style.RESET_ALL}')
+                         f'{str(e)}{colorama.Style.RESET_ALL}')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -5358,14 +5400,42 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
               '-e',
               required=False,
               help='The SkyPilot API server endpoint.')
-@click.option('--get-token',
+@click.option('--relogin',
               is_flag=True,
               default=False,
-              help='Force token-based login.')
+              help='Force relogin with OAuth2 when enabled.')
+@click.option(
+    '--service-account-token',
+    '--token',
+    '-t',
+    required=False,
+    help='Service account token for authentication (starts with ``sky_``).')
 @usage_lib.entrypoint
-def api_login(endpoint: Optional[str], get_token: bool):
-    """Logs into a SkyPilot API server."""
-    sdk.api_login(endpoint, get_token)
+def api_login(endpoint: Optional[str], relogin: bool,
+              service_account_token: Optional[str]):
+    """Logs into a SkyPilot API server.
+
+    If your remote API server has enabled OAuth2 authentication, you can use
+    one of the following methods to login:
+
+    1. OAuth2 browser-based authentication (default)
+
+    2. Service account token via ``--token`` flag
+
+    3. Service account token in ``~/.sky/config.yaml``
+
+    Examples:
+
+    .. code-block:: bash
+
+      # OAuth2 browser login
+      sky api login -e https://api.example.com
+      \b
+      # Service account token login
+      sky api login -e https://api.example.com --token sky_abc123...
+
+    """
+    sdk.api_login(endpoint, relogin, service_account_token)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -5404,13 +5474,18 @@ def ssh():
               is_flag=True,
               hidden=True,
               help='Run the command asynchronously.')
-def ssh_up(infra: Optional[str], async_call: bool):
-    """Set up a cluster using SSH targets from ~/.sky/ssh_node_pools.yaml.
+@click.option('--file',
+              '-f',
+              required=False,
+              help='The file containing the SSH targets.')
+def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
+    """Set up a cluster using SSH targets from a file. If not specified,
+    ~/.sky/ssh_node_pools.yaml will be used.
 
-    This command sets up a Kubernetes cluster on the machines specified in
-    ~/.sky/ssh_node_pools.yaml and configures SkyPilot to use it.
+    This command sets up a Kubernetes cluster on the machines specified in the
+    config file and configures SkyPilot to use it.
     """
-    request_id = sdk.ssh_up(infra=infra)
+    request_id = sdk.ssh_up(infra=infra, file=file)
     if async_call:
         print(f'Request submitted with ID: {request_id}')
     else:

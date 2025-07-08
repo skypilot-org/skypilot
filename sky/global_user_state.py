@@ -65,6 +65,7 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('name', sqlalchemy.Text),
     sqlalchemy.Column('password', sqlalchemy.Text),
+    sqlalchemy.Column('created_at', sqlalchemy.Integer),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -167,11 +168,35 @@ ssh_key_table = sqlalchemy.Table(
     sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
 )
 
+service_account_token_table = sqlalchemy.Table(
+    'service_account_tokens',
+    Base.metadata,
+    sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('token_name', sqlalchemy.Text),
+    sqlalchemy.Column('token_hash', sqlalchemy.Text),
+    sqlalchemy.Column('created_at', sqlalchemy.Integer),
+    sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('creator_user_hash',
+                      sqlalchemy.Text),  # Who created this token
+    sqlalchemy.Column('service_account_user_id',
+                      sqlalchemy.Text),  # Service account's own user ID
+)
+
 cluster_yaml_table = sqlalchemy.Table(
     'cluster_yaml',
     Base.metadata,
     sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('yaml', sqlalchemy.Text),
+)
+
+system_config_table = sqlalchemy.Table(
+    'system_config',
+    Base.metadata,
+    sqlalchemy.Column('config_key', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('config_value', sqlalchemy.Text),
+    sqlalchemy.Column('created_at', sqlalchemy.Integer),
+    sqlalchemy.Column('updated_at', sqlalchemy.Integer),
 )
 
 
@@ -331,6 +356,12 @@ def create_table():
             'password',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'users',
+            'created_at',
+            sqlalchemy.Integer(),
+            default_statement='DEFAULT NULL')
 
         db_utils.add_column_to_table_sqlalchemy(
             session,
@@ -360,7 +391,8 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+                    conn_string, poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/state.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
@@ -383,7 +415,8 @@ def _init_db(func):
 
 
 @_init_db
-def add_or_update_user(user: models.User) -> bool:
+def add_or_update_user(user: models.User,
+                       allow_duplicate_name: bool = True) -> bool:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
@@ -394,7 +427,18 @@ def add_or_update_user(user: models.User) -> bool:
     if user.name is None:
         return False
 
+    # Set created_at if not already set
+    created_at = user.created_at
+    if created_at is None:
+        created_at = int(time.time())
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Check for duplicate names if not allowed (within the same transaction)
+        if not allow_duplicate_name:
+            existing_user = session.query(user_table).filter(
+                user_table.c.name == user.name).first()
+            if existing_user is not None:
+                return False
+
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
@@ -405,14 +449,15 @@ def add_or_update_user(user: models.User) -> bool:
             insert_stmnt = insert_func(user_table).prefix_with(
                 'OR IGNORE').values(id=user.id,
                                     name=user.name,
-                                    password=user.password)
+                                    password=user.password,
+                                    created_at=created_at)
             result = session.execute(insert_stmnt)
 
             # Check if the INSERT actually inserted a row
             was_inserted = result.rowcount > 0
 
             if not was_inserted:
-                # User existed, so update it
+                # User existed, so update it (but don't update created_at)
                 if user.password:
                     session.query(user_table).filter_by(id=user.id).update({
                         user_table.c.name: user.name,
@@ -430,8 +475,12 @@ def add_or_update_user(user: models.User) -> bool:
             # For PostgreSQL, use INSERT ... ON CONFLICT with RETURNING to
             # detect insert vs update
             insert_func = postgresql.insert
+
             insert_stmnt = insert_func(user_table).values(
-                id=user.id, name=user.name, password=user.password)
+                id=user.id,
+                name=user.name,
+                password=user.password,
+                created_at=created_at)
 
             # Use a sentinel in the RETURNING clause to detect insert vs update
             if user.password:
@@ -449,10 +498,12 @@ def add_or_update_user(user: models.User) -> bool:
                                                                  ))
 
             result = session.execute(upsert_stmnt)
+            row = result.fetchone()
+
+            ret = bool(row.was_inserted) if row else False
             session.commit()
 
-            row = result.fetchone()
-            return bool(row.was_inserted) if row else False
+            return ret
         else:
             raise ValueError('Unsupported database dialect')
 
@@ -464,7 +515,10 @@ def get_user(user_id: str) -> Optional[models.User]:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
         return None
-    return models.User(id=row.id, name=row.name, password=row.password)
+    return models.User(id=row.id,
+                       name=row.name,
+                       password=row.password,
+                       created_at=row.created_at)
 
 
 def get_user_by_name(username: str) -> List[models.User]:
@@ -473,8 +527,10 @@ def get_user_by_name(username: str) -> List[models.User]:
     if len(rows) == 0:
         return []
     return [
-        models.User(id=row.id, name=row.name, password=row.password)
-        for row in rows
+        models.User(id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at) for row in rows
     ]
 
 
@@ -490,8 +546,10 @@ def get_all_users() -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
     return [
-        models.User(id=row.id, name=row.name, password=row.password)
-        for row in rows
+        models.User(id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at) for row in rows
     ]
 
 
@@ -1593,6 +1651,137 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
 
 
 @_init_db
+def add_service_account_token(token_id: str,
+                              token_name: str,
+                              token_hash: str,
+                              creator_user_hash: str,
+                              service_account_user_id: str,
+                              expires_at: Optional[int] = None) -> None:
+    """Add a service account token to the database."""
+    assert _SQLALCHEMY_ENGINE is not None
+    created_at = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(service_account_token_table).values(
+            token_id=token_id,
+            token_name=token_name,
+            token_hash=token_hash,
+            created_at=created_at,
+            expires_at=expires_at,
+            creator_user_hash=creator_user_hash,
+            service_account_user_id=service_account_user_id)
+        session.execute(insert_stmnt)
+        session.commit()
+
+
+@_init_db
+def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
+    """Get a service account token by token_id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(service_account_token_table).filter_by(
+            token_id=token_id).first()
+    if row is None:
+        return None
+    return {
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    }
+
+
+@_init_db
+def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
+    """Get all service account tokens for a user (as creator)."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).filter_by(
+            creator_user_hash=user_hash).all()
+    return [{
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    } for row in rows]
+
+
+@_init_db
+def update_service_account_token_last_used(token_id: str) -> None:
+    """Update the last_used_at timestamp for a service account token."""
+    assert _SQLALCHEMY_ENGINE is not None
+    last_used_at = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(service_account_token_table).filter_by(
+            token_id=token_id).update(
+                {service_account_token_table.c.last_used_at: last_used_at})
+        session.commit()
+
+
+@_init_db
+def delete_service_account_token(token_id: str) -> bool:
+    """Delete a service account token.
+
+    Returns:
+        True if token was found and deleted.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.query(service_account_token_table).filter_by(
+            token_id=token_id).delete()
+        session.commit()
+    return result > 0
+
+
+@_init_db
+def rotate_service_account_token(token_id: str,
+                                 new_token_hash: str,
+                                 new_expires_at: Optional[int] = None) -> None:
+    """Rotate a service account token by updating its hash and expiration.
+
+    Args:
+        token_id: The token ID to rotate.
+        new_token_hash: The new hashed token value.
+        new_expires_at: New expiration timestamp, or None for no expiration.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(service_account_token_table).filter_by(
+            token_id=token_id
+        ).update({
+            service_account_token_table.c.token_hash: new_token_hash,
+            service_account_token_table.c.expires_at: new_expires_at,
+            service_account_token_table.c.last_used_at: None,  # Reset last used
+            # Update creation time
+            service_account_token_table.c.created_at: current_time,
+        })
+        session.commit()
+
+    if count == 0:
+        raise ValueError(f'Service account token {token_id} not found.')
+
+
+@_init_db
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.
     If the cluster yaml is not in the database, check if it exists on the
@@ -1661,4 +1850,66 @@ def remove_cluster_yaml(cluster_name: str):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).delete()
+        session.commit()
+
+
+@_init_db
+def get_all_service_account_tokens() -> List[Dict[str, Any]]:
+    """Get all service account tokens across all users (for admin access)."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).all()
+    return [{
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    } for row in rows]
+
+
+@_init_db
+def get_system_config(config_key: str) -> Optional[str]:
+    """Get a system configuration value by key."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(system_config_table).filter_by(
+            config_key=config_key).first()
+    if row is None:
+        return None
+    return row.config_value
+
+
+@_init_db
+def set_system_config(config_key: str, config_value: str) -> None:
+    """Set a system configuration value."""
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(system_config_table).values(
+            config_key=config_key,
+            config_value=config_value,
+            created_at=current_time,
+            updated_at=current_time)
+
+        upsert_stmnt = insert_stmnt.on_conflict_do_update(
+            index_elements=[system_config_table.c.config_key],
+            set_={
+                system_config_table.c.config_value: config_value,
+                system_config_table.c.updated_at: current_time,
+            })
+        session.execute(upsert_stmnt)
         session.commit()

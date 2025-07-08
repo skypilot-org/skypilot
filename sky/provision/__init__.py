@@ -6,7 +6,7 @@ providers supported by SkyPilot need to follow.
 import functools
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from sky import models
 from sky import sky_logging
@@ -106,7 +106,7 @@ def bootstrap_instances(
 
 @_route_to_cloud_impl
 def apply_volume(provider_name: str,
-                 config: models.VolumeConfig) -> models.VolumeConfig:
+                 volume_config: models.VolumeConfig) -> models.VolumeConfig:
     """Create or register a volume.
 
     This function creates or registers a volume with the provided configuration,
@@ -117,15 +117,23 @@ def apply_volume(provider_name: str,
 
 @_route_to_cloud_impl
 def delete_volume(provider_name: str,
-                  config: models.VolumeConfig) -> models.VolumeConfig:
+                  volume_config: models.VolumeConfig) -> models.VolumeConfig:
     """Delete a volume."""
     raise NotImplementedError
 
 
 @_route_to_cloud_impl
-def get_volume_usedby(provider_name: str,
-                      config: models.VolumeConfig) -> List[str]:
-    """Get the usedby of a volume."""
+def get_volume_usedby(
+    provider_name: str,
+    volume_config: models.VolumeConfig,
+) -> Tuple[List[str], List[str]]:
+    """Get the usedby of a volume.
+
+    Returns:
+        usedby_pods: List of pods using the volume. These may include pods
+                     not created by SkyPilot.
+        usedby_clusters: List of clusters using the volume.
+    """
     raise NotImplementedError
 
 
@@ -155,6 +163,17 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """Terminate running or stopped instances."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def cleanup_custom_multi_network(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    failover: bool = False,
+) -> None:
+    """Cleanup custom multi-network."""
     raise NotImplementedError
 
 

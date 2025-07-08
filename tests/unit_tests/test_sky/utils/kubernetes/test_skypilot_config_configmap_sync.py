@@ -159,7 +159,7 @@ class TestConfigMapSync(unittest.TestCase):
         with mock.patch.object(skypilot_config, 'get_user_config_path',
                                return_value=config_path), \
              mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
-             mock.patch('sky.skypilot_config._reload_config'):
+             mock.patch('sky.skypilot_config.reload_config'):
 
             config = config_utils.Config({'test': 'value'})
             skypilot_config.update_api_server_config_no_lock(config)
@@ -186,7 +186,7 @@ class TestConfigMapSync(unittest.TestCase):
         with mock.patch.object(skypilot_config, 'get_user_config_path',
                                return_value=config_path), \
              mock.patch('sky.utils.common_utils.dump_yaml') as mock_dump_yaml, \
-             mock.patch('sky.skypilot_config._reload_config'):
+             mock.patch('sky.skypilot_config.reload_config'):
 
             config = config_utils.Config({'test': 'value'})
             skypilot_config.update_api_server_config_no_lock(config)

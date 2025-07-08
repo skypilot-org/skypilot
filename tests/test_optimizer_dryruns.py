@@ -73,6 +73,15 @@ def _test_resources(
         assert expected_cloud.is_same_cloud(resources.cloud)
 
 
+def _test_resources_from_yaml(spec: str, cluster_name: str = None):
+    resources = sky.Resources.from_yaml_config(spec)
+    with sky.Dag() as dag:
+        task = sky.Task('test_task')
+        task.set_resources(resources)
+    sky.stream_and_get(sky.launch(dag, dryrun=True, cluster_name=cluster_name))
+    return resources
+
+
 def _test_resources_launch(*resources_args,
                            cluster_name: str = None,
                            **resources_kwargs):
@@ -496,6 +505,11 @@ def test_parse_accelerators_from_yaml():
         accelerators: \"V100: 0.5\"""")
     _test_parse_accelerators(spec, {'V100': 0.5})
 
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: {V100: 0.5}""")
+    _test_parse_accelerators(spec, {'V100': 0.5})
+
     # Invalid.
     spec = textwrap.dedent("""\
       resources:
@@ -632,26 +646,30 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
 
 def test_ordered_resources(enable_all_clouds):
     captured_output = io.StringIO()
-    sys.stdout = captured_output  # Redirect stdout to the StringIO object
+    original_stdout = sys.stdout
+    try:
+        sys.stdout = captured_output  # Redirect stdout to the StringIO object
 
-    with sky.Dag() as dag:
-        task = sky.Task('test_task')
-        task.set_resources([
-            sky.Resources(accelerators={'V100': 1}),
-            sky.Resources(accelerators={'T4': 1}),
-            sky.Resources(accelerators={'K80': 1}),
-            sky.Resources(accelerators={'T4': 4}),
-        ])
-    dag = sky.optimize(dag)
-    cli_runner = cli_testing.CliRunner()
-    request_id = sky.launch(task, dryrun=True)
-    result = cli_runner.invoke(command.api_logs, [request_id])
-    assert not result.exit_code
+        with sky.Dag() as dag:
+            task = sky.Task('test_task')
+            task.set_resources([
+                sky.Resources(accelerators={'V100': 1}),
+                sky.Resources(accelerators={'T4': 1}),
+                sky.Resources(accelerators={'K80': 1}),
+                sky.Resources(accelerators={'T4': 4}),
+            ])
+        dag = sky.optimize(dag)
+        cli_runner = cli_testing.CliRunner()
+        request_id = sky.launch(task, dryrun=True)
+        result = cli_runner.invoke(command.api_logs, [request_id])
+        assert not result.exit_code
 
-    # Access the captured output
-    output = captured_output.getvalue()
-    assert any('V100' in line and '✔' in line for line in output.splitlines()), \
-        'Expected to find a line with V100 and ✔ indicating V100 was chosen'
+        # Access the captured output
+        output = captured_output.getvalue()
+        assert any('V100' in line and '✔' in line for line in output.splitlines()), \
+            'Expected to find a line with V100 and ✔ indicating V100 was chosen'
+    finally:
+        sys.stdout = original_stdout  # Restore original stdout
 
 
 def test_disk_tier_mismatch(enable_all_clouds):
@@ -742,3 +760,86 @@ def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     assert 'Try specifying a different memory size' in stdout
     assert 'add "+" to the end of the memory size' in stdout
     assert 'Did you mean:' not in stdout  # No fuzzy candidates
+
+
+def test_accelerator_memory_filtering(capfd, enable_all_clouds):
+    """Test filtering accelerators by memory requirements."""
+    # Test exact memory match
+    spec = {'accelerators': '16GB'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    # Test memory with plus (greater than or equal)
+    spec = {'accelerators': '32GB+'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' not in stdout  # T4 has 16GB memory
+
+    spec = {'accelerators': ['32GB+']}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' not in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': {'32GB+': 1, 'T4': 1}})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': ['32GB+', 'T4']})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    _test_resources_from_yaml({'accelerators': ['32GB+', '16gb']})
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout  # V100 has 32GB memory
+    assert 'A100' in stdout  # A100 has 40GB/80GB memory
+    assert 'T4' in stdout  # T4 has 16GB memory
+
+    # Test memory with different units
+    spec = {'accelerators': '16384MB'}  # 16GB in MB
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+
+
+def test_accelerator_manufacturer_filtering(capfd, enable_all_clouds):
+    """Test filtering accelerators by manufacturer."""
+    # Test NVIDIA GPUs
+    spec = {'accelerators': 'nvidia:16GB:1'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'T4' in stdout
+
+    # Test with memory plus
+    spec = {'accelerators': 'nvidia:32GB+'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+    assert 'V100' in stdout
+    assert 'A100' in stdout
+    assert 'T4' not in stdout
+
+
+def test_accelerator_cloud_filtering(capfd, enable_all_clouds):
+    """Test filtering accelerators by cloud provider."""
+    # Test AWS GPUs
+    spec = {'accelerators': '16GB'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+
+    # Test Azure GPUs
+    spec = {'accelerators': '16GB'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()
+
+    # Test with manufacturer and memory
+    spec = {'accelerators': 'nvidia:32GB+'}
+    _test_resources_from_yaml(spec)
+    stdout, _ = capfd.readouterr()

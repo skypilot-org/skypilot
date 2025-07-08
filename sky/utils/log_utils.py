@@ -573,6 +573,74 @@ def readable_time_duration(start: Optional[float],
     return diff
 
 
+def human_duration(start: int, end: Optional[int] = None) -> str:
+    """Calculates the time elapsed between two timestamps and returns
+       it as a human-readable string, similar to Kubernetes' duration format.
+
+    Args:
+        start: The start time as a Unix timestamp (seconds since epoch).
+        end: The end time as a Unix timestamp (seconds since epoch).
+            If None, current time is used.
+
+    Returns:
+        A string representing the duration, e.g., "2d3h", "15m", "30s".
+        Returns "0s" for zero, negative durations, or if the timestamp
+        is invalid.
+    """
+    if not start or start <= 0:
+        return '0s'
+
+    if end is None:
+        end = int(time.time())
+    duration_seconds = end - start
+
+    units = {
+        'y': 365 * 24 * 60 * 60,
+        'd': 60 * 60 * 24,
+        'h': 60 * 60,
+        'm': 60,
+        's': 1,
+    }
+
+    if duration_seconds <= 0:
+        return '0s'
+    elif duration_seconds < 60 * 2:
+        return f'{duration_seconds}s'
+
+    minutes = int(duration_seconds / units['m'])
+    if minutes < 10:
+        s = int(duration_seconds / units['s']) % 60
+        if s == 0:
+            return f'{minutes}m'
+        return f'{minutes}m{s}s'
+    elif minutes < 60 * 3:
+        return f'{minutes}m'
+
+    hours = int(duration_seconds / units['h'])
+    days = int(hours / 24)
+    years = int(hours / 24 / 365)
+    if hours < 8:
+        m = int(duration_seconds / units['m']) % 60
+        if m == 0:
+            return f'{hours}h'
+        return f'{hours}h{m}m'
+    elif hours < 48:
+        return f'{hours}h'
+    elif hours < 24 * 8:
+        h = hours % 24
+        if h == 0:
+            return f'{days}d'
+        return f'{days}d{h}h'
+    elif hours < 24 * 365 * 2:
+        return f'{days}d'
+    elif hours < 24 * 365 * 8:
+        dy = int(hours / 24) % 365
+        if dy == 0:
+            return f'{years}y'
+        return f'{years}y{dy}d'
+    return f'{years}y'
+
+
 def follow_logs(
     file: TextIO,
     *,

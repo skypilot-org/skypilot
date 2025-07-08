@@ -99,28 +99,6 @@ class ScheduleType(enum.Enum):
 
 
 @dataclasses.dataclass
-class RequestPayload:
-    """The payload for the requests."""
-
-    request_id: str
-    name: str
-    entrypoint: str
-    request_body: str
-    status: str
-    created_at: float
-    user_id: str
-    return_value: str
-    error: str
-    pid: Optional[int]
-    schedule_type: str
-    user_name: Optional[str] = None
-    # Resources the request operates on.
-    cluster_name: Optional[str] = None
-    status_msg: Optional[str] = None
-    should_retry: bool = False
-
-
-@dataclasses.dataclass
 class Request:
     """A SkyPilot API request."""
 
@@ -185,7 +163,7 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
-        return cls.decode(RequestPayload(**content))
+        return cls.decode(payloads.RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
@@ -194,7 +172,7 @@ class Request:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(self) -> RequestPayload:
+    def readable_encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -212,7 +190,7 @@ class Request:
                           payloads.RequestBody), (self.name, self.request_body)
         user = global_user_state.get_user(self.user_id)
         user_name = user.name if user is not None else None
-        return RequestPayload(
+        return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
             entrypoint=self.entrypoint.__name__,
@@ -230,12 +208,12 @@ class Request:
             should_retry=self.should_retry,
         )
 
-    def encode(self) -> RequestPayload:
+    def encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request."""
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
-            return RequestPayload(
+            return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
@@ -264,7 +242,7 @@ class Request:
             raise
 
     @classmethod
-    def decode(cls, payload: RequestPayload) -> 'Request':
+    def decode(cls, payload: payloads.RequestPayload) -> 'Request':
         """Deserialize the SkyPilot API request."""
         try:
             return cls(
@@ -375,9 +353,28 @@ def managed_job_status_refresh_event():
 
 @dataclasses.dataclass
 class InternalRequestDaemon:
+    """Internal daemon that runs an event in the background."""
+
     id: str
     name: str
     event_fn: Callable[[], None]
+
+    def run_event(self):
+        """Run the event."""
+        while True:
+            with ux_utils.enable_traceback():
+                try:
+                    self.event_fn()
+                    break
+                except Exception:  # pylint: disable=broad-except
+                    # It is OK to fail to run the event, as the event is not
+                    # critical, but we should log the error.
+                    logger.exception(
+                        f'Error running {self.name} event. '
+                        f'Restarting in '
+                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
+                        'seconds...')
+                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.

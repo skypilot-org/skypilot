@@ -180,12 +180,6 @@ def is_consolidation_mode() -> bool:
     return consolidation_mode
 
 
-def get_ha_dump_script_path(job_id: int) -> pathlib.Path:
-    """Get the path to the HA dump script for a job."""
-    return pathlib.Path(constants.PERSISTENT_RUN_SCRIPT_DIR).expanduser(
-    ).resolve() / f'sky_job_{job_id}'
-
-
 def ha_recovery_for_consolidation_mode():
     """Recovery logic for HA mode."""
     # No setup recovery is needed in consolidation mode, as the API server
@@ -221,17 +215,15 @@ def ha_recovery_for_consolidation_mode():
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING
             ]:
-                dump_script_path = get_ha_dump_script_path(job_id)
-                if not dump_script_path.exists():
-                    f.write(f'Job {job_id}\'s recovery file ({dump_script_path}'
-                            ') does not exist. Skipping recovery. Job '
-                            f'schedule state: {job["schedule_state"]}\n')
+                script = managed_job_state.get_ha_recovery_script(job_id)
+                if script is None:
+                    f.write(f'Job {job_id}\'s recovery script does not exist. '
+                            'Skipping recovery. Job schedule state: '
+                            f'{job["schedule_state"]}\n')
                     continue
-                with open(dump_script_path, 'r', encoding='utf-8') as script_f:
-                    script = script_f.read()
                 runner.run(script)
-                f.write(f'Job {job_id} (file: {dump_script_path}) completed '
-                        f'recovery at {datetime.datetime.now()}\n')
+                f.write(f'Job {job_id} completed recovery at '
+                        f'{datetime.datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 

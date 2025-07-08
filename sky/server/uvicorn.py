@@ -159,6 +159,8 @@ class Server(uvicorn.Server):
     def run(self, *args, **kwargs):
         """Run the server process."""
         context_utils.hijack_sys_attrs()
+        # Use default loop policy of uvicorn (use uvloop if available).
+        self.config.setup_event_loop()
         with self.capture_signals():
             asyncio.run(self.serve(*args, **kwargs))
 

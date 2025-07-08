@@ -62,6 +62,9 @@ class Nebius(clouds.Cloud):
             ('Custom network tier is currently not supported on Nebius.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Nebius.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on '
+             f'{_REPR}.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
     # 63 - 8 - 5 = 50 characters since
@@ -224,8 +227,14 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        config_fs = skypilot_config.get_nested(
-            ('nebius', region.name, 'filesystems'), [])
+        config_fs = skypilot_config.get_effective_region_config(
+            cloud='nebius',
+            region=None,
+            keys=(
+                region.name,
+                'filesystems',
+            ),
+            default_value=[])
         resources_vars_fs = []
         for i, fs in enumerate(config_fs):
             resources_vars_fs.append({

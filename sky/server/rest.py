@@ -12,6 +12,8 @@ import colorama
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.server import constants
+from sky.server import versions
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -27,6 +29,11 @@ else:
 F = TypeVar('F', bound=Callable[..., Any])
 
 _RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+_session = requests.Session()
+_session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
+_session.headers[constants.VERSION_HEADER] = (
+    versions.get_local_readable_version())
 
 
 class RetryContext:
@@ -64,8 +71,9 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             msg = (
-                f'{colorama.Fore.YELLOW}API server is temporarily: upgrade in '
-                f'progress. Waiting to resume...{colorama.Style.RESET_ALL}')
+                f'{colorama.Fore.YELLOW}API server is temporarily unavailable: '
+                'upgrade in progress. Waiting to resume...'
+                f'{colorama.Style.RESET_ALL}')
             backoff = common_utils.Backoff(
                 initial_backoff=initial_backoff,
                 max_backoff_factor=max_backoff_factor)
@@ -128,25 +136,20 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
 
 
 @retry_on_server_unavailable()
-def post(url, data=None, json=None, **kwargs) -> 'requests.Response':
-    """Send a POST request to the API server, retry on server temporarily
+def request(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server, retry on server temporarily
     unavailable."""
-    response = requests.post(url, data=data, json=json, **kwargs)
+    return request_without_retry(method, url, **kwargs)
+
+
+def request_without_retry(method, url, **kwargs) -> 'requests.Response':
+    """Send a request to the API server without retry."""
+    response = _session.request(method, url, **kwargs)
     handle_server_unavailable(response)
-    return response
-
-
-@retry_on_server_unavailable()
-def get(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server, retry on server temporarily
-    unavailable."""
-    response = requests.get(url, params=params, **kwargs)
-    handle_server_unavailable(response)
-    return response
-
-
-def get_without_retry(url, params=None, **kwargs) -> 'requests.Response':
-    """Send a GET request to the API server without retry."""
-    response = requests.get(url, params=params, **kwargs)
-    handle_server_unavailable(response)
+    remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
+    remote_version = response.headers.get(constants.VERSION_HEADER)
+    if remote_api_version is not None:
+        versions.set_remote_api_version(int(remote_api_version))
+    if remote_version is not None:
+        versions.set_remote_version(remote_version)
     return response

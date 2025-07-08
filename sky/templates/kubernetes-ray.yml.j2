@@ -297,6 +297,9 @@ available_node_types:
         annotations:
             kueue.x-k8s.io/retriable-in-group: "false"
             kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
+            {% if k8s_max_run_duration_seconds %}
+            provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
+            {% endif %}
         {% endif %}
         # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx 
         # Values from google cloud guide
@@ -379,13 +382,16 @@ available_node_types:
         {% endif %}
 
         # Add node selector if GPU/TPUs are requested:
-        {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) %}
+        {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) or (k8s_enable_flex_start) %}
         nodeSelector:
             {% if k8s_topology_label_key is not none and k8s_topology_label_value is not none %}
             {{k8s_topology_label_key}}: {{k8s_topology_label_value}}
             {% endif %}
             {% if k8s_spot_label_key is not none %}
             {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
+            {% endif %}
+            {% if k8s_enable_flex_start %}
+            cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
         {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
@@ -497,7 +503,7 @@ available_node_types:
         {% endif %}
         containers:
         - name: ray-node
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           image: {{image_id}}
           env:
             - name: SKYPILOT_POD_NODE_TYPE
