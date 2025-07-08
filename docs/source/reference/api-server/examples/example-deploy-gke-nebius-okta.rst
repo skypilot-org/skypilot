@@ -380,9 +380,13 @@ Here's an example of how to use the shared filesystem in a SkyPilot job:
 Volumes on top of Nebius shared filesystem
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The above guide allows you to mount the entire Nebius shared filesystem to all SkyPilot clusters. Additionally, SkyPilot supports creating and managing volumes on top of the shared filesystem using Kubernetes Persistent Volume Claims.
+The above guide allows you to mount the entire Nebius shared filesystem to all SkyPilot clusters. Additionally, SkyPilot supports creating and managing :ref:`volumes <volumes-on-kubernetes>` on top of the shared filesystem using Kubernetes Persistent Volume Claims.
 
-Volumes on top of Nebius shared filesystem help isolate data or share data between different clusters or jobs.
+Volumes provide several key benefits for data management:
+
+* **Data Sharing**: Share data between different clusters or jobs efficiently
+* **Caching**: Serve as persistent cache for PyPI packages, Hugging Face models, and other dependencies
+* **Isolation**: Provide better data isolation between clusters and jobs compared to mounting the shared filesystem directly to node groups
 
 1. Prepare a volume YAML file:
 
