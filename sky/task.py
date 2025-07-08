@@ -255,7 +255,7 @@ class Task:
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
         volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Union[Dict[str, Any], str]] = None,
     ):
         """Initializes a Task.
 
@@ -371,7 +371,12 @@ class Task:
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             volume_mounts)
 
-        self._metadata = metadata if metadata is not None else {}
+        if isinstance(metadata, dict):
+            self._metadata = metadata
+        elif metadata is not None:
+            self._metadata = json.loads(metadata)
+        else:
+            self._metadata = {}
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
