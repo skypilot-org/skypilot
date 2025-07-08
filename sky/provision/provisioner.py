@@ -506,6 +506,11 @@ def _post_provision_setup(
 
         # Check version compatibility for jobs controller clusters
         if cluster_name.display_name.startswith(common.JOB_CONTROLLER_PREFIX):
+            # TODO(zeping): remove this in v0.12.0
+            # This only happens in upgrade from <0.9.3 to > 0.10.0
+            # After 0.10.0 no incompatibility issue
+            # See https://github.com/skypilot-org/skypilot/pull/6096
+            # For more details
             status.update(
                 ux_utils.spinner_message(
                     'Checking controller version compatibility'))
