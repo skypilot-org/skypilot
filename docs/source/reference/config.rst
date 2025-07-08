@@ -210,7 +210,9 @@ Service account token for the SkyPilot API server (optional). For more details, 
 ``api_server.requests_gc_retention_hours``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Retention period for finished requests in seconds (optional). Set to a negative value to disable requests GC.
+Retention period for finished requests in hours (optional). Set to a negative value to disable requests GC.
+
+Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
 
 Default: ``24`` (1 day).
 
