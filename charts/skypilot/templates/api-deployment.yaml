@@ -109,6 +109,10 @@ spec:
         {{- end }}
         - name: SKYPILOT_GRACE_PERIOD_SECONDS
           value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
+        - name: SKYPILOT_APISERVER_UUID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:

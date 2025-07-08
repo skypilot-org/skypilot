@@ -161,7 +161,7 @@ class Server(uvicorn.Server):
         """Run the server process."""
         context_utils.hijack_sys_attrs()
         state.set_host_uuid(
-            os.environ.get(constants.APISERVER_UUID_ENV_VAR, str(uuid.uuid4())))
+            os.environ.get(constants.APISERVER_UUID_ENV_VAR, ''))
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
         with self.capture_signals():
