@@ -6,6 +6,7 @@ import requests
 from sky import clouds
 from sky import server
 from sky.client.cli import command
+from sky.server import common
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -49,6 +50,8 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda
         -> sky show-gpus V100:4 --cloud lambda --all
         """
+        common.get_api_server_status.cache_clear()
+
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.show_gpus, [])
         assert not result.exit_code
@@ -97,6 +100,8 @@ class TestWithNoCloudEnabled:
             assert isinstance(result.exception, SystemExit)
 
     def test_k8s_alias_check(self):
+        common.get_api_server_status.cache_clear()
+
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(command.check, ['k8s'])
