@@ -219,7 +219,8 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+                    conn_string, poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/spot_jobs.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
@@ -544,14 +545,16 @@ def set_job_info_without_job_id(name: str, workspace: str,
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             result = session.execute(insert_stmt)
+            ret = result.lastrowid
             session.commit()
-            return result.lastrowid
+            return ret
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             result = session.execute(
                 insert_stmt.returning(job_info_table.c.spot_job_id))
+            ret = result.scalar()
             session.commit()
-            return result.scalar()
+            return ret
         else:
             raise ValueError('Unsupported database dialect')
 

@@ -391,7 +391,8 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+                    conn_string, poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/state.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
@@ -497,10 +498,12 @@ def add_or_update_user(user: models.User,
                                                                  ))
 
             result = session.execute(upsert_stmnt)
+            row = result.fetchone()
+
+            ret = bool(row.was_inserted) if row else False
             session.commit()
 
-            row = result.fetchone()
-            return bool(row.was_inserted) if row else False
+            return ret
         else:
             raise ValueError('Unsupported database dialect')
 
