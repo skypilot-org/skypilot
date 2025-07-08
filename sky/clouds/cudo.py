@@ -73,6 +73,9 @@ class Cudo(clouds.Cloud):
         ),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Cudo.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on Cudo.'
+            ),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 

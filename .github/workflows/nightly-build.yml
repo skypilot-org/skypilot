@@ -1,7 +1,7 @@
 name: nightly-build
 on:
   schedule:
-    - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
+    - cron: '35 8 * * *' # 8:35am UTC, 1:35am PST, 4:35am EST
   workflow_dispatch:
     inputs:
       skip_buildkite:

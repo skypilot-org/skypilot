@@ -298,10 +298,9 @@ def _initialize_and_get_db(
                                                       'sqlite+aiosqlite://')
                     conn_string = conn_string.replace('postgresql://',
                                                       'postgresql+asyncpg://')
-                    # if we support another async database, add it here
                     engine = create_engine_func(conn_string,
-                                                pool_size=5,
-                                                max_overflow=15)
+                                                pool_size=3,
+                                                max_overflow=2)
                 else:
                     engine = create_engine_func(conn_string,
                                                 poolclass=sqlalchemy.NullPool)
@@ -342,9 +341,9 @@ def _init_db_async(func):
                 last_exc = e
             except OSError as e:
                 last_exc = e
+            logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
-        else:
-            raise last_exc
+        raise last_exc
 
     return wrapper
 
@@ -371,9 +370,9 @@ def _init_db(func):
                 last_exc = e
             except OSError as e:
                 last_exc = e
+            logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())
-        else:
-            raise last_exc
+        raise last_exc
 
     return wrapper
 

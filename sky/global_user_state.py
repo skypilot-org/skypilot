@@ -20,7 +20,6 @@ import uuid
 
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import NullPool
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
@@ -393,7 +392,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
                 _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-                    conn_string, poolclass=NullPool)
+                    conn_string, poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/state.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
@@ -502,7 +501,6 @@ def add_or_update_user(user: models.User,
             row = result.fetchone()
 
             ret = bool(row.was_inserted) if row else False
-
             session.commit()
 
             return ret
