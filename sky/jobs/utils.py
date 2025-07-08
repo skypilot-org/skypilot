@@ -1086,9 +1086,6 @@ def dump_managed_job_queue() -> str:
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
-        if not job['metadata']:
-            job['metadata'] = {}
-
         cluster_name = generate_managed_job_cluster_name(
             job['task_name'], job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)

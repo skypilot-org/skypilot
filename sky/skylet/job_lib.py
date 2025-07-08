@@ -118,14 +118,14 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
+                                 'TEXT DEFAULT NULL')
     db_utils.add_column_to_table(cursor,
                                  conn,
                                  'jobs',
                                  'metadata',
                                  'TEXT DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
-    db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
-                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
