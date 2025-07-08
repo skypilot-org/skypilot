@@ -710,4 +710,4 @@ class RequestPayload(BasePayload):
     cluster_name: Optional[str] = None
     status_msg: Optional[str] = None
     should_retry: bool = False
-    host: Optional[str] = None
+    host_uuid: Optional[str] = None

@@ -1460,6 +1460,14 @@ async def stream(
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
+        if (request_task.host_address is not None and
+            request_task.host_address != state.get_host_address()):
+            # Ask the ingress-controller to retry next upstream, if none
+            # of the upstreams can handle the request, a 502 error will be
+            # returned to the client.
+            raise fastapi.HTTPException(
+                status_code=502,
+                detail=f'Request {request_id!r} is not local, try next upstream')
         log_path_to_stream = request_task.log_path
     else:
         assert log_path is not None, (request_id, log_path)

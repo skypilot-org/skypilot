@@ -51,7 +51,7 @@ COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
-COL_HOST_ADDRESS = 'host_address'
+COL_HOST_UUID = 'host_uuid'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 
@@ -72,7 +72,7 @@ request_table = sqlalchemy.Table(
     sqlalchemy.Column(COL_USER_ID, sqlalchemy.Text),
     sqlalchemy.Column(COL_STATUS_MSG, sqlalchemy.Text),
     sqlalchemy.Column(COL_SHOULD_RETRY, sqlalchemy.Boolean),
-    sqlalchemy.Column(COL_HOST_ADDRESS, sqlalchemy.Text),
+    sqlalchemy.Column(COL_HOST_UUID, sqlalchemy.Text),
 )
 
 
@@ -117,7 +117,7 @@ REQUEST_COLUMNS = [
     COL_USER_ID,
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
-    COL_HOST_ADDRESS,
+    COL_HOST_UUID,
 ]
 
 
@@ -150,8 +150,8 @@ class Request:
     status_msg: Optional[str] = None
     # Whether the request should be retried.
     should_retry: bool = False
-    # The host address of the API server that serves the request.
-    host_address: Optional[str] = None
+    # The UUID of the API server that serves the request.
+    host_uuid: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -243,7 +243,7 @@ class Request:
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
             should_retry=self.should_retry,
-            host_address=self.host_address,
+            host_uuid=self.host_uuid,
         )
 
     def encode(self) -> payloads.RequestPayload:
@@ -266,7 +266,7 @@ class Request:
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
-                host_address=self.host_address,
+                host_uuid=self.host_uuid,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -299,7 +299,7 @@ class Request:
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
-                host_address=payload.host_address,
+                host_uuid=payload.host_uuid,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -457,18 +457,11 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 exclude_request_names=['sky.api_cancel'])
         ]
     cancelled_request_ids = []
-    local_address = state.get_host_address()
     remote_request_ids = []
     for request_id in request_ids:
         with update_request(request_id) as request_record:
             if request_record is None:
                 logger.debug(f'No request ID {request_id}')
-                continue
-            if (request_record.host_address is not None and
-                request_record.host_address != local_address):
-                # For requests that processed by other API servers, forward
-                # the cancel request.
-                remote_request_ids.append(request_id)
                 continue
 
             # Skip internal requests. The internal requests are scheduled with
@@ -486,7 +479,13 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 # - After SIGTERM, the executor can reuse the request process
                 #   for other requests, avoiding the overhead of forking a new
                 #   process for each request.
-                os.kill(request_record.pid, signal.SIGTERM)
+                # TODO(aylei): for requests that processed by other API servers,
+                # forward the kill request to the API server that runs the
+                # request.
+                try:
+                    os.kill(request_record.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    logger.debug(f'Process {request_record.pid} not found')
             request_record.status = RequestStatus.CANCELLED
             cancelled_request_ids.append(request_id)
     if remote_request_ids:
@@ -532,7 +531,7 @@ def create_table():
         db_utils.add_column_to_table_sqlalchemy(
             session,
             REQUEST_TABLE,
-            COL_HOST_ADDRESS,
+            COL_HOST_UUID,
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
         session.commit()
@@ -752,7 +751,7 @@ def _add_or_update_request_no_lock(request: Request):
                     request_table.c.user_id: payload.user_id,
                     request_table.c.status_msg: payload.status_msg,
                     request_table.c.should_retry: payload.should_retry,
-                    request_table.c.host_address: payload.host_address,
+                    request_table.c.host_uuid: payload.host_uuid,
                 })
             session.execute(do_update_stmt)
 
