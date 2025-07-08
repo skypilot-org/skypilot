@@ -871,7 +871,7 @@ def get_task_schema():
                 'items': get_volume_mount_schema(),
             },
             '_metadata': {
-                'type': 'object',
+                'type': 'string',
             },
             **_experimental_task_schema(),
         }
