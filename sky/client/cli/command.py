@@ -5015,6 +5015,7 @@ def serve_logs(
     if tail is not None:
         if tail < 0:
             raise click.UsageError('--tail must be a non-negative integer.')
+        # TODO(arda): We could add ability to tail and follow logs together.
         if follow:
             follow = False
             logger.warning(
