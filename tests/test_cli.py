@@ -236,7 +236,7 @@ def mock_api_server_calls(monkeypatch):
 
 class TestWithNoCloudEnabled:
 
-    def test_show_gpus(self):
+    def test_show_gpus(self, monkeypatch):
         """Tests `sky show-gpus` can be invoked (but not correctness).
 
         Tests below correspond to the following terminal commands, in order:
@@ -253,6 +253,8 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda
         -> sky show-gpus V100:4 --cloud lambda --all
         """
+        mock_api_server_calls(monkeypatch)
+
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.show_gpus, [])
         assert not result.exit_code
@@ -300,7 +302,7 @@ class TestWithNoCloudEnabled:
                                        ['V100:4', '--cloud', cloud, '--all'])
             assert isinstance(result.exception, SystemExit)
 
-    def test_k8s_alias_check(self):
+    def test_k8s_alias_check(self, monkeypatch):
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(command.check, ['k8s'])
