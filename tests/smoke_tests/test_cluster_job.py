@@ -768,6 +768,8 @@ def test_scp_http_server_with_custom_ports():
 # ---------- Labels from task on AWS (instance_tags) ----------
 @pytest.mark.aws
 def test_task_labels_aws():
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Skipping test_task_labels on remote server')
     name = smoke_tests_utils.get_cluster_name()
     template_str = pathlib.Path(
         'tests/test_yamls/test_labels.yaml.j2').read_text()
