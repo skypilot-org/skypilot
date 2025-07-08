@@ -122,8 +122,7 @@ def create_table(cursor, conn):
                                  conn,
                                  'jobs',
                                  'metadata',
-                                 'TEXT',
-                                 'DEFAULT \'{}\'',
+                                 'TEXT DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
                                  'TEXT DEFAULT NULL')
