@@ -497,3 +497,6 @@ COST_REPORT_DEFAULT_DAYS = 30
 # by the orchestration system where different UUID identifies different
 # API server instances.
 APISERVER_UUID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}APISERVER_UUID'
+
+# The directory for file locks.
+SKY_LOCKS_DIR = '~/.sky/locks'

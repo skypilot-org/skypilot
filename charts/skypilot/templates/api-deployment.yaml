@@ -100,7 +100,7 @@ spec:
         - name: SKYPILOT_DB_CONNECTION_URI
           valueFrom:
             secretKeyRef:
-              name: {{ include "skypilot.fullname" . }}-db-connection
+              name: {{ .Release.Name }}-db-connection
               key: connection_string
         {{- end }}
         {{- if .Values.apiService.authUserHeaderName }}

@@ -16,7 +16,6 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import colorama
 import filelock
 import sqlalchemy
-from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
@@ -26,7 +25,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import common as server_common, state
+from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
@@ -53,7 +52,6 @@ COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_HOST_UUID = 'host_uuid'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
-
 
 request_table = sqlalchemy.Table(
     REQUEST_TABLE,
@@ -195,11 +193,11 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
-        
+
         # Convert error from bytes back to string for RequestPayload
         if content.get('error') and isinstance(content['error'], bytes):
             content['error'] = content['error'].decode('utf-8')
-        
+
         return cls.decode(payloads.RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
@@ -457,7 +455,6 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 exclude_request_names=['sky.api_cancel'])
         ]
     cancelled_request_ids = []
-    remote_request_ids = []
     for request_id in request_ids:
         with update_request(request_id) as request_record:
             if request_record is None:
@@ -488,8 +485,6 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                     logger.debug(f'Process {request_record.pid} not found')
             request_record.status = RequestStatus.CANCELLED
             cancelled_request_ids.append(request_id)
-    if remote_request_ids:
-        logger.info(f'Forwarding cancel request to {remote_request_ids}')
     return cancelled_request_ids
 
 
@@ -523,11 +518,12 @@ def create_table():
             COL_STATUS_MSG,
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                REQUEST_TABLE,
-                                                COL_SHOULD_RETRY,
-                                                sqlalchemy.Boolean(),
-                                                default_statement='DEFAULT FALSE')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            REQUEST_TABLE,
+            COL_SHOULD_RETRY,
+            sqlalchemy.Boolean(),
+            default_statement='DEFAULT FALSE')
         db_utils.add_column_to_table_sqlalchemy(
             session,
             REQUEST_TABLE,

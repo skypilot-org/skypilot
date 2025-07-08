@@ -9,7 +9,7 @@ from typing import Optional
 _block_requests = False
 
 # The UUID generated on server instance startup.
-_host_uuid: Optional[int] = None
+_host_uuid: Optional[str] = None
 
 
 # TODO(aylei): refactor, state should be a instance property of API server app
@@ -24,10 +24,12 @@ def set_block_requests(shutting_down: bool) -> None:
     global _block_requests
     _block_requests = shutting_down
 
-def set_host_uuid(host_uuid: int) -> None:
+
+def set_host_uuid(host_uuid: str) -> None:
     """Set the UUID of the API server."""
     global _host_uuid
     _host_uuid = host_uuid
+
 
 def get_host_uuid() -> Optional[str]:
     """Get the UUID of the API server."""
