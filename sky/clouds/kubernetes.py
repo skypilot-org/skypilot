@@ -610,7 +610,8 @@ class Kubernetes(clouds.Cloud):
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
 
-        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
+        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts,
+                                                    False)
         timeout = skypilot_config.get_nested(
             ('kubernetes', 'provision_timeout'),
             timeout,
@@ -760,7 +761,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
-            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
         }
