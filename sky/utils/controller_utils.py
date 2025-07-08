@@ -2,7 +2,6 @@
 import copy
 import dataclasses
 import enum
-import getpass
 import os
 import tempfile
 import typing
@@ -254,6 +253,13 @@ def _get_cloud_dependencies_installation_commands(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+    enabled_k8s_and_ssh = [
+        repr(cloud)
+        for cloud in enabled_clouds
+        if isinstance(cloud, clouds.Kubernetes)
+    ]
+    k8s_and_ssh_label = ' and '.join(sorted(enabled_k8s_and_ssh))
+    k8s_dependencies_installed = False
 
     for cloud in enabled_clouds:
         cloud_python_dependencies: List[str] = copy.deepcopy(
@@ -295,10 +301,11 @@ def _get_cloud_dependencies_installation_commands(
                 '--endpoint api.nebius.cloud '
                 '--service-account-file $HOME/.nebius/credentials.json '
                 '&> /dev/null || echo "Unable to create Nebius profile."')
-        elif isinstance(cloud, clouds.Kubernetes):
+        elif (isinstance(cloud, clouds.Kubernetes) and
+              not k8s_dependencies_installed):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{step_prefix}Kubernetes{empty_str}" && '
+                f'echo -en "\\r{step_prefix}{k8s_and_ssh_label}{empty_str}" && '
                 # Install k8s + skypilot dependencies
                 'sudo bash -c "if '
                 '! command -v curl &> /dev/null || '
@@ -321,6 +328,7 @@ def _get_cloud_dependencies_installation_commands(
                 'kubectl /usr/local/bin/kubectl)) && '
                 f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # pylint: disable=line-too-long
                 f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # pylint: disable=line-too-long
+            k8s_dependencies_installed = True
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -422,7 +430,7 @@ def download_and_stream_latest_job_log(
         return None
 
     log_dir = list(log_dirs.values())[0]
-    log_file = os.path.join(log_dir, 'run.log')
+    log_file = os.path.expanduser(os.path.join(log_dir, 'run.log'))
 
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for
@@ -489,7 +497,7 @@ def shared_controller_vars_to_fill(
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
         # running in a container.
-        constants.USER_ENV_VAR: getpass.getuser(),
+        constants.USER_ENV_VAR: common_utils.get_current_user_name(),
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
@@ -725,7 +733,11 @@ def _setup_proxy_command_on_controller(
     config = config_utils.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
-    ssh_proxy_command = config.get_nested(proxy_command_key, None)
+    ssh_proxy_command = skypilot_config.get_effective_region_config(
+        cloud=str(controller_launched_cloud).lower(),
+        region=None,
+        keys=('ssh_proxy_command',),
+        default_value=None)
     if isinstance(ssh_proxy_command, str):
         config.set_nested(proxy_command_key, None)
     elif isinstance(ssh_proxy_command, dict):

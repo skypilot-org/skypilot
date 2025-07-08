@@ -1,4 +1,4 @@
-{{- if and (not .Values.ingress.authSecret) .Values.ingress.authCredentials (not (index .Values.ingress "oauth2-proxy" "enabled")) }}
+{{- if and (not .Values.ingress.authSecret) .Values.ingress.authCredentials (not .Values.apiService.enableUserManagement) (not (index .Values.ingress "oauth2-proxy" "enabled")) }}
 apiVersion: v1
 kind: Secret
 metadata:

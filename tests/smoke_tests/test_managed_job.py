@@ -832,7 +832,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     # First, add an initialization for region
     region = None
     region_flag = ''
-    region_validation_cmd = 'true'
+    region_validation_base_cmd = 'true'
     use_spot = ' --use-spot'
     output_check_cmd = None
 
@@ -845,9 +845,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=output_storage_name)
-        region_validation_cmd = f's=$({region_cmd}) && echo "$s" && echo; echo "$s" | grep {region}'
-        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, region_validation_cmd)
+        region_validation_base_cmd = f's=$({region_cmd}) && echo "$s" && echo; echo "$s" | grep {region}'
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.S3, output_storage_name, 'output.txt')
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -862,9 +860,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, bucket_name=output_storage_name)
-        region_validation_cmd = f'{region_cmd} | grep {region}'
-        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, region_validation_cmd)
+        region_validation_base_cmd = f'{region_cmd} | grep {region}'
         gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -885,9 +881,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
-        region_validation_cmd = f'{region_cmd} | grep {region}'
-        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, region_validation_cmd)
+        region_validation_base_cmd = f'{region_cmd} | grep {region}'
         az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.AZURE,
             output_storage_name,
@@ -945,6 +939,34 @@ def test_managed_jobs_storage(generic_cloud: str):
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_az_cmd} && exit 1; }} || true'))
         timeout *= 4
+
+    # Apply universal retry mechanism with 30s timeout for region validation.
+    # This is useful for jobs consolidation mode, where the job submission is
+    # very fast (don't need to launch a controller VM) and the bucket might not
+    # be created yet immediately after the job submission.
+    region_validation_cmd_with_retry = region_validation_base_cmd
+    region_validation_timeout_for_consolidation = 30
+    # Only apply to non-trivial region validation commands.
+    if region_validation_base_cmd != 'true':
+        if smoke_tests_utils.server_side_is_consolidation_mode():
+            region_validation_cmd = (
+                'start_time=$SECONDS; '
+                'while true; do '
+                f'if (( $SECONDS - start_time > {region_validation_timeout_for_consolidation} )); then '
+                f'  echo "Timeout after {region_validation_timeout_for_consolidation} seconds waiting for region validation"; exit 1; '
+                'fi; '
+                f'if {region_validation_base_cmd}; then '
+                '  echo "Region validation succeeded"; break; '
+                'fi; '
+                'echo "Retrying region validation..."; '
+                'sleep 5; '
+                'done')
+        else:
+            region_validation_cmd = region_validation_base_cmd
+        region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
+            name, region_validation_cmd)
+    else:
+        region_validation_cmd = region_validation_base_cmd
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
@@ -1171,5 +1193,61 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def _get_ha_kill_test(name: str, generic_cloud: str,
+                      status: sky.ManagedJobStatus, first_timeout: int,
+                      second_timeout: int) -> smoke_tests_utils.Test:
+    return smoke_tests_utils.Test(
+        f'test-managed-jobs-ha-kill-{status.value.lower()}',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}', job_status=[status], timeout=first_timeout),
+            smoke_tests_utils.kill_and_wait_controller('jobs'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=second_timeout),
+            f's=$(sky jobs logs --controller -n {name} --no-follow); echo "$s"; echo "$s" | grep "Job succeeded."',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "SUCCEEDED"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env={
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/managed_jobs_ha_config.yaml'
+        },
+        timeout=20 * 60,
+    )
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_running(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(
+        name,
+        generic_cloud,
+        sky.ManagedJobStatus.RUNNING,
+        first_timeout=200,
+        second_timeout=335,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_ha_kill_starting(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = _get_ha_kill_test(
+        name,
+        generic_cloud,
+        sky.ManagedJobStatus.STARTING,
+        first_timeout=95,
+        second_timeout=600,
     )
     smoke_tests_utils.run_one_test(test)

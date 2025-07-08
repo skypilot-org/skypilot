@@ -24,6 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -121,27 +122,61 @@ def _fill_in_env_vars(
     return json.loads(yaml_field_str)
 
 
-def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
-    """Checks if there is a valid docker login config in task_envs.
+def _check_docker_login_config(task_envs: Dict[str, str],
+                               task_secrets: Dict[str, str]) -> bool:
+    """Validates a valid docker login config in task_envs and task_secrets.
 
-    If any of the docker login env vars is set, all of them must be set.
+    Docker login variables must be specified together either in envs OR secrets,
+    not split across both. If any of the docker login env vars is set, all of
+    them must be set in the same location.
+
+    Args:
+        task_envs: Environment variables
+        task_secrets: Secret variables (optional, defaults to empty dict)
 
     Returns:
-        True if there is a valid docker login config in task_envs.
+        True if there is a valid docker login config.
         False otherwise.
     Raises:
-        ValueError: if any of the docker login env vars is set, but not all of
-            them are set.
+        ValueError: if docker login configuration is invalid.
     """
+    if task_secrets is None:
+        task_secrets = {}
+
     all_keys = constants.DOCKER_LOGIN_ENV_VARS
-    existing_keys = all_keys & set(task_envs.keys())
-    if not existing_keys:
+    envs_keys = all_keys & set(task_envs.keys())
+    secrets_keys = all_keys & set(task_secrets.keys())
+
+    # Check if any docker variables exist
+    if not envs_keys and not secrets_keys:
         return False
-    if len(existing_keys) != len(all_keys):
+
+    # Check if variables are split across envs and secrets
+    if envs_keys and secrets_keys:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'If any of {", ".join(all_keys)} is set, all of them must '
-                f'be set. Missing envs: {all_keys - existing_keys}')
+                'Docker login variables must be specified together either '
+                'in envs OR secrets, not split across both. '
+                f'Found in envs: {sorted(envs_keys)}, '
+                f'Found in secrets: {sorted(secrets_keys)}')
+
+    # Check if all variables are present in the chosen location
+    if envs_keys:
+        if len(envs_keys) != len(all_keys):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Docker login variables must be specified together '
+                    'in envs. '
+                    f'Missing from envs: {sorted(all_keys - envs_keys)}')
+
+    if secrets_keys:
+        if len(secrets_keys) != len(all_keys):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Docker login variables must be specified together '
+                    'in secrets. '
+                    f'Missing from secrets: {sorted(all_keys - secrets_keys)}')
+
     return True
 
 
@@ -149,11 +184,13 @@ def _with_docker_login_config(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
+    task_secrets: Dict[str, str],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
-    if not _check_docker_login_config(task_envs):
+    if not _check_docker_login_config(task_envs, task_secrets):
         return resources
-    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
-        task_envs)
+    envs = task_envs.copy()
+    envs.update(task_secrets)
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
         docker_image = resources.extract_docker_image()
@@ -181,8 +218,11 @@ def _with_docker_username_for_runpod(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
+    task_secrets: Dict[str, str],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
-    docker_username_for_runpod = task_envs.get(
+    envs = task_envs.copy()
+    envs.update(task_secrets)
+    docker_username_for_runpod = envs.get(
         constants.RUNPOD_DOCKER_USERNAME_ENV_VAR)
 
     # We should not call r.copy() if docker_username_for_runpod is None,
@@ -204,14 +244,17 @@ class Task:
         setup: Optional[str] = None,
         run: Optional[CommandOrCommandGen] = None,
         envs: Optional[Dict[str, str]] = None,
+        secrets: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
+        volumes: Optional[Dict[str, str]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
+        volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initializes a Task.
@@ -255,6 +298,9 @@ class Task:
             self-contained lambda.
           envs: A dictionary of environment variables to set before running the
             setup and run commands.
+          secrets: A dictionary of secret environment variables to set before
+            running the setup and run commands. These will be redacted in logs
+            and YAML output.
           workdir: The local working directory.  This directory will be synced
             to a location on the remote VM(s), and ``setup`` and ``run``
             commands will be run under that location (thus, they can rely on
@@ -277,6 +323,14 @@ class Task:
                                  storage_lib.StoreType] = {}
         self.setup = setup
         self._envs = envs or {}
+        self._secrets = secrets or {}
+        self._volumes = volumes or {}
+
+        # Validate Docker login configuration early if both envs and secrets
+        # contain Docker variables
+        if self._envs or self._secrets:
+            _check_docker_login_config(self._envs, self._secrets)
+
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
@@ -294,8 +348,7 @@ class Task:
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
-        # The priority of the managed job running this task.
-        self._job_priority: Optional[int] = None
+
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -314,7 +367,9 @@ class Task:
         self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
-        self.file_mounts_mapping = file_mounts_mapping
+        self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
+        self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
+            volume_mounts)
 
         self._metadata = metadata if metadata is not None else {}
 
@@ -397,12 +452,9 @@ class Task:
         if self.file_mounts is None:
             return
         for target, source in self.file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
+            location = f'file_mounts.{target}: {source}'
+            self._validate_mount_path(target, location)
+            self._validate_path(source, location)
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -417,17 +469,25 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
-            # TODO(zhwu): /home/username/sky_workdir as the target path need
-            # to be filtered out as well.
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
-                        'destination path of a file mount, as it will be used '
-                        'by the workdir. If uploading a file/folder to the '
-                        'workdir is needed, please specify the full path to '
-                        'the file/folder.')
+
+    def _validate_mount_path(self, path: str, location: str):
+        self._validate_path(path, location)
+        # TODO(zhwu): /home/username/sky_workdir as the target path need
+        # to be filtered out as well.
+        if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                    'destination path of a file mount, as it will be used '
+                    'by the workdir. If uploading a file/folder to the '
+                    'workdir is needed, please specify the full path to '
+                    'the file/folder.')
+
+    def _validate_path(self, path: str, location: str):
+        if path.endswith('/'):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Mount paths cannot end with a slash '
+                                 f'Found: {path} in {location}')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -453,6 +513,7 @@ class Task:
     def from_yaml_config(
         config: Dict[str, Any],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
+        secrets_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
@@ -466,6 +527,20 @@ class Task:
                 else:
                     new_envs[str(k)] = None
             config['envs'] = new_envs
+
+        # More robust handling for 'secrets': explicitly convert keys and values
+        # to str, since users may pass '123' as keys/values which will get
+        # parsed as int causing validate_schema() to fail.
+        secrets = config.get('secrets')
+        if secrets is not None and isinstance(secrets, dict):
+            new_secrets: Dict[str, Optional[str]] = {}
+            for k, v in secrets.items():
+                if v is not None:
+                    new_secrets[str(k)] = str(v)
+                else:
+                    new_secrets[str(k)] = None
+            config['secrets'] = new_secrets
+
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
         if env_overrides is not None:
@@ -479,6 +554,12 @@ class Task:
             new_envs.update(env_overrides)
             config['envs'] = new_envs
 
+        if secrets_overrides is not None:
+            # Override secrets vars from CLI.
+            new_secrets = config.get('secrets', {})
+            new_secrets.update(secrets_overrides)
+            config['secrets'] = new_secrets
+
         for k, v in config.get('envs', {}).items():
             if v is None:
                 with ux_utils.print_exception_no_traceback():
@@ -487,6 +568,15 @@ class Task:
                         'value for it in task YAML or with --env flag. '
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
+
+        for k, v in config.get('secrets', {}).items():
+            if v is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Secret variable {k!r} is None. Please set a '
+                        'value for it in task YAML or with --secret flag. '
+                        f'To set it to be empty, use an empty string ({k}: "" '
+                        f'in task YAML or --secret {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -511,8 +601,10 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
+            secrets=config.pop('secrets', None),
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            volumes=config.pop('volumes', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -637,9 +729,15 @@ class Task:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
-        job = config.pop('job', None)
-        if job is not None and 'priority' in job:
-            task.set_job_priority(job['priority'])
+        volume_mounts = config.pop('volume_mounts', None)
+        if volume_mounts is not None:
+            task.volume_mounts = []
+            for vol in volume_mounts:
+                common_utils.validate_schema(vol,
+                                             schemas.get_volume_mount_schema(),
+                                             'Invalid volume mount config: ')
+                volume_mount = volume_lib.VolumeMount.from_yaml_config(vol)
+                task.volume_mounts.append(volume_mount)
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task
@@ -675,6 +773,97 @@ class Task:
             config = {}
         return Task.from_yaml_config(config)
 
+    def resolve_and_validate_volumes(self) -> None:
+        """Resolve volumes config to volume mounts and validate them.
+
+        Raises:
+            exceptions.VolumeNotFoundError: if any volume is not found.
+            exceptions.VolumeTopologyConflictError: if there is conflict in the
+              volumes and compute topology.
+        """
+        # Volumes has been resolved, a typical case is that the API server
+        # has resolved the volumes and the dag was then submitted to
+        # controllers.
+        if self.volume_mounts is not None:
+            return None
+        if not self._volumes:
+            return None
+        volume_mounts: List[volume_lib.VolumeMount] = []
+        for dst_path, vol in self._volumes.items():
+            self._validate_mount_path(dst_path, location='volumes')
+            # Shortcut for `dst_path: volume_name`
+            if isinstance(vol, str):
+                volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
+            elif isinstance(vol, dict):
+                assert 'name' in vol, 'Volume name must be set.'
+                volume_mount = volume_lib.VolumeMount.resolve(
+                    dst_path, vol['name'])
+            else:
+                raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
+            volume_mounts.append(volume_mount)
+        # Disable certain access modes
+        disabled_modes = {}
+        if self.num_nodes > 1:
+            disabled_modes[
+                volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value] = (
+                    'access mode ReadWriteOnce is not supported for '
+                    'multi-node tasks.')
+            disabled_modes[
+                volume_lib.VolumeAccessMode.READ_WRITE_ONCE_POD.value] = (
+                    'access mode ReadWriteOncePod is not supported for '
+                    'multi-node tasks.')
+        # TODO(aylei): generalize access mode to all volume types
+        # Record the required topology and the volume that requires it, e.g.
+        # {'cloud': ('volume_name', 'aws')}
+        topology: Dict[str, Tuple[str, Optional[str]]] = {
+            'cloud': ('', None),
+            'region': ('', None),
+            'zone': ('', None),
+        }
+        for vol in volume_mounts:
+            # Check access mode
+            access_mode = vol.volume_config.config.get('access_mode', '')
+            if access_mode in disabled_modes:
+                raise ValueError(f'Volume {vol.volume_name} with '
+                                 f'{disabled_modes[access_mode]}')
+            # Check topology
+            for key, (vol_name, previous_req) in topology.items():
+                req = getattr(vol.volume_config, key)
+                if req is not None:
+                    if previous_req is not None and req != previous_req:
+                        raise exceptions.VolumeTopologyConflictError(
+                            f'Volume {vol.volume_name} can only be attached on '
+                            f'{key}:{req}, which conflicts with another volume '
+                            f'{vol_name} that requires {key}:{previous_req}.'
+                            f'Please use different volumes and retry.')
+                    topology[key] = (vol_name, req)
+        # Now we have the topology requirements from the intersection of all
+        # volumes. Check if there is topology conflict with the resources.
+        # Volume must have no conflict with ALL resources even if user
+        # specifies 'any_of' resources to ensure no resources will conflict
+        # with the volumes during failover.
+
+        for res in self.resources:
+            for key, (vol_name, vol_req) in topology.items():
+                req = getattr(res, key)
+                if (req is not None and vol_req is not None and
+                        str(req) != vol_req):
+                    raise exceptions.VolumeTopologyConflictError(
+                        f'The task requires {key}:{req}, which conflicts with '
+                        f'the volume constraint {key}:{vol_req}. Please '
+                        f'use different volumes and retry.')
+        # No topology conflict, we safely override the topology of resources to
+        # satisfy the volume constraints.
+        override_params = {}
+        for key, (vol_name, vol_req) in topology.items():
+            if vol_req is not None:
+                if key == 'cloud':
+                    override_params[key] = sky.CLOUD_REGISTRY.from_str(vol_req)
+                else:
+                    override_params[key] = vol_req
+        self.set_resources_override(override_params)
+        self.volume_mounts = volume_mounts
+
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
@@ -696,6 +885,26 @@ class Task:
     @property
     def envs(self) -> Dict[str, str]:
         return self._envs
+
+    @property
+    def secrets(self) -> Dict[str, str]:
+        return self._secrets
+
+    @property
+    def volumes(self) -> Dict[str, str]:
+        return self._volumes
+
+    def set_volumes(self, volumes: Dict[str, str]) -> None:
+        """Sets the volumes for this task.
+
+        Args:
+          volumes: a dict of ``{mount_path: volume_name}``.
+        """
+        self._volumes = volumes
+
+    def update_volumes(self, volumes: Dict[str, str]) -> None:
+        """Updates the volumes for this task."""
+        self._volumes.update(volumes)
 
     def update_envs(
             self, envs: Union[None, List[Tuple[str, str]],
@@ -737,16 +946,69 @@ class Task:
         # If the update_envs() is called after set_resources(), we need to
         # manually update docker login config in task resources, in case the
         # docker login envs are newly added.
-        if _check_docker_login_config(self._envs):
+        if _check_docker_login_config(self._envs, self._secrets):
             self.resources = _with_docker_login_config(self.resources,
-                                                       self._envs)
+                                                       self._envs,
+                                                       self._secrets)
         self.resources = _with_docker_username_for_runpod(
-            self.resources, self._envs)
+            self.resources, self._envs, self._secrets)
+        return self
+
+    def update_secrets(
+            self, secrets: Union[None, List[Tuple[str, str]],
+                                 Dict[str, str]]) -> 'Task':
+        """Updates secret env vars for use inside the setup/run commands.
+
+        Args:
+          secrets: (optional) either a list of ``(secret_name, value)`` or a
+            dict ``{secret_name: value}``.
+
+        Returns:
+          self: The current task, with secrets updated.
+
+        Raises:
+          ValueError: if various invalid inputs errors are detected.
+        """
+        if secrets is None:
+            secrets = {}
+        if isinstance(secrets, (list, tuple)):
+            keys = set(secret[0] for secret in secrets)
+            if len(keys) != len(secrets):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Duplicate secret keys provided.')
+            secrets = dict(secrets)
+        if isinstance(secrets, dict):
+            for key in secrets:
+                if not isinstance(key, str):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Secret keys must be strings.')
+                if not common_utils.is_valid_env_var(key):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Invalid secret key: {key}')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'secrets must be List[Tuple[str, str]] or Dict[str, str]: '
+                    f'{secrets}')
+        self._secrets.update(secrets)
+        # Validate Docker login configuration if needed
+        if _check_docker_login_config(self._envs, self._secrets):
+            self.resources = _with_docker_login_config(self.resources,
+                                                       self._envs,
+                                                       self._secrets)
+        self.resources = _with_docker_username_for_runpod(
+            self.resources, self._envs, self._secrets)
         return self
 
     @property
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
+
+    @property
+    def envs_and_secrets(self) -> Dict[str, str]:
+        envs = self.envs.copy()
+        envs.update(self.secrets)
+        return envs
 
     def set_inputs(self, inputs: str,
                    estimated_size_gigabytes: float) -> 'Task':
@@ -806,10 +1068,11 @@ class Task:
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        self.resources = _with_docker_login_config(resources, self.envs)
+        self.resources = _with_docker_login_config(resources, self.envs,
+                                                   self.secrets)
         # Only have effect on RunPod.
         self.resources = _with_docker_username_for_runpod(
-            self.resources, self.envs)
+            self.resources, self.envs, self.secrets)
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
@@ -845,23 +1108,6 @@ class Task:
           self: The current task, with service set.
         """
         self._service = service
-        return self
-
-    @property
-    def job_priority(self) -> Optional[int]:
-        """The priority of the managed job running this task."""
-        return self._job_priority
-
-    def set_job_priority(self, priority: int) -> 'Task':
-        """Sets the job priority for this task.
-
-        Args:
-          priority: an integer between 0 and 1000.
-
-        Returns:
-          self: The current task, with job priority set.
-        """
-        self._job_priority = priority
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
@@ -1276,7 +1522,7 @@ class Task:
                 d[k] = v
         return d
 
-    def to_yaml_config(self) -> Dict[str, Any]:
+    def to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 
         INTERNAL: this method is internal-facing.
@@ -1307,9 +1553,6 @@ class Task:
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 
-        if self.job_priority is not None:
-            add_if_not_none('job', {'priority': self.job_priority})
-
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
@@ -1324,7 +1567,18 @@ class Task:
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
+
+        # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
+
+        # Add secrets with redaction if requested
+        secrets = self.secrets
+        if secrets and redact_secrets:
+            secrets = {
+                k: '<redacted>' if isinstance(v, str) else v
+                for k, v in secrets.items()
+            }
+        add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
 
@@ -1338,6 +1592,12 @@ class Task:
             })
 
         add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
+        add_if_not_none('volumes', self.volumes)
+        if self.volume_mounts is not None:
+            config['volume_mounts'] = [
+                volume_mount.to_yaml_config()
+                for volume_mount in self.volume_mounts
+            ]
         return config
 
     def get_required_cloud_features(

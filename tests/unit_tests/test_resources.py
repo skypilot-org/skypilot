@@ -774,6 +774,90 @@ def test_autostop_config():
     assert r.autostop_config.idle_minutes == 55
 
 
+def test_disk_size_conversion():
+    """Test disk size conversion to GB."""
+    # Test integer input
+    r = Resources(disk_size=100)
+    assert r.disk_size == 100
+
+    # Test string input with different units
+    r = Resources(disk_size='100GB')
+    assert r.disk_size == 100
+
+    r = Resources(disk_size='1024MB')
+    assert r.disk_size == 1
+
+    r = Resources(disk_size='1TB')
+    assert r.disk_size == 1024
+
+    with pytest.raises(ValueError):
+        Resources(disk_size='1024KB')
+
+    with pytest.raises(ValueError):
+        Resources(disk_size='1024B')
+
+    r = Resources(disk_size='1PB')
+    assert r.disk_size == 1024 * 1024
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(disk_size='invalid')
+
+
+def test_memory_conversion():
+    """Test memory conversion to GB."""
+    # Test integer input
+    r = Resources(memory=8)
+    assert r.memory == '8'
+
+    # Test string input with different units
+    r = Resources(memory='8GB')
+    assert r.memory == '8.0'
+
+    r = Resources(memory='8192MB')
+    assert r.memory == '8.0'
+
+    r = Resources(memory='1TB+')
+    assert r.memory == '1024.0+'
+
+    r = Resources(memory='1PB')
+    assert r.memory == '1048576.0'
+
+    # Test with plus suffix
+    r = Resources(memory='8GB+')
+    assert r.memory == '8.0+'
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(memory='invalid')
+
+
+def test_autostop_time_format():
+    """Test autostop time format parsing."""
+    # Test minutes format
+    r = Resources(autostop='5m')
+    assert r.autostop_config.idle_minutes == 5
+
+    # Test hours format
+    r = Resources(autostop='2h')
+    assert r.autostop_config.idle_minutes == 120
+
+    # Test days format
+    r = Resources(autostop='1d')
+    assert r.autostop_config.idle_minutes == 1440
+
+    r = Resources(autostop=30)
+    assert r.autostop_config.idle_minutes == 30
+
+    # Test numeric format
+    r = Resources(autostop='60')
+    assert r.autostop_config.idle_minutes == 60
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(autostop='invalid')
+
+
 def test_priority_basic():
     """Test basic priority field functionality."""
     # Test with no priority specified (defaults to None)
@@ -781,14 +865,14 @@ def test_priority_basic():
     assert r.priority is None
 
     # Test with valid priority values
-    r = Resources(priority=0)
-    assert r.priority == 0
+    r = Resources(priority=constants.MIN_PRIORITY)
+    assert r.priority == constants.MIN_PRIORITY
 
-    r = Resources(priority=500)
-    assert r.priority == 500
+    r = Resources(priority=constants.DEFAULT_PRIORITY)
+    assert r.priority == constants.DEFAULT_PRIORITY
 
-    r = Resources(priority=1000)
-    assert r.priority == 1000
+    r = Resources(priority=constants.MAX_PRIORITY)
+    assert r.priority == constants.MAX_PRIORITY
 
     # Test with None explicitly
     r = Resources(priority=None)
@@ -798,12 +882,13 @@ def test_priority_basic():
 def test_priority_validation():
     """Test priority field validation with invalid values."""
     # Test invalid priority - below range
-    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
-        Resources(priority=-1)
+    error_message = f'Priority must be between {constants.MIN_PRIORITY} and {constants.MAX_PRIORITY}'
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=constants.MIN_PRIORITY - 1)
 
     # Test invalid priority - above range
-    with pytest.raises(ValueError, match='Priority must be between 0 and 1000'):
-        Resources(priority=1001)
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=constants.MAX_PRIORITY + 1)
 
 
 def test_priority_yaml_serialization():
@@ -859,7 +944,7 @@ def test_priority_copy():
 def test_priority_with_any_of():
     """Test priority field works with any_of configuration."""
     config = {
-        'priority': 500,  # Base priority
+        'priority': constants.DEFAULT_PRIORITY,  # Base priority
         'any_of': [
             {
                 'cpus': 8,
@@ -884,7 +969,7 @@ def test_priority_with_any_of():
     r_cpus4 = next((r for r in resources_list if r.cpus == '4'), None)
 
     assert r_cpus8 is not None
-    assert r_cpus8.priority == 500  # Base priority
+    assert r_cpus8.priority == constants.DEFAULT_PRIORITY  # Base priority
 
     assert r_cpus4 is not None
     assert r_cpus4.priority == 800  # Override priority

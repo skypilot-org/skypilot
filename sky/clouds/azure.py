@@ -24,6 +24,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky.volumes import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -313,13 +314,15 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -377,8 +380,11 @@ class Azure(clouds.Cloud):
             }
 
         # Determine resource group for deploying the instance.
-        resource_group_name = skypilot_config.get_nested(
-            ('azure', 'resource_group_vm'), None)
+        resource_group_name = skypilot_config.get_effective_region_config(
+            cloud='azure',
+            region=region_name,
+            keys=('resource_group_vm',),
+            default_value=None)
         use_external_resource_group = resource_group_name is not None
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'

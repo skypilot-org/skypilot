@@ -13,6 +13,16 @@ spec:
       app: {{ .Release.Name }}-api
   template:
     metadata:
+      annotations:
+        {{- if .Values.apiService.metrics.enabled }}
+        # Well-known annotations for Prometheus to scrape the metrics.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
+        {{- if .Values.apiService.annotations }}
+        {{- toYaml .Values.apiService.annotations | nindent 8 }}
+        {{- end }}
       labels:
         app: {{ .Release.Name }}-api
         # This label indicates that the API server is ready to serve requests.
@@ -25,6 +35,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       runtimeClassName: {{ .Values.runtimeClassName }}
+      terminationGracePeriodSeconds: {{ .Values.apiService.terminationGracePeriodSeconds }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
@@ -40,6 +51,17 @@ spec:
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
           value: {{ .Release.Name | quote }}
+        {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
+        - name: SKYPILOT_INITIAL_BASIC_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "skypilot.initialBasicAuthSecretName" . }}
+              key: auth
+        {{- end }}
+        {{- if .Values.apiService.enableServiceAccounts }}
+        - name: ENABLE_SERVICE_ACCOUNTS
+          value: "true"
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
@@ -52,6 +74,19 @@ spec:
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
+        {{- if .Values.apiService.dbConnectionSecretName }}
+        - name: SKYPILOT_DB_CONNECTION_URI
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.apiService.dbConnectionSecretName }}
+              key: connection_string
+        {{- end }}
+        {{- if .Values.apiService.authUserHeaderName }}
+        - name: SKYPILOT_AUTH_USER_HEADER
+          value: {{ .Values.apiService.authUserHeaderName | quote }}
+        {{- end }}
+        - name: SKYPILOT_GRACE_PERIOD_SECONDS
+          value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -87,9 +122,13 @@ spec:
           fi
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
-          echo "Linking ssh_node_pools.yaml from ConfigMap \`skypilot-ssh-node-pools\` to /root/.sky/ssh_node_pools.yaml"
-          # The configmap serves as the ground truth for the ssh_node_pools.yaml file, read-only
-          ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it
+          if [ ! -s /root/.sky/ssh_node_pools.yaml ]; then
+            echo "ssh_node_pools.yaml not found in /root/.sky, copying from ConfigMap \`skypilot-ssh-node-pools\`"
+            cp /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
+          else
+            echo "ssh_node_pools.yaml already exists in /root/.sky, skipping copy"
+          fi
           # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
           if [ ! -s /root/.kube/config ]; then
             echo "{}" > /root/.kube/config
@@ -125,11 +164,11 @@ spec:
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
-            exec sky api start --deploy --foreground
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
           else
             # For backward compatibility, run in background if --foreground is not supported.
-            # TODO(aylei): this will bedropped in 0.11.0.
-            if sky api start --deploy; then
+            # TODO(aylei): this will be dropped in 0.11.0.
+            if sky api start {{ include "skypilot.apiArgs" . }}; then
               tail -n+0 -f /root/.sky/api_server/server.log
             else
               cat /root/.sky/api_server/server.log
@@ -146,7 +185,10 @@ spec:
           httpGet:
             path: /api/health
             port: 46580
-          periodSeconds: 30
+          successThreshold: 1
+          failureThreshold: 3
+          periodSeconds: 5
+          initialDelaySeconds: 5
         volumeMounts:
         {{- if .Values.storage.enabled }}
         - name: state-volume

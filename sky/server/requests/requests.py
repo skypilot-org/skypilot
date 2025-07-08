@@ -38,6 +38,7 @@ REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
+COL_SHOULD_RETRY = 'should_retry'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 # TODO(zhwu): For scalability, there are several TODOs:
@@ -86,6 +87,7 @@ REQUEST_COLUMNS = [
     'schedule_type',
     COL_USER_ID,
     COL_STATUS_MSG,
+    COL_SHOULD_RETRY,
 ]
 
 
@@ -94,27 +96,6 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
-
-
-@dataclasses.dataclass
-class RequestPayload:
-    """The payload for the requests."""
-
-    request_id: str
-    name: str
-    entrypoint: str
-    request_body: str
-    status: str
-    created_at: float
-    user_id: str
-    return_value: str
-    error: str
-    pid: Optional[int]
-    schedule_type: str
-    user_name: Optional[str] = None
-    # Resources the request operates on.
-    cluster_name: Optional[str] = None
-    status_msg: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -137,6 +118,8 @@ class Request:
     cluster_name: Optional[str] = None
     # Status message of the request, indicates the reason of current status.
     status_msg: Optional[str] = None
+    # Whether the request should be retried.
+    should_retry: bool = False
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -180,7 +163,7 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
-        return cls.decode(RequestPayload(**content))
+        return cls.decode(payloads.RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
@@ -189,7 +172,7 @@ class Request:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(self) -> RequestPayload:
+    def readable_encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -207,7 +190,7 @@ class Request:
                           payloads.RequestBody), (self.name, self.request_body)
         user = global_user_state.get_user(self.user_id)
         user_name = user.name if user is not None else None
-        return RequestPayload(
+        return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
             entrypoint=self.entrypoint.__name__,
@@ -222,14 +205,15 @@ class Request:
             user_name=user_name,
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
+            should_retry=self.should_retry,
         )
 
-    def encode(self) -> RequestPayload:
+    def encode(self) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request."""
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
-            return RequestPayload(
+            return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
@@ -243,6 +227,7 @@ class Request:
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
+                should_retry=self.should_retry,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -257,7 +242,7 @@ class Request:
             raise
 
     @classmethod
-    def decode(cls, payload: RequestPayload) -> 'Request':
+    def decode(cls, payload: payloads.RequestPayload) -> 'Request':
         """Deserialize the SkyPilot API request."""
         try:
             return cls(
@@ -274,6 +259,7 @@ class Request:
                 user_id=payload.user_id,
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
+                should_retry=payload.should_retry,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -327,11 +313,68 @@ def refresh_cluster_status_event():
         time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+def refresh_volume_status_event():
+    """Periodically refresh the volume status."""
+    # pylint: disable=import-outside-toplevel
+    from sky.volumes.server import core
+
+    # Disable logging for periodic refresh to avoid the usage message being
+    # sent multiple times.
+    os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
+
+    while True:
+        logger.info('=== Refreshing volume status ===')
+        core.volume_refresh()
+        logger.info('Volume status refreshed. Sleeping '
+                    f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
+                    ' seconds for the next refresh...\n')
+        time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
+
+
+def managed_job_status_refresh_event():
+    """Refresh the managed job status for controller consolidation mode."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    # We run the recovery logic before starting the event loop as those two are
+    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
+    from sky.utils import controller_utils
+    if controller_utils.high_availability_specified(
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
+        managed_job_utils.ha_recovery_for_consolidation_mode()
+    # After recovery, we start the event loop.
+    from sky.skylet import events
+    event = events.ManagedJobEvent()
+    while True:
+        time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+        event.run()
+
+
 @dataclasses.dataclass
 class InternalRequestDaemon:
+    """Internal daemon that runs an event in the background."""
+
     id: str
     name: str
     event_fn: Callable[[], None]
+
+    def run_event(self):
+        """Run the event."""
+        while True:
+            with ux_utils.enable_traceback():
+                try:
+                    self.event_fn()
+                    break
+                except Exception:  # pylint: disable=broad-except
+                    # It is OK to fail to run the event, as the event is not
+                    # critical, but we should log the error.
+                    logger.exception(
+                        f'Error running {self.name} event. '
+                        f'Restarting in '
+                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
+                        'seconds...')
+                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.
@@ -341,7 +384,14 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
-                          event_fn=refresh_cluster_status_event)
+                          event_fn=refresh_cluster_status_event),
+    # Volume status refresh daemon to update the volume status periodically.
+    InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
+                          name='volume',
+                          event_fn=refresh_volume_status_event),
+    InternalRequestDaemon(id='managed-job-status-refresh-daemon',
+                          name='managed-job-status',
+                          event_fn=managed_job_status_refresh_event),
 ]
 
 
@@ -423,10 +473,14 @@ def create_table(cursor, conn):
         {COL_CLUSTER_NAME} TEXT,
         schedule_type TEXT,
         {COL_USER_ID} TEXT,
-        {COL_STATUS_MSG} TEXT)""")
+        {COL_STATUS_MSG} TEXT,
+        {COL_SHOULD_RETRY} INTEGER
+        )""")
 
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
                                  'TEXT')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_SHOULD_RETRY,
+                                 'INTEGER')
 
 
 _DB = None
