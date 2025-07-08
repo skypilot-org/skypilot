@@ -490,7 +490,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise e
 
     high_availability: bool = config.get('high_availability', False)
-    print(f'high_availability: {high_availability}')
     if high_availability:
         target_kind = 'deployment'
     else:

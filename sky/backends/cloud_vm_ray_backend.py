@@ -3231,8 +3231,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cluster_yaml,
                 ssh_user=handle.ssh_user,
                 docker_user=handle.docker_user)
+            cluster_ips = handle.cached_external_ips
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                # For Kubernetes, the connection is always proxied. The HostName
+                # in the SSH config must be 127.0.0.1. Using the pod's real IP
+                # is incorrect, as the IP can become stale, which is especially
+                # true for High-Availability services where pods are recreated.
+                if cluster_ips is not None:
+                    cluster_ips = ['127.0.0.1'] * len(cluster_ips)
             cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name, handle.cached_external_ips, auth_config,
+                handle.cluster_name, cluster_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
 
