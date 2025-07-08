@@ -10,6 +10,13 @@ metadata:
   name: {{ .Release.Name }}-ingress
   namespace: {{ .Release.Namespace }}
   annotations:
+    {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+    # Enable session affinity for RollingUpdate strategy
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "ROUTEID"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+    {{- end }}
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: nginx
     {{- end }}
