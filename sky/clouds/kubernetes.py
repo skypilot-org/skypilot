@@ -78,6 +78,9 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported in '
+             'Kubernetes.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is currently not supported in '
              f'{_REPR}.'),

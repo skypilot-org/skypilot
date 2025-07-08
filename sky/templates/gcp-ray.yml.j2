@@ -75,6 +75,9 @@ provider:
 {%- if placement_policy %}
   placement_policy: {{ placement_policy }}
 {%- endif %}
+{%- if network_tier %}
+  network_tier: {{ network_tier }}
+{%- endif %}
 
 auth:
   ssh_user: gcpuser
