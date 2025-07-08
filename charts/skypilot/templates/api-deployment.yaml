@@ -7,7 +7,7 @@ spec:
   # Note: replicas > 1 is not well tested.
   replicas: {{ .Values.apiService.replicas }}
   {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
-  {{- if not .Values.apiService.dbConnectionSecretName }}
+  {{- if and (not .Values.apiService.dbConnectionSecretName }}
   {{- fail "External database must be configured via .apiService.dbConnectionSecretName when using RollingUpdate strategy" }}
   {{- end }}
   {{- if .Values.storage.enabled }}

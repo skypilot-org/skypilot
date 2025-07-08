@@ -637,6 +637,7 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
+    host_uuid: Optional[str] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -677,6 +678,8 @@ def get_request_tasks(
         if include_request_names is not None:
             query = query.filter(
                 request_table.c.name.in_(include_request_names))
+        if host_uuid is not None:
+            query = query.filter(request_table.c.host_uuid == host_uuid)
 
         rows = query.order_by(request_table.c.created_at.desc()).all()
 
