@@ -720,7 +720,7 @@ def _add_or_update_request_no_lock(request: Request):
             user_id=payload.user_id,
             status_msg=payload.status_msg,
             should_retry=payload.should_retry,
-            host=payload.host,
+            host_uuid=payload.host_uuid,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
