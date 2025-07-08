@@ -223,7 +223,7 @@ behavior: GKE allocates all requested resources at the same time (gang-schedulin
 for more details.)
 
 .. code-block:: yaml
-  :emphasize-lines: 8-9
+  :emphasize-lines: 7-7
 
   kubernetes:
     # provision_timeout: 1200
@@ -256,7 +256,7 @@ Or, specify it in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml
           local_queue_name: skypilot-local-queue
 
 .. note::
-  `Flex-start <>`__ is always enabled when using DWS on GKE. It behaves slightly different for allocating new resources depends on whether Kueue is involved:
+  `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. It behaves slightly different for allocating new resources depends on whether Kueue is involved:
 
   .. dropdown:: DWS with flex-start with/without Kueue
 
