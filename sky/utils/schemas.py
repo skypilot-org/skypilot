@@ -1430,7 +1430,7 @@ def get_config_schema():
                     }
                 ]
             },
-            'requests_gc_retention_hours': {
+            'requests_retention_hours': {
                 'type': 'integer',
             },
         }

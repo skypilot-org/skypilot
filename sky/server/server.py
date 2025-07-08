@@ -1782,6 +1782,7 @@ if __name__ == '__main__':
 
     queue_server: Optional[multiprocessing.Process] = None
     workers: List[executor.RequestWorker] = []
+    # Global background tasks that will be scheduled in a separate event loop.
     global_tasks: List[asyncio.Task] = []
     try:
         background = uvloop.new_event_loop()

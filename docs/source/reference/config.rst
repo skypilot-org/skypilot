@@ -28,7 +28,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
-    :ref:`requests_gc_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
+    :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -207,7 +207,7 @@ Service account token for the SkyPilot API server (optional). For more details, 
 
 .. _config-yaml-api-server-requests-gc-retention-hours:
 
-``api_server.requests_gc_retention_hours``
+``api_server.requests_retention_hours``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Retention period for finished requests in hours (optional). Set to a negative value to disable requests GC.
@@ -221,7 +221,7 @@ Example:
 .. code-block:: yaml
 
   api_server:
-    requests_gc_retention_hours: -1 # Disable requests GC
+    requests_retention_hours: -1 # Disable requests GC
 
 .. _config-yaml-jobs:
 

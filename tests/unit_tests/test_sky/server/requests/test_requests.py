@@ -15,7 +15,7 @@ def dummy():
     return None
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def isolated_database(tmp_path):
     """Create an isolated database for each test to prevent interference."""
     # Create temporary paths for database and logs
@@ -35,7 +35,7 @@ def isolated_database(tmp_path):
             requests._DB = None
 
 
-def test_set_request_failed():
+def test_set_request_failed(isolated_database):
     request = requests.Request(request_id='test-request-1',
                                name='test-request',
                                entrypoint=dummy,
@@ -66,14 +66,14 @@ def test_set_request_failed():
     assert error['object'] is not None
 
 
-def test_set_request_failed_nonexistent_request():
+def test_set_request_failed_nonexistent_request(isolated_database):
     # Try to set a non-existent request as failed
     with pytest.raises(AssertionError):
         requests.set_request_failed('nonexistent-request',
                                     ValueError('Test error'))
 
 
-def test_clean_finished_requests_with_retention():
+def test_clean_finished_requests_with_retention(isolated_database):
     """Test cleaning up old finished requests."""
     current_time = time.time()
     retention_seconds = 60  # 1 minute retention
@@ -137,7 +137,8 @@ def test_clean_finished_requests_with_retention():
     assert 'Cleaned up 1 finished requests' in log_message
 
 
-def test_clean_finished_requests_with_retention_no_old_requests():
+def test_clean_finished_requests_with_retention_no_old_requests(
+        isolated_database):
     """Test cleanup when there are no old requests to clean."""
     current_time = time.time()
     retention_seconds = 60
@@ -167,7 +168,7 @@ def test_clean_finished_requests_with_retention_no_old_requests():
     assert 'Cleaned up 0 finished requests' in log_message
 
 
-def test_clean_finished_requests_with_retention_all_statuses():
+def test_clean_finished_requests_with_retention_all_statuses(isolated_database):
     """Test cleanup works for all finished statuses."""
     current_time = time.time()
     retention_seconds = 60
@@ -220,7 +221,7 @@ def test_clean_finished_requests_with_retention_all_statuses():
 
 
 @pytest.mark.asyncio
-async def test_requests_gc_daemon():
+async def test_requests_gc_daemon(isolated_database):
     """Test the garbage collection daemon runs correctly."""
     with mock.patch(
             'sky.server.requests.requests.skypilot_config') as mock_config:
@@ -248,7 +249,7 @@ async def test_requests_gc_daemon():
 
 
 @pytest.mark.asyncio
-async def test_requests_gc_daemon_disabled():
+async def test_requests_gc_daemon_disabled(isolated_database):
     """Test daemon when retention is negative (disabled)."""
     with mock.patch(
             'sky.server.requests.requests.skypilot_config') as mock_config:

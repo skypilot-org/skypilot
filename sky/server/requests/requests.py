@@ -45,7 +45,7 @@ COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
-DEFAULT_REQUESTS_GC_RETENTION_HOURS = 24  # 1 day
+DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -69,6 +69,10 @@ class RequestStatus(enum.Enum):
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+    @classmethod
+    def finished_status(cls) -> List['RequestStatus']:
+        return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
 
 
 _STATUS_TO_COLOR = {
@@ -730,10 +734,7 @@ def clean_finished_requests_with_retention(retention_seconds: int):
         retention_seconds: Requests older than this many seconds will be
             deleted.
     """
-    finished_statuses = [
-        RequestStatus.SUCCEEDED, RequestStatus.FAILED, RequestStatus.CANCELLED
-    ]
-    reqs = get_request_tasks(status=finished_statuses,
+    reqs = get_request_tasks(status=RequestStatus.finished_status(),
                              finished_before=time.time() - retention_seconds)
 
     subprocess_utils.run_in_parallel(
@@ -756,8 +757,8 @@ async def requests_gc_daemon():
         # Use the latest config.
         skypilot_config.reload_config()
         retention_seconds = skypilot_config.get_nested(
-            ('api_server', 'requests_gc_retention_hours'),
-            DEFAULT_REQUESTS_GC_RETENTION_HOURS) * 3600
+            ('api_server', 'requests_retention_hours'),
+            DEFAULT_REQUESTS_RETENTION_HOURS) * 3600
         try:
             # Negative value disables the requests GC
             if retention_seconds >= 0:
