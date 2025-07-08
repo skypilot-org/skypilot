@@ -128,7 +128,7 @@ async def _override_user_info_in_request_body(request: fastapi.Request,
     if body:
         try:
             original_json = await request.json()
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(f'Error parsing request JSON: {e}')
         else:
             logger.debug(f'Overriding user for {request.state.request_id}: '
