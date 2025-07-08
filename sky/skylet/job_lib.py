@@ -123,6 +123,7 @@ def create_table(cursor, conn):
                                  'jobs',
                                  'metadata',
                                  'TEXT',
+                                 'DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
                                  'TEXT DEFAULT NULL')
@@ -849,7 +850,6 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
         jobs = get_job_queue()
         print(format_job_queue(jobs))
     """
-    # only want to show git commit if it exists in one of them
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
         'STATUS', 'LOG', 'GIT COMMIT'
@@ -867,7 +867,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
             job['resources'],
             job['status'].colored_str(),
             job['log_path'],
-            job.get('metadata', {}).get('git_commit', ''),
+            job.get('metadata', {}).get('git_commit', '-'),
         ])
     return job_table
 

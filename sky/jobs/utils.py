@@ -1249,11 +1249,17 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
-        'GIT_COMMIT',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
-        columns += ['STARTED', 'INFRA', 'RESOURCES', 'SCHED. STATE', 'DETAILS']
+        columns += [
+            'STARTED',
+            'INFRA',
+            'RESOURCES',
+            'SCHED. STATE',
+            'DETAILS',
+            'GIT_COMMIT',
+        ]
     if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -1356,7 +1362,6 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
-                job_tasks[0].get('metadata', {}).get('git_commit', ''),
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
@@ -1367,6 +1372,7 @@ def format_job_table(
                     '-',
                     job_tasks[0]['schedule_state'],
                     generate_details(details, failure_reason),
+                    job_tasks[0].get('metadata', {}).get('git_commit', '-'),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1396,7 +1402,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
-                task.get('metadata', {}).get('git_commit', ''),
+                task.get('metadata', {}).get('git_commit', '-'),
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
@@ -1571,9 +1577,13 @@ class ManagedJobCodeGen:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r},
-                                  {task.metadata!r})
+                if managed_job_version < 7:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r})
+                else:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r},
+                                    {task.metadata!r})
                 """)
         return cls._build(code)
 
