@@ -10,7 +10,6 @@ import threading
 import time
 from types import FrameType
 from typing import Optional, Union
-import uuid
 
 import filelock
 import uvicorn
@@ -160,8 +159,8 @@ class Server(uvicorn.Server):
     def run(self, *args, **kwargs):
         """Run the server process."""
         context_utils.hijack_sys_attrs()
-        state.set_host_uuid(
-            os.environ.get(constants.APISERVER_UUID_ENV_VAR, ''))
+        state.set_host_uuid(os.environ.get(constants.APISERVER_UUID_ENV_VAR,
+                                           ''))
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
         with self.capture_signals():
