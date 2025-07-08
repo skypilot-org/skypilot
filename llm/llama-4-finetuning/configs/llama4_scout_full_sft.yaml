@@ -9,7 +9,7 @@ stage: sft
 do_train: true
 finetuning_type: full
 # deepspeed: examples/deepspeed/ds_z2_offload_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
-deepspeed: /configs/offload.yaml
+deepspeed: /configs/offload_scout.yaml
 flash_attn: fa2
 enable_liger_kernel: True
 
