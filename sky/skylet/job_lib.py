@@ -1094,7 +1094,6 @@ class JobLibCodeGen:
             f'{run_timestamp!r},'
             f'{resources_str!r},'
             f'metadata={metadata!r})',
-            '\nprint("Job ID: " + str(job_id), flush=True)',
             ('\nif isinstance(result, tuple):'
              '\n  print("Job ID: " + str(result[0]), flush=True)'
              '\n  print("Log Dir: " + str(result[1]), flush=True)'

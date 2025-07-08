@@ -1402,7 +1402,6 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
-                task.get('metadata', {}).get('git_commit', '-'),
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
@@ -1439,6 +1438,8 @@ def format_job_table(
                     generate_details(task.get('details'),
                                      task['failure_reason']),
                 ])
+
+                values.append(task.get('metadata', {}).get('git_commit', '-'))
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
