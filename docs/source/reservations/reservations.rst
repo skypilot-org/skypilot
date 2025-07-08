@@ -216,11 +216,9 @@ using DWS on GKE:
 Using DWS with Kueue
 ^^^^^^^^^^^^^^^^^^^^
 
-When you have :ref:`Kueue setup <kubernetes-example-kueue>` setup on the GKE cluster,
-DWS is also available with advanced a run duration configuration and gang-scheduling
-behavior: GKE allocates all requested resources at the same time (gang-scheduling).
-(See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_
-for more details.)
+You can combine a :ref:`Kueue setup <kubernetes-example-kueue>` with DWS on the GKE cluster. This enables gang-scheduling, i.e., all-or-nothing behavior: GKE allocates all resources of the same request at the same time (e.g., multiple nodes/pods of the same job). 
+See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_
+for more details.
 
 .. code-block:: yaml
   :emphasize-lines: 7-7
