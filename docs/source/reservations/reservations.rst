@@ -174,35 +174,37 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 Using DWS on GKE
 ~~~~~~~~~~~~~~~~~
 
-Flex-start, powered by `Dynamic Workload Scheduler <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`_, provides a flexible and cost-effective technique to obtain GPUs when you need to run AI/ML workloads.
+.. dropdown:: DWS flex-start modes on GKE
 
-GKE supports the two kinds of flex-start configurations:
+  Flex-start, powered by `Dynamic Workload Scheduler <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`_, provides a flexible and cost-effective technique to obtain GPUs when you need to run AI/ML workloads.
 
-* Flex-start, where GKE allocates resources node by node.
+  GKE supports the two kinds of flex-start configurations:
 
-  * This configuration only requires you to set the ``flex-start`` flag during node creation. 
+  * Flex-start, where GKE allocates resources node by node.
 
-  * Flex-start configuration is recommended for the small to medium workload size, which means that the workload can run on a single node. For example, this configuration works well if you are running small training jobs, offline inference, or batch jobs.
+    * This configuration only requires you to set the ``flex-start`` flag during node creation. 
 
-* Flex-start with queued provisioning, where GKE allocates all requested resources at the same time.
+    * Flex-start configuration is recommended for the small to medium workload size, which means that the workload can run on a single node. For example, this configuration works well if you are running small training jobs, offline inference, or batch jobs.
 
-  * To use this configuration, you have to add the ``flex-start`` and ``enable-queued-provisioning`` flags when you create the node pool.
+  * Flex-start with queued provisioning, where GKE allocates all requested resources at the same time.
 
-  * Flex-start with queued provisioning configuration is recommended for the medium to large workload, which means that the workload can run on multiple nodes. Your workload requires multiple resources and can't start running until all nodes are provisioned and ready at the same time. For example, this configuration works well if you are running distributed machine learning training workloads.
+    * To use this configuration, you have to add the ``flex-start`` and ``enable-queued-provisioning`` flags when you create the node pool.
 
-See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
+    * Flex-start with queued provisioning configuration is recommended for the medium to large workload, which means that the workload can run on multiple nodes. Your workload requires multiple resources and can't start running until all nodes are provisioned and ready at the same time. For example, this configuration works well if you are running distributed machine learning training workloads.
 
-.. note::
+  See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
 
-    If you are using Kueue, and ``kubernetes.kueue.local_queue_name`` is specified, SkyPilot will automatically enable the flex-start with queued provisioning mode, otherwise it will use the flex-start mode.
+  .. note::
+
+      If you are using Kueue, and ``kubernetes.kueue.local_queue_name`` is specified, SkyPilot will automatically enable the flex-start with queued provisioning mode, otherwise it will use the flex-start mode.
 
 
-Flex-start
-^^^^^^^^^^
+Using DWS without Kueue
+^^^^^^^^^^^^^^^^^^^^^^^
 
-To launch clusters or managed jobs with flex-start configuration:
+To launch clusters or managed jobs using DWS without `Kueue <https://kueue.sigs.k8s.io/>`_:
 
-1. Follow the `official documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/dws-flex-start-training#node-pool-flex>`_ to create a node pool with flex-start enabled.
+1. Follow the `official documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/dws-flex-start-training#node-pool-flex>`_ to create a node pool.
 
 2. Configure the following fields in ``~/.sky/config.yaml``:
 
@@ -214,13 +216,13 @@ To launch clusters or managed jobs with flex-start configuration:
       dws:
         enabled: true
 
-When flex-start is enabled, the default ``provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value in your configuration. For example, set it to ``1200`` seconds (20 minutes) or higher depending on your workload and cluster size.
+When DWS is enabled, the default ``provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value in your configuration. For example, set it to ``1200`` seconds (20 minutes) or higher depending on your workload and cluster size.
 
 3. Launch your clusters or managed jobs.
 
 .. code-block:: yaml
 
-    name: flex-start
+    name: dws
 
     resources:
       infra: k8s
@@ -232,7 +234,7 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 
 .. code-block:: yaml
 
-    name: flex-start
+    name: dws
 
     resources:
       infra: k8s
@@ -245,14 +247,12 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
         dws:
           enabled: true
 
-Flex-start with queued provisioning
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Using DWS with Kueue
+^^^^^^^^^^^^^^^^^^^^
 
-`Kueue <https://kueue.sigs.k8s.io/>`_ is required with flex-start with queued provisioning mode.
+To launch clusters or managed jobs with DWS with Kueue:
 
-To launch clusters or managed jobs with flex-start with queued provisioning configuration:
-
-1. Follow the `GKE documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#create-node-pool>`_ to create a node pool with flex-start with queued provisioning enabled.
+1. Follow the `GKE documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#create-node-pool>`_ to create a node pool.
 
 2. Follow the :ref:`Kueue example <kubernetes-example-kueue>` to install Kueue, update configuration of Kueue to support plain Pods, create Kueue resource flavor, cluster queue and local queue.
 
@@ -271,13 +271,13 @@ To launch clusters or managed jobs with flex-start with queued provisioning conf
       kueue:
         local_queue_name: skypilot-local-queue
 
-When flex-start is enabled, the default ``provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value in your configuration. For example, set it to ``1200`` seconds (20 minutes) or higher depending on your workload and cluster size.
+When DWS is enabled, the default ``provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value in your configuration. For example, set it to ``1200`` seconds (20 minutes) or higher depending on your workload and cluster size.
 
 4. Launch your clusters or managed jobs.
 
 .. code-block:: yaml
 
-    name: flex-start-queued-provisioning
+    name: dws-kueue
 
     resources:
       infra: k8s
@@ -289,7 +289,7 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 
 .. code-block:: yaml
 
-    name: flex-start-queued-provisioning
+    name: dws-kueue
 
     resources:
       infra: k8s
