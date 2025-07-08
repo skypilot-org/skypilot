@@ -184,19 +184,19 @@ Using DWS on GKE
 
     * This configuration only requires you to set the ``flex-start`` flag during node creation. 
 
-    * Flex-start configuration is recommended for the small to medium workload size, which means that the workload can run on a single node. For example, this configuration works well if you are running small training jobs, offline inference, or batch jobs.
+    * Flex-start is recommended for small to medium (single-node) workloads such as small training jobs, offline inference, or batch jobs.
 
   * Flex-start with queued provisioning, where GKE allocates all requested resources at the same time.
 
-    * To use this configuration, you have to add the ``flex-start`` and ``enable-queued-provisioning`` flags when you create the node pool.
+    * To use this configuration, add the ``--flex-start`` and ``--enable-queued-provisioning`` flags when you create the node pool.
 
-    * Flex-start with queued provisioning configuration is recommended for the medium to large workload, which means that the workload can run on multiple nodes. Your workload requires multiple resources and can't start running until all nodes are provisioned and ready at the same time. For example, this configuration works well if you are running distributed machine learning training workloads.
+    * Flex-start with queued provisioning is recommended for multi-node workloads, which require multiple resources and can't start running until all nodes are provisioned and ready at the same time. For example, distributed machine learning training workloads.
 
   See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
 
   .. note::
 
-      If you are using Kueue, and ``kubernetes.kueue.local_queue_name`` is specified, SkyPilot will automatically enable the flex-start with queued provisioning mode, otherwise it will use the flex-start mode.
+      If you are using Kueue and ``kubernetes.kueue.local_queue_name`` is specified, SkyPilot will automatically enable flex-start with queued provisioning mode, otherwise it will use the regular flex-start mode.
 
 
 Using DWS without Kueue

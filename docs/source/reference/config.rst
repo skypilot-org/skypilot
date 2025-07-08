@@ -1128,7 +1128,7 @@ Refer to :ref:`Using DWS on GKE <dws-on-gke>` for more details.
 
 Whether to enable DWS (optional).
 
-When ``enabled`` is set to ``true``, SkyPilot will automatically enable the flex-start with queued provisioning mode if ``kubernetes.kueue.local_queue_name`` is set, otherwise it will use the flex-start mode.
+When ``enabled: true``, SkyPilot will automatically use DWS with flex-start mode. If ``kubernetes.kueue.local_queue_name`` is set, it will use flex-start with queued provisioning mode.
 
 Default: ``false``.
 
