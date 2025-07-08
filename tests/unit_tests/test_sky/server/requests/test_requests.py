@@ -76,7 +76,7 @@ class TestRequestsCRUD:
                                 cluster_name='test-cluster',
                                 status_msg='Test status',
                                 should_retry=should_retry,
-                                host='test-host')
+                                host_uuid='test-host-uuid')
 
     def test_create_request(self):
         """Test creating a new request."""
@@ -93,7 +93,7 @@ class TestRequestsCRUD:
         assert retrieved.status == RequestStatus.PENDING
         assert retrieved.user_id == 'test-user'
         assert retrieved.should_retry is False
-        assert retrieved.host == 'test-host'
+        assert retrieved.host_uuid == 'test-host-uuid'
 
         # Try to create the same request again - should return False
         assert requests.create_if_not_exists(request) is False
@@ -328,13 +328,13 @@ class TestRequestsCRUD:
     def test_host_field_persistence(self):
         """Test that the host field is properly stored and retrieved."""
         request = self.create_test_request()
-        request.host = 'api-server-host.example.com'
+        request.host_uuid = 'api-server-host.example.com'
 
         requests.create_if_not_exists(request)
 
         retrieved = requests.get_request('test-request-1')
         assert retrieved is not None
-        assert retrieved.host == 'api-server-host.example.com'
+        assert retrieved.host_uuid == 'api-server-host.example.com'
 
     def test_upsert_operations_sqlite(self):
         """Test upsert operations work correctly with SQLite."""
