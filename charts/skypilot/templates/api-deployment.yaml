@@ -4,13 +4,29 @@ metadata:
   name: {{ .Release.Name }}-api-server
   namespace: {{ .Release.Namespace }}
 spec:
-  # Note: replicas > 1 is not well tested, and requires a PVC that supports ReadWriteMany.
+  # Note: replicas > 1 is not well tested.
   replicas: {{ .Values.apiService.replicas }}
+  {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+  {{- if not .Values.apiService.dbConnectionSecretName }}
+  {{- fail "External database must be configured via .apiService.dbConnectionSecretName when using RollingUpdate strategy" }}
+  {{- end }}
+  {{- if .Values.storage.enabled }}
+  {{- fail "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false." }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- else }}
   strategy:
     type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}-api
+      # This label indicates that the API server is ready to serve requests.
+      skypilot.co/ready: "true"
   template:
     metadata:
       annotations:
@@ -79,6 +95,12 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ .Values.apiService.dbConnectionSecretName }}
+              key: connection_string
+        {{- else if .Values.apiService.dbConnectionString }}
+        - name: SKYPILOT_DB_CONNECTION_URI
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "skypilot.fullname" . }}-db-connection
               key: connection_string
         {{- end }}
         {{- if .Values.apiService.authUserHeaderName }}
