@@ -58,12 +58,6 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
-from sqlalchemy.pool import NullPool
 
 from sky import exceptions
 from sky import sky_logging
@@ -78,8 +72,10 @@ from sky.utils import ux_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
+    import sqlalchemy
     import yaml
 else:
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy')
     yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
@@ -121,14 +117,18 @@ API_SERVER_CONFIG_KEY = 'api_server_config'
 
 _DB_USE_LOCK = threading.Lock()
 
-Base = declarative.declarative_base()
-
-config_yaml_table = sqlalchemy.Table(
-    'config_yaml',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-)
+def _get_db_schema():
+    """Get the database schema objects. This function lazy-loads SQLAlchemy."""
+    Base = sqlalchemy.ext.declarative.declarative_base()
+    
+    config_yaml_table = sqlalchemy.Table(
+        'config_yaml',
+        Base.metadata,
+        sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+        sqlalchemy.Column('value', sqlalchemy.Text),
+    )
+    
+    return Base, config_yaml_table
 
 
 class ConfigContext:
@@ -572,13 +572,14 @@ def _reload_config_as_server() -> None:
     if db_url:
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
-                                                         poolclass=NullPool)
+                                                         poolclass=sqlalchemy.pool.NullPool)
+            Base, config_yaml_table = _get_db_schema()
             Base.metadata.create_all(bind=sqlalchemy_engine)
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
                 assert sqlalchemy_engine is not None
-                with orm.Session(sqlalchemy_engine) as session:
+                with sqlalchemy.orm.Session(sqlalchemy_engine) as session:
                     row = session.query(config_yaml_table).filter_by(
                         key=key).first()
                 if row:
@@ -858,7 +859,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 raise ValueError('Cannot change db url while server is running')
             with _DB_USE_LOCK:
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
-                                                             poolclass=NullPool)
+                                                             poolclass=sqlalchemy.pool.NullPool)
+                Base, config_yaml_table = _get_db_schema()
                 Base.metadata.create_all(bind=sqlalchemy_engine)
 
                 def _set_config_yaml_to_db(key: str,
@@ -866,13 +868,13 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                     assert sqlalchemy_engine is not None
                     config.pop_nested(('db',), None)
                     config_str = common_utils.dump_yaml_str(dict(config))
-                    with orm.Session(sqlalchemy_engine) as session:
+                    with sqlalchemy.orm.Session(sqlalchemy_engine) as session:
                         if (sqlalchemy_engine.dialect.name ==
                                 db_utils.SQLAlchemyDialect.SQLITE.value):
-                            insert_func = sqlite.insert
+                            insert_func = sqlalchemy.dialects.sqlite.insert
                         elif (sqlalchemy_engine.dialect.name ==
                               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                            insert_func = postgresql.insert
+                            insert_func = sqlalchemy.dialects.postgresql.insert
                         else:
                             raise ValueError('Unsupported database dialect')
                         insert_stmnt = insert_func(config_yaml_table).values(

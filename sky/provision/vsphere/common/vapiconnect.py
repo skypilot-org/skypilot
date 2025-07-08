@@ -3,15 +3,15 @@
 
 import typing
 
-from urllib3.exceptions import InsecureRequestWarning
-
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
 
 if typing.TYPE_CHECKING:
     import requests
+    import urllib3
 else:
     requests = adaptors_common.LazyImport('requests')
+    urllib3 = adaptors_common.LazyImport('urllib3')
 
 
 def get_jsonrpc_endpoint_url(host):
@@ -89,5 +89,5 @@ def create_unverified_session(session, suppress_warning=True):
     session.verify = False
     if suppress_warning:
         # Suppress unverified https request warnings
-        requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+        requests.packages.urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     return session

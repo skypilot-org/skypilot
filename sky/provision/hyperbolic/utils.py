@@ -3,13 +3,13 @@ import enum
 import json
 import os
 import time
+import typing
 from typing import Any, Dict, Optional, Tuple
-
-import requests
 
 from sky import authentication
 from sky import sky_logging
 from sky.utils import status_lib
+from sky.adaptors import common as adaptors_common
 
 #TODO update to prod endpoint
 BASE_URL = 'https://api.hyperbolic.xyz'
@@ -18,6 +18,11 @@ API_KEY_PATH = '~/.hyperbolic/api_key'
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 TIMEOUT = 120
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 

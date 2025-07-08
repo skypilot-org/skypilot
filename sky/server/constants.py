@@ -4,6 +4,13 @@ import os
 
 from sky.skylet import constants
 
+# API server URL configuration
+DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
+AVAILABLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
+AVAILABLE_LOCAL_API_SERVER_URLS = [
+    f'http://{host}:46580' for host in AVAILABLE_LOCAL_API_SERVER_HOSTS
+]
+
 # pylint: disable=line-too-long
 # The SkyPilot API version that the code currently use.
 # Bump this version when the API is changed and special compatibility handling

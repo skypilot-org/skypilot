@@ -18,17 +18,12 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-import sqlalchemy
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
 import yaml
 
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -37,167 +32,243 @@ from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
+    import sqlalchemy
     from sky import backends
     from sky import clouds
     from sky.clouds import cloud
     from sky.data import Storage
+else:
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy')
 
 logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
-_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE: Optional['sqlalchemy.engine.Engine'] = None
 _DB_INIT_LOCK = threading.Lock()
+_DB_SCHEMA_CACHE = None
+_DB_SCHEMA_LOCK = threading.Lock()
 
-Base = declarative.declarative_base()
+def _get_db_schema():
+    """Get the database schema objects. This function lazy-loads SQLAlchemy."""
+    global _DB_SCHEMA_CACHE
+    if _DB_SCHEMA_CACHE is not None:
+        return _DB_SCHEMA_CACHE
+    
+    with _DB_SCHEMA_LOCK:
+        if _DB_SCHEMA_CACHE is not None:
+            return _DB_SCHEMA_CACHE
+            
+        Base = sqlalchemy.ext.declarative.declarative_base()
 
-config_table = sqlalchemy.Table(
-    'config',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-)
+        config_table = sqlalchemy.Table(
+            'config',
+            Base.metadata,
+            sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('value', sqlalchemy.Text),
+        )
 
-user_table = sqlalchemy.Table(
-    'users',
-    Base.metadata,
-    sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('name', sqlalchemy.Text),
-    sqlalchemy.Column('password', sqlalchemy.Text),
-    sqlalchemy.Column('created_at', sqlalchemy.Integer),
-)
+        user_table = sqlalchemy.Table(
+            'users',
+            Base.metadata,
+            sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('name', sqlalchemy.Text),
+            sqlalchemy.Column('password', sqlalchemy.Text),
+            sqlalchemy.Column('created_at', sqlalchemy.Integer),
+        )
 
-cluster_table = sqlalchemy.Table(
-    'clusters',
-    Base.metadata,
-    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
-    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
-    sqlalchemy.Column('last_use', sqlalchemy.Text),
-    sqlalchemy.Column('status', sqlalchemy.Text),
-    sqlalchemy.Column('autostop', sqlalchemy.Integer, server_default='-1'),
-    sqlalchemy.Column('to_down', sqlalchemy.Integer, server_default='0'),
-    sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
-    sqlalchemy.Column('owner', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('storage_mounts_metadata',
-                      sqlalchemy.LargeBinary,
-                      server_default=None),
-    sqlalchemy.Column('cluster_ever_up', sqlalchemy.Integer,
-                      server_default='0'),
-    sqlalchemy.Column('status_updated_at',
-                      sqlalchemy.Integer,
-                      server_default=None),
-    sqlalchemy.Column('config_hash', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('workspace',
-                      sqlalchemy.Text,
-                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
-    sqlalchemy.Column('last_creation_yaml',
-                      sqlalchemy.Text,
-                      server_default=None),
-    sqlalchemy.Column('last_creation_command',
-                      sqlalchemy.Text,
-                      server_default=None),
-)
+        cluster_table = sqlalchemy.Table(
+            'clusters',
+            Base.metadata,
+            sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+            sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+            sqlalchemy.Column('last_use', sqlalchemy.Text),
+            sqlalchemy.Column('status', sqlalchemy.Text),
+            sqlalchemy.Column('autostop', sqlalchemy.Integer, server_default='-1'),
+            sqlalchemy.Column('to_down', sqlalchemy.Integer, server_default='0'),
+            sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
+            sqlalchemy.Column('owner', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('cluster_hash', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('storage_mounts_metadata',
+                              sqlalchemy.LargeBinary,
+                              server_default=None),
+            sqlalchemy.Column('cluster_ever_up', sqlalchemy.Integer,
+                              server_default='0'),
+            sqlalchemy.Column('status_updated_at',
+                              sqlalchemy.Integer,
+                              server_default=None),
+            sqlalchemy.Column('config_hash', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('workspace',
+                              sqlalchemy.Text,
+                              server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+            sqlalchemy.Column('last_creation_yaml',
+                              sqlalchemy.Text,
+                              server_default=None),
+            sqlalchemy.Column('last_creation_command',
+                              sqlalchemy.Text,
+                              server_default=None),
+        )
 
-storage_table = sqlalchemy.Table(
-    'storage',
-    Base.metadata,
-    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
-    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
-    sqlalchemy.Column('last_use', sqlalchemy.Text),
-    sqlalchemy.Column('status', sqlalchemy.Text),
-)
+        storage_table = sqlalchemy.Table(
+            'storage',
+            Base.metadata,
+            sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+            sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+            sqlalchemy.Column('last_use', sqlalchemy.Text),
+            sqlalchemy.Column('status', sqlalchemy.Text),
+        )
 
-volume_table = sqlalchemy.Table(
-    'volumes',
-    Base.metadata,
-    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('launched_at', sqlalchemy.Integer),
-    sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
-    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('workspace',
-                      sqlalchemy.Text,
-                      server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
-    sqlalchemy.Column('last_attached_at',
-                      sqlalchemy.Integer,
-                      server_default=None),
-    sqlalchemy.Column('last_use', sqlalchemy.Text),
-    sqlalchemy.Column('status', sqlalchemy.Text),
-)
+        volume_table = sqlalchemy.Table(
+            'volumes',
+            Base.metadata,
+            sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('launched_at', sqlalchemy.Integer),
+            sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
+            sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('workspace',
+                              sqlalchemy.Text,
+                              server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+            sqlalchemy.Column('last_attached_at',
+                              sqlalchemy.Integer,
+                              server_default=None),
+            sqlalchemy.Column('last_use', sqlalchemy.Text),
+            sqlalchemy.Column('status', sqlalchemy.Text),
+        )
 
-# Table for Cluster History
-# usage_intervals: List[Tuple[int, int]]
-#  Specifies start and end timestamps of cluster.
-#  When the last end time is None, the cluster is still UP.
-#  Example: [(start1, end1), (start2, end2), (start3, None)]
+        # Table for Cluster History
+        # usage_intervals: List[Tuple[int, int]]
+        #  Specifies start and end timestamps of cluster.
+        #  When the last end time is None, the cluster is still UP.
+        #  Example: [(start1, end1), (start2, end2), (start3, None)]
 
-# requested_resources: Set[resource_lib.Resource]
-#  Requested resources fetched from task that user specifies.
+        # requested_resources: Set[resource_lib.Resource]
+        #  Requested resources fetched from task that user specifies.
 
-# launched_resources: Optional[resources_lib.Resources]
-#  Actual launched resources fetched from handle for cluster.
+        # launched_resources: Optional[resources_lib.Resources]
+        #  Actual launched resources fetched from handle for cluster.
 
-# num_nodes: Optional[int] number of nodes launched.
-cluster_history_table = sqlalchemy.Table(
-    'cluster_history',
-    Base.metadata,
-    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('name', sqlalchemy.Text),
-    sqlalchemy.Column('num_nodes', sqlalchemy.Integer),
-    sqlalchemy.Column('requested_resources', sqlalchemy.LargeBinary),
-    sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
-    sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
-    sqlalchemy.Column('user_hash', sqlalchemy.Text),
-    sqlalchemy.Column('last_creation_yaml',
-                      sqlalchemy.Text,
-                      server_default=None),
-    sqlalchemy.Column('last_creation_command',
-                      sqlalchemy.Text,
-                      server_default=None),
-)
+        # num_nodes: Optional[int] number of nodes launched.
+        cluster_history_table = sqlalchemy.Table(
+            'cluster_history',
+            Base.metadata,
+            sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('name', sqlalchemy.Text),
+            sqlalchemy.Column('num_nodes', sqlalchemy.Integer),
+            sqlalchemy.Column('requested_resources', sqlalchemy.LargeBinary),
+            sqlalchemy.Column('launched_resources', sqlalchemy.LargeBinary),
+            sqlalchemy.Column('usage_intervals', sqlalchemy.LargeBinary),
+            sqlalchemy.Column('user_hash', sqlalchemy.Text),
+            sqlalchemy.Column('last_creation_yaml',
+                              sqlalchemy.Text,
+                              server_default=None),
+            sqlalchemy.Column('last_creation_command',
+                              sqlalchemy.Text,
+                              server_default=None),
+        )
 
-ssh_key_table = sqlalchemy.Table(
-    'ssh_key',
-    Base.metadata,
-    sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('ssh_public_key', sqlalchemy.Text),
-    sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
-)
+        ssh_key_table = sqlalchemy.Table(
+            'ssh_key',
+            Base.metadata,
+            sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('ssh_public_key', sqlalchemy.Text),
+            sqlalchemy.Column('ssh_private_key', sqlalchemy.Text),
+        )
 
-service_account_token_table = sqlalchemy.Table(
-    'service_account_tokens',
-    Base.metadata,
-    sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('token_name', sqlalchemy.Text),
-    sqlalchemy.Column('token_hash', sqlalchemy.Text),
-    sqlalchemy.Column('created_at', sqlalchemy.Integer),
-    sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
-    sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
-    sqlalchemy.Column('creator_user_hash',
-                      sqlalchemy.Text),  # Who created this token
-    sqlalchemy.Column('service_account_user_id',
-                      sqlalchemy.Text),  # Service account's own user ID
-)
+        service_account_token_table = sqlalchemy.Table(
+            'service_account_tokens',
+            Base.metadata,
+            sqlalchemy.Column('token_id', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('token_name', sqlalchemy.Text),
+            sqlalchemy.Column('token_hash', sqlalchemy.Text),
+            sqlalchemy.Column('created_at', sqlalchemy.Integer),
+            sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
+            sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
+            sqlalchemy.Column('creator_user_hash',
+                              sqlalchemy.Text),  # Who created this token
+            sqlalchemy.Column('service_account_user_id',
+                              sqlalchemy.Text),  # Service account's own user ID
+        )
 
-cluster_yaml_table = sqlalchemy.Table(
-    'cluster_yaml',
-    Base.metadata,
-    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('yaml', sqlalchemy.Text),
-)
+        cluster_yaml_table = sqlalchemy.Table(
+            'cluster_yaml',
+            Base.metadata,
+            sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('yaml', sqlalchemy.Text),
+        )
 
-system_config_table = sqlalchemy.Table(
-    'system_config',
-    Base.metadata,
-    sqlalchemy.Column('config_key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('config_value', sqlalchemy.Text),
-    sqlalchemy.Column('created_at', sqlalchemy.Integer),
-    sqlalchemy.Column('updated_at', sqlalchemy.Integer),
-)
+        system_config_table = sqlalchemy.Table(
+            'system_config',
+            Base.metadata,
+            sqlalchemy.Column('config_key', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('config_value', sqlalchemy.Text),
+            sqlalchemy.Column('created_at', sqlalchemy.Integer),
+            sqlalchemy.Column('updated_at', sqlalchemy.Integer),
+        )
+
+        _DB_SCHEMA_CACHE = (Base, config_table, user_table, cluster_table, storage_table,
+                           volume_table, cluster_history_table, ssh_key_table,
+                           service_account_token_table, cluster_yaml_table,
+                           system_config_table)
+        return _DB_SCHEMA_CACHE
+
+
+def _get_base():
+    """Get the SQLAlchemy Base object."""
+    return _get_db_schema()[0]
+
+
+def _get_config_table():
+    """Get the config table object."""
+    return _get_db_schema()[1]
+
+
+def _get_user_table():
+    """Get the user table object."""
+    return _get_db_schema()[2]
+
+
+def _get_cluster_table():
+    """Get the cluster table object."""
+    return _get_db_schema()[3]
+
+
+def _get_storage_table():
+    """Get the storage table object."""
+    return _get_db_schema()[4]
+
+
+def _get_volume_table():
+    """Get the volume table object."""
+    return _get_db_schema()[5]
+
+
+def _get_cluster_history_table():
+    """Get the cluster history table object."""
+    return _get_db_schema()[6]
+
+
+def _get_ssh_key_table():
+    """Get the ssh key table object."""
+    return _get_db_schema()[7]
+
+
+def _get_service_account_token_table():
+    """Get the service account token table object."""
+    return _get_db_schema()[8]
+
+
+def _get_cluster_yaml_table():
+    """Get the cluster yaml table object."""
+    return _get_db_schema()[9]
+
+
+def _get_system_config_table():
+    """Get the system config table object."""
+    return _get_db_schema()[10]
 
 
 def _glob_to_similar(glob_pattern):
@@ -230,22 +301,23 @@ def create_table():
             == db_utils.SQLAlchemyDialect.SQLITE.value and
             not common_utils.is_wsl()):
         try:
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
                 session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
                 session.commit()
-        except sqlalchemy_exc.OperationalError as e:
+        except sqlalchemy.exc.OperationalError as e:
             if 'database is locked' not in str(e):
                 raise
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
     # Create tables if they don't exist
+    Base = _get_base()
     Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
 
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Add autostop column to clusters table
         db_utils.add_column_to_table_sqlalchemy(session,
                                                 'clusters',
@@ -380,7 +452,7 @@ def create_table():
         session.commit()
 
 
-def initialize_and_get_db() -> sqlalchemy.engine.Engine:
+def initialize_and_get_db() -> 'sqlalchemy.engine.Engine':
     global _SQLALCHEMY_ENGINE
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
@@ -430,11 +502,11 @@ def add_or_update_user(user: models.User,
     created_at = user.created_at
     if created_at is None:
         created_at = int(time.time())
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Check for duplicate names if not allowed (within the same transaction)
         if not allow_duplicate_name:
-            existing_user = session.query(user_table).filter(
-                user_table.c.name == user.name).first()
+            existing_user = session.query(_get_user_table()).filter(
+                _get_user_table().c.name == user.name).first()
             if existing_user is not None:
                 return False
 
@@ -442,10 +514,10 @@ def add_or_update_user(user: models.User,
                 db_utils.SQLAlchemyDialect.SQLITE.value):
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
             # vs existing
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
 
             # First try INSERT OR IGNORE - this won't fail if user exists
-            insert_stmnt = insert_func(user_table).prefix_with(
+            insert_stmnt = insert_func(_get_user_table()).prefix_with(
                 'OR IGNORE').values(id=user.id,
                                     name=user.name,
                                     password=user.password,
@@ -458,13 +530,13 @@ def add_or_update_user(user: models.User,
             if not was_inserted:
                 # User existed, so update it (but don't update created_at)
                 if user.password:
-                    session.query(user_table).filter_by(id=user.id).update({
-                        user_table.c.name: user.name,
-                        user_table.c.password: user.password
+                    session.query(_get_user_table()).filter_by(id=user.id).update({
+                        _get_user_table().c.name: user.name,
+                        _get_user_table().c.password: user.password
                     })
                 else:
-                    session.query(user_table).filter_by(id=user.id).update(
-                        {user_table.c.name: user.name})
+                    session.query(_get_user_table()).filter_by(id=user.id).update(
+                        {_get_user_table().c.name: user.name})
 
             session.commit()
             return was_inserted
@@ -473,9 +545,9 @@ def add_or_update_user(user: models.User,
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             # For PostgreSQL, use INSERT ... ON CONFLICT with RETURNING to
             # detect insert vs update
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
 
-            insert_stmnt = insert_func(user_table).values(
+            insert_stmnt = insert_func(_get_user_table()).values(
                 id=user.id,
                 name=user.name,
                 password=user.password,
@@ -484,14 +556,14 @@ def add_or_update_user(user: models.User,
             # Use a sentinel in the RETURNING clause to detect insert vs update
             if user.password:
                 set_ = {
-                    user_table.c.name: user.name,
-                    user_table.c.password: user.password
+                    _get_user_table().c.name: user.name,
+                    _get_user_table().c.password: user.password
                 }
             else:
-                set_ = {user_table.c.name: user.name}
+                set_ = {_get_user_table().c.name: user.name}
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
-                index_elements=[user_table.c.id], set_=set_).returning(
-                    user_table.c.id,
+                index_elements=[_get_user_table().c.id], set_=set_).returning(
+                    _get_user_table().c.id,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -508,8 +580,8 @@ def add_or_update_user(user: models.User,
 @_init_db
 def get_user(user_id: str) -> Optional[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(user_table).filter_by(id=user_id).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_user_table()).filter_by(id=user_id).first()
     if row is None:
         return None
     return models.User(id=row.id,
@@ -519,8 +591,8 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 
 def get_user_by_name(username: str) -> List[models.User]:
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(user_table).filter_by(name=username).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_user_table()).filter_by(name=username).all()
     if len(rows) == 0:
         return []
     return [
@@ -532,16 +604,16 @@ def get_user_by_name(username: str) -> List[models.User]:
 
 
 def delete_user(user_id: str) -> None:
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(user_table).filter_by(id=user_id).delete()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_user_table()).filter_by(id=user_id).delete()
         session.commit()
 
 
 @_init_db
 def get_all_users() -> List[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(user_table).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_user_table()).all()
     return [
         models.User(id=row.id,
                     name=row.name,
@@ -624,10 +696,10 @@ def add_or_update_cluster(cluster_name: str,
             'config_hash': config_hash,
         })
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         # with_for_update() locks the row until commit() or rollback()
         # is called, or until the code escapes the with block.
-        cluster_row = session.query(cluster_table).filter_by(
+        cluster_row = session.query(_get_cluster_table()).filter_by(
             name=cluster_name).with_for_update().first()
         if (not cluster_row or
                 cluster_row.status == status_lib.ClusterStatus.STOPPED.value):
@@ -653,15 +725,15 @@ def add_or_update_cluster(cluster_name: str,
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        insert_stmnt = insert_func(cluster_table).values(
+        insert_stmnt = insert_func(_get_cluster_table()).values(
             name=cluster_name,
             **conditional_values,
             handle=handle,
@@ -673,16 +745,16 @@ def add_or_update_cluster(cluster_name: str,
             status_updated_at=status_updated_at,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[cluster_table.c.name],
+            index_elements=[_get_cluster_table().c.name],
             set_={
                 **conditional_values,
-                cluster_table.c.handle: handle,
-                cluster_table.c.status: status.value,
+                _get_cluster_table().c.handle: handle,
+                _get_cluster_table().c.status: status.value,
                 # do not update metadata value
                 # do not update owner value
-                cluster_table.c.cluster_hash: cluster_hash,
+                _get_cluster_table().c.cluster_hash: cluster_hash,
                 # do not update storage_mounts_metadata
-                cluster_table.c.status_updated_at: status_updated_at,
+                _get_cluster_table().c.status_updated_at: status_updated_at,
                 # do not update user_hash
             })
         session.execute(do_update_stmt)
@@ -699,7 +771,7 @@ def add_or_update_cluster(cluster_name: str,
                     conditional_values.get('last_creation_command'),
             }
 
-        insert_stmnt = insert_func(cluster_history_table).values(
+        insert_stmnt = insert_func(_get_cluster_history_table()).values(
             cluster_hash=cluster_hash,
             name=cluster_name,
             num_nodes=launched_nodes,
@@ -710,17 +782,17 @@ def add_or_update_cluster(cluster_name: str,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[cluster_history_table.c.cluster_hash],
+            index_elements=[_get_cluster_history_table().c.cluster_hash],
             set_={
-                cluster_history_table.c.name: cluster_name,
-                cluster_history_table.c.num_nodes: launched_nodes,
-                cluster_history_table.c.requested_resources:
+                _get_cluster_history_table().c.name: cluster_name,
+                _get_cluster_history_table().c.num_nodes: launched_nodes,
+                _get_cluster_history_table().c.requested_resources:
                     pickle.dumps(requested_resources),
-                cluster_history_table.c.launched_resources:
+                _get_cluster_history_table().c.launched_resources:
                     pickle.dumps(launched_resources),
-                cluster_history_table.c.usage_intervals:
+                _get_cluster_history_table().c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.user_hash: user_hash,
+                _get_cluster_history_table().c.user_hash: user_hash,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -745,18 +817,18 @@ def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     assert _SQLALCHEMY_ENGINE is not None
     handle = pickle.dumps(cluster_handle)
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(cluster_table).filter_by(name=cluster_name).update(
-            {cluster_table.c.handle: handle})
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_cluster_table()).filter_by(name=cluster_name).update(
+            {_get_cluster_table().c.handle: handle})
         session.commit()
 
 
 @_init_db
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(cluster_table).filter_by(name=cluster_name).update(
-            {cluster_table.c.last_use: common_utils.get_current_command()})
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_cluster_table()).filter_by(name=cluster_name).update(
+            {_get_cluster_table().c.last_use: common_utils.get_current_command()})
         session.commit()
 
 
@@ -767,7 +839,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         # usage_intervals is not None and not empty
         if usage_intervals:
             assert cluster_hash is not None, cluster_name
@@ -777,7 +849,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
             _set_cluster_usage_intervals(cluster_hash, usage_intervals)
 
         if terminate:
-            session.query(cluster_table).filter_by(name=cluster_name).delete()
+            session.query(_get_cluster_table()).filter_by(name=cluster_name).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -789,10 +861,10 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
                                      handle)
                 handle.stable_internal_external_ips = None
             current_time = int(time.time())
-            session.query(cluster_table).filter_by(name=cluster_name).update({
-                cluster_table.c.handle: pickle.dumps(handle),
-                cluster_table.c.status: status_lib.ClusterStatus.STOPPED.value,
-                cluster_table.c.status_updated_at: current_time
+            session.query(_get_cluster_table()).filter_by(name=cluster_name).update({
+                _get_cluster_table().c.handle: pickle.dumps(handle),
+                _get_cluster_table().c.status: status_lib.ClusterStatus.STOPPED.value,
+                _get_cluster_table().c.status_updated_at: current_time
             })
         session.commit()
 
@@ -802,8 +874,8 @@ def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None:
         return None
     return pickle.loads(row.handle)
@@ -813,15 +885,15 @@ def get_handle_from_cluster_name(
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            rows = session.query(cluster_table).filter(
-                cluster_table.c.name.op('GLOB')(cluster_name)).all()
+            rows = session.query(_get_cluster_table()).filter(
+                _get_cluster_table().c.name.op('GLOB')(cluster_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            rows = session.query(cluster_table).filter(
-                cluster_table.c.name.op('SIMILAR TO')(
+            rows = session.query(_get_cluster_table()).filter(
+                _get_cluster_table().c.name.op('SIMILAR TO')(
                     _glob_to_similar(cluster_name))).all()
         else:
             raise ValueError('Unsupported database dialect')
@@ -833,11 +905,11 @@ def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     current_time = int(time.time())
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(cluster_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_cluster_table()).filter_by(
             name=cluster_name).update({
-                cluster_table.c.status: status.value,
-                cluster_table.c.status_updated_at: current_time
+                _get_cluster_table().c.status: status.value,
+                _get_cluster_table().c.status_updated_at: current_time
             })
         session.commit()
     assert count <= 1, count
@@ -849,11 +921,11 @@ def set_cluster_status(cluster_name: str,
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(cluster_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_cluster_table()).filter_by(
             name=cluster_name).update({
-                cluster_table.c.autostop: idle_minutes,
-                cluster_table.c.to_down: int(to_down)
+                _get_cluster_table().c.autostop: idle_minutes,
+                _get_cluster_table().c.to_down: int(to_down)
             })
         session.commit()
     assert count <= 1, count
@@ -864,8 +936,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
 @_init_db
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.launched_at is None:
         return None
     return int(row.launched_at)
@@ -874,8 +946,8 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
 @_init_db
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.metadata is None:
         return None
     return json.loads(row.metadata)
@@ -884,10 +956,10 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 @_init_db
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(cluster_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_cluster_table()).filter_by(
             name=cluster_name).update(
-                {cluster_table.c.metadata: json.dumps(metadata)})
+                {_get_cluster_table().c.metadata: json.dumps(metadata)})
         session.commit()
     assert count <= 1, count
     if count == 0:
@@ -898,8 +970,8 @@ def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
 def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.storage_mounts_metadata is None:
         return None
     return pickle.loads(row.storage_mounts_metadata)
@@ -909,10 +981,10 @@ def get_cluster_storage_mounts_metadata(
 def set_cluster_storage_mounts_metadata(
         cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(cluster_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_cluster_table()).filter_by(
             name=cluster_name).update({
-                cluster_table.c.storage_mounts_metadata:
+                _get_cluster_table().c.storage_mounts_metadata:
                     pickle.dumps(storage_mounts_metadata)
             })
         session.commit()
@@ -928,8 +1000,8 @@ def _get_cluster_usage_intervals(
     assert _SQLALCHEMY_ENGINE is not None
     if cluster_hash is None:
         return None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_history_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_history_table()).filter_by(
             cluster_hash=cluster_hash).first()
     if row is None or row.usage_intervals is None:
         return None
@@ -967,10 +1039,10 @@ def _set_cluster_usage_intervals(
         cluster_hash: str, usage_intervals: List[Tuple[int,
                                                        Optional[int]]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(cluster_history_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_cluster_history_table()).filter_by(
             cluster_hash=cluster_hash).update({
-                cluster_history_table.c.usage_intervals:
+                _get_cluster_history_table().c.usage_intervals:
                     pickle.dumps(usage_intervals)
             })
         session.commit()
@@ -986,10 +1058,10 @@ def set_owner_identity_for_cluster(cluster_name: str,
     if owner_identity is None:
         return
     owner_identity_str = json.dumps(owner_identity)
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(cluster_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_cluster_table()).filter_by(
             name=cluster_name).update(
-                {cluster_table.c.owner: owner_identity_str})
+                {_get_cluster_table().c.owner: owner_identity_str})
         session.commit()
     assert count <= 1, count
     if count == 0:
@@ -999,8 +1071,8 @@ def set_owner_identity_for_cluster(cluster_name: str,
 @_init_db
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.cluster_hash is None:
         return None
     return row.cluster_hash
@@ -1010,8 +1082,8 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_history_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_history_table()).filter_by(
             cluster_hash=cluster_hash).first()
     if row is None:
         return None
@@ -1057,8 +1129,8 @@ def _load_storage_mounts_metadata(
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None:
         return None
     user_hash = _get_user_hash_or_current_user(row.user_hash)
@@ -1094,9 +1166,9 @@ def get_cluster_from_name(
 @_init_db
 def get_clusters() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table).order_by(
-            sqlalchemy.desc(cluster_table.c.launched_at)).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_cluster_table()).order_by(
+            sqlalchemy.desc(_get_cluster_table().c.launched_at)).all()
     records = []
     for row in rows:
         user_hash = _get_user_hash_or_current_user(row.user_hash)
@@ -1145,22 +1217,22 @@ def get_clusters_from_history(
         List of cluster records with history information.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Explicitly select columns from both tables to avoid ambiguity
         query = session.query(
-            cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
-            cluster_history_table.c.num_nodes,
-            cluster_history_table.c.requested_resources,
-            cluster_history_table.c.launched_resources,
-            cluster_history_table.c.usage_intervals,
-            cluster_history_table.c.user_hash,
-            cluster_history_table.c.last_creation_yaml,
-            cluster_history_table.c.last_creation_command,
-            cluster_table.c.status, cluster_table.c.workspace,
-            cluster_table.c.status_updated_at).select_from(
-                cluster_history_table.join(cluster_table,
-                                           cluster_history_table.c.cluster_hash
-                                           == cluster_table.c.cluster_hash,
+            _get_cluster_history_table().c.cluster_hash, _get_cluster_history_table().c.name,
+            _get_cluster_history_table().c.num_nodes,
+            _get_cluster_history_table().c.requested_resources,
+            _get_cluster_history_table().c.launched_resources,
+            _get_cluster_history_table().c.usage_intervals,
+            _get_cluster_history_table().c.user_hash,
+            _get_cluster_history_table().c.last_creation_yaml,
+            _get_cluster_history_table().c.last_creation_command,
+            _get_cluster_table().c.status, _get_cluster_table().c.workspace,
+            _get_cluster_table().c.status_updated_at).select_from(
+                _get_cluster_history_table().join(_get_cluster_table(),
+                                           _get_cluster_history_table().c.cluster_hash
+                                           == _get_cluster_table().c.cluster_hash,
                                            isouter=True))
 
         rows = query.all()
@@ -1253,9 +1325,9 @@ def get_clusters_from_history(
 @_init_db
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table).filter(
-            cluster_table.c.name.like(f'{starts_with}%')).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_cluster_table()).filter(
+            _get_cluster_table().c.name.like(f'{starts_with}%')).all()
     return [row.name for row in rows]
 
 
@@ -1263,8 +1335,8 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(config_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_config_table()).filter_by(
             key=_get_enabled_clouds_key(cloud_capability, workspace)).first()
     ret = []
     if row:
@@ -1289,21 +1361,21 @@ def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(config_table).values(
+        insert_stmnt = insert_func(_get_config_table()).values(
             key=_get_enabled_clouds_key(cloud_capability, workspace),
             value=json.dumps(enabled_clouds))
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[config_table.c.key],
-            set_={config_table.c.value: json.dumps(enabled_clouds)})
+            index_elements=[_get_config_table().c.key],
+            set_={_get_config_table().c.value: json.dumps(enabled_clouds)})
         session.execute(do_update_stmt)
         session.commit()
 
@@ -1316,8 +1388,8 @@ def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
 @_init_db
 def get_allowed_clouds(workspace: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(config_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_config_table()).filter_by(
             key=_get_allowed_clouds_key(workspace)).first()
     if row:
         return json.loads(row.value)
@@ -1327,21 +1399,21 @@ def get_allowed_clouds(workspace: str) -> List[str]:
 @_init_db
 def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(config_table).values(
+        insert_stmnt = insert_func(_get_config_table()).values(
             key=_get_allowed_clouds_key(workspace),
             value=json.dumps(allowed_clouds))
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[config_table.c.key],
-            set_={config_table.c.value: json.dumps(allowed_clouds)})
+            index_elements=[_get_config_table().c.key],
+            set_={_get_config_table().c.value: json.dumps(allowed_clouds)})
         session.execute(do_update_stmt)
         session.commit()
 
@@ -1365,28 +1437,28 @@ def add_or_update_storage(storage_name: str,
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(storage_table).values(
+        insert_stmnt = insert_func(_get_storage_table()).values(
             name=storage_name,
             handle=handle,
             last_use=last_use,
             launched_at=storage_launched_at,
             status=storage_status.value)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[storage_table.c.name],
+            index_elements=[_get_storage_table().c.name],
             set_={
-                storage_table.c.handle: handle,
-                storage_table.c.last_use: last_use,
-                storage_table.c.launched_at: storage_launched_at,
-                storage_table.c.status: storage_status.value
+                _get_storage_table().c.handle: handle,
+                _get_storage_table().c.last_use: last_use,
+                _get_storage_table().c.launched_at: storage_launched_at,
+                _get_storage_table().c.status: storage_status.value
             })
         session.execute(do_update_stmt)
         session.commit()
@@ -1396,8 +1468,8 @@ def add_or_update_storage(storage_name: str,
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(storage_table).filter_by(name=storage_name).delete()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_storage_table()).filter_by(name=storage_name).delete()
         session.commit()
 
 
@@ -1405,9 +1477,9 @@ def remove_storage(storage_name: str):
 def set_storage_status(storage_name: str,
                        status: status_lib.StorageStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(storage_table).filter_by(
-            name=storage_name).update({storage_table.c.status: status.value})
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_storage_table()).filter_by(
+            name=storage_name).update({_get_storage_table().c.status: status.value})
         session.commit()
     assert count <= 1, count
     if count == 0:
@@ -1418,8 +1490,8 @@ def set_storage_status(storage_name: str,
 def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(storage_table).filter_by(name=storage_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_storage_table()).filter_by(name=storage_name).first()
     if row:
         return status_lib.StorageStatus[row.status]
     return None
@@ -1429,10 +1501,10 @@ def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
 def set_storage_handle(storage_name: str,
                        handle: 'Storage.StorageMetadata') -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(storage_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_storage_table()).filter_by(
             name=storage_name).update(
-                {storage_table.c.handle: pickle.dumps(handle)})
+                {_get_storage_table().c.handle: pickle.dumps(handle)})
         session.commit()
     assert count <= 1, count
     if count == 0:
@@ -1445,8 +1517,8 @@ def get_handle_from_storage_name(
     assert _SQLALCHEMY_ENGINE is not None
     if storage_name is None:
         return None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(storage_table).filter_by(name=storage_name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_storage_table()).filter_by(name=storage_name).first()
     if row:
         return pickle.loads(row.handle)
     return None
@@ -1456,15 +1528,15 @@ def get_handle_from_storage_name(
 def get_glob_storage_name(storage_name: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            rows = session.query(storage_table).filter(
-                storage_table.c.name.op('GLOB')(storage_name)).all()
+            rows = session.query(_get_storage_table()).filter(
+                _get_storage_table().c.name.op('GLOB')(storage_name)).all()
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            rows = session.query(storage_table).filter(
-                storage_table.c.name.op('SIMILAR TO')(
+            rows = session.query(_get_storage_table()).filter(
+                _get_storage_table().c.name.op('SIMILAR TO')(
                     _glob_to_similar(storage_name))).all()
         else:
             raise ValueError('Unsupported database dialect')
@@ -1474,17 +1546,17 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 @_init_db
 def get_storage_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(storage_table).filter(
-            storage_table.c.name.like(f'{starts_with}%')).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_storage_table()).filter(
+            _get_storage_table().c.name.like(f'{starts_with}%')).all()
     return [row.name for row in rows]
 
 
 @_init_db
 def get_storage() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(storage_table).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_storage_table()).all()
     records = []
     for row in rows:
         # TODO: use namedtuple instead of dict
@@ -1501,17 +1573,17 @@ def get_storage() -> List[Dict[str, Any]]:
 @_init_db
 def get_volume_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(volume_table).filter(
-            volume_table.c.name.like(f'{starts_with}%')).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_volume_table()).filter(
+            _get_volume_table().c.name.like(f'{starts_with}%')).all()
     return [row.name for row in rows]
 
 
 @_init_db
 def get_volumes() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(volume_table).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_volume_table()).all()
     records = []
     for row in rows:
         records.append({
@@ -1530,8 +1602,8 @@ def get_volumes() -> List[Dict[str, Any]]:
 @_init_db
 def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(volume_table).filter_by(name=name).first()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_volume_table()).filter_by(name=name).first()
     if row:
         return {
             'name': row.name,
@@ -1556,16 +1628,16 @@ def add_volume(name: str, config: models.VolumeConfig,
     user_hash = common_utils.get_current_user().id
     active_workspace = skypilot_config.get_active_workspace()
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(volume_table).values(
+        insert_stmnt = insert_func(_get_volume_table()).values(
             name=name,
             launched_at=volume_launched_at,
             handle=handle,
@@ -1584,10 +1656,10 @@ def add_volume(name: str, config: models.VolumeConfig,
 def update_volume(name: str, last_attached_at: int,
                   status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(volume_table).filter_by(name=name).update({
-            volume_table.c.last_attached_at: last_attached_at,
-            volume_table.c.status: status.value,
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_volume_table()).filter_by(name=name).update({
+            _get_volume_table().c.last_attached_at: last_attached_at,
+            _get_volume_table().c.status: status.value,
         })
         session.commit()
 
@@ -1595,9 +1667,9 @@ def update_volume(name: str, last_attached_at: int,
 @_init_db
 def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(volume_table).filter_by(name=name).update({
-            volume_table.c.status: status.value,
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_volume_table()).filter_by(name=name).update({
+            _get_volume_table().c.status: status.value,
         })
         session.commit()
 
@@ -1605,16 +1677,16 @@ def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
 @_init_db
 def delete_volume(name: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(volume_table).filter_by(name=name).delete()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_volume_table()).filter_by(name=name).delete()
         session.commit()
 
 
 @_init_db
 def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(ssh_key_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_ssh_key_table()).filter_by(
             user_hash=user_hash).first()
     if row:
         return row.ssh_public_key, row.ssh_private_key, True
@@ -1624,24 +1696,24 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
 @_init_db
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(ssh_key_table).values(
+        insert_stmnt = insert_func(_get_ssh_key_table()).values(
             user_hash=user_hash,
             ssh_public_key=ssh_public_key,
             ssh_private_key=ssh_private_key)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[ssh_key_table.c.user_hash],
+            index_elements=[_get_ssh_key_table().c.user_hash],
             set_={
-                ssh_key_table.c.ssh_public_key: ssh_public_key,
-                ssh_key_table.c.ssh_private_key: ssh_private_key
+                _get_ssh_key_table().c.ssh_public_key: ssh_public_key,
+                _get_ssh_key_table().c.ssh_private_key: ssh_private_key
             })
         session.execute(do_update_stmt)
         session.commit()
@@ -1658,17 +1730,17 @@ def add_service_account_token(token_id: str,
     assert _SQLALCHEMY_ENGINE is not None
     created_at = int(time.time())
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
 
-        insert_stmnt = insert_func(service_account_token_table).values(
+        insert_stmnt = insert_func(_get_service_account_token_table()).values(
             token_id=token_id,
             token_name=token_name,
             token_hash=token_hash,
@@ -1684,8 +1756,8 @@ def add_service_account_token(token_id: str,
 def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     """Get a service account token by token_id."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(service_account_token_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_service_account_token_table()).filter_by(
             token_id=token_id).first()
     if row is None:
         return None
@@ -1705,8 +1777,8 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
 def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
     """Get all service account tokens for a user (as creator)."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(service_account_token_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_service_account_token_table()).filter_by(
             creator_user_hash=user_hash).all()
     return [{
         'token_id': row.token_id,
@@ -1726,10 +1798,10 @@ def update_service_account_token_last_used(token_id: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     last_used_at = int(time.time())
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(service_account_token_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_service_account_token_table()).filter_by(
             token_id=token_id).update(
-                {service_account_token_table.c.last_used_at: last_used_at})
+                {_get_service_account_token_table().c.last_used_at: last_used_at})
         session.commit()
 
 
@@ -1741,8 +1813,8 @@ def delete_service_account_token(token_id: str) -> bool:
         True if token was found and deleted.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.query(service_account_token_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.query(_get_service_account_token_table()).filter_by(
             token_id=token_id).delete()
         session.commit()
     return result > 0
@@ -1762,15 +1834,15 @@ def rotate_service_account_token(token_id: str,
     assert _SQLALCHEMY_ENGINE is not None
     current_time = int(time.time())
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(service_account_token_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(_get_service_account_token_table()).filter_by(
             token_id=token_id
         ).update({
-            service_account_token_table.c.token_hash: new_token_hash,
-            service_account_token_table.c.expires_at: new_expires_at,
-            service_account_token_table.c.last_used_at: None,  # Reset last used
+            _get_service_account_token_table().c.token_hash: new_token_hash,
+            _get_service_account_token_table().c.expires_at: new_expires_at,
+            _get_service_account_token_table().c.last_used_at: None,  # Reset last used
             # Update creation time
-            service_account_token_table.c.created_at: current_time,
+            _get_service_account_token_table().c.created_at: current_time,
         })
         session.commit()
 
@@ -1791,8 +1863,8 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
         raise ValueError('Attempted to read a None YAML.')
     cluster_file_name = os.path.basename(cluster_yaml_path)
     cluster_name, _ = os.path.splitext(cluster_file_name)
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_yaml_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_cluster_yaml_table()).filter_by(
             cluster_name=cluster_name).first()
     if row is None:
         # If the cluster yaml is not in the database, check if it exists
@@ -1823,20 +1895,20 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
 def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
     """Set the cluster yaml in the database."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(cluster_yaml_table).values(
+        insert_stmnt = insert_func(_get_cluster_yaml_table()).values(
             cluster_name=cluster_name, yaml=yaml_str)
         do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[cluster_yaml_table.c.cluster_name],
-            set_={cluster_yaml_table.c.yaml: yaml_str})
+            index_elements=[_get_cluster_yaml_table().c.cluster_name],
+            set_={_get_cluster_yaml_table().c.yaml: yaml_str})
         session.execute(do_update_stmt)
         session.commit()
 
@@ -1844,8 +1916,8 @@ def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
 @_init_db
 def remove_cluster_yaml(cluster_name: str):
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(cluster_yaml_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(_get_cluster_yaml_table()).filter_by(
             cluster_name=cluster_name).delete()
         session.commit()
 
@@ -1854,8 +1926,8 @@ def remove_cluster_yaml(cluster_name: str):
 def get_all_service_account_tokens() -> List[Dict[str, Any]]:
     """Get all service account tokens across all users (for admin access)."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(service_account_token_table).all()
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(_get_service_account_token_table()).all()
     return [{
         'token_id': row.token_id,
         'token_name': row.token_name,
@@ -1872,8 +1944,8 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
 def get_system_config(config_key: str) -> Optional[str]:
     """Get a system configuration value by key."""
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(system_config_table).filter_by(
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(_get_system_config_table()).filter_by(
             config_key=config_key).first()
     if row is None:
         return None
@@ -1886,27 +1958,27 @@ def set_system_config(config_key: str, config_value: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     current_time = int(time.time())
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlite.insert
+            insert_func = sqlalchemy.dialects.sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = postgresql.insert
+            insert_func = sqlalchemy.dialects.postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
 
-        insert_stmnt = insert_func(system_config_table).values(
+        insert_stmnt = insert_func(_get_system_config_table()).values(
             config_key=config_key,
             config_value=config_value,
             created_at=current_time,
             updated_at=current_time)
 
         upsert_stmnt = insert_stmnt.on_conflict_do_update(
-            index_elements=[system_config_table.c.config_key],
+            index_elements=[_get_system_config_table().c.config_key],
             set_={
-                system_config_table.c.config_value: config_value,
-                system_config_table.c.updated_at: current_time,
+                _get_system_config_table().c.config_value: config_value,
+                _get_system_config_table().c.updated_at: current_time,
             })
         session.execute(upsert_stmnt)
         session.commit()

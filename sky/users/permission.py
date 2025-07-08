@@ -3,18 +3,25 @@ import contextlib
 import hashlib
 import logging
 import os
+import typing
 from typing import Generator, List
+import threading
 
 import casbin
 import filelock
-import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import sqlalchemy_adapter
+else:
+    sqlalchemy_adapter = adaptors_common.LazyImport('sqlalchemy_adapter')
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -354,5 +361,25 @@ def _policy_lock() -> Generator[None, None, None]:
                            f'file if you believe it is stale.') from e
 
 
-# Singleton instance of PermissionService for other modules to use.
-permission_service = PermissionService()
+# Lazy singleton instance of PermissionService
+_permission_service_instance = None
+_permission_service_lock = threading.Lock()
+
+def get_permission_service() -> PermissionService:
+    """Get the singleton PermissionService instance (lazy loaded)."""
+    global _permission_service_instance
+    if _permission_service_instance is not None:
+        return _permission_service_instance
+    
+    with _permission_service_lock:
+        if _permission_service_instance is not None:
+            return _permission_service_instance
+        _permission_service_instance = PermissionService()
+        return _permission_service_instance
+
+# For backward compatibility: create the permission_service attribute lazily
+def __getattr__(name):
+    """Module-level lazy attribute access for backward compatibility."""
+    if name == 'permission_service':
+        return get_permission_service()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

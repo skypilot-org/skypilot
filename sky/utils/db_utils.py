@@ -1,16 +1,18 @@
 """Utils for sky databases."""
 import contextlib
 import enum
-import sqlite3
 import threading
 import typing
 from typing import Any, Callable, Optional
 
-import sqlalchemy
-from sqlalchemy import exc as sqlalchemy_exc
+from sky.adaptors import common as adaptors_common
 
 if typing.TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    import sqlalchemy
+    import sqlite3
+else:
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy')
+    sqlite3 = adaptors_common.LazyImport('sqlite3')
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
 # obtains a database lock (not necessarily during connection, but whenever it is
@@ -85,10 +87,10 @@ def add_column_to_table(
 
 
 def add_column_to_table_sqlalchemy(
-    session: 'Session',
+    session: 'sqlalchemy.orm.Session',
     table_name: str,
     column_name: str,
-    column_type: sqlalchemy.types.TypeEngine,
+    column_type: 'sqlalchemy.types.TypeEngine',
     default_statement: Optional[str] = None,
     copy_from: Optional[str] = None,
     value_to_replace_existing_entries: Optional[Any] = None,
@@ -116,13 +118,13 @@ def add_column_to_table_sqlalchemy(
                                 f'WHERE {column_name} IS NULL'),
                 {'replacement_value': value_to_replace_existing_entries})
     #sqlite
-    except sqlalchemy_exc.OperationalError as e:
+    except sqlalchemy.exc.OperationalError as e:
         if 'duplicate column name' in str(e):
             pass
         else:
             raise
     #postgressql
-    except sqlalchemy_exc.ProgrammingError as e:
+    except sqlalchemy.exc.ProgrammingError as e:
         if 'already exists' in str(e):
             pass
         else:
