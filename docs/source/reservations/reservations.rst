@@ -256,7 +256,7 @@ Or, specify it in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml
           local_queue_name: skypilot-local-queue
 
 .. note::
-  `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. It behaves slightly different for allocating new resources depends on whether Kueue is involved:
+  `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. Depending  on whether Kueue is enabled, the behavior of allocating new resources is different:
 
   .. dropdown:: DWS with flex-start with/without Kueue
 
