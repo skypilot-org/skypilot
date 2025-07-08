@@ -92,6 +92,11 @@ class DistributedLock(abc.ABC):
         """Force unlock the lock if it is acquired."""
         pass
 
+    @abc.abstractmethod
+    def is_locked(self) -> bool:
+        """Check if the lock is acquired."""
+        pass
+
     def __enter__(self) -> 'DistributedLock':
         """Context manager entry."""
         self.acquire()
@@ -147,6 +152,9 @@ class FileLock(DistributedLock):
     def force_unlock(self) -> None:
         """Force unlock the file lock."""
         common_utils.remove_file_if_exists(self.lock_path)
+
+    def is_locked(self) -> bool:
+        return self._filelock.is_locked()
 
 
 class PostgresLock(DistributedLock):
@@ -259,6 +267,10 @@ class PostgresLock(DistributedLock):
             if self._connection:
                 self._connection.close()
                 self._connection = None
+
+    def is_locked(self) -> bool:
+        """Check if the postgres advisory lock is acquired."""
+        return self._acquired
 
 
 def get_lock(lock_id: str,
