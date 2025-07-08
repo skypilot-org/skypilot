@@ -123,6 +123,7 @@ Example:
 
 SkyPilot will utilize the reservations similar to AWS reservations as described in :ref:`utilizing-reservations`.
 
+.. _gcp-dws:
 
 GCP Dynamic Workload Scheduler (DWS)
 -------------------------------------
@@ -170,32 +171,141 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 
 .. _dws-on-gke:
 
-Using DWS on GKE with Kueue
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Using DWS on GKE
+~~~~~~~~~~~~~~~~~
 
-DWS is also supported on Google Kubernetes Engine (GKE) with Kueue. To enable DWS on GKE, you need to set up your GKE cluster with Kueue and DWS; see the `GCP official docs <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest>`__.
+.. dropdown:: DWS flex-start modes on GKE
 
-To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS configuration in the SkyPilot task YAML:
+  Flex-start, powered by `Dynamic Workload Scheduler <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`_, provides a flexible and cost-effective technique to obtain GPUs when you need to run AI/ML workloads.
+
+  GKE supports the two kinds of flex-start configurations:
+
+  * Flex-start, where GKE allocates resources node by node.
+
+    * This configuration only requires you to set the ``flex-start`` flag during node creation. 
+
+    * Flex-start is recommended for small to medium (single-node) workloads such as small training jobs, offline inference, or batch jobs.
+
+  * Flex-start with queued provisioning, where GKE allocates all requested resources at the same time.
+
+    * To use this configuration, add the ``--flex-start`` and ``--enable-queued-provisioning`` flags when you create the node pool.
+
+    * Flex-start with queued provisioning is recommended for multi-node workloads, which require multiple resources and can't start running until all nodes are provisioned and ready at the same time. For example, distributed machine learning training workloads.
+
+  See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
+
+  .. note::
+
+      If you are using Kueue and ``kubernetes.kueue.local_queue_name`` is specified, SkyPilot will automatically enable flex-start with queued provisioning mode, otherwise it will use the regular flex-start mode.
+
+
+Using DWS without Kueue
+^^^^^^^^^^^^^^^^^^^^^^^
+
+To launch clusters or managed jobs using DWS without `Kueue <https://kueue.sigs.k8s.io/>`_:
+
+1. Follow the `official documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/dws-flex-start-training#node-pool-flex>`_ to create a node pool.
+
+2. Configure the following fields in ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
-    config:
-      kubernetes:
-        pod_config:
-          metadata:
-            annotations:
-              provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
-        provision_timeout: 900
+    kubernetes:
+      # provision_timeout: 1200
+      autoscaler: gke
+      dws:
+        enabled: true
+
+When DWS is enabled, the default ``provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value in your configuration. For example, set it to ``1200`` seconds (20 minutes) or higher depending on your workload and cluster size.
+
+3. Launch your clusters or managed jobs.
+
+.. code-block:: yaml
+
+    name: dws
 
     resources:
-      infra: kubernetes
-      accelerators: A100:8
-      labels:
-        kueue.x-k8s.io/queue-name: dws-local-queue
+      infra: k8s
+      accelerators: L4:1
 
-1. ``kueue.x-k8s.io/queue-name``: name of the Kueue queue to submit your resource request to.
-2. ``provreq.kueue.x-k8s.io/maxRunDurationSeconds``: maximum duration for a created instance to be kept alive (in seconds, required).
-3. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
+    num_nodes: 1
+
+In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <config-client-job-task-yaml>`):
+
+.. code-block:: yaml
+
+    name: dws
+
+    resources:
+      infra: k8s
+      accelerators: L4:1
+
+    num_nodes: 1
+
+    config:
+      kubernetes:
+        dws:
+          enabled: true
+
+Using DWS with Kueue
+^^^^^^^^^^^^^^^^^^^^
+
+To launch clusters or managed jobs with DWS with Kueue:
+
+1. Follow the `GKE documentation <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#create-node-pool>`_ to create a node pool.
+
+2. Follow the :ref:`Kueue example <kubernetes-example-kueue>` to install Kueue, update configuration of Kueue to support plain Pods, create Kueue resource flavor, cluster queue and local queue.
+
+3. Configure the following fields in ``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+    kubernetes:
+      # provision_timeout: 1200
+      autoscaler: gke
+      dws:
+        enabled: true
+        # Optional, the maximum runtime of a node,
+        # up to the default of seven days
+        max_run_duration: 10m
+      kueue:
+        local_queue_name: skypilot-local-queue
+
+When DWS is enabled, the default ``provision_timeout`` is set to ``600`` seconds (10 minutes). If you encounter provisioning timeout issues, you can increase this value in your configuration. For example, set it to ``1200`` seconds (20 minutes) or higher depending on your workload and cluster size.
+
+4. Launch your clusters or managed jobs.
+
+.. code-block:: yaml
+
+    name: dws-kueue
+
+    resources:
+      infra: k8s
+      accelerators: L4:1
+
+    num_nodes: 2
+
+In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <config-client-job-task-yaml>`):
+
+.. code-block:: yaml
+
+    name: dws-kueue
+
+    resources:
+      infra: k8s
+      accelerators: L4:1
+
+    num_nodes: 2
+
+    config:
+      kubernetes:
+        dws:
+          enabled: true
+          # Optional, the maximum runtime of a node,
+          # up to the default of seven days
+          max_run_duration: 10m
+        kueue:
+          local_queue_name: skypilot-local-queue
 
 Long-term reservations
 ----------------------

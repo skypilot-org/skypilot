@@ -79,6 +79,9 @@ Below is the configuration syntax and some example values. See detailed explanat
         runtimeClassName: nvidia
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`dws <config-yaml-kubernetes-dws>`:
+      enabled: true
+      max_run_duration: 10m
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -1111,6 +1114,39 @@ Kueue configuration (optional).
 
 Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
 
+.. _config-yaml-kubernetes-dws:
+
+``kubernetes.dws``
+~~~~~~~~~~~~~~~~~~
+
+GKE DWS configuration (optional).
+
+Refer to :ref:`Using DWS on GKE <dws-on-gke>` for more details.
+
+``kubernetes.dws.enabled``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to enable DWS (optional).
+
+When ``enabled: true``, SkyPilot will automatically use DWS with flex-start mode. If ``kubernetes.kueue.local_queue_name`` is set, it will use flex-start with queued provisioning mode.
+
+Default: ``false``.
+
+``kubernetes.dws.max_run_duration``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum runtime of a node (optional), only used in ``flex-start-queued-provisioning`` mode.
+
+Default: ``null``.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    dws:
+      enabled: true
+      max_run_duration: 10m
 
 .. _config-yaml-kubernetes-context-configs:
 
