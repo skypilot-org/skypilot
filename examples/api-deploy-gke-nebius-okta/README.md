@@ -271,7 +271,7 @@ Some commands to try:
 
 To configure SkyPilot to use infiniband on Nebius:
 
-1. Set `network_tier: best` in your SkyPilot task YAML resources to enable InfiniBand:
+Set `network_tier: best` in your SkyPilot task YAML resources to enable InfiniBand:
 
     ```yaml
     resources:
