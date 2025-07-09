@@ -543,6 +543,7 @@ async def delete_service_account_token(
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions using Casbin policy system
+    permission.initialize_permission_service()
     assert permission.permission_service is not None
     if not permission.permission_service.check_service_account_token_permission(
             auth_user.id, token_info['creator_user_hash'], 'delete'):
