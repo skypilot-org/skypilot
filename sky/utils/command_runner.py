@@ -192,7 +192,6 @@ class CommandRunner:
         # We need this to correctly run the cmd, and get the output.
         command = [
             '/bin/bash',
-            '--login',
             '-c',
         ]
         if source_bashrc:
