@@ -39,36 +39,41 @@ _DB_SCHEMA_LOCK = threading.Lock()
 def _get_db_schema():
     """Get the database schema objects. This function lazy-loads SQLAlchemy."""
     global _DB_SCHEMA_CACHE
-    if _DB_SCHEMA_CACHE is not None:
-        return _DB_SCHEMA_CACHE
 
     with _DB_SCHEMA_LOCK:
         if _DB_SCHEMA_CACHE is not None:
             return _DB_SCHEMA_CACHE
-
+ 
         Base = sqlalchemy.ext.declarative.declarative_base()  # pylint: disable=invalid-name
-
+ 
         spot_table = sqlalchemy.Table(
             'spot',
             Base.metadata,
-            sqlalchemy.Column('spot_job_id',
-                              sqlalchemy.Integer,
-                              primary_key=True),
-            sqlalchemy.Column('task_id', sqlalchemy.Integer, primary_key=True),
-            sqlalchemy.Column('task_name', sqlalchemy.Text),
-            sqlalchemy.Column('cluster_name', sqlalchemy.Text),
-            sqlalchemy.Column('region', sqlalchemy.Text),
-            sqlalchemy.Column('zone', sqlalchemy.Text),
+            sqlalchemy.Column('job_id',
+                            sqlalchemy.Integer,
+                            primary_key=True,
+                            autoincrement=True),
+            sqlalchemy.Column('job_name', sqlalchemy.Text),
             sqlalchemy.Column('resources', sqlalchemy.Text),
+            sqlalchemy.Column('submitted_at', sqlalchemy.Float),
             sqlalchemy.Column('status', sqlalchemy.Text),
-            sqlalchemy.Column('submitted_at', sqlalchemy.Integer),
-            sqlalchemy.Column('started_at', sqlalchemy.Integer),
-            sqlalchemy.Column('ended_at', sqlalchemy.Integer),
+            sqlalchemy.Column('run_timestamp', sqlalchemy.Text),
+            sqlalchemy.Column('start_at', sqlalchemy.Float, server_default=None),
+            sqlalchemy.Column('end_at', sqlalchemy.Float, server_default=None),
+            sqlalchemy.Column('last_recovered_at',
+                            sqlalchemy.Float,
+                            server_default='-1'),
+            sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
+            sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
             sqlalchemy.Column('failure_reason', sqlalchemy.Text),
+            sqlalchemy.Column('spot_job_id', sqlalchemy.Integer),
+            sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
+            sqlalchemy.Column('task_name', sqlalchemy.Text),
             sqlalchemy.Column('specs', sqlalchemy.Text),
-            sqlalchemy.Column('local_log_file', sqlalchemy.Text),
+            sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
         )
-
+        
         job_info_table = sqlalchemy.Table(
             'job_info',
             Base.metadata,
@@ -162,7 +167,21 @@ def create_table():
             'local_log_file',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+<<<<<<< HEAD
         db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'cluster_name',
+=======
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'spot',
+            'metadata',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT \'{}\'',
+            value_to_replace_existing_entries='{}')
+
+        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                                'schedule_state',
+>>>>>>> master
                                                 sqlalchemy.Text())
         db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'region',
                                                 sqlalchemy.Text())
@@ -243,6 +262,7 @@ def _get_jobs_dict(r: 'sqlalchemy.engine.RowMapping') -> Dict[str, Any]:
         'task_name': r['task_name'],
         'specs': r['specs'],
         'local_log_file': r['local_log_file'],
+        'metadata': r['metadata'],
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r[_get_job_info_table().c.spot_job_id
                              ],  # ambiguous, use table.column
@@ -530,7 +550,13 @@ def set_job_info_without_job_id(name: str, workspace: str,
 
 
 @_init_db
-def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
+def set_pending(
+    job_id: int,
+    task_id: int,
+    task_name: str,
+    resources_str: str,
+    metadata: str,
+):
     """Set the task to pending state."""
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -540,6 +566,7 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
                 task_id=task_id,
                 task_name=task_name,
                 resources=resources_str,
+                metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
             ))
         session.commit()
@@ -1194,6 +1221,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                 job_dict['schedule_state'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
+            job_dict['metadata'] = json.loads(job_dict['metadata'])
 
             # Add user YAML content for managed jobs.
             yaml_path = job_dict.get('original_user_yaml_path')

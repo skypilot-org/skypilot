@@ -150,7 +150,10 @@ class Server(uvicorn.Server):
             if req is None:
                 return
             if req.pid is not None:
-                os.kill(req.pid, signal.SIGTERM)
+                try:
+                    os.kill(req.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
             req.should_retry = True
         logger.info(
