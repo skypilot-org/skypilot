@@ -220,7 +220,10 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
 
     @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
     @patch('sky.skypilot_config.get_workspace_cloud')
-    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.is_incluster_config_available')
     def test_empty_result_when_no_contexts_found(
             self, mock_is_incluster_available, mock_get_current_context,
             mock_get_nested, mock_get_workspace_cloud, mock_get_all_contexts):
