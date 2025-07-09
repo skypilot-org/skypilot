@@ -255,7 +255,7 @@ class Task:
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
         volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
-        metadata: Optional[Union[Dict[str, Any], str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initializes a Task.
 
@@ -371,12 +371,7 @@ class Task:
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             volume_mounts)
 
-        if isinstance(metadata, dict):
-            self._metadata = metadata
-        elif metadata is not None:
-            self._metadata = json.loads(metadata)
-        else:
-            self._metadata = {}
+        self._metadata = metadata if metadata is not None else {}
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -885,7 +880,11 @@ class Task:
         self._num_nodes = num_nodes
 
     @property
-    def metadata(self) -> str:
+    def metadata(self) -> Dict[str, Any]:
+        return self._metadata
+
+    @property
+    def metadata_json(self) -> str:
         return json.dumps(self._metadata)
 
     @property
@@ -1605,7 +1604,7 @@ class Task:
                 for volume_mount in self.volume_mounts
             ]
         # we manually check if its empty to not clog up the generated yaml
-        add_if_not_none('_metadata', self.metadata if self.metadata else None)
+        add_if_not_none('_metadata', self._metadata if self._metadata else None)
         return config
 
     def get_required_cloud_features(

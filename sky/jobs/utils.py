@@ -1581,7 +1581,7 @@ class ManagedJobCodeGen:
                 else:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r},
-                                    {task.metadata!r})
+                                    {task.metadata_json!r})
                 """)
         return cls._build(code)
 

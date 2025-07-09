@@ -3704,7 +3704,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return None
 
         job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
-                                        task.metadata)
+                                        task.metadata_json)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
