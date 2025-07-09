@@ -43,37 +43,45 @@ def _get_db_schema():
     with _DB_SCHEMA_LOCK:
         if _DB_SCHEMA_CACHE is not None:
             return _DB_SCHEMA_CACHE
- 
+
         Base = sqlalchemy.ext.declarative.declarative_base()  # pylint: disable=invalid-name
- 
+
         spot_table = sqlalchemy.Table(
             'spot',
             Base.metadata,
             sqlalchemy.Column('job_id',
-                            sqlalchemy.Integer,
-                            primary_key=True,
-                            autoincrement=True),
+                              sqlalchemy.Integer,
+                              primary_key=True,
+                              autoincrement=True),
             sqlalchemy.Column('job_name', sqlalchemy.Text),
             sqlalchemy.Column('resources', sqlalchemy.Text),
             sqlalchemy.Column('submitted_at', sqlalchemy.Float),
             sqlalchemy.Column('status', sqlalchemy.Text),
             sqlalchemy.Column('run_timestamp', sqlalchemy.Text),
-            sqlalchemy.Column('start_at', sqlalchemy.Float, server_default=None),
+            sqlalchemy.Column('start_at', sqlalchemy.Float,
+                              server_default=None),
             sqlalchemy.Column('end_at', sqlalchemy.Float, server_default=None),
             sqlalchemy.Column('last_recovered_at',
-                            sqlalchemy.Float,
-                            server_default='-1'),
-            sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
-            sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
+                              sqlalchemy.Float,
+                              server_default='-1'),
+            sqlalchemy.Column('recovery_count',
+                              sqlalchemy.Integer,
+                              server_default='0'),
+            sqlalchemy.Column('job_duration',
+                              sqlalchemy.Float,
+                              server_default='0'),
             sqlalchemy.Column('failure_reason', sqlalchemy.Text),
             sqlalchemy.Column('spot_job_id', sqlalchemy.Integer),
-            sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
+            sqlalchemy.Column('task_id', sqlalchemy.Integer,
+                              server_default='0'),
             sqlalchemy.Column('task_name', sqlalchemy.Text),
             sqlalchemy.Column('specs', sqlalchemy.Text),
-            sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('local_log_file',
+                              sqlalchemy.Text,
+                              server_default=None),
             sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
         )
-        
+
         job_info_table = sqlalchemy.Table(
             'job_info',
             Base.metadata,
@@ -167,9 +175,6 @@ def create_table():
             'local_log_file',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
-<<<<<<< HEAD
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'cluster_name',
-=======
 
         db_utils.add_column_to_table_sqlalchemy(
             session,
@@ -181,7 +186,6 @@ def create_table():
 
         db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
                                                 'schedule_state',
->>>>>>> master
                                                 sqlalchemy.Text())
         db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'region',
                                                 sqlalchemy.Text())
