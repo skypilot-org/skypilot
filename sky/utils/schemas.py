@@ -1449,6 +1449,9 @@ def get_config_schema():
                     }
                 ]
             },
+            'requests_retention_hours': {
+                'type': 'integer',
+            },
         }
     }
 
