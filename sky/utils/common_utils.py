@@ -268,8 +268,8 @@ def _get_server_url(host: Optional[str] = None) -> str:
     """
     # Import here to avoid circular import
     from sky import skypilot_config  # pylint: disable=import-outside-toplevel
-    from sky.server import constants as server_constants  # pylint: disable=import-outside-toplevel
-    from sky.skylet import constants as skylet_constants  # pylint: disable=import-outside-toplevel,reimported
+    from sky.server import constants as server_constants
+    from sky.skylet import constants as skylet_constants
 
     endpoint = server_constants.DEFAULT_SERVER_URL
     if host is not None:
@@ -287,7 +287,7 @@ def is_api_server_local() -> bool:
     This is moved from sky.server.common to break circular import.
     """
     # Import here to avoid circular import
-    from sky.server import constants as server_constants  # pylint: disable=import-outside-toplevel
+    from sky.server import constants as server_constants
 
     return _get_server_url() in server_constants.AVAILABLE_LOCAL_API_SERVER_URLS
 

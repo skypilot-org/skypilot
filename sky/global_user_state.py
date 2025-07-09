@@ -293,12 +293,12 @@ def _get_system_config_table():
 
 class _BaseProxy:
     """A proxy class to provide lazy access to the SQLAlchemy Base for backward compatibility."""
-    
+
     @property
     def metadata(self):
         """Get the metadata from the SQLAlchemy Base object."""
         return _get_base().metadata
-    
+
     def __getattr__(self, name):
         """Delegate all other attribute access to the actual Base object."""
         return getattr(_get_base(), name)
