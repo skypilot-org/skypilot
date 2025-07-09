@@ -30,7 +30,6 @@ logger = sky_logging.init_logger(__name__)
 USER_LOCK_PATH = os.path.expanduser('~/.sky/.{user_id}.lock')
 USER_LOCK_TIMEOUT_SECONDS = 20
 
-permission.initialize_permission_service()
 router = fastapi.APIRouter()
 
 
@@ -44,6 +43,8 @@ async def users() -> List[Dict[str, Any]]:
         if user.is_service_account():
             continue
 
+        permission.initialize_permission_service()
+        assert permission.permission_service is not None
         user_roles = permission.permission_service.get_user_roles(user.id)
         all_users.append({
             'id': user.id,
@@ -62,6 +63,9 @@ async def get_current_user_role(request: fastapi.Request):
     auth_user = request.state.auth_user
     if auth_user is None:
         return {'id': '', 'name': '', 'role': rbac.RoleName.ADMIN.value}
+
+    permission.initialize_permission_service()
+    assert permission.permission_service is not None
     user_roles = permission.permission_service.get_user_roles(auth_user.id)
     return {
         'id': auth_user.id,
@@ -97,6 +101,8 @@ async def user_create(user_create_body: payloads.UserCreateBody) -> None:
                 status_code=400, detail=f'User {username!r} already exists')
         global_user_state.add_or_update_user(
             models.User(id=user_hash, name=username, password=password_hash))
+        permission.initialize_permission_service()
+        assert permission.permission_service is not None
         permission.permission_service.update_role(user_hash, role)
 
 
@@ -111,6 +117,8 @@ async def user_update(request: fastapi.Request,
     if role and role not in supported_roles:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
+    permission.initialize_permission_service()
+    assert permission.permission_service is not None
     target_user_roles = permission.permission_service.get_user_roles(user_id)
     need_update_role = role and (not target_user_roles or
                                  (role != target_user_roles[0]))
@@ -178,6 +186,8 @@ def _delete_user(user_id: str) -> None:
 
     with _user_lock(user_id):
         global_user_state.delete_user(user_id)
+        permission.initialize_permission_service()
+        assert permission.permission_service is not None
         permission.permission_service.delete_user(user_id)
 
 
@@ -288,6 +298,8 @@ async def user_import(
                     models.User(id=user_hash,
                                 name=username,
                                 password=password_hash))
+                permission.initialize_permission_service()
+                assert permission.permission_service is not None
                 permission.permission_service.update_role(user_hash, role)
 
             success_count += 1
@@ -322,6 +334,8 @@ async def user_export() -> Dict[str, Any]:
                 continue
 
             # Get user role
+            permission.initialize_permission_service()
+            assert permission.permission_service is not None
             user_roles = permission.permission_service.get_user_roles(user.id)
             role = user_roles[0] if user_roles else rbac.get_default_role()
             # Avoid exporting `None` values
@@ -404,6 +418,8 @@ async def get_service_account_tokens(
                                               token['token_name'])
 
         # Add service account roles
+        permission.initialize_permission_service()
+        assert permission.permission_service is not None
         roles = permission.permission_service.get_user_roles(
             token['service_account_user_id'])
         token_info['service_account_roles'] = roles
@@ -463,11 +479,10 @@ async def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add service account to permission system with default role
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.permission import permission_service
-        permission_service.add_user_if_not_exists(service_account_user_id)
+        permission.initialize_permission_service()
+        assert permission.permission_service is not None
+        permission.permission_service.add_user_if_not_exists(
+            service_account_user_id)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
@@ -528,6 +543,7 @@ async def delete_service_account_token(
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions using Casbin policy system
+    assert permission.permission_service is not None
     if not permission.permission_service.check_service_account_token_permission(
             auth_user.id, token_info['creator_user_hash'], 'delete'):
         raise fastapi.HTTPException(
@@ -565,6 +581,8 @@ async def get_service_account_role(
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions - only creator or admin can view roles
+    permission.initialize_permission_service()
+    assert permission.permission_service is not None
     if not permission.permission_service.check_service_account_token_permission(
             auth_user.id, token_info['creator_user_hash'], 'view'):
         raise fastapi.HTTPException(
@@ -602,6 +620,8 @@ async def update_service_account_role(
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions - only creator or admin can update roles
+    permission.initialize_permission_service()
+    assert permission.permission_service is not None
     if not permission.permission_service.check_service_account_token_permission(
             auth_user.id, token_info['creator_user_hash'], 'update'):
         raise fastapi.HTTPException(
@@ -649,6 +669,8 @@ async def rotate_service_account_token(
         raise fastapi.HTTPException(status_code=404, detail='Token not found')
 
     # Check permissions - same as delete permission (only creator or admin)
+    permission.initialize_permission_service()
+    assert permission.permission_service is not None
     if not permission.permission_service.check_service_account_token_permission(
             auth_user.id, token_info['creator_user_hash'], 'delete'):
         raise fastapi.HTTPException(

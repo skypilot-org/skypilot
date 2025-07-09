@@ -79,7 +79,6 @@ else:
 
 P = ParamSpec('P')
 
-permission.initialize_permission_service()
 
 def _add_timestamp_prefix_for_server_logs() -> None:
     server_logger = sky_logging.init_logger('sky.server')
@@ -197,6 +196,8 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is None:
             return await call_next(request)
 
+        permission.initialize_permission_service()
+        assert permission.permission_service is not None
         permission_service = permission.permission_service
         # Check the role permission
         if permission_service.check_endpoint_permission(auth_user.id,
@@ -438,6 +439,8 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
+                permission.initialize_permission_service()
+                assert permission.permission_service is not None
                 permission.permission_service.add_user_if_not_exists(
                     auth_user.id)
 

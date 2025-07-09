@@ -126,6 +126,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
         permission.initialize_permission_service()
+        assert permission.permission_service is not None
         permission_service = permission.permission_service
         permission_service.update_workspace_policy(workspace_name, users)
 
@@ -175,6 +176,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
         # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
         permission.initialize_permission_service()
+        assert permission.permission_service is not None
         permission_service = permission.permission_service
         permission_service.add_workspace_policy(workspace_name, users)
 
@@ -228,6 +230,7 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
             raise ValueError(f'Workspace {workspace_name!r} does not exist.')
         del workspaces[workspace_name]
         permission.initialize_permission_service()
+        assert permission.permission_service is not None
         permission_service = permission.permission_service
         permission_service.remove_workspace_policy(workspace_name)
 
@@ -336,6 +339,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
             permission.initialize_permission_service()
+            assert permission.permission_service is not None
             permission_service = permission.permission_service
             for operation, workspaces in workspaces_to_check_policy.items():
                 for workspace_name, users in workspaces.items():
@@ -379,6 +383,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
     """
     active_workspace = skypilot_config.get_active_workspace()
     permission.initialize_permission_service()
+    assert permission.permission_service is not None
     if not permission.permission_service.check_workspace_permission(
             user.id, active_workspace):
         raise exceptions.PermissionDeniedError(
@@ -414,6 +419,7 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     user_workspaces = {}
 
     permission.initialize_permission_service()
+    assert permission.permission_service is not None
     for workspace_name, workspace_config in workspaces.items():
         if permission.permission_service.check_workspace_permission(
                 user_id, workspace_name):

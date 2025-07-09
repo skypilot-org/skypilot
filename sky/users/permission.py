@@ -3,8 +3,8 @@ import contextlib
 import hashlib
 import logging
 import os
-from typing import Generator, List
 import threading
+from typing import Generator, List
 
 import casbin
 import filelock
@@ -354,9 +354,11 @@ def _policy_lock() -> Generator[None, None, None]:
                            'Please try again or manually remove the lock '
                            f'file if you believe it is stale.') from e
 
+
 # Singleton instance of PermissionService for other modules to use.
 _PERMISSION_SERVICE_INIT_LOCK = threading.Lock()
 permission_service = None
+
 
 def initialize_permission_service():
     """Initialize permission service."""
