@@ -33,6 +33,7 @@ from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     import sqlalchemy
+
     from sky import backends
     from sky import clouds
     from sky.clouds import cloud
@@ -50,17 +51,18 @@ _DB_INIT_LOCK = threading.Lock()
 _DB_SCHEMA_CACHE = None
 _DB_SCHEMA_LOCK = threading.Lock()
 
+
 def _get_db_schema():
     """Get the database schema objects. This function lazy-loads SQLAlchemy."""
     global _DB_SCHEMA_CACHE
     if _DB_SCHEMA_CACHE is not None:
         return _DB_SCHEMA_CACHE
-    
+
     with _DB_SCHEMA_LOCK:
         if _DB_SCHEMA_CACHE is not None:
             return _DB_SCHEMA_CACHE
-            
-        Base = sqlalchemy.ext.declarative.declarative_base()
+
+        Base = sqlalchemy.ext.declarative.declarative_base()  # pylint: disable=invalid-name
 
         config_table = sqlalchemy.Table(
             'config',
@@ -86,24 +88,34 @@ def _get_db_schema():
             sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
             sqlalchemy.Column('last_use', sqlalchemy.Text),
             sqlalchemy.Column('status', sqlalchemy.Text),
-            sqlalchemy.Column('autostop', sqlalchemy.Integer, server_default='-1'),
-            sqlalchemy.Column('to_down', sqlalchemy.Integer, server_default='0'),
+            sqlalchemy.Column('autostop',
+                              sqlalchemy.Integer,
+                              server_default='-1'),
+            sqlalchemy.Column('to_down', sqlalchemy.Integer,
+                              server_default='0'),
             sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
             sqlalchemy.Column('owner', sqlalchemy.Text, server_default=None),
-            sqlalchemy.Column('cluster_hash', sqlalchemy.Text, server_default=None),
+            sqlalchemy.Column('cluster_hash',
+                              sqlalchemy.Text,
+                              server_default=None),
             sqlalchemy.Column('storage_mounts_metadata',
                               sqlalchemy.LargeBinary,
                               server_default=None),
-            sqlalchemy.Column('cluster_ever_up', sqlalchemy.Integer,
+            sqlalchemy.Column('cluster_ever_up',
+                              sqlalchemy.Integer,
                               server_default='0'),
             sqlalchemy.Column('status_updated_at',
                               sqlalchemy.Integer,
                               server_default=None),
-            sqlalchemy.Column('config_hash', sqlalchemy.Text, server_default=None),
-            sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
-            sqlalchemy.Column('workspace',
+            sqlalchemy.Column('config_hash',
                               sqlalchemy.Text,
-                              server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+                              server_default=None),
+            sqlalchemy.Column('user_hash', sqlalchemy.Text,
+                              server_default=None),
+            sqlalchemy.Column(
+                'workspace',
+                sqlalchemy.Text,
+                server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
             sqlalchemy.Column('last_creation_yaml',
                               sqlalchemy.Text,
                               server_default=None),
@@ -128,10 +140,12 @@ def _get_db_schema():
             sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
             sqlalchemy.Column('launched_at', sqlalchemy.Integer),
             sqlalchemy.Column('handle', sqlalchemy.LargeBinary),
-            sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
-            sqlalchemy.Column('workspace',
-                              sqlalchemy.Text,
-                              server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
+            sqlalchemy.Column('user_hash', sqlalchemy.Text,
+                              server_default=None),
+            sqlalchemy.Column(
+                'workspace',
+                sqlalchemy.Text,
+                server_default=constants.SKYPILOT_DEFAULT_WORKSPACE),
             sqlalchemy.Column('last_attached_at',
                               sqlalchemy.Integer,
                               server_default=None),
@@ -155,7 +169,8 @@ def _get_db_schema():
         cluster_history_table = sqlalchemy.Table(
             'cluster_history',
             Base.metadata,
-            sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('cluster_hash', sqlalchemy.Text,
+                              primary_key=True),
             sqlalchemy.Column('name', sqlalchemy.Text),
             sqlalchemy.Column('num_nodes', sqlalchemy.Integer),
             sqlalchemy.Column('requested_resources', sqlalchemy.LargeBinary),
@@ -185,8 +200,12 @@ def _get_db_schema():
             sqlalchemy.Column('token_name', sqlalchemy.Text),
             sqlalchemy.Column('token_hash', sqlalchemy.Text),
             sqlalchemy.Column('created_at', sqlalchemy.Integer),
-            sqlalchemy.Column('last_used_at', sqlalchemy.Integer, server_default=None),
-            sqlalchemy.Column('expires_at', sqlalchemy.Integer, server_default=None),
+            sqlalchemy.Column('last_used_at',
+                              sqlalchemy.Integer,
+                              server_default=None),
+            sqlalchemy.Column('expires_at',
+                              sqlalchemy.Integer,
+                              server_default=None),
             sqlalchemy.Column('creator_user_hash',
                               sqlalchemy.Text),  # Who created this token
             sqlalchemy.Column('service_account_user_id',
@@ -196,7 +215,8 @@ def _get_db_schema():
         cluster_yaml_table = sqlalchemy.Table(
             'cluster_yaml',
             Base.metadata,
-            sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('cluster_name', sqlalchemy.Text,
+                              primary_key=True),
             sqlalchemy.Column('yaml', sqlalchemy.Text),
         )
 
@@ -209,10 +229,10 @@ def _get_db_schema():
             sqlalchemy.Column('updated_at', sqlalchemy.Integer),
         )
 
-        _DB_SCHEMA_CACHE = (Base, config_table, user_table, cluster_table, storage_table,
-                           volume_table, cluster_history_table, ssh_key_table,
-                           service_account_token_table, cluster_yaml_table,
-                           system_config_table)
+        _DB_SCHEMA_CACHE = (Base, config_table, user_table, cluster_table,
+                            storage_table, volume_table, cluster_history_table,
+                            ssh_key_table, service_account_token_table,
+                            cluster_yaml_table, system_config_table)
         return _DB_SCHEMA_CACHE
 
 
@@ -311,7 +331,7 @@ def create_table():
             # is not critical and is likely to be enabled by other processes.
 
     # Create tables if they don't exist
-    Base = _get_base()
+    Base = _get_base()  # pylint: disable=invalid-name
     Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
 
     # For backward compatibility.
@@ -517,11 +537,12 @@ def add_or_update_user(user: models.User,
             insert_func = sqlalchemy.dialects.sqlite.insert
 
             # First try INSERT OR IGNORE - this won't fail if user exists
-            insert_stmnt = insert_func(_get_user_table()).prefix_with(
-                'OR IGNORE').values(id=user.id,
-                                    name=user.name,
-                                    password=user.password,
-                                    created_at=created_at)
+            insert_stmnt = insert_func(
+                _get_user_table()).prefix_with('OR IGNORE').values(
+                    id=user.id,
+                    name=user.name,
+                    password=user.password,
+                    created_at=created_at)
             result = session.execute(insert_stmnt)
 
             # Check if the INSERT actually inserted a row
@@ -530,13 +551,15 @@ def add_or_update_user(user: models.User,
             if not was_inserted:
                 # User existed, so update it (but don't update created_at)
                 if user.password:
-                    session.query(_get_user_table()).filter_by(id=user.id).update({
-                        _get_user_table().c.name: user.name,
-                        _get_user_table().c.password: user.password
-                    })
+                    session.query(
+                        _get_user_table()).filter_by(id=user.id).update({
+                            _get_user_table().c.name: user.name,
+                            _get_user_table().c.password: user.password
+                        })
                 else:
-                    session.query(_get_user_table()).filter_by(id=user.id).update(
-                        {_get_user_table().c.name: user.name})
+                    session.query(
+                        _get_user_table()).filter_by(id=user.id).update(
+                            {_get_user_table().c.name: user.name})
 
             session.commit()
             return was_inserted
@@ -828,7 +851,10 @@ def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(_get_cluster_table()).filter_by(name=cluster_name).update(
-            {_get_cluster_table().c.last_use: common_utils.get_current_command()})
+            {
+                _get_cluster_table().c.last_use:
+                    common_utils.get_current_command()
+            })
         session.commit()
 
 
@@ -849,7 +875,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
             _set_cluster_usage_intervals(cluster_hash, usage_intervals)
 
         if terminate:
-            session.query(_get_cluster_table()).filter_by(name=cluster_name).delete()
+            session.query(
+                _get_cluster_table()).filter_by(name=cluster_name).delete()
         else:
             handle = get_handle_from_cluster_name(cluster_name)
             if handle is None:
@@ -861,11 +888,13 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
                                      handle)
                 handle.stable_internal_external_ips = None
             current_time = int(time.time())
-            session.query(_get_cluster_table()).filter_by(name=cluster_name).update({
-                _get_cluster_table().c.handle: pickle.dumps(handle),
-                _get_cluster_table().c.status: status_lib.ClusterStatus.STOPPED.value,
-                _get_cluster_table().c.status_updated_at: current_time
-            })
+            session.query(
+                _get_cluster_table()).filter_by(name=cluster_name).update({
+                    _get_cluster_table().c.handle: pickle.dumps(handle),
+                    _get_cluster_table().c.status:
+                        status_lib.ClusterStatus.STOPPED.value,
+                    _get_cluster_table().c.status_updated_at: current_time
+                })
         session.commit()
 
 
@@ -875,7 +904,8 @@ def get_handle_from_cluster_name(
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
+        row = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None:
         return None
     return pickle.loads(row.handle)
@@ -906,8 +936,8 @@ def set_cluster_status(cluster_name: str,
     assert _SQLALCHEMY_ENGINE is not None
     current_time = int(time.time())
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_cluster_table()).filter_by(
-            name=cluster_name).update({
+        count = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).update({
                 _get_cluster_table().c.status: status.value,
                 _get_cluster_table().c.status_updated_at: current_time
             })
@@ -922,8 +952,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_cluster_table()).filter_by(
-            name=cluster_name).update({
+        count = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).update({
                 _get_cluster_table().c.autostop: idle_minutes,
                 _get_cluster_table().c.to_down: int(to_down)
             })
@@ -937,7 +967,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
+        row = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.launched_at is None:
         return None
     return int(row.launched_at)
@@ -947,7 +978,8 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
+        row = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.metadata is None:
         return None
     return json.loads(row.metadata)
@@ -957,8 +989,8 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_cluster_table()).filter_by(
-            name=cluster_name).update(
+        count = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).update(
                 {_get_cluster_table().c.metadata: json.dumps(metadata)})
         session.commit()
     assert count <= 1, count
@@ -971,7 +1003,8 @@ def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
+        row = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.storage_mounts_metadata is None:
         return None
     return pickle.loads(row.storage_mounts_metadata)
@@ -982,8 +1015,8 @@ def set_cluster_storage_mounts_metadata(
         cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_cluster_table()).filter_by(
-            name=cluster_name).update({
+        count = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).update({
                 _get_cluster_table().c.storage_mounts_metadata:
                     pickle.dumps(storage_mounts_metadata)
             })
@@ -1059,8 +1092,8 @@ def set_owner_identity_for_cluster(cluster_name: str,
         return
     owner_identity_str = json.dumps(owner_identity)
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_cluster_table()).filter_by(
-            name=cluster_name).update(
+        count = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).update(
                 {_get_cluster_table().c.owner: owner_identity_str})
         session.commit()
     assert count <= 1, count
@@ -1072,7 +1105,8 @@ def set_owner_identity_for_cluster(cluster_name: str,
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
+        row = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None or row.cluster_hash is None:
         return None
     return row.cluster_hash
@@ -1130,7 +1164,8 @@ def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_cluster_table()).filter_by(name=cluster_name).first()
+        row = session.query(
+            _get_cluster_table()).filter_by(name=cluster_name).first()
     if row is None:
         return None
     user_hash = _get_user_hash_or_current_user(row.user_hash)
@@ -1220,7 +1255,8 @@ def get_clusters_from_history(
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Explicitly select columns from both tables to avoid ambiguity
         query = session.query(
-            _get_cluster_history_table().c.cluster_hash, _get_cluster_history_table().c.name,
+            _get_cluster_history_table().c.cluster_hash,
+            _get_cluster_history_table().c.name,
             _get_cluster_history_table().c.num_nodes,
             _get_cluster_history_table().c.requested_resources,
             _get_cluster_history_table().c.launched_resources,
@@ -1228,12 +1264,14 @@ def get_clusters_from_history(
             _get_cluster_history_table().c.user_hash,
             _get_cluster_history_table().c.last_creation_yaml,
             _get_cluster_history_table().c.last_creation_command,
-            _get_cluster_table().c.status, _get_cluster_table().c.workspace,
+            _get_cluster_table().c.status,
+            _get_cluster_table().c.workspace,
             _get_cluster_table().c.status_updated_at).select_from(
-                _get_cluster_history_table().join(_get_cluster_table(),
-                                           _get_cluster_history_table().c.cluster_hash
-                                           == _get_cluster_table().c.cluster_hash,
-                                           isouter=True))
+                _get_cluster_history_table().join(
+                    _get_cluster_table(),
+                    _get_cluster_history_table().c.cluster_hash ==
+                    _get_cluster_table().c.cluster_hash,
+                    isouter=True))
 
         rows = query.all()
 
@@ -1469,7 +1507,8 @@ def remove_storage(storage_name: str):
     """Removes Storage from Database"""
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(_get_storage_table()).filter_by(name=storage_name).delete()
+        session.query(
+            _get_storage_table()).filter_by(name=storage_name).delete()
         session.commit()
 
 
@@ -1478,8 +1517,9 @@ def set_storage_status(storage_name: str,
                        status: status_lib.StorageStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_storage_table()).filter_by(
-            name=storage_name).update({_get_storage_table().c.status: status.value})
+        count = session.query(
+            _get_storage_table()).filter_by(name=storage_name).update(
+                {_get_storage_table().c.status: status.value})
         session.commit()
     assert count <= 1, count
     if count == 0:
@@ -1491,7 +1531,8 @@ def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_storage_table()).filter_by(name=storage_name).first()
+        row = session.query(
+            _get_storage_table()).filter_by(name=storage_name).first()
     if row:
         return status_lib.StorageStatus[row.status]
     return None
@@ -1502,8 +1543,8 @@ def set_storage_handle(storage_name: str,
                        handle: 'Storage.StorageMetadata') -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_storage_table()).filter_by(
-            name=storage_name).update(
+        count = session.query(
+            _get_storage_table()).filter_by(name=storage_name).update(
                 {_get_storage_table().c.handle: pickle.dumps(handle)})
         session.commit()
     assert count <= 1, count
@@ -1518,7 +1559,8 @@ def get_handle_from_storage_name(
     if storage_name is None:
         return None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_storage_table()).filter_by(name=storage_name).first()
+        row = session.query(
+            _get_storage_table()).filter_by(name=storage_name).first()
     if row:
         return pickle.loads(row.handle)
     return None
@@ -1686,8 +1728,8 @@ def delete_volume(name: str) -> None:
 def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_get_ssh_key_table()).filter_by(
-            user_hash=user_hash).first()
+        row = session.query(
+            _get_ssh_key_table()).filter_by(user_hash=user_hash).first()
     if row:
         return row.ssh_public_key, row.ssh_private_key, True
     return '', '', False
@@ -1800,8 +1842,9 @@ def update_service_account_token_last_used(token_id: str) -> None:
 
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(_get_service_account_token_table()).filter_by(
-            token_id=token_id).update(
-                {_get_service_account_token_table().c.last_used_at: last_used_at})
+            token_id=token_id).update({
+                _get_service_account_token_table().c.last_used_at: last_used_at
+            })
         session.commit()
 
 
@@ -1835,14 +1878,13 @@ def rotate_service_account_token(token_id: str,
     current_time = int(time.time())
 
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_service_account_token_table()).filter_by(
-            token_id=token_id
-        ).update({
-            _get_service_account_token_table().c.token_hash: new_token_hash,
-            _get_service_account_token_table().c.expires_at: new_expires_at,
-            _get_service_account_token_table().c.last_used_at: None,  # Reset last used
+        token_table = _get_service_account_token_table()
+        count = session.query(token_table).filter_by(token_id=token_id).update({
+            token_table.c.token_hash: new_token_hash,
+            token_table.c.expires_at: new_expires_at,
+            token_table.c.last_used_at: None,  # Reset last used
             # Update creation time
-            _get_service_account_token_table().c.created_at: current_time,
+            token_table.c.created_at: current_time,
         })
         session.commit()
 

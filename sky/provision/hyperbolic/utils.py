@@ -8,8 +8,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from sky import authentication
 from sky import sky_logging
-from sky.utils import status_lib
 from sky.adaptors import common as adaptors_common
+from sky.utils import status_lib
 
 #TODO update to prod endpoint
 BASE_URL = 'https://api.hyperbolic.xyz'

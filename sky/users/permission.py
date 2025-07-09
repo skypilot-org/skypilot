@@ -3,9 +3,9 @@ import contextlib
 import hashlib
 import logging
 import os
+import threading
 import typing
 from typing import Generator, List
-import threading
 
 import casbin
 import filelock
@@ -365,21 +365,23 @@ def _policy_lock() -> Generator[None, None, None]:
 _permission_service_instance = None
 _permission_service_lock = threading.Lock()
 
+
 def get_permission_service() -> PermissionService:
     """Get the singleton PermissionService instance (lazy loaded)."""
     global _permission_service_instance
     if _permission_service_instance is not None:
         return _permission_service_instance
-    
+
     with _permission_service_lock:
         if _permission_service_instance is not None:
             return _permission_service_instance
         _permission_service_instance = PermissionService()
         return _permission_service_instance
 
+
 # For backward compatibility: create the permission_service attribute lazily
-def __getattr__(name):
+def __getattr__(name):  # pylint: disable=invalid-name
     """Module-level lazy attribute access for backward compatibility."""
     if name == 'permission_service':
         return get_permission_service()
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    raise AttributeError(f'module \'{__name__}\' has no attribute \'{name}\'')

@@ -8,8 +8,9 @@ from typing import Any, Callable, Optional
 from sky.adaptors import common as adaptors_common
 
 if typing.TYPE_CHECKING:
-    import sqlalchemy
     import sqlite3
+
+    import sqlalchemy
 else:
     sqlalchemy = adaptors_common.LazyImport('sqlalchemy')
     sqlite3 = adaptors_common.LazyImport('sqlite3')

@@ -262,32 +262,33 @@ _current_user: Optional['models.User'] = None
 
 def _get_server_url(host: Optional[str] = None) -> str:
     """Get the API server URL from config or environment variables.
-    
-    This is a simplified version of sky.server.common.get_server_url() to avoid circular import.
+
+    This is a simplified version of sky.server.common.get_server_url()
+    to avoid circular import.
     """
     # Import here to avoid circular import
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
     from sky.server import constants as server_constants
-    from sky.skylet import constants
-    from sky import skypilot_config
-    
+    from sky.skylet import constants as skylet_constants
+
     endpoint = server_constants.DEFAULT_SERVER_URL
     if host is not None:
         endpoint = f'http://{host}:46580'
-    
+
     url = os.getenv(
-        constants.SKY_API_SERVER_URL_ENV_VAR,
+        skylet_constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
     return url.rstrip('/')
 
 
 def is_api_server_local() -> bool:
     """Check if the API server is running locally.
-    
+
     This is moved from sky.server.common to break circular import.
     """
     # Import here to avoid circular import
     from sky.server import constants as server_constants
-    
+
     return _get_server_url() in server_constants.AVAILABLE_LOCAL_API_SERVER_URLS
 
 
@@ -360,7 +361,8 @@ def get_using_remote_api_server() -> bool:
                          '').lower() in ('true', '1')
     if _using_remote_api_server is not None:
         return _using_remote_api_server
-    # Use local logic instead of importing from sky.server.common to avoid circular import
+    # Use local logic instead of importing from sky.server.common to
+    # avoid circular import
     return not is_api_server_local()
 
 

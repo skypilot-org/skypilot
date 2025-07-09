@@ -117,17 +117,18 @@ API_SERVER_CONFIG_KEY = 'api_server_config'
 
 _DB_USE_LOCK = threading.Lock()
 
+
 def _get_db_schema():
     """Get the database schema objects. This function lazy-loads SQLAlchemy."""
-    Base = sqlalchemy.ext.declarative.declarative_base()
-    
+    Base = sqlalchemy.ext.declarative.declarative_base()  # pylint: disable=invalid-name
+
     config_yaml_table = sqlalchemy.Table(
         'config_yaml',
         Base.metadata,
         sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
         sqlalchemy.Column('value', sqlalchemy.Text),
     )
-    
+
     return Base, config_yaml_table
 
 
@@ -571,9 +572,9 @@ def _reload_config_as_server() -> None:
 
     if db_url:
         with _DB_USE_LOCK:
-            sqlalchemy_engine = sqlalchemy.create_engine(db_url,
-                                                         poolclass=sqlalchemy.pool.NullPool)
-            Base, config_yaml_table = _get_db_schema()
+            sqlalchemy_engine = sqlalchemy.create_engine(
+                db_url, poolclass=sqlalchemy.pool.NullPool)
+            Base, config_yaml_table = _get_db_schema()  # pylint: disable=invalid-name
             Base.metadata.create_all(bind=sqlalchemy_engine)
 
             def _get_config_yaml_from_db(
@@ -858,9 +859,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             if new_db_url and new_db_url != existing_db_url:
                 raise ValueError('Cannot change db url while server is running')
             with _DB_USE_LOCK:
-                sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
-                                                             poolclass=sqlalchemy.pool.NullPool)
-                Base, config_yaml_table = _get_db_schema()
+                sqlalchemy_engine = sqlalchemy.create_engine(
+                    existing_db_url, poolclass=sqlalchemy.pool.NullPool)
+                Base, config_yaml_table = _get_db_schema()  # pylint: disable=invalid-name
                 Base.metadata.create_all(bind=sqlalchemy_engine)
 
                 def _set_config_yaml_to_db(key: str,
