@@ -31,7 +31,7 @@ To install Kueue, run the following command:
 .. code-block:: bash
 
     # See https://github.com/kubernetes-sigs/kueue/releases for available versions.
-    VERSION=v0.11.4
+    VERSION=v0.12.3
     kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/$VERSION/manifests.yaml
 
 
@@ -150,45 +150,106 @@ A local queue points to a cluster queue. Multiple local queues can point to the 
 
 Here, a cluster queue and a local queue are created.
 
-``kueue.yaml``:
+.. tab-set::
 
-.. code-block:: yaml
+    .. tab-item:: kueue.yaml
+        :sync: kueue-yaml-tab
 
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: ClusterQueue
-    metadata:
-      name: "skypilot-cluster-queue"
-    spec:
-      namespaceSelector: {} # match all namespaces
-      resourceGroups:
-      - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
-        flavors:
-        - name: "default-flavor"
-          # Adjust this value based on actual resource needs.
-          # The resource quote should be at most the resource
-          # capacity of the cluster.
-          # This section must include all resources defined in
-          # 'coveredResources' above.
-          # Set an "infinite" quota for resources that
-          # you don't want to limit.
-          resources:
-          - name: "cpu"
-            nominalQuota: 16
-          - name: "memory"
-            nominalQuota: 32Gi
-          - name: "nvidia.com/gpu"
-            nominalQuota: 1000000 # "Infinite" quota
-      preemption:
-        withinClusterQueue: LowerPriority
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: LocalQueue
-    metadata:
-      # A local queue is in a namespace
-      namespace: "default"
-      name: "skypilot-local-queue"
-    spec:
-      clusterQueue: "skypilot-cluster-queue"
+        .. code-block:: yaml
+
+            apiVersion: kueue.x-k8s.io/v1beta1
+            kind: ClusterQueue
+            metadata:
+              name: "skypilot-cluster-queue"
+            spec:
+              namespaceSelector: {} # match all namespaces
+              resourceGroups:
+              - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+                flavors:
+                - name: "default-flavor"
+                  # Adjust this value based on actual resource needs.
+                  # The resource quote should be at most the resource
+                  # capacity of the cluster.
+                  # This section must include all resources defined in
+                  # 'coveredResources' above.
+                  # Set an "infinite" quota for resources that
+                  # you don't want to limit.
+                  resources:
+                  - name: "cpu"
+                    nominalQuota: 16
+                  - name: "memory"
+                    nominalQuota: 32Gi
+                  - name: "nvidia.com/gpu"
+                    nominalQuota: 1000000 # "Infinite" quota
+              preemption:
+                withinClusterQueue: LowerPriority
+            ---
+            apiVersion: kueue.x-k8s.io/v1beta1
+            kind: LocalQueue
+            metadata:
+              # A local queue is in a namespace
+              namespace: "default"
+              name: "skypilot-local-queue"
+            spec:
+              clusterQueue: "skypilot-cluster-queue"
+
+    .. tab-item:: kueue.yaml with GKE DWS Enabled
+        :sync: kueue-yaml-gke-dws-tab
+
+        When using :ref:`GKE DWS <dws-with-kueue>`, the ``kueue.yaml`` file should include the following:
+
+        .. code-block:: yaml
+
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: AdmissionCheck
+          metadata:
+            name: dws-prov
+          spec:
+            controllerName: kueue.x-k8s.io/provisioning-request
+            parameters:
+              apiGroup: kueue.x-k8s.io
+              kind: ProvisioningRequestConfig
+              name: dws-config
+          ---
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: ProvisioningRequestConfig
+          metadata:
+            name: dws-config
+          spec:
+            provisioningClassName: queued-provisioning.gke.io
+            managedResources:
+            - nvidia.com/gpu
+            podSetMergePolicy: IdenticalWorkloadSchedulingRequirements
+          ---
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: ClusterQueue
+          metadata:
+            name: "skypilot-cluster-queue"
+          spec:
+            namespaceSelector: {}
+            resourceGroups:
+            - coveredResources: ["cpu", "memory", "nvidia.com/gpu", "ephemeral-storage"]
+              flavors:
+              - name: "default-flavor"
+                resources:
+                - name: "cpu"
+                  nominalQuota: 1000000000    # "Infinite" quota
+                - name: "memory"
+                  nominalQuota: 1000000000Gi  # "Infinite" quota
+                - name: "nvidia.com/gpu"
+                  nominalQuota: 1000000000    # "Infinite" quota
+                - name: "ephemeral-storage"
+                  nominalQuota: 1000000000Ti  # "Infinite" quota
+            admissionChecks:
+            - dws-prov
+          ---
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: LocalQueue
+          metadata:
+            namespace: "default"
+            name: "skypilot-local-queue"
+          spec:
+            clusterQueue: "skypilot-cluster-queue"
 
 To create the cluster and local queues above, save the snippet to ``kueue.yaml`` and run the following command:
 

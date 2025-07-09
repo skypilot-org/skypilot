@@ -348,6 +348,23 @@ available_node_types:
                   operator: DoesNotExist
                 {% endfor %}
             {% endif %}
+          # For multi-node support, we put a soft-constraint to schedule
+          # worker pods on different nodes than the head pod.
+          # This is not set as a hard constraint because if different nodes
+          # are not available, we still want to be able to schedule worker
+          # pods on larger nodes which may be able to fit multiple SkyPilot
+          # "nodes".
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: skypilot-cluster-name
+                    operator: In
+                    values:
+                    - {{cluster_name_on_cloud}}
+                topologyKey: kubernetes.io/hostname
+              weight: 100
           {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
           podAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
