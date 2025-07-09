@@ -77,6 +77,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('task_name', sqlalchemy.Text),
     sqlalchemy.Column('specs', sqlalchemy.Text),
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -169,6 +170,14 @@ def create_table():
             'local_log_file',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'spot',
+            'metadata',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT \'{}\'',
+            value_to_replace_existing_entries='{}')
 
         db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
                                                 'schedule_state',
@@ -273,6 +282,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'task_name': r['task_name'],
         'specs': r['specs'],
         'local_log_file': r['local_log_file'],
+        'metadata': r['metadata'],
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r[job_info_table.c.spot_job_id
                              ],  # ambiguous, use table.column
@@ -560,7 +570,13 @@ def set_job_info_without_job_id(name: str, workspace: str,
 
 
 @_init_db
-def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
+def set_pending(
+    job_id: int,
+    task_id: int,
+    task_name: str,
+    resources_str: str,
+    metadata: str,
+):
     """Set the task to pending state."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -570,6 +586,7 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
                 task_id=task_id,
                 task_name=task_name,
                 resources=resources_str,
+                metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
             ))
         session.commit()
@@ -1213,6 +1230,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
                 job_dict['schedule_state'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
+            job_dict['metadata'] = json.loads(job_dict['metadata'])
 
             # Add user YAML content for managed jobs.
             yaml_path = job_dict.get('original_user_yaml_path')
