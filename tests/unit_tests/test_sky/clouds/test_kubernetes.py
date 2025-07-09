@@ -306,19 +306,21 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_cluster_type')
     def test_ipc_lock_capability_enabled_with_user_security_context(
-            self, mock_detect_cluster_type, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_cluster_type, mock_get_image,
+            mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
         """Test that IPC_LOCK capability is enabled when network tier is BEST and cluster supports it."""
 
         # Setup mocks
-        from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
         mock_cluster_type = mock.MagicMock()
         mock_cluster_type.supports_high_performance_networking.return_value = True
         mock_cluster_type.requires_ipc_lock_capability.return_value = True
         mock_detect_cluster_type.return_value = mock_cluster_type
-        
+
         mock_get_current_context.return_value = "test-context"
         mock_get_namespace.return_value = "default"
         mock_get_accelerator_label_keys.return_value = []
@@ -363,7 +365,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # We should not expect them in k8s_env_vars for GCP cluster types
         k8s_env_vars = deploy_vars['k8s_env_vars']
         self.assertIn('SKYPILOT_IN_CLUSTER_CONTEXT_NAME', k8s_env_vars)
-        self.assertEqual(k8s_env_vars['SKYPILOT_IN_CLUSTER_CONTEXT_NAME'], 'test-context')
+        self.assertEqual(k8s_env_vars['SKYPILOT_IN_CLUSTER_CONTEXT_NAME'],
+                         'test-context')
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -378,16 +381,18 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_cluster_type')
     def test_ipc_lock_capability_disabled_when_no_high_perf_networking(
-            self, mock_detect_cluster_type, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_cluster_type, mock_get_image,
+            mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
         """Test that IPC_LOCK capability is disabled when cluster doesn't support high performance networking."""
 
         # Setup mocks - cluster does NOT support high performance networking
-        from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
         mock_detect_cluster_type.return_value = KubernetesHighPerformanceNetworkType.NONE
-        
+
         mock_get_current_context.return_value = "test-context"
         mock_get_namespace.return_value = "default"
         mock_get_accelerator_label_keys.return_value = []
@@ -446,7 +451,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_cluster_type')
     def test_ipc_lock_capability_disabled_when_network_tier_not_best(
-            self, mock_detect_cluster_type, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_cluster_type, mock_get_image,
+            mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_accelerator_label_keys,
             mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
@@ -457,9 +463,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.resources.network_tier = resources_utils.NetworkTier.STANDARD
 
         # Setup mocks - when network tier is not BEST, _detect_cluster_type returns NONE
-        from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
         mock_detect_cluster_type.return_value = KubernetesHighPerformanceNetworkType.NONE
-        
+
         mock_get_current_context.return_value = "test-context"
         mock_get_namespace.return_value = "default"
         mock_get_accelerator_label_keys.return_value = []
@@ -515,7 +522,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_cluster_type')
     def test_nebius_network_tier_with_gpu_environment_variables(
-            self, mock_detect_cluster_type, mock_get_image, mock_get_networking_mode, mock_get_port_mode,
+            self, mock_detect_cluster_type, mock_get_image,
+            mock_get_networking_mode, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
             mock_is_exec_auth, mock_get_gpu_resource_key,
             mock_get_accelerator_label_key_values,
@@ -541,9 +549,10 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         gpu_resources.network_tier = resources_utils.NetworkTier.BEST
 
         # Setup mocks - cluster supports high performance networking (Nebius)
-        from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
         mock_detect_cluster_type.return_value = KubernetesHighPerformanceNetworkType.NEBIUS
-        
+
         mock_get_current_context.return_value = "nebius-context"
         mock_get_namespace.return_value = "default"
         mock_get_accelerator_label_keys.return_value = []

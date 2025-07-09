@@ -1,10 +1,10 @@
-# Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
+# Full finetuning of Llama-4 Scout 17B MoE model with 128 experts.
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick.yaml -c maverick --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-scout_gke_llama_factory_sft.yaml -c scout --env HF_TOKEN
 #
-# This config uses H200 GPUs with 141GB memory each (much better for LLaMA-4!)
+# This config uses H100 GPUs with 80GB memory each
 
 envs:
   HF_TOKEN: 
