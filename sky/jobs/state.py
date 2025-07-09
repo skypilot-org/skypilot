@@ -1202,7 +1202,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     if job_id is not None:
         query = query.where(spot_table.c.spot_job_id == job_id)
     query = query.order_by(spot_table.c.spot_job_id.desc(),
-                            spot_table.c.task_id.asc())
+                           spot_table.c.task_id.asc())
     rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.execute(query).fetchall()
@@ -1227,7 +1227,7 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
             job_dict['user_yaml'] = None
 
         jobs.append(job_dict)
-        return jobs
+    return jobs
 
 
 @_init_db
