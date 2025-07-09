@@ -30,6 +30,7 @@ logger = sky_logging.init_logger(__name__)
 USER_LOCK_PATH = os.path.expanduser('~/.sky/.{user_id}.lock')
 USER_LOCK_TIMEOUT_SECONDS = 20
 
+permission.initialize_permission_service()
 router = fastapi.APIRouter()
 
 

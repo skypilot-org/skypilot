@@ -20,6 +20,7 @@ from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
+permission.initialize_permission_service()
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60

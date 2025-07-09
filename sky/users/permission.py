@@ -353,6 +353,11 @@ def _policy_lock() -> Generator[None, None, None]:
                            'Please try again or manually remove the lock '
                            f'file if you believe it is stale.') from e
 
-
 # Singleton instance of PermissionService for other modules to use.
-permission_service = PermissionService()
+permission_service = None
+
+def initialize_permission_service():
+    """Initialize permission service."""
+    global permission_service
+    if permission_service is None:
+        permission_service = PermissionService()

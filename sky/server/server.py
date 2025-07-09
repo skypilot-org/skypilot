@@ -79,6 +79,7 @@ else:
 
 P = ParamSpec('P')
 
+permission.initialize_permission_service()
 
 def _add_timestamp_prefix_for_server_logs() -> None:
     server_logger = sky_logging.init_logger('sky.server')
