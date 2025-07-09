@@ -1280,6 +1280,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
     """
     assert _SQLALCHEMY_ENGINE is not None
     with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        o_user_yaml_path = original_user_yaml_path
         updated_count = session.query(_get_job_info_table()).filter(
             sqlalchemy.and_(
                 _get_job_info_table().c.spot_job_id == job_id,
@@ -1290,7 +1291,7 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             _get_job_info_table().c.schedule_state:
                 ManagedJobScheduleState.WAITING.value,
             _get_job_info_table().c.dag_yaml_path: dag_yaml_path,
-            _get_job_info_table().c.original_user_yaml_path: original_user_yaml_path,
+            _get_job_info_table().c.original_user_yaml_path: o_user_yaml_path,
             _get_job_info_table().c.env_file_path: env_file_path,
             _get_job_info_table().c.user_hash: user_hash,
             _get_job_info_table().c.priority: priority,
