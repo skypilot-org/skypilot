@@ -1340,38 +1340,39 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     # Note: we will get the user_hash here, but don't try to call
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
+    query = sqlalchemy.select(spot_table, job_info_table).select_from(
+        spot_table.outerjoin(
+            job_info_table,
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+    if job_id is not None:
+        query = query.where(spot_table.c.spot_job_id == job_id)
+    query = query.order_by(spot_table.c.spot_job_id.desc(),
+                           spot_table.c.task_id.asc())
+    rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        query = sqlalchemy.select(spot_table, job_info_table).select_from(
-            spot_table.outerjoin(
-                job_info_table,
-                spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
-        if job_id is not None:
-            query = query.where(spot_table.c.spot_job_id == job_id)
-        query = query.order_by(spot_table.c.spot_job_id.desc(),
-                               spot_table.c.task_id.asc())
         rows = session.execute(query).fetchall()
-        jobs = []
-        for row in rows:
-            job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-            if job_dict['job_name'] is None:
-                job_dict['job_name'] = job_dict['task_name']
+    jobs = []
+    for row in rows:
+        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        job_dict['schedule_state'] = ManagedJobScheduleState(
+            job_dict['schedule_state'])
+        if job_dict['job_name'] is None:
+            job_dict['job_name'] = job_dict['task_name']
 
-            # Add user YAML content for managed jobs.
-            yaml_path = job_dict.get('original_user_yaml_path')
-            if yaml_path:
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['user_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError):
-                    job_dict['user_yaml'] = None
-            else:
+        # Add user YAML content for managed jobs.
+        yaml_path = job_dict.get('original_user_yaml_path')
+        if yaml_path:
+            try:
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    job_dict['user_yaml'] = f.read()
+            except (FileNotFoundError, IOError, OSError):
                 job_dict['user_yaml'] = None
+        else:
+            job_dict['user_yaml'] = None
 
-            jobs.append(job_dict)
-        return jobs
+        jobs.append(job_dict)
+    return jobs
 
 
 @_init_db
