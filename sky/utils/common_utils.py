@@ -22,9 +22,7 @@ import jsonschema
 from sky import exceptions
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.server import constants as server_constants
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
@@ -268,13 +266,17 @@ def _get_server_url(host: Optional[str] = None) -> str:
     This is a simplified version of sky.server.common.get_server_url()
     to avoid circular import.
     """
+    # Import here to avoid circular import
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
+    from sky.server import constants as server_constants  # pylint: disable=import-outside-toplevel
+    from sky.skylet import constants as skylet_constants  # pylint: disable=import-outside-toplevel,reimported
 
     endpoint = server_constants.DEFAULT_SERVER_URL
     if host is not None:
         endpoint = f'http://{host}:46580'
 
     url = os.getenv(
-        constants.SKY_API_SERVER_URL_ENV_VAR,
+        skylet_constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
     return url.rstrip('/')
 
@@ -284,6 +286,8 @@ def is_api_server_local() -> bool:
 
     This is moved from sky.server.common to break circular import.
     """
+    # Import here to avoid circular import
+    from sky.server import constants as server_constants  # pylint: disable=import-outside-toplevel
 
     return _get_server_url() in server_constants.AVAILABLE_LOCAL_API_SERVER_URLS
 
