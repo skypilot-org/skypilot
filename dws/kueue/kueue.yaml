@@ -1,0 +1,35 @@
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: "skypilot-cluster-queue"
+spec:
+  namespaceSelector: {} # match all namespaces
+  resourceGroups:
+  - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+    flavors:
+    - name: "default-flavor"
+      # Adjust this value based on actual resource needs.
+      # The resource quote should be at most the resource
+      # capacity of the cluster.
+      # This section must include all resources defined in
+      # 'coveredResources' above.
+      # Set an "infinite" quota for resources that
+      # you don't want to limit.
+      resources:
+      - name: "cpu"
+        nominalQuota: 16
+      - name: "memory"
+        nominalQuota: 32Gi
+      - name: "nvidia.com/gpu"
+        nominalQuota: 1000000 # "Infinite" quota
+  preemption:
+    withinClusterQueue: LowerPriority
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  # A local queue is in a namespace
+  namespace: "default"
+  name: "skypilot-local-queue"
+spec:
+  clusterQueue: "skypilot-cluster-queue"

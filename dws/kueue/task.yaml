@@ -1,0 +1,7 @@
+name: dws-kueue
+
+resources:
+  infra: k8s
+  accelerators: H200:8
+
+num_nodes: 1 # TODO: ROMILB TEST WITH 2
