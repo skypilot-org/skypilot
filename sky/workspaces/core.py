@@ -20,7 +20,6 @@ from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
-permission.initialize_permission_service()
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
@@ -126,6 +125,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
         """Function to update workspace inside the lock."""
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
+        permission.initialize_permission_service()
         permission_service = permission.permission_service
         permission_service.update_workspace_policy(workspace_name, users)
 
@@ -174,6 +174,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
         workspaces[workspace_name] = config
         # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
+        permission.initialize_permission_service()
         permission_service = permission.permission_service
         permission_service.add_workspace_policy(workspace_name, users)
 
@@ -226,6 +227,7 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
         if workspace_name not in workspaces:
             raise ValueError(f'Workspace {workspace_name!r} does not exist.')
         del workspaces[workspace_name]
+        permission.initialize_permission_service()
         permission_service = permission.permission_service
         permission_service.remove_workspace_policy(workspace_name)
 
@@ -333,6 +335,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
+            permission.initialize_permission_service()
             permission_service = permission.permission_service
             for operation, workspaces in workspaces_to_check_policy.items():
                 for workspace_name, users in workspaces.items():
@@ -375,6 +378,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
             the active workspace.
     """
     active_workspace = skypilot_config.get_active_workspace()
+    permission.initialize_permission_service()
     if not permission.permission_service.check_workspace_permission(
             user.id, active_workspace):
         raise exceptions.PermissionDeniedError(
@@ -409,6 +413,7 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
         workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
     user_workspaces = {}
 
+    permission.initialize_permission_service()
     for workspace_name, workspace_config in workspaces.items():
         if permission.permission_service.check_workspace_permission(
                 user_id, workspace_name):

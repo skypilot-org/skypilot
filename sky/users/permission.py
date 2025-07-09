@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 from typing import Generator, List
+import threading
 
 import casbin
 import filelock
@@ -354,10 +355,13 @@ def _policy_lock() -> Generator[None, None, None]:
                            f'file if you believe it is stale.') from e
 
 # Singleton instance of PermissionService for other modules to use.
+_PERMISSION_SERVICE_INIT_LOCK = threading.Lock()
 permission_service = None
 
 def initialize_permission_service():
     """Initialize permission service."""
     global permission_service
     if permission_service is None:
-        permission_service = PermissionService()
+        with _PERMISSION_SERVICE_INIT_LOCK:
+            if permission_service is None:
+                permission_service = PermissionService()
