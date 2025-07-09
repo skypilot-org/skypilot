@@ -278,9 +278,6 @@ Set `network_tier: best` in your SkyPilot task YAML resources to enable InfiniBa
       network_tier: best
     ```
 
-
-> **💡 Tip:** Add the above config to the SkyPilot config (`~/.sky/config.yaml` [global config](https://docs.skypilot.co/en/latest/reference/config.html#config-yaml) or `.sky.yaml` [project config](https://docs.skypilot.co/en/latest/reference/config-sources.html#config-client-project-config)) to have Infiniband configured automatically for all your jobs.
-
 Refer to [Using InfiniBand in Nebius with SkyPilot](https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html)  and [NCCL test example](https://github.com/skypilot-org/skypilot/blob/master/examples/nebius_infiniband/nccl.yaml) for more details.
 
 ### Shared storage with Nebius shared filesystem
