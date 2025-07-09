@@ -451,12 +451,7 @@ def override_sky_config(
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
-        if is_remote_server_test():
-            test.commands.insert(0, 'sky status')
-        else:
-            subprocess.run(['sky', 'status'],
-                           stdout=subprocess.DEVNULL,
-                           check=True)
+        test.commands.insert(0, 'sky status')
 
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:

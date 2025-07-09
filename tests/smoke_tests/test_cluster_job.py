@@ -2026,4 +2026,4 @@ def test_remote_server_api_login():
         # Mock the environment config to return a non-existing endpoint.
         # The sky api login command should not read from environment config
         # when an explicit endpoint is provided as an argument.
-        smoke_tests_utils.run_one_test(test, False)
+        smoke_tests_utils.run_one_test(test, check_sky_status=False)
