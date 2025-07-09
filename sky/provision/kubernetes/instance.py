@@ -18,6 +18,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -808,21 +809,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
 
     def _create_resource_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
-        # We need to keep the following fields in the pod spec to be same for
-        # head and worker pods.
-        # So that Kueue can merge them into a single PodSet when creating
-        # ProvisioningRequest to trigger scale up of the cluster autoscaler,
-        # this is especially required for DWS queued provisioning mode in GKE.
-        #  spec.containers[*].resources.requests
-        #  spec.initContainers[*].resources.requests
-        #  spec.resources
-        #  spec.nodeSelector
-        #  spec.tolerations
-        #  spec.affinity
-        #  resourceClaims
-        # Refer to the following links for more details:
-        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # pylint: disable=line-too-long
-        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # pylint: disable=line-too-long
         if head_pod_name is None and i == 0:
             # First pod should be head if no head exists
             pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
@@ -839,6 +825,54 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        # We need to keep the following fields in the pod spec to be same for
+        # head and worker pods.
+        # So that Kueue can merge them into a single PodSet when creating
+        # ProvisioningRequest to trigger scale up of the cluster autoscaler,
+        # this is especially required for DWS queued provisioning mode in GKE.
+        #  spec.containers[*].resources.requests
+        #  spec.initContainers[*].resources.requests
+        #  spec.resources
+        #  spec.nodeSelector
+        #  spec.tolerations
+        #  spec.affinity
+        #  resourceClaims
+        # Refer to the following links for more details:
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # pylint: disable=line-too-long
+        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # pylint: disable=line-too-long
+        if config.count > 1:
+            # For multi-node support, we put a soft-constraint to schedule
+            # worker pods on different nodes than the head pod.
+            # This is not set as a hard constraint because if different nodes
+            # are not available, we still want to be able to schedule worker
+            # pods on larger nodes which may be able to fit multiple SkyPilot
+            # "nodes".
+            pod_spec_config = config_utils.Config(pod_spec_copy['spec'].get(
+                'affinity', {}))
+            existing_rules = pod_spec_config.get_nested(
+                ('podAntiAffinity',
+                 'preferredDuringSchedulingIgnoredDuringExecution'), [])
+            existing_rules.append({
+                # Max weight to avoid scheduling on the
+                # same physical node unless necessary.
+                'weight': 100,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': k8s_constants.TAG_SKYPILOT_CLUSTER_NAME,
+                            'operator': 'In',
+                            'values': [cluster_name_on_cloud]
+                        }]
+                    },
+                    'topologyKey': 'kubernetes.io/hostname'
+                }
+            })
+            pod_spec_config.set_nested(
+                ('podAntiAffinity',
+                 'preferredDuringSchedulingIgnoredDuringExecution'),
+                existing_rules)
+            pod_spec_copy['spec']['affinity'] = pod_spec_config
 
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU
