@@ -524,7 +524,7 @@ def patch_db_create_for_parallel_tests(monkeypatch):
     """Mock Base.metadata.create_all with file lock to prevent race conditions in parallel execution."""
 
     # Store the original create_all method
-    original_create_all = global_user_state.Base.metadata.create_all
+    original_create_all = global_user_state._get_base().metadata.create_all
 
     def create_all_with_lock(bind=None, **kwargs):
         """Wrapper for Base.metadata.create_all with file lock to prevent race conditions."""
@@ -546,7 +546,7 @@ def patch_db_create_for_parallel_tests(monkeypatch):
                 pass
 
     # Patch the method
-    monkeypatch.setattr(global_user_state.Base.metadata, 'create_all',
+    monkeypatch.setattr(global_user_state._get_base().metadata, 'create_all',
                         create_all_with_lock)
 
     yield
