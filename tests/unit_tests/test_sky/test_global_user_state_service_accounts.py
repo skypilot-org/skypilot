@@ -17,12 +17,12 @@ class TestServiceAccountDatabaseOperations:
         # Create a mock postgresql module to prevent AttributeError
         mock_postgresql = mock.Mock()
         mock_postgresql.insert = mock.Mock()
-        
+
         # Patch the postgresql dialect if it doesn't exist
-        with mock.patch.object(
-            global_user_state.sqlalchemy.dialects, 'postgresql', mock_postgresql,
-            create=True
-        ):
+        with mock.patch.object(global_user_state.sqlalchemy.dialects,
+                               'postgresql',
+                               mock_postgresql,
+                               create=True):
             yield
 
     @pytest.fixture
@@ -56,7 +56,9 @@ class TestServiceAccountDatabaseOperations:
                                        mock_table):
         """Test adding a service account token."""
         with mock.patch('time.time', return_value=1234567890):
-            with mock.patch('sky.global_user_state.sqlalchemy.dialects.sqlite.insert') as mock_insert:
+            with mock.patch(
+                    'sky.global_user_state.sqlalchemy.dialects.sqlite.insert'
+            ) as mock_insert:
                 # Mock the upsert functionality
                 mock_engine.dialect.name = 'sqlite'
                 mock_insert_obj = mock.Mock()
@@ -81,10 +83,12 @@ class TestServiceAccountDatabaseOperations:
         mock_engine.dialect.name = 'postgresql'
 
         with mock.patch('time.time', return_value=1234567890):
-            with mock.patch('sky.global_user_state.sqlalchemy.dialects.postgresql.insert') as mock_insert:
+            with mock.patch(
+                    'sky.global_user_state.sqlalchemy.dialects.postgresql.insert'
+            ) as mock_insert:
                 mock_insert_obj = mock.Mock()
                 mock_insert.return_value = mock_insert_obj
-                
+
                 global_user_state.add_service_account_token(
                     token_id='token123',
                     token_name='test-token',
@@ -245,8 +249,9 @@ class TestServiceAccountDatabaseOperations:
         with mock.patch('time.time', return_value=1234568000):
             mock_session.query.return_value.filter_by.return_value.update.return_value = 0
 
-            with pytest.raises(ValueError,
-                               match='Service account token nonexistent not found'):
+            with pytest.raises(
+                    ValueError,
+                    match='Service account token nonexistent not found'):
                 global_user_state.rotate_service_account_token(
                     token_id='nonexistent',
                     new_token_hash='new_hash456',
