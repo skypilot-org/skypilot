@@ -180,7 +180,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
+Current supported infra: Kubernetes, AWS, AWS SageMaker, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
 VMware vSphere, Nebius.
 

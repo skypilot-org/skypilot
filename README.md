@@ -78,7 +78,7 @@ pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidst
   <img src="docs/source/_static/intro.gif" alt="SkyPilot">
 </p>
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
+Current supported infra: Kubernetes, AWS, AWS SageMaker, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
 VMware vSphere, Nebius.
 <p align="center">
