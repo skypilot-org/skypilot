@@ -291,24 +291,6 @@ def _get_system_config_table():
     return _get_db_schema()[10]
 
 
-class _BaseProxy:
-    """A proxy class to provide lazy access to the SQLAlchemy Base for backward compatibility."""
-
-    @property
-    def metadata(self):
-        """Get the metadata from the SQLAlchemy Base object."""
-        return _get_base().metadata
-
-    def __getattr__(self, name):
-        """Delegate all other attribute access to the actual Base object."""
-        return getattr(_get_base(), name)
-
-
-# Backward compatibility: expose Base at module level for tests
-# This allows tests to access global_user_state.Base.metadata.create_all
-Base = _BaseProxy()  # pylint: disable=invalid-name
-
-
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
 
