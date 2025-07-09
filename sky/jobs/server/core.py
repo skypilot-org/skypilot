@@ -101,7 +101,6 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
 
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
-
     consolidation_mode_job_id = managed_job_state.set_job_info_without_job_id(
         dag.name,
         workspace=skypilot_config.get_active_workspace(
@@ -110,7 +109,6 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
     for task_id, task in enumerate(dag.tasks):
         resources_str = backend_utils.get_task_resources_str(
             task, is_managed_job=True)
-
         managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                       task.name, resources_str)
     return consolidation_mode_job_id
@@ -135,7 +133,7 @@ def launch(
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
-            chain dag or skypilot runtime version mismatch.
+            chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
         sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
             is unavailable
