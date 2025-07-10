@@ -1,13 +1,11 @@
-import os
 import sys
-import tempfile
 import threading
-import time
 from unittest import mock
 
 import pytest
 
 import sky
+from sky import global_user_state
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='Only test in CI.')
@@ -17,17 +15,12 @@ def test_enabled_clouds_empty():
         sky.clouds.cloud.CloudCapability.COMPUTE, workspace='default') == []
 
 
-def test_concurrent_database_initializationd():
+def test_concurrent_database_initializationd(tmp_path):
     """Test that concurrent database initialization."""
     # Store original state to restore later
-    original_engine = sky.global_user_state._SQLALCHEMY_ENGINE
+    with mock.patch.object(global_user_state, '_SQLALCHEMY_ENGINE', None):
 
-    try:
-        sky.global_user_state._SQLALCHEMY_ENGINE = None
-
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
-            temp_db_path = f.name
-
+        temp_db_path = tmp_path / 'state.db'
         results = []
         num_threads = 5
 
@@ -35,14 +28,13 @@ def test_concurrent_database_initializationd():
             """Worker thread that initializes DB and performs operations"""
             try:
                 with mock.patch('os.path.expanduser',
-                                return_value=temp_db_path):
+                                return_value=str(temp_db_path)):
                     # Force database initialization
-                    engine = sky.global_user_state.initialize_and_get_db()
+                    global_user_state.initialize_and_get_db()
 
                     # Immediately try to use the database
                     # This should work if tables are properly created
-                    user = sky.global_user_state.get_user(
-                        f"test_user_{thread_id}")
+                    global_user_state.get_user(f"test_user_{thread_id}")
 
                     results.append((thread_id, "SUCCESS", None))
             except Exception as e:
@@ -72,10 +64,3 @@ def test_concurrent_database_initializationd():
             f"Race condition detected: {len(failures)} threads failed. "
             f"This indicates the database initialization has race conditions. "
             f"Failures: {[(f[0], str(f[2])) for f in failures]}")
-
-    finally:
-        sky.global_user_state._SQLALCHEMY_ENGINE = original_engine
-        try:
-            os.unlink(temp_db_path)
-        except:
-            pass
