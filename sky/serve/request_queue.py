@@ -28,10 +28,12 @@ class RequestEntry:
 class RequestStatus:
     batch_size: int
     num_pending_reqs: int = 0
-    running_req_ids: List[str] = dataclasses.field(default_factory=list)
-    # List[cn, job_id, logs]
-    completed_reqs: List[Tuple[str, int,
+    submitting_reqs: List[str] = dataclasses.field(default_factory=list)
+    # List[job_id, cn]
+    submitted_reqs: List[Tuple[int,
                                str]] = dataclasses.field(default_factory=list)
+    # List[logs]
+    completed_reqs: List[str] = dataclasses.field(default_factory=list)
 
 
 class RequestQueue:
@@ -119,33 +121,53 @@ class RequestQueue:
         )
         sky_req_id = sdk.exec(task=sky.Task(run=request_entry.run_script),
                               cluster_name=avail)
-        self.id2status[request_entry.batch_id].running_req_ids.append(
+        self.id2status[request_entry.batch_id].submitting_reqs.append(
             sky_req_id)
         self.id2status[request_entry.batch_id].num_pending_reqs -= 1
+
+    def _is_finished(self, job_id: int, cn: str) -> bool:
+        job_statuses = sdk.get(sdk.job_status(cn, [job_id]))
+        return job_statuses[job_id] == 'SUCCEEDED'
 
     def check_request_status(self, batch_id: str,
                              status: RequestStatus) -> None:
         logger.info(f'Checking status for {batch_id}')
         # TODO(tian): Make this async.
-        api_stats = sdk.api_status(request_ids=status.running_req_ids,
+        api_stats = sdk.api_status(request_ids=status.submitting_reqs,
                                    all_status=True)
         for stat in api_stats:
             if stat.status == 'SUCCEEDED':
                 job_id, handle = sdk.get(stat.request_id)
                 cn = handle.cluster_name
-                stream = io.StringIO()
-                sdk.tail_logs(cluster_name=cn,
-                              job_id=job_id,
-                              follow=False,
-                              output_stream=stream)
-                status.completed_reqs.append((job_id, cn, stream.getvalue()))
-                status.running_req_ids.remove(stat.request_id)
+                status.submitted_reqs.append((job_id, cn))
+                status.submitting_reqs.remove(stat.request_id)
                 self.cn2inproc[cn] -= 1
+
+    def check_request_finished(self, batch_id: str,
+                               status: RequestStatus) -> None:
+        logger.info(f'Checking request finished for {batch_id}')
+        to_remove = []
+        for job_id, cn in status.submitted_reqs:
+            if not self._is_finished(job_id, cn):
+                continue
+            stream = io.StringIO()
+            sdk.tail_logs(cluster_name=cn,
+                          job_id=job_id,
+                          follow=False,
+                          output_stream=stream)
+            logs = stream.getvalue()
+            status.completed_reqs.append(logs)
+            to_remove.append((job_id, cn))
+        for job_id, cn in to_remove:
+            status.submitted_reqs.remove((job_id, cn))
+            self.cn2inproc[cn] -= 1
 
     async def _pull_request_status(self) -> None:
         for batch_id, status in self.id2status.items():
-            if status.running_req_ids:
+            if status.submitting_reqs:
                 self.check_request_status(batch_id, status)
+            if status.submitted_reqs:
+                self.check_request_finished(batch_id, status)
 
     def run(self):
 
@@ -189,10 +211,10 @@ class RequestQueue:
                 })
             status = self.id2status[batch_id]
             msg = f'{status.num_pending_reqs} requests are pending.\n'
-            msg += f'{len(status.running_req_ids)} requests are running.\n'
-            if status.completed_reqs:
-                msg += f'{len(status.completed_reqs)} requests are completed.\n'
-            for i, (_, _, logs) in enumerate(status.completed_reqs):
+            msg += f'{len(status.submitting_reqs)} requests are submitting.\n'
+            msg += f'{len(status.submitted_reqs)} requests are submitted.\n'
+            msg += f'{len(status.completed_reqs)} requests are completed.\n'
+            for i, logs in enumerate(status.completed_reqs):
                 rid_identity = (f' Logs for {batch_id} '
                                 f'({i+1}/{status.batch_size}) ')
                 msg += f'{rid_identity:=^70}\n{logs}\n'
