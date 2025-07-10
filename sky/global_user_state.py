@@ -240,7 +240,7 @@ def create_table():
             # is not critical and is likely to be enabled by other processes.
 
     # Create tables if they don't exist
-    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, _SQLALCHEMY_ENGINE)
 
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to

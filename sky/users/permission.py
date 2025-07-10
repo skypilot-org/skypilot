@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import common_utils
+from sky.utils import db_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -38,6 +39,8 @@ class PermissionService:
             if _enforcer_instance is None:
                 _enforcer_instance = self
                 engine = global_user_state.initialize_and_get_db()
+                db_utils.add_tables_to_db_sqlalchemy(
+                    sqlalchemy_adapter.Base.metadata, engine)
                 adapter = sqlalchemy_adapter.Adapter(engine)
                 model_path = os.path.join(os.path.dirname(__file__),
                                           'model.conf')
