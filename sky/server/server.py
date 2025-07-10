@@ -1801,8 +1801,8 @@ if __name__ == '__main__':
         queue_server, workers = executor.start(config)
         # Request daemons should be submitted to the executor to get executed in
         # separate processes.
-        subprocess_utils.run_in_parallel(submit_request_daemon,
-                                         requests_lib.INTERNAL_REQUEST_DAEMONS)
+        for daemon in requests_lib.INTERNAL_REQUEST_DAEMONS:
+            submit_request_daemon(daemon)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
