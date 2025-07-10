@@ -220,7 +220,7 @@ Using DWS with Kueue
 You can combine a :ref:`Kueue setup <kubernetes-example-kueue>` with DWS on the GKE cluster. This enables gang-scheduling, i.e., all-or-nothing behavior: GKE allocates all resources of the same request at the same time (e.g., multiple nodes/pods of the same job). 
 See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
 
-When using DWS with Kueue, you can additionally specify `max_run_duration`. With shorter duration, the resources are likely easier to get due to GCP's DWS scheduling behavior.
+When using DWS with Kueue, you can additionally specify `max_run_duration` in ``~/.sky/config.yaml``. With shorter duration, the resources are likely easier to get due to GCP's DWS scheduling behavior.
 
 .. code-block:: yaml
   :emphasize-lines: 7-7
@@ -235,7 +235,7 @@ When using DWS with Kueue, you can additionally specify `max_run_duration`. With
     kueue:
       local_queue_name: skypilot-local-queue
 
-Or, specify it in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml>`):
+Or, specify the ``dws`` and ``kueue`` fields in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml>`):
 
 .. code-block:: yaml
 
@@ -254,6 +254,15 @@ Or, specify it in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml
           max_run_duration: 10m
         kueue:
           local_queue_name: skypilot-local-queue
+
+And specify the ``kubernetes.autoscaler: gke`` in ``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    autoscaler: gke
+
+In addition, you can also configure ``autoscaler`` in ``~/.sky/config.yaml`` per Kubernetes context, refer to :ref:`Kubernetes Context Configs <config-yaml-kubernetes-context-configs>` for more details.
 
 .. note::
   `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. Depending  on whether Kueue is enabled, the behavior of allocating new resources is different:
