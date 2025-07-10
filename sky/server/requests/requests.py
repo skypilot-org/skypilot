@@ -843,6 +843,7 @@ def set_request_cancelled(request_id: str) -> None:
         request_task.status = RequestStatus.CANCELLED
 
 
+@_init_db
 def delete_requests(req_ids: List[str]):
     """Clean up requests by their IDs."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -853,6 +854,7 @@ def delete_requests(req_ids: List[str]):
         session.commit()
 
 
+@_init_db
 def delete_requests_by_host_uuid(host_uuid: str):
     """Delete requests by host UUID."""
     assert _SQLALCHEMY_ENGINE is not None

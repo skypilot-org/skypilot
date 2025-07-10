@@ -199,7 +199,7 @@ class TestBackwardCompatibility:
         test = smoke_tests_utils.Test(
             test_name,
             commands,
-            teardown='cat ~/.sky/api_server/server.log && ' + teardown,
+            teardown=teardown,
             timeout=self.TEST_TIMEOUT,
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
