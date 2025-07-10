@@ -30,8 +30,8 @@ class PrimeIntellect(clouds.Cloud):
     _REPR = 'PrimeIntellect'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE: 'Auto terminate not supported yet.',
         clouds.CloudImplementationFeatures.AUTODOWN: 'Auto down not supported yet.',
+        clouds.CloudImplementationFeatures.AUTO_TERMINATE: 'Auto terminate not supported yet.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: ('Spot is not supported yet.'),
         clouds.CloudImplementationFeatures.MULTI_NODE: ('Multi-node not supported yet.'),
