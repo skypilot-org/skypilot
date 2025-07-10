@@ -45,7 +45,7 @@ This will automatically find available machines to compute the vectors. Expect:
 (clip-batch-compute-vectors, pid=2523) 2025-01-28 00:06:25,009 - root - INFO - Saved partition 6 to /output/embeddings_90000_100000.parquet_part_6/data.parquet
 ...
 ```
-You can also use `sky jobs queue` and `sky jobs dashboard` to see the status of jobs. Figure below shows our jobs are launched across different regions: 
+You can also use `sky jobs queue` and `sky dashboard` to see the status of jobs. Figure below shows our jobs are launched across different regions: 
 
 <p align="center">
 <img src="https://i.imgur.com/2CyQADY.png" alt="SkyPilot Dashboard" style="width: 70%;">
