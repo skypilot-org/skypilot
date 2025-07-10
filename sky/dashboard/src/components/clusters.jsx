@@ -1117,7 +1117,9 @@ const FilterDropdown = ({
 
   // Helper function to get the capitalized label for a property value
   const getPropertyLabel = (propertyValue) => {
-    const propertyItem = propertyList.find(item => item.value === propertyValue);
+    const propertyItem = propertyList.find(
+      (item) => item.value === propertyValue
+    );
     return propertyItem ? propertyItem.label : propertyValue;
   };
 
