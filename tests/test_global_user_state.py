@@ -6,7 +6,6 @@ import time
 from unittest import mock
 
 import pytest
-import sqlalchemy
 
 import sky
 
