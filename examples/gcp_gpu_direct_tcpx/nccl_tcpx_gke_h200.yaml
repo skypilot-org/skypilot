@@ -1,5 +1,5 @@
 # This example is used to test the NCCL performance with
-# GPUDirect TCPX on GKE.
+# GPUDirect RDMA on GKE for H200 instances (a3-ultragpu-8g).
 name: nccl-gpudirect-rdma-h200
 
 resources:
