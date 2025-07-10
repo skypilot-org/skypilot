@@ -1660,6 +1660,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_services = show_services and not any([clusters, ip, endpoints])
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
+    refresh_mode = common.StatusRefreshMode.NONE
+    if refresh:
+        refresh_mode = common.StatusRefreshMode.FORCE
 
     # Phase 1: Validate arguments for IP/endpoint queries
     if ip or show_endpoints:
@@ -1735,15 +1738,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         service_status_request_id = services_request_future.result()
         workspace_request_id = workspace_request_future.result()
 
+    service_status_request_id = '' if not service_status_request_id \
+        else service_status_request_id
+
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, common.StatusRefreshMode.FORCE
-        if refresh else common.StatusRefreshMode.NONE, all_users)
+        query_clusters, refresh_mode, all_users)
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
-        _show_endpoint(query_clusters, cluster_records, ip,
-                       endpoints, endpoint)
+        _show_endpoint(query_clusters, cluster_records, ip, endpoints, endpoint)
         return
     hints = []
     normal_clusters = []
