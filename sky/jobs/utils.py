@@ -136,8 +136,9 @@ def _validate_consolidation_mode_config(
     if (current_is_consolidation_mode and
             not env_options.Options.IS_DEVELOPER.get() and
             server_common.is_api_server_local()):
-        raise exceptions.NotSupportedError(
-            'Consolidation mode is not supported when running locally.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
