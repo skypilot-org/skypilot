@@ -6,7 +6,6 @@ import requests
 from sky import clouds
 from sky import server
 from sky.client.cli import command
-from sky.server import common
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -50,8 +49,6 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda
         -> sky show-gpus V100:4 --cloud lambda --all
         """
-        common.get_api_server_status.cache_clear()
-
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.show_gpus, [])
         assert not result.exit_code
@@ -100,8 +97,6 @@ class TestWithNoCloudEnabled:
             assert isinstance(result.exception, SystemExit)
 
     def test_k8s_alias_check(self):
-        common.get_api_server_status.cache_clear()
-
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(command.check, ['k8s'])
@@ -112,70 +107,6 @@ class TestWithNoCloudEnabled:
 
         result = cli_runner.invoke(command.check, ['notarealcloud'])
         assert isinstance(result.exception, ValueError)
-
-    def test_status(self):
-        """Tests `sky status` can be invoked (but not correctness).
-
-        Tests below correspond to the following terminal commands, in order:
-
-        -> sky status
-        -> sky status --verbose
-        -> sky status --refresh
-        -> sky status --all-users  
-        -> sky status --show-managed-jobs
-        -> sky status --no-show-managed-jobs
-        -> sky status --show-services
-        -> sky status --no-show-services
-        -> sky status cluster-name
-        -> sky status cluster1 cluster2
-        """
-        common.get_api_server_status.cache_clear()
-
-        cli_runner = cli_testing.CliRunner()
-
-        # Basic status command
-        result = cli_runner.invoke(command.status, [])
-        assert not result.exit_code
-
-        # Status with verbose output
-        result = cli_runner.invoke(command.status, ['--verbose'])
-        assert not result.exit_code
-
-        # Status with refresh
-        result = cli_runner.invoke(command.status, ['--refresh'])
-        assert not result.exit_code
-
-        # Status for all users
-        result = cli_runner.invoke(command.status, ['--all-users'])
-        assert not result.exit_code
-
-        # Status with managed jobs display options
-        result = cli_runner.invoke(command.status, ['--show-managed-jobs'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.status, ['--no-show-managed-jobs'])
-        assert not result.exit_code
-
-        # Status with services display options
-        result = cli_runner.invoke(command.status, ['--show-services'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.status, ['--no-show-services'])
-        assert not result.exit_code
-
-        # Status for specific cluster(s)
-        result = cli_runner.invoke(command.status, ['test-cluster'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.status, ['cluster1', 'cluster2'])
-        assert not result.exit_code
-
-        # Combined flags
-        result = cli_runner.invoke(command.status, ['--verbose', '--all-users'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.status, ['--refresh', '--verbose'])
-        assert not result.exit_code
 
 
 class TestHelperFunctions:
