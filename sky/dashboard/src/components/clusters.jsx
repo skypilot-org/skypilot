@@ -785,7 +785,7 @@ export function ClusterTable({
                       <TableCell className="hidden md:table-cell">
                         <Link
                           href="/workspaces"
-                          className="text-blue-600 hover:underline"
+                          className="text-gray-700 hover:text-blue-600 hover:underline"
                         >
                           {item.workspace || 'default'}
                         </Link>
