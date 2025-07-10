@@ -173,7 +173,7 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
-        'nebius>=0.2.0',
+        'nebius>=0.2.37',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,
