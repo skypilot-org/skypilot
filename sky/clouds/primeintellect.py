@@ -30,13 +30,15 @@ class PrimeIntellect(clouds.Cloud):
     _REPR = 'PrimeIntellect'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.AUTO_TERMINATE: 'Auto terminate not supported yet.',
+        clouds.CloudImplementationFeatures.AUTODOWN: 'Auto down not supported yet.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: (
-            'Spot is not supported, as primeintellect API does not implement spot .'
-        ),
-        clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trivial on Prime Intellect.'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: ('Spot is not supported yet.'),
+        clouds.CloudImplementationFeatures.MULTI_NODE: ('Multi-node not supported yet.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk tier not supported yet.',
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER: 'Custom network tier not supported yet.',
+        clouds.CloudImplementationFeatures.IMAGE_ID: 'Custom network tier not supported yet.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Custom network tier not supported yet.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
