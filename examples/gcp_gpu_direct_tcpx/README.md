@@ -2,15 +2,10 @@
 
 SkyPilot supports advanced GPU networking technologies on both GCP VMs and GKE clusters, enabling high-performance inter-GPU communication for distributed deep learning and HPC workloads. This includes support for:
 
-- **GPUDirect-TCPX**: High-performance networking for A3 VMs (a3-highgpu-8g, a3-edgegpu-8g, a3-ultragpu-8g)
-- **GPUDirect-RDMA**: Direct GPU-to-GPU communication across multiple VM types
-- **TCPX/TCPXO**: Optimized TCP extensions for GPU workloads
-
-These technologies enable direct communication between GPUs and network interfaces, bypassing CPU and system memory bottlenecks to deliver superior throughput for large-scale data transfers.
+- **GPUDirect-TCPX**: a3-highgpu-8g, a3-edgegpu-8g (h100)
+- **GPUDirect-RDMA**: a3-ultragpu-8g (h200), a4-highgpu-8g (b200)
 
 ## GPUDirect-TCPX on A3 VMs
-
-When deploying `a3-highgpu-8g`, `a3-edgegpu-8g`, or `a3-ultragpu-8g` VMs, combining GPUDirect-TCPX with Google Virtual NIC (gVNIC) delivers optimal network performance with minimal latency between applications and the network infrastructure.
 
 This example demonstrates how to run [NCCL tests](https://github.com/NVIDIA/nccl-tests) on a GCP cluster with A3 VMs, comparing performance with and without GPUDirect-TCPX enabled.
 
@@ -104,17 +99,21 @@ Speed-up = busbw GPUDirect-TCPX (GB/s) / busbw Non-GPUDirect-TCPX (GB/s)
 | 1 GB         | 66.2       | 20.09       | 3.3 x        |
 | 2 GB         | 65.72      | 19.39       | 3.4 x        |
 
+### Key Performance Insights
+
+| Message Size Range | Performance Characteristics |
+|-------------------|----------------------------|
+| ≤ 128 KB          | Minimal benefit - GPUDirect-TCPX may introduce slight overhead for small messages, with comparable or lower bandwidth than non-GPUDirect mode |
+| 256 KB – 8 MB     | Moderate improvement - Speedup of 1.5–1.9×, with performance crossover point at 128–256 KB |
+| ≥ 16 MB           | Significant advantage - 2.5–3.8× speedup, with GPUDirect-TCPX maintaining 65–67 GB/s versus ~20 GB/s without it |
+
+GPUDirect-TCPX's direct GPU-to-NIC communication path eliminates CPU and system memory bottlenecks, delivering superior throughput for large-scale data transfers. This makes it particularly effective for distributed deep learning workloads and high-performance computing applications.
+
 ### Performance Validation on A3-Ultra (H200s)
 
 We have also validated GPUDirect-RDMA performance on `a3-ultragpu-8g` instances with H200 GPUs. Testing was conducted on a 2-node cluster with 16x H200 GPUs (8 per node) using the configuration in [`nccl_tcpx_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h200.yaml).
 
-**Key performance metrics achieved:**
-- **Peak bandwidth**: ~354 GB/s for 8GB messages
-- **Average bus bandwidth**: ~122 GB/s  
-
-**Performance validation results demonstrate that SkyPilot achieves identical performance to Google's native GCP tools**, confirming that our GPUDirect-GPUDirect implementation provides the same level of optimization as Google's reference configurations. The scaling curves and bandwidth measurements match exactly with Google's official benchmarks shown in their [documentation](https://cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom#flex-start).
-
-For `a3-ultragpu-8g` instances, the performance characteristics follow the same pattern as H100 instances, with GPUDirect-TCPX delivering maximum benefit for large message sizes (≥16MB) commonly used in distributed deep learning workloads.
+The scaling curves and bandwidth measurements match exactly with Google's official benchmarks shown in their [documentation](https://cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom#flex-start).
 
 #### Applying NCCL test from documentation
 
@@ -229,16 +228,6 @@ NCCL version 2.26.6+cuda12.8
 (head, rank=0, pid=3808) [1,0]<stdout>:#
 ```
 
-### Key Performance Insights
-
-| Message Size Range | Performance Characteristics |
-|-------------------|----------------------------|
-| ≤ 128 KB          | Minimal benefit - GPUDirect-TCPX may introduce slight overhead for small messages, with comparable or lower bandwidth than non-GPUDirect mode |
-| 256 KB – 8 MB     | Moderate improvement - Speedup of 1.5–1.9×, with performance crossover point at 128–256 KB |
-| ≥ 16 MB           | Significant advantage - 2.5–3.8× speedup, with GPUDirect-TCPX maintaining 65–67 GB/s versus ~20 GB/s without it |
-
-GPUDirect-TCPX's direct GPU-to-NIC communication path eliminates CPU and system memory bottlenecks, delivering superior throughput for large-scale data transfers. This makes it particularly effective for distributed deep learning workloads and high-performance computing applications.
-
 ## Using High-Performance GPU Networking on GKE
 
 SkyPilot supports advanced GPU networking technologies on GKE clusters, including GPUDirect-TCPX, GPUDirect-RDMA, and TCPX/TCPXO optimizations.
@@ -247,7 +236,7 @@ To use these technologies on GKE, refer to the [GKE documentation](https://cloud
 
 In addition to creating a node pool with fixed node size to request the desired GPU instances, you can also use Dynamic Workload Scheduler (DWS) on GKE to provision the nodes, refer to [using DWS on GKE](https://docs.skypilot.co/en/latest/reservations/reservations.html#using-dws-on-gke) for more details.
 
-After setting up the GKE cluster, you can run NCCL Tests with the appropriate GPU networking technology.
+After setting up the GKE cluster, you can run NCCL Tests with the appropriate GPUs.
 
 ### Available Configurations
 
