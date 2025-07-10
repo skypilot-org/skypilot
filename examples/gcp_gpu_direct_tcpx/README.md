@@ -7,7 +7,7 @@ SkyPilot supports advanced GPU networking technologies on both GCP VMs and GKE c
 
 ## Using High-Performance GPU Networking on GKE
 
-SkyPilot supports advanced GPU networking GKE clusters, including GPUDirect-TCPX, GPUDirect-RDMA, and TCPX/TCPXO optimizations.
+SkyPilot supports advanced GPU networking GKE clusters, including GPUDirect-TCP and, GPUDirect-RDMA.
 
 To setup GPU networking on GKE, refer to the [GKE documentation](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#create-vpcs-subnets) to setup the cluster with the appropriate networking configuration.
 
