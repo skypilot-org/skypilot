@@ -66,20 +66,29 @@ class TestBackwardCompatibility:
             job_name=job_name, job_status=status, timeout=300)
 
     def _get_base_skylet_version(self) -> str:
-        """Get SKYLET_VERSION from the base environment directory."""
-        base_constants_file = self.BASE_SKY_DIR / 'sky' / 'skylet' / 'constants.py'
-        try:
-            with open(base_constants_file, 'r') as f:
-                content = f.read()
-                # Find the SKYLET_VERSION line
-                for line in content.split('\n'):
-                    if line.strip().startswith('SKYLET_VERSION = '):
-                        # Extract version string between quotes
-                        version = line.split('=')[1].strip().strip('\'"')
-                        return version
-            raise ValueError('SKYLET_VERSION not found in base constants.py')
-        except Exception as e:
-            raise ValueError(f'Failed to read base SKYLET_VERSION: {e}') from e
+        """Get SKYLET_VERSION from the base environment by running Python code."""
+        base_skylet_version = subprocess.run(
+            f'{self.ACTIVATE_BASE} && python -c "'
+            'from sky.skylet import constants; '
+            'print(constants.SKYLET_VERSION);'
+            '"',
+            shell=True,
+            check=False,
+            executable='/bin/bash',
+            text=True,
+            capture_output=True)
+
+        if base_skylet_version.returncode != 0:
+            raise ValueError(f'Failed to get base SKYLET_VERSION. '
+                             f'Return code: {base_skylet_version.returncode}, '
+                             f'stderr: {base_skylet_version.stderr}, '
+                             f'stdout: {base_skylet_version.stdout}')
+
+        version = base_skylet_version.stdout.strip()
+        if not version:
+            raise ValueError('SKYLET_VERSION is empty')
+
+        return version
 
     @pytest.fixture(scope="session", autouse=True)
     def session_setup(self, request):
