@@ -490,9 +490,6 @@ def submit(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def query(service_name: str, batch_id: str) -> server_common.RequestId:
-
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
     body = payloads.ServeQueryBody(
         service_name=service_name,
         batch_id=batch_id,

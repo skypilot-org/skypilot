@@ -1,5 +1,5 @@
+"""Request queue for batch jobs submission."""
 import asyncio
-import collections
 import dataclasses
 import io
 import traceback
@@ -35,6 +35,7 @@ class RequestStatus:
 
 
 class RequestQueue:
+    """Request queue for batch jobs submission."""
 
     def __init__(self, controller_addr: str, load_balancer_port: int):
         self.controller_addr = controller_addr
@@ -105,8 +106,8 @@ class RequestQueue:
 
     async def _process_request_entry(self) -> None:
         avail = None
-        for cn in self.cn2inproc:
-            if self.cn2inproc[cn] == 0:
+        for cn, inproc in self.cn2inproc.items():
+            if inproc == 0:
                 avail = cn
                 break
         if avail is None:
@@ -128,7 +129,6 @@ class RequestQueue:
         # TODO(tian): Make this async.
         api_stats = sdk.api_status(request_ids=status.running_req_ids,
                                    all_status=True)
-        # logger.info(f'API stats: {api_stats}')
         for stat in api_stats:
             if stat.status == 'SUCCEEDED':
                 job_id, handle = sdk.get(stat.request_id)
@@ -161,7 +161,8 @@ class RequestQueue:
                 await self.request_queue.put(
                     RequestEntry(batch_id, payload['run_script']))
             return fastapi.responses.JSONResponse({
-                'message': f'{num_reqs} requests submitted. Batch ID: {batch_id}'
+                'message': (f'{num_reqs} requests submitted. '
+                            f'Batch ID: {batch_id}')
             })
 
         @self.app.get('/debug')
@@ -175,7 +176,7 @@ class RequestQueue:
                     'cn2inproc': self.cn2inproc,
                     'request_queue': [
                         dataclasses.asdict(req)
-                        for req in self.request_queue._queue  # type: ignore
+                        for req in self.request_queue._queue  # type: ignore  # pylint: disable=protected-access
                     ],
                 },
             })
@@ -192,7 +193,8 @@ class RequestQueue:
             if status.completed_reqs:
                 msg += f'{len(status.completed_reqs)} requests are completed.\n'
             for i, (_, _, logs) in enumerate(status.completed_reqs):
-                rid_identity = f' Logs for {batch_id} ({i+1}/{status.batch_size}) '
+                rid_identity = (f' Logs for {batch_id} '
+                                f'({i+1}/{status.batch_size}) ')
                 msg += f'{rid_identity:=^70}\n{logs}\n'
             return fastapi.responses.JSONResponse({
                 'message': msg,
@@ -206,8 +208,9 @@ class RequestQueue:
         uvicorn.run(self.app, host='0.0.0.0', port=self.load_balancer_port)
 
 
-def run_request_queue(controller_addr: str, load_balancer_port: int, *args):
-    del args  # Unused.
+def run_request_queue(controller_addr: str, load_balancer_port: int,
+                      *unused_args):
+    del unused_args  # Unused.
     request_queue = RequestQueue(controller_addr, load_balancer_port)
     request_queue.run()
 
