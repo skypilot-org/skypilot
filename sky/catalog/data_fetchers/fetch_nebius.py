@@ -155,7 +155,7 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
         output_file (str): The path to the output CSV file.
     """
     # Set up the CSV writer to output to stdout
-    with open(output_file, 'w') as out:
+    with open(output_file, 'w', encoding='utf-8') as out:
         header = [
             'InstanceType',
             'AcceleratorName',
