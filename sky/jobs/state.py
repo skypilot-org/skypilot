@@ -132,7 +132,7 @@ def create_table():
             # is not critical and is likely to be enabled by other processes.
 
     # Create tables if they don't exist
-    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, _SQLALCHEMY_ENGINE)
 
     # Backward compatibility: add columns that not exist in older databases
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
