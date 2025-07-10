@@ -275,10 +275,6 @@ def _handle_non_200_server_status(
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
 
-@cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
-                                             ttl=5.0,
-                                             timer=time.time),
-                   lock=threading.RLock())
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     """Retrieve the status of the API server.
 
