@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 from typing import Any, Dict, Literal, Optional, Tuple, Union
@@ -276,7 +277,8 @@ def _handle_non_200_server_status(
 
 @cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
                                              ttl=5.0,
-                                             timer=time.time))
+                                             timer=time.time),
+                   lock=threading.RLock())
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     """Retrieve the status of the API server.
 
