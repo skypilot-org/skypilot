@@ -83,6 +83,7 @@ def add_column_to_table(
                 raise
     conn.commit()
 
+
 def add_tables_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
     engine: sqlalchemy.Engine,
