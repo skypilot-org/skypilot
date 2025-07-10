@@ -551,7 +551,7 @@ def create_table():
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, _SQLALCHEMY_ENGINE)
 
     # For backward compatibility.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
