@@ -58,6 +58,7 @@ import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from alembic import command as alembic_command
 import filelock
 import sqlalchemy
 from sqlalchemy import orm
@@ -70,6 +71,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.utils import alembic_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
@@ -574,8 +576,11 @@ def _reload_config_as_server() -> None:
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
-            db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                 sqlalchemy_engine)
+            
+            # Get alembic config for sky config db and run migrations
+            alembic_config = alembic_utils.get_alembic_config(sqlalchemy_engine,
+                                                              'sky_config_db')
+            alembic_command.upgrade(alembic_config, 'head')
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
@@ -863,8 +868,11 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             with _DB_USE_LOCK:
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
                                                              poolclass=NullPool)
-                db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                     sqlalchemy_engine)
+                
+                # Get alembic config for sky config db and run migrations
+                alembic_config = alembic_utils.get_alembic_config(sqlalchemy_engine,
+                                                                  'sky_config_db')
+                alembic_command.upgrade(alembic_config, 'head')
 
                 def _set_config_yaml_to_db(key: str,
                                            config: config_utils.Config):

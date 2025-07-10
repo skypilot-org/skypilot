@@ -101,8 +101,6 @@ def upgrade():
                                          sa.Integer(),
                                          server_default=None)
 
-    print('Initial state database schema created successfully.')
-
 
 def downgrade():
     # Drop all tables
