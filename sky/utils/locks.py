@@ -4,6 +4,7 @@ This module provides an abstraction for locking that can use
 either local file locks or database-based distributed locks.
 """
 import abc
+import hashlib
 import logging
 import os
 import time
@@ -169,13 +170,14 @@ class PostgresLock(DistributedLock):
     def __init__(self,
                  lock_id: str,
                  timeout: Optional[float] = None,
-                 poll_interval: float = 0.1):
+                 poll_interval: float = 1):
         """Initialize the postgres lock.
 
         Args:
             lock_id: Unique identifier for the lock.
             timeout: Maximum time to wait for lock acquisition.
-            poll_interval: Interval in seconds to poll for lock acquisition.
+            poll_interval: Interval in seconds to poll for lock acquisition,
+                default to 1 second to avoid storming the database.
         """
         super().__init__(lock_id, timeout, poll_interval)
         # Convert string lock_id to integer for postgres advisory locks
@@ -185,8 +187,9 @@ class PostgresLock(DistributedLock):
 
     def _string_to_lock_key(self, s: str) -> int:
         """Convert string to a 64-bit integer for advisory lock key."""
-        # Use hash to convert string to integer, ensuring it fits in 64-bit
-        return hash(s) & ((1 << 63) - 1)  # Ensure positive 64-bit int
+        hash_digest = hashlib.sha256(s.encode('utf-8')).digest()
+        # Take first 8 bytes and convert to int, ensure positive 64-bit
+        return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
@@ -275,7 +278,7 @@ class PostgresLock(DistributedLock):
 def get_lock(lock_id: str,
              timeout: Optional[float] = None,
              lock_type: Optional[str] = None,
-             poll_interval: float = 0.1) -> DistributedLock:
+             poll_interval: Optional[float] = None) -> DistributedLock:
     """Create a distributed lock instance.
 
     Args:
@@ -292,8 +295,12 @@ def get_lock(lock_id: str,
         lock_type = _detect_lock_type()
 
     if lock_type == 'postgres':
+        if poll_interval is None:
+            return PostgresLock(lock_id, timeout)
         return PostgresLock(lock_id, timeout, poll_interval)
     elif lock_type == 'filelock':
+        if poll_interval is None:
+            return FileLock(lock_id, timeout)
         return FileLock(lock_id, timeout, poll_interval)
     else:
         raise ValueError(f'Unknown lock type: {lock_type}')

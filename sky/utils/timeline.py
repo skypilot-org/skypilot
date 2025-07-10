@@ -80,7 +80,7 @@ def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
 class DistributedLockEvent:
     """Serve both as a distributed lock and event for the lock."""
 
-    def __init__(self, lock_id: str, timeout: float = -1):
+    def __init__(self, lock_id: str, timeout: Optional[float] = None):
         self._lock_id = lock_id
         self._lock = locks.get_lock(lock_id, timeout)
         self._hold_lock_event = Event(f'[DistributedLock.hold]:{lock_id}')
