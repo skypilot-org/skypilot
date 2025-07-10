@@ -138,7 +138,7 @@ def set_api_cookie_jar(cookie_jar: CookieJar,
         return
     if not cookie_path.parent.exists():
         cookie_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Writing directly to the cookie jar path can race with other processes that
     # are reading the cookie jar, making it look malformed. Instead, write to a
     # temporary file and then move it to the final location.

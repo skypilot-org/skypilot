@@ -16,6 +16,12 @@ helm ls -n $NAMESPACE | grep $RELEASE_NAME || (echo "Release $RELEASE_NAME not f
 
 echo "Running upgrade test with server URL: $SERVER_URL"
 
+# Ensure the upgrade strategy is RollingUpdate, upgrade will error out if postgres is not configured previously.
+helm upgrade $RELEASE_NAME charts/skypilot \
+    --namespace $NAMESPACE \
+    --reuse-values \
+    --set apiService.upgradeStrategy="RollingUpdate"
+
 CLUSTER_NAME="test-upgrade"
 
 sky api login -e $SERVER_URL
@@ -45,20 +51,6 @@ helm upgrade $RELEASE_NAME charts/skypilot \
     --namespace $NAMESPACE \
     --reuse-values \
     --set apiService.annotations.restart="at$timestamp"
-
-# wait curl $SERVER_URL/api/info returns 503, and run concurrent sky status command in background, capture their pid, wait them exit and verify the exit code should be 0
-
-echo "Wait rolling upgrade dispatched"
-timeout=60
-elapsed=0
-while [ $elapsed -lt $timeout ]; do
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" "$SERVER_URL/api/status" || echo "000")
-    if [ "$http_code" = "503" ]; then
-        break
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-done
 
 if [ $elapsed -ge $timeout ]; then
     echo "Timeout wait rolling upgrade dispatched"

@@ -112,11 +112,12 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(status=statuses)
+            reqs = requests_lib.get_request_tasks(
+                status=statuses, host_uuid=state.get_host_uuid())
             if not reqs:
                 break
-            logger.info(f'{len(reqs)} on-going requests '
-                        'found, waiting for them to finish...')
+            logger.info(f'{len(reqs)} on-going requests found on server, '
+                        'waiting for them to finish...')
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
             internal_request_ids = [
