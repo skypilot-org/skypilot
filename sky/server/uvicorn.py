@@ -120,7 +120,7 @@ class Server(uvicorn.Server):
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
             internal_request_ids = [
-                d.id for d in requests_lib.INTERNAL_REQUEST_DAEMONS
+                d.get_unique_id() for d in requests_lib.INTERNAL_REQUEST_DAEMONS
             ]
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
@@ -150,7 +150,10 @@ class Server(uvicorn.Server):
             if req is None:
                 return
             if req.pid is not None:
-                os.kill(req.pid, signal.SIGTERM)
+                try:
+                    os.kill(req.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
             req.should_retry = True
         logger.info(
@@ -159,8 +162,6 @@ class Server(uvicorn.Server):
     def run(self, *args, **kwargs):
         """Run the server process."""
         context_utils.hijack_sys_attrs()
-        state.set_host_uuid(os.environ.get(constants.APISERVER_UUID_ENV_VAR,
-                                           ''))
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
         with self.capture_signals():

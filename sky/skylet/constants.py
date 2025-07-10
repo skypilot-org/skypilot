@@ -375,6 +375,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('ssh', 'pod_config'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
+    ('kubernetes', 'dws'),
+    ('kubernetes', 'kueue'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -460,8 +462,10 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = (
-    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
+TIME_PATTERN: str = ('^[0-9]+('
+                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
+                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
+                     ')?$')
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,

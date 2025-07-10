@@ -109,10 +109,12 @@ spec:
         {{- end }}
         - name: SKYPILOT_GRACE_PERIOD_SECONDS
           value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
+        {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
         - name: SKYPILOT_APISERVER_UUID
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:

@@ -1,4 +1,5 @@
 """Utilities for REST API."""
+import asyncio
 import contextlib
 import dataclasses
 import enum
@@ -25,6 +26,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import state
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
@@ -35,6 +37,8 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils import locks
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -50,6 +54,7 @@ COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
+COL_FINISHED_AT = 'finished_at'
 COL_HOST_UUID = 'host_uuid'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
@@ -70,8 +75,12 @@ request_table = sqlalchemy.Table(
     sqlalchemy.Column(COL_USER_ID, sqlalchemy.Text),
     sqlalchemy.Column(COL_STATUS_MSG, sqlalchemy.Text),
     sqlalchemy.Column(COL_SHOULD_RETRY, sqlalchemy.Boolean),
+    sqlalchemy.Column(COL_FINISHED_AT, sqlalchemy.Float),
     sqlalchemy.Column(COL_HOST_UUID, sqlalchemy.Text),
 )
+REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+
+DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
 
 class RequestStatus(enum.Enum):
@@ -90,6 +99,10 @@ class RequestStatus(enum.Enum):
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+    @classmethod
+    def finished_status(cls) -> List['RequestStatus']:
+        return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
 
 
 _STATUS_TO_COLOR = {
@@ -115,6 +128,7 @@ REQUEST_COLUMNS = [
     COL_USER_ID,
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
+    COL_FINISHED_AT,
     COL_HOST_UUID,
 ]
 
@@ -148,6 +162,8 @@ class Request:
     status_msg: Optional[str] = None
     # Whether the request should be retried.
     should_retry: bool = False
+    # When the request finished.
+    finished_at: Optional[float] = None
     # The UUID of the API server that serves the request.
     host_uuid: Optional[str] = None
 
@@ -241,6 +257,7 @@ class Request:
             cluster_name=self.cluster_name,
             status_msg=self.status_msg,
             should_retry=self.should_retry,
+            finished_at=self.finished_at,
             host_uuid=self.host_uuid,
         )
 
@@ -264,6 +281,7 @@ class Request:
                 cluster_name=self.cluster_name,
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
+                finished_at=self.finished_at,
                 host_uuid=self.host_uuid,
             )
         except (TypeError, ValueError) as e:
@@ -297,6 +315,7 @@ class Request:
                 cluster_name=payload.cluster_name,
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
+                finished_at=payload.finished_at,
                 host_uuid=payload.host_uuid,
             )
         except (TypeError, ValueError) as e:
@@ -396,9 +415,30 @@ class InternalRequestDaemon:
     id: str
     name: str
     event_fn: Callable[[], None]
+    # Whether the daemon is a singleton. If True, a distributed lock
+    # will be acquired before running the event to ensure only one
+    # instance of the daemon runs at a time.
+    singleton: bool = False
+
+    def get_unique_id(self) -> str:
+        """Get a global unique ID for the daemon.
+
+        This allows multiple API server replicas to run the same daemon
+        without conflicts.
+        """
+        if state.get_host_uuid():
+            return f'{self.id}-{state.get_host_uuid()}'
+        return self.id
 
     def run_event(self):
         """Run the event."""
+        if self.singleton:
+            with locks.get_lock(self.id):
+                self._run_event()
+        else:
+            self._run_event()
+
+    def _run_event(self):
         while True:
             with ux_utils.enable_traceback():
                 try:
@@ -422,14 +462,17 @@ INTERNAL_REQUEST_DAEMONS = [
     # cluster being stopped or down when `sky status -r` is called.
     InternalRequestDaemon(id='skypilot-status-refresh-daemon',
                           name='status',
-                          event_fn=refresh_cluster_status_event),
+                          event_fn=refresh_cluster_status_event,
+                          singleton=True),
     # Volume status refresh daemon to update the volume status periodically.
     InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
                           name='volume',
-                          event_fn=refresh_volume_status_event),
+                          event_fn=refresh_volume_status_event,
+                          singleton=True),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
                           name='managed-job-status',
-                          event_fn=managed_job_status_refresh_event),
+                          event_fn=managed_job_status_refresh_event,
+                          singleton=True),
 ]
 
 
@@ -484,6 +527,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 except ProcessLookupError:
                     logger.debug(f'Process {request_record.pid} not found')
             request_record.status = RequestStatus.CANCELLED
+            request_record.finished_at = time.time()
             cancelled_request_ids.append(request_id)
     return cancelled_request_ids
 
@@ -524,6 +568,12 @@ def create_table():
             COL_SHOULD_RETRY,
             sqlalchemy.Boolean(),
             default_statement='DEFAULT FALSE')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            REQUEST_TABLE,
+            COL_FINISHED_AT,
+            sqlalchemy.Float(),
+            default_statement='DEFAULT NULL')
         db_utils.add_column_to_table_sqlalchemy(
             session,
             REQUEST_TABLE,
@@ -637,6 +687,7 @@ def get_request_tasks(
     user_id: Optional[str] = None,
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
+    finished_before: Optional[float] = None,
     host_uuid: Optional[str] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
@@ -650,6 +701,8 @@ def get_request_tasks(
             If None, all users are included.
         include_request_names: a list of request names to filter on.
             Mutually exclusive with exclude_request_names.
+        finished_before: if provided, only include requests finished before this
+            timestamp.
 
     Raises:
         ValueError: If both exclude_request_names and include_request_names are
@@ -678,6 +731,8 @@ def get_request_tasks(
         if include_request_names is not None:
             query = query.filter(
                 request_table.c.name.in_(include_request_names))
+        if finished_before is not None:
+            query = query.filter(request_table.c.finished_at < finished_before)
         if host_uuid is not None:
             query = query.filter(request_table.c.host_uuid == host_uuid)
 
@@ -723,6 +778,7 @@ def _add_or_update_request_no_lock(request: Request):
             user_id=payload.user_id,
             status_msg=payload.status_msg,
             should_retry=payload.should_retry,
+            finished_at=payload.finished_at,
             host_uuid=payload.host_uuid,
         )
 
@@ -750,6 +806,7 @@ def _add_or_update_request_no_lock(request: Request):
                     request_table.c.user_id: payload.user_id,
                     request_table.c.status_msg: payload.status_msg,
                     request_table.c.should_retry: payload.should_retry,
+                    request_table.c.finished_at: payload.finished_at,
                     request_table.c.host_uuid: payload.host_uuid,
                 })
             session.execute(do_update_stmt)
@@ -765,19 +822,82 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
         request_task.set_error(e)
 
 
-def set_request_succeeded(request_id: str, result: Any) -> None:
+def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.SUCCEEDED
-        request_task.set_return_value(result)
+        request_task.finished_at = time.time()
+        if result is not None:
+            request_task.set_return_value(result)
 
 
 def set_request_cancelled(request_id: str) -> None:
     """Set a request to cancelled."""
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
+        request_task.finished_at = time.time()
         request_task.status = RequestStatus.CANCELLED
+
+
+def delete_requests(req_ids: List[str]):
+    """Clean up requests by their IDs."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        stmt = sqlalchemy.delete(request_table).where(
+            request_table.c.request_id.in_(req_ids))
+        session.execute(stmt)
+        session.commit()
+
+
+def clean_finished_requests_with_retention(retention_seconds: int):
+    """Clean up finished requests older than the retention period.
+
+    This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
+    from the database and cleans up their associated log files.
+
+    Args:
+        retention_seconds: Requests older than this many seconds will be
+            deleted.
+    """
+    reqs = get_request_tasks(status=RequestStatus.finished_status(),
+                             finished_before=time.time() - retention_seconds)
+
+    subprocess_utils.run_in_parallel(
+        func=lambda req: req.log_path.unlink(missing_ok=True),
+        args=reqs,
+        num_threads=len(reqs))
+
+    delete_requests([req.request_id for req in reqs])
+
+    # To avoid leakage of the log file, logs must be deleted before the
+    # request task in the database.
+    logger.info(f'Cleaned up {len(reqs)} finished requests '
+                f'older than {retention_seconds} seconds')
+
+
+async def requests_gc_daemon():
+    """Garbage collect finished requests periodically."""
+    while True:
+        logger.info('Running requests GC daemon...')
+        # Use the latest config.
+        skypilot_config.reload_config()
+        retention_seconds = skypilot_config.get_nested(
+            ('api_server', 'requests_retention_hours'),
+            DEFAULT_REQUESTS_RETENTION_HOURS) * 3600
+        try:
+            # Negative value disables the requests GC
+            if retention_seconds >= 0:
+                clean_finished_requests_with_retention(retention_seconds)
+        except asyncio.CancelledError:
+            logger.info('Requests GC daemon cancelled')
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error running requests GC daemon: {e}')
+        # Run the daemon at most once every hour to avoid too frequent
+        # cleanup.
+        await asyncio.sleep(max(retention_seconds, 3600))

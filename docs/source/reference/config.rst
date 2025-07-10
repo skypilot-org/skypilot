@@ -28,6 +28,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
+    :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -79,6 +80,9 @@ Below is the configuration syntax and some example values. See detailed explanat
         runtimeClassName: nvidia
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`dws <config-yaml-kubernetes-dws>`:
+      enabled: true
+      max_run_duration: 10m
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -204,7 +208,23 @@ Example:
 
 Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
 
+.. _config-yaml-api-server-requests-gc-retention-hours:
 
+``api_server.requests_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for finished requests in hours (optional). Set to a negative value to disable requests GC.
+
+Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
+
+Default: ``24`` (1 day).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    requests_retention_hours: -1 # Disable requests GC
 
 .. _config-yaml-jobs:
 
@@ -1111,6 +1131,39 @@ Kueue configuration (optional).
 
 Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
 
+.. _config-yaml-kubernetes-dws:
+
+``kubernetes.dws``
+~~~~~~~~~~~~~~~~~~
+
+GKE DWS configuration (optional).
+
+Refer to :ref:`Using DWS on GKE <dws-on-gke>` for more details.
+
+``kubernetes.dws.enabled``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to enable DWS (optional).
+
+When ``enabled: true``, SkyPilot will automatically use DWS with flex-start mode. If ``kubernetes.kueue.local_queue_name`` is set, it will use flex-start with queued provisioning mode.
+
+Default: ``false``.
+
+``kubernetes.dws.max_run_duration``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum runtime of a node (optional), only used in ``flex-start-queued-provisioning`` mode.
+
+Default: ``null``.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    dws:
+      enabled: true
+      max_run_duration: 10m
 
 .. _config-yaml-kubernetes-context-configs:
 

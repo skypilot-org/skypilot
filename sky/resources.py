@@ -1,7 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import collections
 import dataclasses
-import math
 import re
 import textwrap
 import typing
@@ -92,7 +91,7 @@ class AutostopConfig:
             return cls(idle_minutes=config, down=False, enabled=True)
 
         if isinstance(config, str):
-            return cls(idle_minutes=parse_time_minutes(config),
+            return cls(idle_minutes=resources_utils.parse_time_minutes(config),
                        down=False,
                        enabled=True)
 
@@ -2415,31 +2414,3 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
-
-
-def parse_time_minutes(time: str) -> int:
-    """Convert a time string to minutes.
-
-    Args:
-        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
-
-    Returns:
-        Time in minutes as an integer
-    """
-    time_str = str(time)
-
-    if time_str.isdecimal():
-        # We assume it is already in minutes to maintain backwards
-        # compatibility
-        return int(time_str)
-
-    time_str = time_str.lower()
-    for unit, multiplier in constants.TIME_UNITS.items():
-        if time_str.endswith(unit):
-            try:
-                value = int(time_str[:-len(unit)])
-                return math.ceil(value * multiplier)
-            except ValueError:
-                continue
-
-    raise ValueError(f'Invalid time format: {time}')

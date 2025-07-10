@@ -1,6 +1,9 @@
 """State for API server process."""
 
+import os
 from typing import Optional
+
+from sky.skylet import constants
 
 # This state is used to block requests except /api operations, which is useful
 # when a server is shutting down: new requests will be blocked, but existing
@@ -9,7 +12,7 @@ from typing import Optional
 _block_requests = False
 
 # The UUID generated on server instance startup.
-_host_uuid: Optional[str] = None
+_host_uuid: str = os.environ.get(constants.APISERVER_UUID_ENV_VAR, '')
 
 
 # TODO(aylei): refactor, state should be a instance property of API server app
@@ -23,12 +26,6 @@ def set_block_requests(shutting_down: bool) -> None:
     """Set the API server to block requests except /api operations."""
     global _block_requests
     _block_requests = shutting_down
-
-
-def set_host_uuid(host_uuid: str) -> None:
-    """Set the UUID of the API server."""
-    global _host_uuid
-    _host_uuid = host_uuid
 
 
 def get_host_uuid() -> Optional[str]:

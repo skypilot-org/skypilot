@@ -4,7 +4,6 @@ This module provides an abstraction for locking that can use
 either local file locks or database-based distributed locks.
 """
 import abc
-import contextlib
 import logging
 import os
 import time
@@ -311,25 +310,3 @@ def _detect_lock_type() -> str:
         pass
 
     return 'filelock'
-
-
-@contextlib.contextmanager
-def distributed_lock(lock_id: str,
-                     timeout: Optional[float] = None,
-                     lock_type: Optional[str] = None,
-                     poll_interval: float = 0.1):
-    """Context manager for distributed locks.
-
-    Args:
-        lock_id: Unique identifier for the lock.
-        timeout: Maximum time seconds to wait for lock acquisition,
-                 None means wait indefinitely.
-        lock_type: Type of lock to create ('filelock' or 'postgres').
-        poll_interval: Interval in seconds to poll for lock acquisition.
-
-    Raises:
-        LockTimeout: If lock cannot be acquired within timeout.
-    """
-    lock = get_lock(lock_id, timeout, lock_type, poll_interval)
-    with lock:
-        yield lock

@@ -490,7 +490,7 @@ class TestDistributedLockContextManager:
         mock_lock.__exit__ = mock.Mock(return_value=None)
         mock_get_lock.return_value = mock_lock
 
-        with locks.distributed_lock('test_lock') as lock:
+        with locks.get_lock('test_lock') as lock:
             assert lock is mock_lock
 
         mock_get_lock.assert_called_once_with('test_lock', None, None, 0.1)
@@ -505,10 +505,10 @@ class TestDistributedLockContextManager:
         mock_lock.__exit__ = mock.Mock(return_value=None)
         mock_get_lock.return_value = mock_lock
 
-        with locks.distributed_lock('test_lock',
-                                    timeout=5.0,
-                                    lock_type='postgres',
-                                    poll_interval=0.5) as lock:
+        with locks.get_lock('test_lock',
+                            timeout=5.0,
+                            lock_type='postgres',
+                            poll_interval=0.5) as lock:
             assert lock is mock_lock
 
         mock_get_lock.assert_called_once_with('test_lock', 5.0, 'postgres', 0.5)
@@ -522,7 +522,7 @@ class TestDistributedLockContextManager:
         mock_get_lock.return_value = mock_lock
 
         with pytest.raises(RuntimeError):
-            with locks.distributed_lock('test_lock'):
+            with locks.get_lock('test_lock'):
                 raise RuntimeError("Test exception")
 
         # Lock should still be properly cleaned up
@@ -579,7 +579,7 @@ class TestDistributedLockIntegration:
         """Test context manager with auto-detection."""
         mock_detect.return_value = 'filelock'
 
-        with locks.distributed_lock('auto_detect_test') as lock:
+        with locks.get_lock('auto_detect_test') as lock:
             assert isinstance(lock, locks.FileLock)
 
         mock_detect.assert_called_once()
