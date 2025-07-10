@@ -23,6 +23,7 @@ from sky.serve import constants
 from sky.serve import controller
 from sky.serve import load_balancer
 from sky.serve import replica_managers
+from sky.serve import request_queue
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
@@ -274,7 +275,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # After that, we will have a mapping from replica port to endpoint.
             load_balancer_process = multiprocessing.Process(
                 target=ux_utils.RedirectOutputForProcess(
-                    load_balancer.run_load_balancer,
+                    request_queue.run_request_queue,
                     load_balancer_log_file).run,
                 args=(controller_addr, load_balancer_port,
                       service_spec.load_balancing_policy,

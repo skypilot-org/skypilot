@@ -22,6 +22,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import serve_state
@@ -244,6 +245,14 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
+    # _check_consolidation_mode_consistency(consolidation_mode)
+    return consolidation_mode
+
+
 def validate_service_task(task: 'sky.Task') -> None:
     """Validate the task for Sky Serve.
 
@@ -426,6 +435,7 @@ def set_service_status_and_active_versions_from_replica(
 
 
 def update_service_status() -> None:
+    return
     services = serve_state.get_services()
     for record in services:
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
@@ -694,38 +704,38 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     start_time = time.time()
     setup_completed = False
     while True:
-        job_status = job_lib.get_status(job_id)
-        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
-            # Wait for the controller process to finish setting up. It can be
-            # slow if a lot cloud dependencies are being installed.
-            if (time.time() - start_time >
-                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Failed to start the controller '
-                        f'process for the service {service_name!r} '
-                        f'within '
-                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
-                    )
-            # No need to check the service status as the controller process
-            # is still setting up.
-            time.sleep(1)
-            continue
+        # job_status = job_lib.get_status(job_id)
+        # if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+        #     # Wait for the controller process to finish setting up. It can be
+        #     # slow if a lot cloud dependencies are being installed.
+        #     if (time.time() - start_time >
+        #             constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+        #         with ux_utils.print_exception_no_traceback():
+        #             raise RuntimeError(
+        #                 f'Failed to start the controller '
+        #                 f'process for the service {service_name!r} '
+        #                 f'within '
+        #                 f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
+        #             )
+        #     # No need to check the service status as the controller process
+        #     # is still setting up.
+        #     time.sleep(1)
+        #     continue
 
-        if not setup_completed:
-            setup_completed = True
-            # Reset the start time to wait for the service to be registered.
-            start_time = time.time()
+        # if not setup_completed:
+        #     setup_completed = True
+        #     # Reset the start time to wait for the service to be registered.
+        #     start_time = time.time()
 
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
-            if job_id != record['controller_job_id']:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'The service {service_name!r} is already running. '
-                        'Please specify a different name for your service. '
-                        'To update an existing service, run: sky serve update '
-                        f'{service_name} <new-service-yaml>')
+            # if job_id != record['controller_job_id']:
+            #     with ux_utils.print_exception_no_traceback():
+            #         raise ValueError(
+            #             f'The service {service_name!r} is already running. '
+            #             'Please specify a different name for your service. '
+            #             'To update an existing service, run: sky serve update '
+            #             f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)

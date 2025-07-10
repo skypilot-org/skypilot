@@ -115,7 +115,7 @@ class SkyServiceSpec:
 
         service_config: Dict[str, Any] = {}
 
-        readiness_section = config['readiness_probe']
+        readiness_section = config.get('readiness_probe', '/')
         if isinstance(readiness_section, str):
             service_config['readiness_path'] = readiness_section
             initial_delay_seconds = None

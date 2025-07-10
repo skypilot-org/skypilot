@@ -2358,12 +2358,12 @@ def check_port_forward_mode_dependencies(
         nc_mac_installed = netcat_output.returncode == 1 and 'apple' in str(
             netcat_output.stderr)
 
-        if nc_mac_installed:
-            required_binaries.append('netcat')
-            reasons.append(netcat_macos_message)
-        elif netcat_output.returncode != 0:
-            required_binaries.append('netcat')
-            reasons.append(netcat_default_message)
+        # if nc_mac_installed:
+        #     required_binaries.append('netcat')
+        #     reasons.append(netcat_macos_message)
+        # elif netcat_output.returncode != 0:
+        #     required_binaries.append('netcat')
+        #     reasons.append(netcat_default_message)
 
     except FileNotFoundError:
         required_binaries.append('netcat')

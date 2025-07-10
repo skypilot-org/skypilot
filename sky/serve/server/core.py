@@ -148,6 +148,7 @@ def up(
     dag, mutated_user_config = admin_policy_utils.apply(dag)
     dag.pre_mount_volumes()
     task = dag.tasks[0]
+    task.run = 'python3 -m http.server 8000'
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
@@ -176,6 +177,9 @@ def up(
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
+        controller_job_id = None
+        if serve_utils.is_consolidation_mode():
+            controller_job_id = 1
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -185,6 +189,7 @@ def up(
             'remote_user_config_path': remote_config_yaml_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            'consolidation_mode_job_id': controller_job_id,
             **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -225,15 +230,43 @@ def up(
         # for the first time; otherwise it is a name conflict.
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
-        with common.with_server_user():
-            with skypilot_config.local_active_workspace_ctx(
-                    constants.SKYPILOT_DEFAULT_WORKSPACE):
-                controller_job_id, controller_handle = execution.launch(
-                    task=controller_task,
-                    cluster_name=controller_name,
-                    retry_until_up=True,
-                    _disable_controller_check=True,
-                )
+        if not serve_utils.is_consolidation_mode():
+            with common.with_server_user():
+                with skypilot_config.local_active_workspace_ctx(
+                        constants.SKYPILOT_DEFAULT_WORKSPACE):
+                    controller_job_id, controller_handle = execution.launch(
+                        task=controller_task,
+                        cluster_name=controller_name,
+                        retry_until_up=True,
+                        _disable_controller_check=True,
+                    )
+        else:
+            controller_handle = backend_utils.is_controller_accessible(
+                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+                stopped_message='')
+            backend = backend_utils.get_backend_from_handle(controller_handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            backend.sync_file_mounts(
+                handle=controller_handle,
+                all_file_mounts=controller_task.file_mounts,
+                storage_mounts=controller_task.storage_mounts)
+            run_script = controller_task.run
+            assert isinstance(run_script, str)
+            # Manually add the env variables to the run script. Originally
+            # this is done in ray jobs submission but now we have to do it
+            # manually because there is no ray runtime on the API server.
+            env_cmds = [
+                f'export {k}={v!r}' for k, v in controller_task.envs.items()
+            ]
+            run_script = '\n'.join(env_cmds + [run_script])
+            # Dump script for high availability recovery.
+            # if controller_utils.high_availability_specified(
+            #         controller_name):
+            #     managed_job_state.set_ha_recovery_script(
+            #         consolidation_mode_job_id, run_script)
+            print(f'run_script: {run_script}')
+            backend.run_on_head(controller_handle, run_script)
+            print('finish running on head')
 
         style = colorama.Style
         fore = colorama.Fore
@@ -292,9 +325,10 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            socket_endpoint = backend_utils.get_endpoints(
-                controller_handle.cluster_name, lb_port,
-                skip_status_check=True).get(lb_port)
+            # socket_endpoint = backend_utils.get_endpoints(
+            #     controller_handle.cluster_name, lb_port,
+            #     skip_status_check=True).get(lb_port)
+            socket_endpoint = f'localhost:{lb_port}'
             assert socket_endpoint is not None, (
                 'Did not get endpoint for controller.')
             # Already checked by validate_service_task

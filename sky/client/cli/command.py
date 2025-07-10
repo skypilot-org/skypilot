@@ -4469,7 +4469,7 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        ports=ports,
+        ports=('8000',),
     )
     if isinstance(task, sky.Dag):
         raise click.UsageError(

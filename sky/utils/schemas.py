@@ -605,7 +605,7 @@ def get_service_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['readiness_probe'],
+        # 'required': ['readiness_probe'],
         'additionalProperties': False,
         'properties': {
             'readiness_probe': {
@@ -1635,7 +1635,7 @@ def get_config_schema():
                 'type': 'string',
             },
             'jobs': _get_controller_schema(add_consolidation_mode=True),
-            'serve': _get_controller_schema(add_consolidation_mode=False),
+            'serve': _get_controller_schema(add_consolidation_mode=True),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,

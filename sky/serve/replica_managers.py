@@ -617,7 +617,7 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def get_active_replica_urls(self) -> List[str]:
+    def get_active_replica_cluster_names(self) -> List[str]:
         """Get the urls of the active replicas."""
         raise NotImplementedError
 
@@ -1268,7 +1268,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
-    def get_active_replica_urls(self) -> List[str]:
+    def get_active_replica_cluster_names(self) -> List[str]:
         """Get the urls of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
@@ -1278,8 +1278,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
-                assert info.url is not None, info
-                ready_replica_urls.append(info.url)
+                assert info.cluster_name is not None, info
+                ready_replica_urls.append(info.cluster_name)
         return ready_replica_urls
 
     ###########################################
