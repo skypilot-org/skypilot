@@ -891,7 +891,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
-        common_utils.dump_yaml(global_config_path, dict(config))
+        common_utils.dump_yaml(global_config_path,
+                               dict(config),
+                               create_if_not_exists=True)
 
         if config_map_utils.is_running_in_kubernetes():
             # In Kubernetes, sync the PVC config to ConfigMap for user
@@ -900,5 +902,4 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             # easy access.
             config_map_utils.patch_configmap_with_config(
                 config, global_config_path)
-
     reload_config()
