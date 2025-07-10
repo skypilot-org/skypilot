@@ -52,6 +52,7 @@ import contextlib
 import copy
 import json
 import os
+import pathlib
 import tempfile
 import threading
 import typing
@@ -847,8 +848,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
-        global_config_path = get_user_config_path()
-    global_config_path = os.path.expanduser(global_config_path)
+        # Fallback to ~/.sky/config.yaml, and make sure it exists.
+        global_config_path = os.path.expanduser(get_user_config_path())
+        pathlib.Path(global_config_path).touch(exist_ok=True)
 
     db_updated = False
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
@@ -892,9 +894,7 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
-        common_utils.dump_yaml(global_config_path,
-                               dict(config),
-                               create_if_not_exists=True)
+        common_utils.dump_yaml(global_config_path, dict(config))
 
         if config_map_utils.is_running_in_kubernetes():
             # In Kubernetes, sync the PVC config to ConfigMap for user

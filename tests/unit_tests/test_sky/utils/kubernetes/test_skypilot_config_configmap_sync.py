@@ -166,9 +166,7 @@ class TestConfigMapSync(unittest.TestCase):
 
             # In Kubernetes, should call both dump_yaml and ConfigMap patching
             mock_patch.assert_called_once_with(config, config_path)
-            mock_dump_yaml.assert_called_once_with(config_path,
-                                                   dict(config),
-                                                   create_if_not_exists=True)
+            mock_dump_yaml.assert_called_once_with(config_path, dict(config))
 
         os.unlink(config_path)
 
@@ -194,9 +192,7 @@ class TestConfigMapSync(unittest.TestCase):
             skypilot_config.update_api_server_config_no_lock(config)
 
             # In non-Kubernetes, should call dump_yaml but not ConfigMap patch
-            mock_dump_yaml.assert_called_once_with(config_path,
-                                                   dict(config),
-                                                   create_if_not_exists=True)
+            mock_dump_yaml.assert_called_once_with(config_path, dict(config))
             mock_patch.assert_not_called()
 
         os.unlink(config_path)

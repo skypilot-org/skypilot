@@ -7,7 +7,6 @@ import hashlib
 import inspect
 import io
 import os
-import pathlib
 import platform
 import random
 import re
@@ -486,17 +485,14 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return read_yaml_all_str(f.read())
 
 
-def dump_yaml(path: str,
-              config: Union[List[Dict[str, Any]], Dict[str, Any]],
-              create_if_not_exists: bool = False) -> None:
+def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
+                                       Dict[str, Any]]) -> None:
     """Dumps a YAML file.
 
     Args:
         path: the path to the YAML file.
         config: the configuration to dump.
     """
-    if create_if_not_exists:
-        pathlib.Path(path).touch(exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
