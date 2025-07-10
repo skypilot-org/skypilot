@@ -96,11 +96,6 @@ SKYLET_VERSION = '15'
 SKYLET_LIB_VERSION = 3
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
-# `sky jobs dashboard`-related
-#
-# Port on the remote jobs controller that the dashboard is running on.
-SPOT_DASHBOARD_REMOTE_PORT = 5000
-
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 DEFAULT_DOCKER_PORT = 10022
