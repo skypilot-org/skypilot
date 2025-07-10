@@ -41,7 +41,7 @@ tests:
           value: "http_502 non_idempotent"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
-          value: "2"
+          value: "3"
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-change-on-failure"]
           value: "true"
