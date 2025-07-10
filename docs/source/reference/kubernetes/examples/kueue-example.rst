@@ -199,6 +199,7 @@ Here, a cluster queue and a local queue are created.
         When using :ref:`GKE DWS <dws-with-kueue>`, an ``AdmissionCheck`` and ``ProvisioningRequestConfig`` should be added to the ``kueue.yaml`` file to make sure that the head and worker PodSets in a multi-node cluster are merged into a single PodSet when creating ProvisioningRequest to trigger scale up in GKE.
 
         .. code-block:: yaml
+          :emphasize-lines: 1-20,41-42
 
           apiVersion: kueue.x-k8s.io/v1beta1
           kind: AdmissionCheck
