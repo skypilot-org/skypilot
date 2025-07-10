@@ -52,7 +52,6 @@ import contextlib
 import copy
 import json
 import os
-import pathlib
 import tempfile
 import threading
 import typing
@@ -849,7 +848,7 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
         global_config_path = get_user_config_path()
-    global_config_path = str(pathlib.Path(global_config_path).expanduser())
+    global_config_path = os.path.expanduser(global_config_path)
 
     db_updated = False
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
