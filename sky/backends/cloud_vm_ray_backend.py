@@ -2918,7 +2918,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         backend_utils.check_owner_identity(cluster_name)
         lock_id = backend_utils.cluster_status_lock_id(cluster_name)
         with timeline.DistributedLockEvent(lock_id):
-            logger.info(f'Acquired lock {lock_id}')
             # Try to launch the exiting cluster first. If no existing cluster,
             # this function will create a to_provision_config with required
             # resources.

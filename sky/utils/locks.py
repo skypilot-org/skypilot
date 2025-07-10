@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import filelock
 import sqlalchemy
+import hashlib
 
 from sky import global_user_state
 from sky.skylet import constants
@@ -212,10 +213,10 @@ class PostgresLock(DistributedLock):
                                (self._lock_key,))
                 result = cursor.fetchone()[0]
 
-                logger.info(f'Try lock {self.lock_id}: {result}')
+                logger.info(f'Try lock {self.lock_id}, {self._lock_key}: {result}')
                 if result:
                     self._acquired = True
-                    logger.info(f'Acquired lock {self.lock_id}')
+                    logger.info(f'Acquired lock {self.lock_id}, {self._lock_key}')
                     return AcquireReturnProxy(self)
 
                 if not blocking:
