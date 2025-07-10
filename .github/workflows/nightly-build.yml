@@ -122,7 +122,7 @@ jobs:
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --kubernetes --no-resource-heavy"
+      message: "nightly-build-pypi --kubernetes --no-resource-heavy on test_cluster_job.py"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py"}'
       timeout_minutes: 40
