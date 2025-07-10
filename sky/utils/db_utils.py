@@ -84,6 +84,22 @@ def add_column_to_table(
     conn.commit()
 
 
+def add_tables_to_db_sqlalchemy(
+    metadata: sqlalchemy.MetaData,
+    engine: sqlalchemy.Engine,
+):
+    """Add tables to the database."""
+    for table in metadata.tables.values():
+        try:
+            table.create(bind=engine, checkfirst=True)
+        except (sqlalchemy_exc.OperationalError,
+                sqlalchemy_exc.ProgrammingError) as e:
+            if 'already exists' in str(e):
+                pass
+            else:
+                raise
+
+
 def add_column_to_table_sqlalchemy(
     session: 'Session',
     table_name: str,

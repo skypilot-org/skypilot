@@ -43,7 +43,7 @@ This will automatically find available machines across multiple regions to compu
 
 ## Monitor the progress
 
-You can use `sky jobs queue` and `sky jobs dashboard` to see the status of jobs. Alternatively, you can monitor the progress via 
+You can use `sky jobs queue` and `sky dashboard` to see the status of jobs. Alternatively, you can monitor the progress via 
 ```
 sky launch -n monitor monitor_progress.yaml 
 ```

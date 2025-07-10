@@ -66,23 +66,23 @@ fi
 
 # Check if LAUNCHED_BY_DOCKER_CONTAINER environment variable is set
 if [ -n "$LAUNCHED_BY_DOCKER_CONTAINER" ]; then
-    echo "Container launched by Docker, waiting for /skypilot to be available..."
+    echo "Container launched by Docker, waiting for /success_mount_directory to be available..."
 
     # Set timeout for 5 minutes (300 seconds)
     timeout=300
     start_time=$(date +%s)
 
     # Loop until /skypilot exists or timeout is reached
-    while [ ! -d "/skypilot" ]; do
+    while [ ! -d "/success_mount_directory" ]; do
         current_time=$(date +%s)
         elapsed=$((current_time - start_time))
 
         if [ $elapsed -ge $timeout ]; then
-            echo "Timeout reached waiting for /skypilot directory"
+            echo "Timeout reached waiting for /success_mount_directory directory"
             break
         fi
 
-        echo "Waiting for /skypilot... ($elapsed seconds elapsed)"
+        echo "Waiting for /success_mount_directory... ($elapsed seconds elapsed)"
         sleep 5
     done
 fi

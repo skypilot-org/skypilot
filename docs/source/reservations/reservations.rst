@@ -212,6 +212,7 @@ using DWS on GKE:
       dws:
         enabled: true
 
+.. _dws-with-kueue:
 
 Using DWS with Kueue
 ^^^^^^^^^^^^^^^^^^^^
