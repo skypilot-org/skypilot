@@ -12,6 +12,7 @@ import sqlalchemy_adapter
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.utils import db_utils
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import common_utils
@@ -38,6 +39,8 @@ class PermissionService:
             if _enforcer_instance is None:
                 _enforcer_instance = self
                 engine = global_user_state.initialize_and_get_db()
+                db_utils.add_tables_to_db_sqlalchemy(
+                    sqlalchemy_adapter.Base.metadata, engine)
                 adapter = sqlalchemy_adapter.Adapter(engine)
                 model_path = os.path.join(os.path.dirname(__file__),
                                           'model.conf')
