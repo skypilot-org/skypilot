@@ -1,18 +1,20 @@
-# Using GCP/GKE GPUDirect-TCPX with SkyPilot
+# Using GCP High-Performance GPU Networking with SkyPilot
 
-[GPUDirect-TCPX](https://cloud.google.com/compute/docs/gpus/gpudirect) is a high-performance networking technology that enables direct communication between GPUs and network interfaces. By bypassing the CPU and system memory, it significantly enhances network performance for A3 VMs, particularly for large data transfers.
+SkyPilot supports advanced GPU networking technologies on both GCP VMs and GKE clusters, enabling high-performance inter-GPU communication for distributed deep learning and HPC workloads. This includes support for:
 
-SkyPilot supports GPUDirect-TCPX on both GCP and GKE.
+- **GPUDirect-TCPX**: High-performance networking for A3 VMs (a3-highgpu-8g, a3-edgegpu-8g, a3-ultragpu-8g)
+- **GPUDirect-RDMA**: Direct GPU-to-GPU communication across multiple VM types
+- **TCPX/TCPXO**: Optimized TCP extensions for GPU workloads
 
-## Using GCP GPUDirect-TCPX on A3 VM with SkyPilot
+These technologies enable direct communication between GPUs and network interfaces, bypassing CPU and system memory bottlenecks to deliver superior throughput for large-scale data transfers.
 
-When deploying `a3-highgpu-8g` or `a3-edgegpu-8g` VMs, combining GPUDirect-TCPX with Google Virtual NIC (gVNIC) delivers optimal network performance with minimal latency between applications and the network infrastructure.
+## GPUDirect-TCPX on A3 VMs
 
-This example demonstrates how to run [NCCL tests](https://github.com/NVIDIA/nccl-tests) on a GCP cluster with `a3-highgpu-8g` VMs, comparing performance with and without GPUDirect-TCPX enabled.
+When deploying `a3-highgpu-8g`, `a3-edgegpu-8g`, or `a3-ultragpu-8g` VMs, combining GPUDirect-TCPX with Google Virtual NIC (gVNIC) delivers optimal network performance with minimal latency between applications and the network infrastructure.
 
-### TL;DR: enable GPUDirect-TCPX with SkyPilot
+This example demonstrates how to run [NCCL tests](https://github.com/NVIDIA/nccl-tests) on a GCP cluster with A3 VMs, comparing performance with and without GPUDirect-TCPX enabled.
 
-Enable GPUDirect-TCPX on GCP clusters with `a3-highgpu-8g` or `a3-edgegpu-8g` VMs by adding a single configuration parameter to your SkyPilot YAML:
+Enable GPUDirect-TCPX on GCP clusters with `a3-highgpu-8g`, `a3-edgegpu-8g`, or `a3-ultragpu-8g` VMs by adding a single configuration parameter to your SkyPilot YAML:
 
 ```yaml
 config:
@@ -34,7 +36,7 @@ With `enable_gpu_direct: true`, SkyPilot automatically:
    - Deploys the GPUDirect-TCPX Receive Data Path Manager service
    - Configures NVIDIA Collective Communications Library (NCCL) and GPUDirect-TCPX plugin
 
-### Running NCCL Tests with GPUDirect-TCPX
+## Running NCCL Tests with GPUDirect-TCPX
 
 The complete configuration is available in [`gpu_direct_tcpx.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/gpu_direct_tcpx.yaml). The configuration includes:
 - `image_id`: Pre-configured environment for NCCL testing
@@ -63,7 +65,7 @@ NCCL INFO NET/GPUDirectTCPX : GPUDirectTCPX enable: 1
 > sky launch -c tcpx --env USE_GPU_DIRECT=false gpu_direct_tcpx.yaml
 > ```
 
-#### Performance Benchmark Results
+### Performance Benchmark Results
 
 We conducted performance comparisons using NCCL tests on a GCP cluster with 2x a3-highgpu-8g (2xH100:8) instances. The speed-up is calculated as:
 ```
@@ -101,7 +103,6 @@ Speed-up = busbw GPUDirect-TCPX (GB/s) / busbw Non-GPUDirect-TCPX (GB/s)
 | 512 MB       | 67.09      | 19.93       | 3.3 x        |
 | 1 GB         | 66.2       | 20.09       | 3.3 x        |
 | 2 GB         | 65.72      | 19.39       | 3.4 x        |
-
 
 ### Performance Validation on A3-Ultra (H200s)
 
@@ -228,7 +229,7 @@ NCCL version 2.26.6+cuda12.8
 (head, rank=0, pid=3808) [1,0]<stdout>:#
 ```
 
-#### Key Performance Insights
+### Key Performance Insights
 
 | Message Size Range | Performance Characteristics |
 |-------------------|----------------------------|
@@ -238,23 +239,20 @@ NCCL version 2.26.6+cuda12.8
 
 GPUDirect-TCPX's direct GPU-to-NIC communication path eliminates CPU and system memory bottlenecks, delivering superior throughput for large-scale data transfers. This makes it particularly effective for distributed deep learning workloads and high-performance computing applications.
 
-## Using GPUDirect-TCPX on GKE
+## Using High-Performance GPU Networking on GKE
 
-To use GPUDirect-TCPX on GKE, refer to the [GKE documentation](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#create-vpcs-subnets) to setup the cluster.
+SkyPilot supports advanced GPU networking technologies on GKE clusters, including GPUDirect-TCPX, GPUDirect-RDMA, and TCPX/TCPXO optimizations.
 
-In addition to create a node pool with fixed node size to request the `a3-highgpu-8g` nodes, you can also use DWS on GKE to provision the nodes, refer to [using DWS on GKE](https://docs.skypilot.co/en/latest/reservations/reservations.html#using-dws-on-gke) for more details.
+To use these technologies on GKE, refer to the [GKE documentation](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#create-vpcs-subnets) to setup the cluster with the appropriate networking configuration.
 
-After setting up the GKE, you can run the NCCL Tests with GPUDirect-TCPX.
+In addition to creating a node pool with fixed node size to request the desired GPU instances, you can also use Dynamic Workload Scheduler (DWS) on GKE to provision the nodes, refer to [using DWS on GKE](https://docs.skypilot.co/en/latest/reservations/reservations.html#using-dws-on-gke) for more details.
 
-The complete configuration is available in [`nccl_tcpx_gke.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke.yaml).
+After setting up the GKE cluster, you can run NCCL Tests with the appropriate GPU networking technology.
 
-To run the NCCL test with GPUDirect-TCPX:
+### Available Configurations
 
-```bash
-sky launch -c tcpx nccl_tcpx_gke.yaml
-```
-
-> **Note:** To run tests without GPUDirect-TCPX, use:
-> ```bash
-> sky launch -c tcpx --env USE_GPU_DIRECT=false nccl_tcpx_gke.yaml
-> ```
+| Configuration | Target Platform | GPU Networking Technology | VM Types |
+|---------------|----------------|---------------------------|----------|
+| [`gpu_direct_tcpx.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/gpu_direct_tcpx.yaml) | GCP VM | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
+| [`nccl_tcpx_gke_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke.yaml) | GKE | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
+| [`nccl_tcpx_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h200.yaml) | GKE | GPUDirect-RDMA | a3-ultragpu-8g |
