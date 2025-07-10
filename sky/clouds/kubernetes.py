@@ -438,9 +438,9 @@ class Kubernetes(clouds.Cloud):
         max_timeout = 60  # Cap at 1 minute
         if enable_flex_start:
             # Flex start takes longer to provision.
-            base_timeout = 600
+            base_timeout = 1200
             per_node_timeout = 10
-            max_timeout = 900
+            max_timeout = 2400
         elif volume_mounts is not None:
             for volume_mount in volume_mounts:
                 if (volume_mount.volume_config.type ==

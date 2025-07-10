@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+import traceback
 
 import click
 from click import testing as cli_testing
@@ -273,7 +274,8 @@ class TestJobsOperations:
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
-        assert isinstance(result.exception, exceptions.NotSupportedError)
+        assert isinstance(result.exception, exceptions.NotSupportedError), (
+            f'{traceback.format_tb(result.exception.__traceback__)}')
 
         result = cli_runner.invoke(command.down, ['sky-jobs-con*'])
         assert not result.exception

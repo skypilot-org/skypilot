@@ -377,6 +377,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
         # have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
+    elif accelerator == 'H200':
+        # H200s on GCP use this label format
+        return 'nvidia-h200-141gb'
     elif accelerator.startswith('tpu-'):
         return accelerator
     else:
@@ -546,6 +549,8 @@ class GKELabelFormatter(GPULabelFormatter):
                 # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
                 # to distinguish between a3-high and a3-mega instances
                 return 'H100'
+            elif acc == 'H200-141GB':
+                return 'H200'
             return acc
         elif is_tpu_on_gke(value):
             return value
