@@ -1659,6 +1659,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
 
+    query_clusters: Optional[List[str]] = None if not clusters else clusters
+
     # Phase 1: Validate arguments for IP/endpoint queries
     if ip or show_endpoints:
         if refresh:
@@ -1723,7 +1725,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return None
 
     # Submit all requests in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         managed_jobs_request_future = executor.submit(submit_managed_jobs)
         services_request_future = executor.submit(submit_services)
         workspace_request_future = executor.submit(submit_workspace)
@@ -1735,12 +1737,12 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        None if not clusters else clusters, common.StatusRefreshMode.FORCE
+        query_clusters, common.StatusRefreshMode.FORCE
         if refresh else common.StatusRefreshMode.NONE, all_users)
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
-        _show_endpoint(None if not clusters else clusters, cluster_records, ip,
+        _show_endpoint(query_clusters, cluster_records, ip,
                        endpoints, endpoint)
         return
     hints = []
@@ -1766,8 +1768,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users,
-        None if not clusters else clusters, show_workspace)
+        normal_clusters + controllers, verbose, all_users, query_clusters,
+        show_workspace)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:
@@ -1816,7 +1818,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         num_services = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
-        elif service_status_request_id is not None:
+        else:
             with rich_utils.client_status('[cyan]Checking services[/]'):
                 try:
                     num_services, msg = _handle_services_request(
@@ -1829,8 +1831,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(service_status_request_id, silent=True)
                     num_services = -1
                     msg = 'KeyboardInterrupt'
-        else:
-            msg = 'Failed to initiate services request'
         click.echo(msg)
         if num_services is not None:
             hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
