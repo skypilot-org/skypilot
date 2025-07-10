@@ -41,23 +41,22 @@ class PermissionService:
     def _lazy_initialize(self):
         if self.enforcer is not None:
             return
-        with self.init_lock:
-            with _policy_lock():
-                global _enforcer_instance
-                if _enforcer_instance is None:
-                    _enforcer_instance = self
-                    engine = global_user_state.initialize_and_get_db()
-                    db_utils.add_tables_to_db_sqlalchemy(
-                        sqlalchemy_adapter.Base.metadata, engine)
-                    adapter = sqlalchemy_adapter.Adapter(engine)
-                    model_path = os.path.join(os.path.dirname(__file__),
-                                              'model.conf')
-                    enforcer = casbin.Enforcer(model_path, adapter)
-                    self.enforcer = enforcer
-                    self._maybe_initialize_policies()
-                    self._maybe_initialize_basic_auth_user()
-                else:
-                    self.enforcer = _enforcer_instance.enforcer
+        with _policy_lock():
+            global _enforcer_instance
+            if _enforcer_instance is None:
+                _enforcer_instance = self
+                engine = global_user_state.initialize_and_get_db()
+                db_utils.add_tables_to_db_sqlalchemy(
+                    sqlalchemy_adapter.Base.metadata, engine)
+                adapter = sqlalchemy_adapter.Adapter(engine)
+                model_path = os.path.join(os.path.dirname(__file__),
+                                            'model.conf')
+                enforcer = casbin.Enforcer(model_path, adapter)
+                self.enforcer = enforcer
+                self._maybe_initialize_policies()
+                self._maybe_initialize_basic_auth_user()
+            else:
+                self.enforcer = _enforcer_instance.enforcer
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
