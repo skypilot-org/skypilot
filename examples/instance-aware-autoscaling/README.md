@@ -57,12 +57,7 @@ With the configuration above:
 
 2. **Send requests** to the service endpoint
 
-3. **Monitor scaling behavior**:
-   ```bash
-   sky serve status
-   ```
-
-4. **Check logs** of load_balancer and controller to see GPU type-aware autoscaling
+3. **Check logs** of load_balancer and controller to see GPU type-aware autoscaling
 
 ## Supported Cloud / tested GPU Types
 Only Lambda labs cloud has been tested
