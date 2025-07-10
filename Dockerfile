@@ -37,14 +37,6 @@ RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INS
 # Add source code
 COPY . /skypilot
 
-# Debug: Show what was copied into the container
-RUN echo "=== Contents of /skypilot ===" && \
-    ls -la /skypilot && \
-    echo "=== Checking for dist directory ===" && \
-    ls -la /skypilot/dist/ 2>/dev/null || echo "No /skypilot/dist/ directory found" && \
-    echo "=== Looking for wheel files ===" && \
-    find /skypilot -name "*.whl" -type f 2>/dev/null || echo "No wheel files found in /skypilot"
-
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system
@@ -71,16 +63,6 @@ RUN cd /skypilot && \
         ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi
-
-RUN sky -v && sky api info || { \
-        echo "=== SkyPilot API server failed to start. Checking logs... ==="; \
-        if [ -f ~/.sky/api_server/server.log ]; then \
-            cat ~/.sky/api_server/server.log; \
-        else \
-            echo "No server log file found at ~/.sky/api_server/server.log"; \
-        fi; \
-        exit 1; \
-    }
 
 # Cleanup all caches to reduce the image size
 RUN conda clean -afy && \

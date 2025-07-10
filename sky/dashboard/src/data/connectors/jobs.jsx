@@ -112,7 +112,11 @@ export async function getManagedJobs({ allUsers = true } = {}) {
 
       const full_region_or_zone = region_or_zone;
       if (region_or_zone && region_or_zone.length > 15) {
-        region_or_zone = region_or_zone.substring(0, 15) + '...';
+        // Use head-and-tail truncation like the cluster page
+        const truncateLength = 15;
+        const startLength = Math.floor((truncateLength - 3) / 2);
+        const endLength = Math.ceil((truncateLength - 3) / 2);
+        region_or_zone = `${region_or_zone.substring(0, startLength)}...${region_or_zone.substring(region_or_zone.length - endLength)}`;
       }
 
       let infra = cloud + ' (' + region_or_zone + ')';
