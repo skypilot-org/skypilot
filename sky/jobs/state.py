@@ -133,8 +133,7 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     # Get alembic config for spot jobs db and run migrations
-    alembic_config = alembic_utils.get_alembic_config(engine,
-                                                      'spot_jobs_db')
+    alembic_config = alembic_utils.get_alembic_config(engine, 'spot_jobs_db')
     alembic_command.upgrade(alembic_config, 'head')
 
 

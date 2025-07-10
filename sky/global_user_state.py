@@ -222,19 +222,6 @@ def _glob_to_similar(glob_pattern):
     return like_pattern
 
 
-def _get_alembic_config():
-    """Get Alembic configuration"""
-    # Use the alembic.ini file from setup_files (included in wheel)
-    alembic_ini_path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                                    'sky', 'setup_files', 'alembic.ini')
-    alembic_cfg = Config(alembic_ini_path)
-
-    # Override the database URL to match SkyPilot's current connection
-    alembic_cfg.set_main_option('sqlalchemy.url', str(_SQLALCHEMY_ENGINE.url))
-
-    return alembic_cfg
-
-
 def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -254,8 +241,7 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     # Get alembic config for state db and run migrations
-    alembic_config = alembic_utils.get_alembic_config(engine,
-                                                      'state_db')
+    alembic_config = alembic_utils.get_alembic_config(engine, 'state_db')
     alembic_command.upgrade(alembic_config, 'head')
 
 
