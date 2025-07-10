@@ -73,17 +73,23 @@ _JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
 JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
+JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
 
-# Based on testing, assume a running job uses 350MB memory.
-JOB_MEMORY_MB = 350
-# Number of ongoing launches launches allowed per CPU.
-LAUNCHES_PER_CPU = 2
+# Based on testing, each worker takes around 200-300MB memory. Keeping it
+# higher to be safe.
+JOB_MEMORY_MB = 400
+# Number of ongoing launches launches allowed per worker. Can probably be
+# increased a bit to around 16 but keeping it lower to just to be safe
+LAUNCHES_PER_WORKER = 8
+# this can probably be increased to around 300-400 but keeping it lower to just
+# to be safe
+JOBS_PER_WORKER = 200
 
-# os.cpu_count gives us an Optional[int], ignoring type since mypy has issues
-# if I don't
-WORKERS = (os.cpu_count() or 1)
-WORKERS = 1
-JOBS_PER_WORKER = 1000
+# Maximum values for above constants. There will start to be lagging issues
+# at these numbers already.
+# JOB_MEMORY_MB = 200
+# LAUNCHES_PER_WORKER = 16
+# JOBS_PER_WORKER = 400
 
 
 @lru_cache(maxsize=1)
@@ -93,7 +99,28 @@ def _get_lock_path() -> str:
     return path
 
 
-def _start_controller(env_file_path: str) -> None:
+def start_controller() -> None:
+    """Start the job controller process.
+    
+    This is a wrapper around _start_controller that adds the job_id to the
+    controllers list of processes.
+    """
+
+    logs_dir = os.path.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(logs_dir, 'controller.log')
+    
+    with open(JOB_CONTROLLER_ENV_PATH, 'r', encoding='utf-8') as f:
+        run_cmd = f.read()
+
+    pid = subprocess_utils.launch_new_process_tree(run_cmd,
+                                                    log_output=log_path)
+    with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
+        f.write(str(pid) + '\n')
+
+
+def maybe_start_controller(env_file_path: str) -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
@@ -110,18 +137,16 @@ def _start_controller(env_file_path: str) -> None:
                 if os.path.exists(JOB_CONTROLLER_PID_PATH):
                     with open(JOB_CONTROLLER_PID_PATH, 'r',
                               encoding='utf-8') as f:
-                        pid = int(f.read())
-                        if subprocess_utils.is_process_alive(pid):
+                        pids = f.read().split('\n')
+                    for pid in pids:
+                        if subprocess_utils.is_process_alive(
+                            int(pid.strip())):
                             return
-                        else:
-                            to_start = True
+                    to_start = True
                 else:
                     to_start = True
             except Exception:  # pylint: disable=broad-except
                 to_start = True
-                # Starting the server might error in case its already running.
-                # But that should be fine since at least we will have one
-                # running already.
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
         # should launch any pending jobs.
@@ -131,23 +156,18 @@ def _start_controller(env_file_path: str) -> None:
         activate_python_env_cmd = (
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
         source_environment_cmd = (f'source {env_file_path};'
-                                  if env_file_path else '')
+                                    if env_file_path else '')
         run_controller_cmd = (f'{sys.executable} -u -m'
-                              'sky.jobs.controller_server')
+                                'sky.jobs.controller_server')
 
         run_cmd = (f'{activate_python_env_cmd}'
-                   f'{source_environment_cmd}'
-                   f'{run_controller_cmd}')
+                    f'{source_environment_cmd}'
+                    f'{run_controller_cmd}')
+        
+        with open(JOB_CONTROLLER_ENV_PATH, 'w', encoding='utf-8') as f:
+            f.write(run_cmd)
 
-        logs_dir = os.path.expanduser(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
-        os.makedirs(logs_dir, exist_ok=True)
-        log_path = os.path.join(logs_dir, 'controller.log')
-
-        pid = subprocess_utils.launch_new_process_tree(run_cmd,
-                                                       log_output=log_path)
-        with open(JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
-            f.write(str(pid))
+        start_controller()
 
 
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
@@ -164,7 +184,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
                                 common_utils.get_user_hash(), priority)
-    _start_controller(env_file_path)
+    maybe_start_controller(env_file_path)
 
 
 @contextlib.contextmanager
@@ -230,28 +250,7 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
-    with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_alive_waiting(job_id)
-
-
-def _get_job_parallelism() -> int:
-    return WORKERS * JOBS_PER_WORKER
-
-
-def _get_launch_parallelism() -> int:
-    return WORKERS * LAUNCHES_PER_CPU
-
-
-def _can_start_new_job() -> bool:
-    launching_jobs = state.get_num_launching_jobs()
-    alive_jobs = state.get_num_alive_jobs()
-    return launching_jobs < _get_launch_parallelism(
-    ) and alive_jobs < _get_job_parallelism()
-
-
-def _can_lauch_in_alive_job() -> bool:
-    launching_jobs = state.get_num_launching_jobs()
-    return launching_jobs < _get_launch_parallelism()
+    state.scheduler_set_alive_waiting(job_id)
 
 
 # === Async versions of functions called by controller.py ===

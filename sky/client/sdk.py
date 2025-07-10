@@ -2003,11 +2003,14 @@ def api_stop() -> None:
         with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
                   'r',
                   encoding='utf-8') as f:
-            pid = int(f.read())
-            if psutil.pid_exists(pid):
-                subprocess_utils.kill_children_processes(parent_pids=pid,
-                                                         force=True)
+            pids = f.read().split('\n')
+            for pid in pids:
+                if subprocess_utils.is_process_alive(int(pid.strip())):
+                    subprocess_utils.kill_children_processes(
+                        parent_pids=[int(pid.strip())], force=True)
     except Exception:  # pylint: disable=broad-except
+        # in case we get perm issues or something is messed up, just ignore it
+        # and assume the process is dead
         pass
 
     if found:

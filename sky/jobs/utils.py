@@ -10,6 +10,7 @@ import contextvars
 import datetime
 import enum
 import functools
+import asyncio
 import logging
 import os
 import pathlib
@@ -265,6 +266,8 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
 def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
+        if pid < 0:
+            pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
         return process.is_running() and f'--job-id {job_id}' in cmd_str
@@ -432,7 +435,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Expected to find a controller pid for state '
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
-        elif pid == -1:
+        elif pid < 0:
             logger.debug('Controller pid is -1 for consolidated job controller')
             continue
         else:
@@ -568,7 +571,15 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
 
-    return callback_func
+    try:
+        asyncio.get_running_loop()
+        # In async context
+        async def async_callback_func(status: str):
+            return await to_thread(callback_func, status)
+        return async_callback_func
+    except RuntimeError:
+        # Not in async context
+        return callback_func
 
 
 # ======== user functions ========
@@ -618,7 +629,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
-        if managed_job_state.get_job_controller_pid(job_id) == -1:
+        job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
+        if job_controller_pid is not None and job_controller_pid < 0:
             # This is a consolidated job controller, so we need to cancel the
             # with the controller server API
             try:

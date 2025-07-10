@@ -33,7 +33,9 @@ if typing.TYPE_CHECKING:
 
     import sky
 
-CallbackType = Callable[[str], None]
+CallbackType = Union[
+    Callable[[str], None],
+    Callable[[str], 'asyncio.Future[None]']]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1604,7 +1606,8 @@ def get_num_alive_jobs() -> int:
 
 
 @_init_db_async
-async def get_waiting_job() -> Optional[Dict[str, Any]]:
+async def get_waiting_job(
+    pid: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """Atomically find and set the highest priority waiting job to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
@@ -1625,6 +1628,7 @@ async def get_waiting_job() -> Optional[Dict[str, Any]]:
             job_info_table.c.schedule_state,
             job_info_table.c.dag_yaml_path,
             job_info_table.c.env_file_path,
+            job_info_table.c.controller_pid,
         ).where(
             job_info_table.c.schedule_state.in_([
                 ManagedJobScheduleState.WAITING.value,
@@ -1644,6 +1648,10 @@ async def get_waiting_job() -> Optional[Dict[str, Any]]:
         current_state = ManagedJobScheduleState(waiting_job_row[1])
         dag_yaml_path = waiting_job_row[2]
         env_file_path = waiting_job_row[3]
+        controller_pid = waiting_job_row[4]
+        
+        new_pid = (controller_pid if controller_pid is not None else
+                   (pid if pid is not None else -1))
 
         # Update the job state to LAUNCHING
         update_result = await session.execute(
@@ -1654,7 +1662,7 @@ async def get_waiting_job() -> Optional[Dict[str, Any]]:
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.LAUNCHING.value,
-                    job_info_table.c.controller_pid: -1,
+                    job_info_table.c.controller_pid: new_pid,
                 }))
 
         if update_result.rowcount != 1:
@@ -1670,6 +1678,7 @@ async def get_waiting_job() -> Optional[Dict[str, Any]]:
             'schedule_state': current_state,
             'dag_yaml_path': dag_yaml_path,
             'env_file_path': env_file_path,
+            'old_pid': controller_pid,
         }
 
 
@@ -1807,8 +1816,8 @@ async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
             raise exceptions.ManagedJobStatusError(
                 'Failed to set the task to starting. '
                 f'({count} rows updated)')
-    callback_func('SUBMITTED')
-    callback_func('STARTING')
+    await callback_func('SUBMITTED')
+    await callback_func('STARTING')
 
 
 @_init_db_async
@@ -1839,7 +1848,7 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to started. '
                 f'({count} rows updated)')
-    callback_func('STARTED')
+    await callback_func('STARTED')
 
 
 @_init_db_async
@@ -1896,7 +1905,7 @@ async def set_recovering_async(job_id: int, task_id: int,
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to recovering. '
                 f'({count} rows updated)')
-    callback_func('RECOVERING')
+    await callback_func('RECOVERING')
 
 
 @_init_db_async
@@ -1925,7 +1934,7 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
                 f'Failed to set the task to recovered. '
                 f'({count} rows updated)')
     logger.info('==== Recovered. ====')
-    callback_func('RECOVERED')
+    await callback_func('RECOVERED')
 
 
 @_init_db_async
@@ -1951,7 +1960,7 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
             raise exceptions.ManagedJobStatusError(
                 f'Failed to set the task to succeeded. '
                 f'({count} rows updated)')
-    callback_func('SUCCEEDED')
+    await callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
 
@@ -1999,7 +2008,7 @@ async def set_failed_async(
         await session.commit()
         updated = count > 0
     if callback_func and updated:
-        callback_func('FAILED')
+        await callback_func('FAILED')
     logger.info(failure_reason)
 
 
@@ -2021,7 +2030,7 @@ async def set_cancelling_async(job_id: int, callback_func: CallbackType):
         updated = count > 0
     if updated:
         logger.info('Cancelling the job...')
-        callback_func('CANCELLING')
+        await callback_func('CANCELLING')
     else:
         logger.info('Cancellation skipped, job is already terminal')
 
@@ -2045,7 +2054,7 @@ async def set_cancelled_async(job_id: int, callback_func: CallbackType):
         updated = count > 0
     if updated:
         logger.info('Job cancelled.')
-        callback_func('CANCELLED')
+        await callback_func('CANCELLED')
     else:
         logger.info('Cancellation skipped, job is not CANCELLING')
 

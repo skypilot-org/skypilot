@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 
-@app.on_event('startup')
-async def startup_event():
+async def main():
     # Will happen multiple times, who cares though
     os.makedirs(constants.SIGNAL_PATH, exist_ok=True)
 
@@ -37,13 +36,5 @@ async def startup_event():
                        f'Current soft limit: {soft}, hard limit: {hard}')
 
 
-def start_server(host: str = 'localhost', port: int = 8000):
-    """Start the controller server."""
-    uvicorn.run('sky.jobs.controller_server:app',
-                host=host,
-                port=port,
-                workers=scheduler.WORKERS)
-
-
 if __name__ == '__main__':
-    start_server()
+    asyncio.run(main())
