@@ -264,9 +264,7 @@ def up(
             #         controller_name):
             #     managed_job_state.set_ha_recovery_script(
             #         consolidation_mode_job_id, run_script)
-            print(f'run_script: {run_script}')
             backend.run_on_head(controller_handle, run_script)
-            print('finish running on head')
 
         style = colorama.Style
         fore = colorama.Fore

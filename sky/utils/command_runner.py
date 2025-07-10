@@ -184,7 +184,6 @@ class CommandRunner:
         separate_stderr: bool,
         skip_num_lines: int,
         source_bashrc: bool = False,
-        use_login: bool = True
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -195,7 +194,7 @@ class CommandRunner:
             '/bin/bash',
             '--login',
             '-c',
-        ] if use_login else ['/bin/bash', '-c']
+        ]
         if source_bashrc:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
@@ -1015,8 +1014,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                                process_stream,
                                                separate_stderr,
                                                skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=False)
+                                               source_bashrc=source_bashrc)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
