@@ -25,6 +25,9 @@ def test_workspace_switching(generic_cloud: str):
         pytest.skip(
             'Skipping workspace switching test when not in Buildkite environment'
         )
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Skipping workspace switching test since we do not support '
+                    'restarting clusters in remote server')
     ws1_name = 'ws-1'
     ws2_name = 'ws-2'
     server_config_content = textwrap.dedent(f"""\
