@@ -1037,12 +1037,13 @@ export function ManagedJobsTable({
                         <UserDisplay
                           username={item.user}
                           userHash={item.user_hash}
+                          linkClassName="text-gray-600 hover:text-gray-800"
                         />
                       </TableCell>
                       <TableCell>
                         <Link
                           href="/workspaces"
-                          className="text-blue-600 hover:underline"
+                          className="text-gray-600 hover:text-gray-800"
                         >
                           {item.workspace || 'default'}
                         </Link>
@@ -1064,7 +1065,7 @@ export function ManagedJobsTable({
                             <span>
                               <Link
                                 href="/infra"
-                                className="text-blue-600 hover:underline"
+                                className="text-gray-600 hover:text-gray-800"
                               >
                                 {item.cloud || item.infra.split('(')[0].trim()}
                               </Link>
@@ -1560,12 +1561,13 @@ export function ClusterJobs({
                       <UserDisplay
                         username={item.user}
                         userHash={item.user_hash}
+                        linkClassName="text-gray-600 hover:text-gray-800"
                       />
                     </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
-                        className="text-blue-600 hover:underline"
+                        className="text-gray-600 hover:text-gray-800"
                       >
                         {item.workspace || 'default'}
                       </Link>
