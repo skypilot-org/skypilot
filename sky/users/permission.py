@@ -3,7 +3,6 @@ import contextlib
 import hashlib
 import logging
 import os
-import threading
 from typing import Generator, List
 
 import casbin
@@ -49,7 +48,7 @@ class PermissionService:
                     sqlalchemy_adapter.Base.metadata, engine)
                 adapter = sqlalchemy_adapter.Adapter(engine)
                 model_path = os.path.join(os.path.dirname(__file__),
-                                            'model.conf')
+                                          'model.conf')
                 enforcer = casbin.Enforcer(model_path, adapter)
                 self.enforcer = enforcer
                 self._maybe_initialize_policies()
