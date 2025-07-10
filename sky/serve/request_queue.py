@@ -20,7 +20,7 @@ logger = sky_logging.init_logger(__name__)
 
 @dataclasses.dataclass
 class RequestEntry:
-    req_id: str
+    batch_id: str
     run_script: str
 
 
@@ -29,10 +29,9 @@ class RequestStatus:
     batch_size: int
     num_pending_reqs: int = 0
     running_req_ids: List[str] = dataclasses.field(default_factory=list)
-    # completed_req_ids: List[str] = dataclasses.field(default_factory=list)
-    # List[cn, job_id]
-    completed_reqs: List[Tuple[str,
-                               int]] = dataclasses.field(default_factory=list)
+    # List[cn, job_id, logs]
+    completed_reqs: List[Tuple[str, int,
+                               str]] = dataclasses.field(default_factory=list)
 
 
 class RequestQueue:
@@ -114,46 +113,55 @@ class RequestQueue:
             return
         request_entry = await self.request_queue.get()
         self.cn2inproc[avail] += 1
-        logger.info(f'Processing request {request_entry.req_id} on {avail}')
+        logger.info(
+            f'Processing request from batch {request_entry.batch_id} on {avail}'
+        )
         sky_req_id = sdk.exec(task=sky.Task(run=request_entry.run_script),
                               cluster_name=avail)
-        self.id2status[request_entry.req_id].running_req_ids.append(sky_req_id)
-        self.id2status[request_entry.req_id].num_pending_reqs -= 1
+        self.id2status[request_entry.batch_id].running_req_ids.append(
+            sky_req_id)
+        self.id2status[request_entry.batch_id].num_pending_reqs -= 1
 
-    def check_request_status(self, req_id: str, status: RequestStatus) -> None:
-        logger.info(f'Checking status for {req_id}')
+    def check_request_status(self, batch_id: str,
+                             status: RequestStatus) -> None:
+        logger.info(f'Checking status for {batch_id}')
         # TODO(tian): Make this async.
         api_stats = sdk.api_status(request_ids=status.running_req_ids,
                                    all_status=True)
-        logger.info(f'API stats: {api_stats}')
+        # logger.info(f'API stats: {api_stats}')
         for stat in api_stats:
             if stat.status == 'SUCCEEDED':
                 job_id, handle = sdk.get(stat.request_id)
                 cn = handle.cluster_name
-                status.completed_reqs.append((job_id, cn))
+                stream = io.StringIO()
+                sdk.tail_logs(cluster_name=cn,
+                              job_id=job_id,
+                              follow=False,
+                              output_stream=stream)
+                status.completed_reqs.append((job_id, cn, stream.getvalue()))
                 status.running_req_ids.remove(stat.request_id)
                 self.cn2inproc[cn] -= 1
 
     async def _pull_request_status(self) -> None:
-        for req_id, status in self.id2status.items():
+        for batch_id, status in self.id2status.items():
             if status.running_req_ids:
-                self.check_request_status(req_id, status)
+                self.check_request_status(batch_id, status)
 
     def run(self):
 
-        @self.app.post('/enqueue')
-        async def enqueue(request: fastapi.Request):
+        @self.app.post('/submit')
+        async def submit(request: fastapi.Request):
             payload = await request.json()
             num_reqs = payload['num_reqs']
-            req_id = f'sky-batch-{str(uuid.uuid4())[:4]}'
-            status = RequestStatus(batch_size=num_reqs, num_pending_reqs=num_reqs)
-            self.id2status[req_id] = status
+            batch_id = f'sky-batch-{str(uuid.uuid4())[:4]}'
+            status = RequestStatus(batch_size=num_reqs,
+                                   num_pending_reqs=num_reqs)
+            self.id2status[batch_id] = status
             for _ in range(num_reqs):
                 await self.request_queue.put(
-                    RequestEntry(req_id, payload['run_script']))
+                    RequestEntry(batch_id, payload['run_script']))
             return fastapi.responses.JSONResponse({
-                'message': f'{num_reqs} requests enqueued.',
-                'req_id': req_id,
+                'message': f'{num_reqs} requests submitted. Batch ID: {batch_id}'
             })
 
         @self.app.get('/debug')
@@ -172,25 +180,20 @@ class RequestQueue:
                 },
             })
 
-        @self.app.get('/status')
-        async def status(request: fastapi.Request, req_id: str):
-            if req_id not in self.id2status:
+        @self.app.get('/query')
+        async def query(request: fastapi.Request, batch_id: str):
+            if batch_id not in self.id2status:
                 return fastapi.responses.JSONResponse({
-                    'message': f'Request {req_id} not found.',
+                    'message': f'Batch {batch_id} not found.',
                 })
-            status = self.id2status[req_id]
+            status = self.id2status[batch_id]
             msg = f'{status.num_pending_reqs} requests are pending.\n'
             msg += f'{len(status.running_req_ids)} requests are running.\n'
             if status.completed_reqs:
                 msg += f'{len(status.completed_reqs)} requests are completed.\n'
-            for i, (job_id, cn) in enumerate(status.completed_reqs):
-                stream = io.StringIO()
-                sdk.tail_logs(cluster_name=cn,
-                              job_id=job_id,
-                              follow=False,
-                              output_stream=stream)
-                rid_identity = f' Logs for {req_id} ({i+1}/{status.batch_size}) '
-                msg += f'{rid_identity:=^70}\n{stream.getvalue()}\n'
+            for i, (_, _, logs) in enumerate(status.completed_reqs):
+                rid_identity = f' Logs for {batch_id} ({i+1}/{status.batch_size}) '
+                msg += f'{rid_identity:=^70}\n{logs}\n'
             return fastapi.responses.JSONResponse({
                 'message': msg,
             })

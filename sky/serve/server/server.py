@@ -138,3 +138,33 @@ async def download_logs(
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
+
+
+@router.post('/submit')
+async def submit(
+    request: fastapi.Request,
+    submit_body: payloads.ServeSubmitBody,
+) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='serve.submit',
+        request_body=submit_body,
+        func=core.submit,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
+@router.post('/query')
+async def query(
+    request: fastapi.Request,
+    query_body: payloads.ServeQueryBody,
+) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='serve.query',
+        request_body=query_body,
+        func=core.query,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )

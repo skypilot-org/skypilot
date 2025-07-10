@@ -440,3 +440,66 @@ def sync_down_logs(service_name: str,
     # Download from API server paths to the client's local_dir
     client_common.download_logs_from_api_server([remote_dir], remote_dir,
                                                 local_dir)
+
+
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def submit(
+    task: Union['sky.Task', 'sky.Dag'],
+    service_name: str,
+    batch_size: int,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False
+) -> server_common.RequestId:
+
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            dag, at_client_side=True) as dag:
+        sdk.validate(dag)
+        if _need_confirmation:
+            prompt = (
+                f'Submit {batch_size} requests to {service_name!r}. Proceed?')
+            if prompt is not None:
+                click.confirm(prompt,
+                              default=True,
+                              abort=True,
+                              show_default=True)
+
+        dag = client_common.upload_mounts_to_api_server(dag)
+        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
+        body = payloads.ServeSubmitBody(
+            task=dag_str,
+            service_name=service_name,
+            batch_size=batch_size,
+        )
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/serve/submit',
+            json=json.loads(body.model_dump_json()),
+            timeout=(5, None))
+        return server_common.get_request_id(response)
+
+
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def query(service_name: str, batch_id: str) -> server_common.RequestId:
+
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    body = payloads.ServeQueryBody(
+        service_name=service_name,
+        batch_id=batch_id,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/serve/query',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response)

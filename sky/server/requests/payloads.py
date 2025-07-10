@@ -573,6 +573,30 @@ class ServeStatusBody(RequestBody):
     service_names: Optional[Union[str, List[str]]]
 
 
+class ServeSubmitBody(RequestBody):
+    """The request body for the serve up endpoint."""
+    task: str
+    service_name: str
+    batch_size: int
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a service.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class ServeQueryBody(RequestBody):
+    """The request body for the serve query endpoint."""
+    service_name: str
+    batch_id: str
+
+
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
     """The request body for the realtime GPU availability endpoint."""
     context: Optional[str] = None

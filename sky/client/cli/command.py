@@ -5126,6 +5126,104 @@ def serve_logs(
             raise
 
 
+@serve.command('submit', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('service_name', required=True, type=str)
+@click.option('--batch-size',
+              '-s',
+              default=1,
+              type=int,
+              help='The number of requests to submit.')
+@click.argument('service_yaml',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
+                    flags.COMMON_OPTIONS)
+@flags.yes_option()
+@timeline.event
+@usage_lib.entrypoint
+def serve_submit(
+    service_name: str,
+    batch_size: int,
+    service_yaml: Tuple[str, ...],
+    workdir: Optional[str],
+    infra: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    yes: bool,
+    async_call: bool,
+):
+    """Submit a batch of requests to a service."""
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
+
+    task = _generate_task_with_service(
+        service_name=service_name,
+        service_yaml_args=service_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        secret=secret,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        network_tier=network_tier,
+        ports=ports,
+        not_supported_cmd='sky serve submit',
+    )
+    click.secho('Command to run', fg='cyan')
+    click.echo(task.run)
+    # TODO(tian): warning on only run section will be respected.
+    request_id = serve_lib.submit(task,
+                                  service_name,
+                                  batch_size,
+                                  _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.serve.submit')
+
+
+@serve.command('query', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('service_name', required=True, type=str)
+@click.argument('batch_id', required=True, type=str)
+@_add_click_options(flags.COMMON_OPTIONS)
+@timeline.event
+@usage_lib.entrypoint
+def serve_query(
+    service_name: str,
+    batch_id: str,
+    async_call: bool,
+):
+    """Query the status of a batch of requests."""
+    request_id = serve_lib.query(service_name, batch_id)
+    _async_call_or_wait(request_id, async_call, 'sky.serve.query')
+
+
 @cli.group(cls=_NaturalOrderGroup, hidden=True)
 def local():
     """SkyPilot local tools CLI."""
