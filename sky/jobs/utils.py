@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -38,6 +39,7 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -132,6 +134,11 @@ def _check_consolidation_mode_consistency(
         current_is_consolidation_mode: bool) -> None:
     """Check the consistency of the consolidation mode."""
     # Check whether the consolidation mode config is changed.
+    if (current_is_consolidation_mode and
+            not env_options.Options.IS_DEVELOPER.get() and
+            server_common.is_api_server_local()):
+        raise exceptions.NotSupportedError(
+            'Consolidation mode is not supported when running locally.')
     if current_is_consolidation_mode:
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)

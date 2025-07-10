@@ -36,7 +36,6 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.server import common as server_common
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -2536,16 +2535,9 @@ def is_controller_accessible(
           identity.
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
-        exceptions.NotSupportedError: if the controller is not supported to run
-          on the current mode.
     """
     if (managed_job_utils.is_consolidation_mode() and
             controller == controller_utils.Controllers.JOBS_CONTROLLER):
-        if not env_options.Options.IS_DEVELOPER.get(
-        ) and server_common.is_api_server_local():
-            raise exceptions.NotSupportedError(
-                'Consolidation mode is not supported when running locally.')
-
         cn = 'local-controller-consolidation'
         return backends.LocalResourcesHandle(
             cluster_name=cn,
