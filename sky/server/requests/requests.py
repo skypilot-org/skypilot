@@ -551,7 +551,6 @@ def create_table():
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
     Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
 
     # For backward compatibility.

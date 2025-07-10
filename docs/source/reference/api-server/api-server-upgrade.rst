@@ -232,8 +232,6 @@ Here's an example of deploying the API server with the ``RollingUpdate`` strateg
       --set apiService.dbConnectionSecretName=my-db-secret
 
 
-
-
 .. _sky-api-server-api-compatibility:
 
 API compatbility
