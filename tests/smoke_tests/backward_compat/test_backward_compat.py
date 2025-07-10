@@ -84,7 +84,7 @@ class TestBackwardCompatibility:
                              f'stderr: {base_skylet_version.stderr}, '
                              f'stdout: {base_skylet_version.stdout}')
 
-        version = base_skylet_version.stdout.strip()
+        version = base_skylet_version.stdout.strip().split('\n')[-1]
         if not version:
             raise ValueError('SKYLET_VERSION is empty')
 
