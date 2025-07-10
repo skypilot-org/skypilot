@@ -600,29 +600,6 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
-        # Timeout for resource provisioning. This timeout determines how long to
-        # wait for pod to be in pending status before giving up.
-        # Larger timeout may be required for autoscaling clusters, since
-        # autoscaler may take some time to provision new nodes.
-        # Note that this timeout includes time taken by the Kubernetes scheduler
-        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
-        # scheduling 100s of pods.
-        # We use a linear scaling formula to determine the timeout based on the
-        # number of nodes.
-
-        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts,
-                                                    False)
-        timeout = skypilot_config.get_nested(
-            ('kubernetes', 'provision_timeout'),
-            timeout,
-            override_configs=resources.cluster_config_overrides)
-
-        # Get the storage class name for high availability controller's PVC
-        k8s_ha_storage_class_name = skypilot_config.get_nested(
-            ('kubernetes', 'high_availability', 'storage_class_name'),
-            None,
-            override_configs=resources.cluster_config_overrides)
-
         cluster_type = self._detect_cluster_type(context,
                                                  resources.network_tier)
 
@@ -1120,7 +1097,8 @@ class Kubernetes(clouds.Cloud):
                     if machine_family in ['a3', 'a4']:
                         # Check instance type to determine specific GPUDirect
                         # variant
-                        if 'a3-highgpu-8g' in instance_type:
+                        if ('a3-highgpu-8g' in instance_type or
+                                'a3-edgegpu-8g' in instance_type):
                             return (
                                 KubernetesHighPerformanceNetworkType.GCP_TCPX)
                         elif 'a3-megagpu-8g' in instance_type:
@@ -1152,4 +1130,30 @@ class Kubernetes(clouds.Cloud):
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
             pass
+
+        # If we cannot determine the network type based on nodes
+        # Check if the cluster has any node pools with autoscaling enabled
+        # with machine types that support high perf networking for GKE.
+        autoscaler_type = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('autoscaler',),
+            default_value=None)
+        if (autoscaler_type !=
+                kubernetes_enums.KubernetesAutoscalerType.GKE.value):
+            return KubernetesHighPerformanceNetworkType.NONE
+        autoscaler = kubernetes_utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
+        logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
+        machine_types = autoscaler.get_available_machine_types(context)
+        # Check if any machine type supports high perf networking for GKE.
+        if ('a3-highgpu-8g' in machine_types or
+                'a3-edgegpu-8g' in machine_types):
+            return KubernetesHighPerformanceNetworkType.GCP_TCPX
+        elif 'a3-megagpu-8g' in machine_types:
+            return KubernetesHighPerformanceNetworkType.GCP_TCPXO
+        elif ('a3-ultragpu-8g' in machine_types or
+              'a4-highgpu-8g' in machine_types):
+            return KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA
+
         return KubernetesHighPerformanceNetworkType.NONE

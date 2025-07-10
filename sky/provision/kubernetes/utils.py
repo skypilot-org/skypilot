@@ -823,6 +823,74 @@ class GKEAutoscaler(Autoscaler):
         return False
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
+    def get_available_machine_types(cls, context: str) -> List[str]:
+        """Returns the list of machine types that are available in the cluster.
+        """
+        # Assume context naming convention of
+        # gke_PROJECT-ID_LOCATION_CLUSTER-NAME
+        valid, project_id, location, cluster_name = cls._validate_context_name(
+            context)
+        if not valid:
+            # Context name is not in the format of
+            # gke_PROJECT-ID_LOCATION_CLUSTER-NAME.
+            # Cannot determine if the context can autoscale.
+            # Return empty list.
+            logger.debug(f'Context {context} is not in the format of '
+                         f'gke_PROJECT-ID_LOCATION_CLUSTER-NAME. '
+                         'Returning empty machine type list.')
+            return []
+        try:
+            logger.debug(
+                f'Attempting to get information about cluster {cluster_name}')
+            container_service = gcp.build('container',
+                                          'v1',
+                                          credentials=None,
+                                          cache_discovery=False)
+            cluster = container_service.projects().locations().clusters().get(
+                name=f'projects/{project_id}'
+                f'/locations/{location}'
+                f'/clusters/{cluster_name}').execute()
+        except ImportError:
+            # If the gcp module is not installed, return empty list.
+            # Remind the user once per day to install the gcp module for better
+            # pod scheduling with GKE autoscaler.
+            if time.time() - cls._pip_install_gcp_hint_last_sent > 60 * 60 * 24:
+                logger.info(
+                    'Could not fetch autoscaler information from GKE. '
+                    'Run pip install "skypilot[gcp]" for more intelligent pod '
+                    'scheduling with GKE autoscaler.')
+                cls._pip_install_gcp_hint_last_sent = time.time()
+            return []
+        except gcp.http_error_exception() as e:
+            # Cluster information is not available.
+            # Return empty list.
+            logger.debug(f'{e.message}', exc_info=True)
+            return []
+
+        machine_types = []
+        # Get the list of machine types that are available in the cluster.
+        node_pools = cluster.get('nodePools', [])
+        for node_pool in node_pools:
+            name = node_pool.get('name', '')
+            logger.debug(f'Checking if node pool {name} '
+                         'has autoscaling enabled.')
+            autoscaling_enabled = (node_pool.get('autoscaling',
+                                                 {}).get('enabled', False))
+            if autoscaling_enabled:
+                logger.debug(f'Node pool {name} has autoscaling enabled.')
+                try:
+                    machine_type = node_pool.get('config',
+                                                 {}).get('machineType', '')
+                    if machine_type:
+                        machine_types.append(machine_type)
+                except KeyError:
+                    logger.debug(f'Encountered KeyError while checking machine '
+                                 f'type of node pool {name}.')
+                    continue
+        return machine_types
+
+    @classmethod
     def _validate_context_name(cls, context: str) -> Tuple[bool, str, str, str]:
         """Validates the context name is in the format of
         gke_PROJECT-ID_LOCATION_CLUSTER-NAME
