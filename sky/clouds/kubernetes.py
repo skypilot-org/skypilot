@@ -623,8 +623,8 @@ class Kubernetes(clouds.Cloud):
             None,
             override_configs=resources.cluster_config_overrides)
 
-        cluster_type = self._detect_cluster_type(
-            region.name if region else 'default', resources.network_tier)
+        cluster_type = self._detect_cluster_type(context,
+                                                 resources.network_tier)
 
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
