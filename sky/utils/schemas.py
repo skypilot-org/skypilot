@@ -870,6 +870,9 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
+            '_metadata': {
+                'type': 'object',
+            },
             **_experimental_task_schema(),
         }
     }
@@ -1081,6 +1084,25 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'properties': {
             'local_queue_name': {
                 'type': 'string',
+            },
+        },
+    },
+    'dws': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'enabled': {
+                'type': 'boolean',
+            },
+            # Only used when Kueue is enabled.
+            'max_run_duration': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN,
+                }, {
+                    'type': 'integer',
+                }]
             },
         },
     },
@@ -1429,6 +1451,9 @@ def get_config_schema():
                         'type': 'null',
                     }
                 ]
+            },
+            'requests_retention_hours': {
+                'type': 'integer',
             },
         }
     }

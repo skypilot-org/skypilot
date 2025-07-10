@@ -35,7 +35,7 @@ import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
+import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -66,25 +66,29 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 //   return cost.toFixed(2);
 // };
 
-const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__'; // Define constant for "All Workspaces"
-
-// Define constant for "All Users" similar to workspaces
-const ALL_USERS_VALUE = '__ALL_USERS__';
-
-// Helper function to filter clusters by name
-export function filterClustersByName(clusters, nameFilter) {
-  // If no name filter, return all clusters
-  if (!nameFilter || nameFilter.trim() === '') {
-    return clusters;
-  }
-
-  // Filter clusters by the name filter (case-insensitive partial match)
-  const filterLower = nameFilter.toLowerCase().trim();
-  return clusters.filter((cluster) => {
-    const clusterName = cluster.cluster || '';
-    return clusterName.toLowerCase().includes(filterLower);
-  });
-}
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Status',
+    value: 'status',
+  },
+  {
+    label: 'Cluster',
+    value: 'cluster',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
+  },
+  {
+    label: 'Workspace',
+    value: 'workspace',
+  },
+];
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -169,96 +173,24 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
-  const [nameFilter, setNameFilter] = useState('');
-  const [workspaces, setWorkspaces] = useState([]);
-  const [users, setUsers] = useState([]);
   const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
   const isMobile = useMobile();
+
+  const [filters, setFilters] = useState([]);
+  const [optionValues, setOptionValues] = useState({
+    status: [],
+    cluster: [],
+    user: [],
+    workspace: [],
+    infra: [],
+  }); /// Option values for properties
 
   // Handle URL query parameters for workspace and user filtering
   useEffect(() => {
     if (router.isReady) {
-      if (router.query.workspace) {
-        const workspaceParam = Array.isArray(router.query.workspace)
-          ? router.query.workspace[0]
-          : router.query.workspace;
-        setWorkspaceFilter(workspaceParam);
-      }
-      if (router.query.user) {
-        const userParam = Array.isArray(router.query.user)
-          ? router.query.user[0]
-          : router.query.user;
-        setUserFilter(userParam);
-      }
-      if (router.query.name) {
-        const nameParam = Array.isArray(router.query.name)
-          ? router.query.name[0]
-          : router.query.name;
-        setNameFilter(nameParam);
-      }
+      updateFiltersByURLParams();
     }
-  }, [
-    router.isReady,
-    router.query.workspace,
-    router.query.user,
-    router.query.name,
-  ]);
-
-  // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser, newName) => {
-    const query = { ...router.query };
-
-    // Update workspace parameter
-    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
-      query.workspace = newWorkspace;
-    } else {
-      delete query.workspace;
-    }
-
-    // Update user parameter
-    if (newUser && newUser !== ALL_USERS_VALUE) {
-      query.user = newUser;
-    } else {
-      delete query.user;
-    }
-
-    // Update name parameter
-    if (newName && newName.trim() !== '') {
-      query.name = newName.trim();
-    } else {
-      delete query.name;
-    }
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Handle workspace filter change
-  const handleWorkspaceFilterChange = (newWorkspace) => {
-    setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter, nameFilter);
-  };
-
-  // Handle user filter change
-  const handleUserFilterChange = (newUser) => {
-    setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser, nameFilter);
-  };
-
-  // Handle name filter change
-  const handleNameFilterChange = (newName) => {
-    setNameFilter(newName);
-    updateURLParams(workspaceFilter, userFilter, newName);
-  };
+  }, [router.isReady]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -293,8 +225,6 @@ export function Clusters() {
         uniqueClusterWorkspaces.forEach((wsName) =>
           finalWorkspaces.add(wsName)
         );
-
-        setWorkspaces(Array.from(finalWorkspaces).sort());
 
         // Fetch users for the filter dropdown
         const fetchedUsers = await dashboardCache.get(getUsers);
@@ -331,20 +261,84 @@ export function Clusters() {
             });
           }
         });
-
-        setUsers(
-          Array.from(finalUsers.values()).sort((a, b) =>
-            a.display.localeCompare(b.display)
-          )
-        );
       } catch (error) {
         console.error('Error fetching data for filters:', error);
-        setWorkspaces(['default']); // Fallback or error state
-        setUsers([]); // Fallback or error state
       }
     };
+
     fetchFilterData();
   }, []);
+
+  // Helper function to update URL query parameters
+  const updateURLParams = (filters) => {
+    const query = { ...router.query };
+
+    let properties = [];
+    let operators = [];
+    let values = [];
+
+    filters.map((filter, _index) => {
+      properties.push(filter.property.toLowerCase() ?? '');
+      operators.push(filter.operator);
+      values.push(filter.value);
+    });
+
+    query.property = properties;
+    query.operator = operators;
+    query.value = values;
+
+    // Use replace to avoid adding to browser history for filter changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  const updateFiltersByURLParams = () => {
+    const query = { ...router.query };
+
+    const properties = query.property;
+    const operators = query.operator;
+    const values = query.value;
+
+    if (properties === undefined) {
+      return;
+    }
+
+    let filters = [];
+
+    const length = Array.isArray(properties) ? properties.length : 1;
+
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('cluster', 'Cluster');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('infra', 'Infra');
+
+    if (length === 1) {
+      filters.push({
+        property: propertyMap.get(properties),
+        operator: operators,
+        value: values,
+      });
+    } else {
+      for (let i = 0; i < length; i++) {
+        filters.push({
+          property: propertyMap.get(properties[i]),
+          operator: operators[i],
+          value: values[i],
+        });
+      }
+    }
+
+    setFilters(filters);
+  };
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
@@ -368,6 +362,7 @@ export function Clusters() {
           >
             Sky Clusters
           </Link>
+
           <div className="flex items-center ml-6 space-x-3">
             <label className="flex items-center cursor-pointer">
               <input
@@ -392,76 +387,14 @@ export function Clusters() {
               </span>
             </label>
           </div>
-          <div className="relative ml-4 mr-2">
-            <input
-              type="text"
-              placeholder="Filter by cluster name"
-              value={nameFilter}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-32 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {nameFilter && (
-              <button
-                onClick={() => handleNameFilterChange('')}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear filter"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-          <Select
-            value={workspaceFilter}
-            onValueChange={handleWorkspaceFilterChange}
-          >
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE
-                  ? 'All Workspaces'
-                  : workspaceFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>
-                All Workspaces
-              </SelectItem>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={userFilter} onValueChange={handleUserFilterChange}>
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by user...">
-                {userFilter === ALL_USERS_VALUE
-                  ? 'All Users'
-                  : users.find((u) => u.userId === userFilter)?.display ||
-                    userFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.userId} value={user.userId}>
-                  {user.display}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter clusters"
+          />
         </div>
         <div className="flex items-center">
           {loading && (
@@ -480,13 +413,18 @@ export function Clusters() {
           </button>
         </div>
       </div>
+
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
-        workspaceFilter={workspaceFilter}
-        userFilter={userFilter}
-        nameFilter={nameFilter}
+        filters={filters}
         showHistory={showHistory}
         onOpenSSHModal={(cluster) => {
           setSelectedCluster(cluster);
@@ -496,6 +434,7 @@ export function Clusters() {
           setSelectedCluster(cluster);
           setIsVSCodeModalOpen(true);
         }}
+        setOptionValues={setOptionValues}
       />
 
       {/* SSH Instructions Modal */}
@@ -518,12 +457,11 @@ export function ClusterTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
-  workspaceFilter,
-  userFilter,
-  nameFilter,
+  filters,
   showHistory,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  setOptionValues,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -534,6 +472,32 @@ export function ClusterTable({
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  const fetchOptionValuesFromClusters = (clusters) => {
+    let optionValues = {
+      status: [],
+      cluster: [],
+      user: [],
+      workspace: [],
+      infra: [],
+    };
+
+    const pushWithoutDuplication = (array, item) => {
+      if (array.includes(item)) return;
+
+      array.push(item);
+    };
+
+    clusters.map((cluster) => {
+      pushWithoutDuplication(optionValues.status, cluster.status);
+      pushWithoutDuplication(optionValues.cluster, cluster.cluster);
+      pushWithoutDuplication(optionValues.user, cluster.user);
+      pushWithoutDuplication(optionValues.workspace, cluster.workspace);
+      pushWithoutDuplication(optionValues.infra, cluster.infra);
+    });
+
+    return optionValues;
+  };
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -565,6 +529,9 @@ export function ClusterTable({
             combinedData.push(histCluster);
           }
         });
+
+        setOptionValues(fetchOptionValuesFromClusters(combinedData));
+
         setData(combinedData);
       } else {
         // Mark active clusters for consistency
@@ -572,10 +539,14 @@ export function ClusterTable({
           ...cluster,
           isHistorical: false,
         }));
+
+        setOptionValues(fetchOptionValuesFromClusters(markedActiveClusters));
+
         setData(markedActiveClusters);
       }
     } catch (error) {
       console.error('Error fetching cluster data:', error);
+      setOptionValues(fetchOptionValuesFromClusters([]));
       setData([]);
     }
 
@@ -584,29 +555,63 @@ export function ClusterTable({
     setIsInitialLoad(false);
   }, [setLoading, showHistory]);
 
+  // Utility: checks a condition based on operator
+  const evaluateCondition = (item, filter) => {
+    const { property, operator, value } = filter;
+
+    if (!value) return true; // skip empty filters
+
+    // Global search: check all values
+    if (!property) {
+      const strValue = value.toLowerCase();
+      return Object.values(item).some((val) =>
+        val?.toString().toLowerCase().includes(strValue)
+      );
+    }
+
+    const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
+    const filterValue = value.toString().toLowerCase();
+
+    switch (operator) {
+      case '=':
+        return itemValue === filterValue;
+      case ':':
+        return itemValue?.includes(filterValue);
+      default:
+        return true;
+    }
+  };
+
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
-    let filteredData = data;
-    // Filter by workspace if workspaceFilter is set and not 'ALL_WORKSPACES_VALUE'
-    if (workspaceFilter && workspaceFilter !== ALL_WORKSPACES_VALUE) {
-      filteredData = filteredData.filter((item) => {
-        const itemWorkspace = item.workspace || 'default'; // Treat missing/empty workspace as 'default'
-        return itemWorkspace.toLowerCase() === workspaceFilter.toLowerCase();
+    // Main filter function
+    const filterData = (data, filters) => {
+      if (filters.length === 0) {
+        return data;
+      }
+
+      return data.filter((item) => {
+        let result = null;
+
+        for (let i = 0; i < filters.length; i++) {
+          const filter = filters[i];
+          const current = evaluateCondition(item, filter);
+
+          if (result === null) {
+            result = current;
+          } else {
+            result = result && current;
+          }
+        }
+
+        return result;
       });
-    }
-    // Filter by user if userFilter is set and not 'ALL_USERS_VALUE'
-    if (userFilter && userFilter !== ALL_USERS_VALUE) {
-      filteredData = filteredData.filter((item) => {
-        const itemUserId = item.user_hash || item.user;
-        return itemUserId === userFilter;
-      });
-    }
-    // Filter by name if nameFilter is set
-    if (nameFilter) {
-      filteredData = filterClustersByName(filteredData, nameFilter);
-    }
+    };
+
+    const filteredData = filterData(data, filters);
+
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, workspaceFilter, userFilter, nameFilter]);
+  }, [data, sortConfig, filters]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -893,8 +898,7 @@ export function ClusterTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {`${startIndex + 1} - ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`}
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -1059,3 +1063,256 @@ export function Status2Actions({
     </>
   );
 }
+
+const FilterDropdown = ({
+  propertyList = [],
+  valueList,
+  setFilters,
+  updateURLParams,
+  placeholder = 'Filter clusters',
+}) => {
+  const inputRef = useRef(null);
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [propertyValue, setPropertValue] = useState('cluster');
+  const [valueOptions, setValueOptions] = useState([]);
+
+  let filteredOptions = [];
+
+  useEffect(() => {
+    let updatedValueOptions = [];
+
+    switch (propertyValue) {
+      case 'status':
+        updatedValueOptions = valueList.status;
+        break;
+
+      case 'user':
+        updatedValueOptions = valueList.user;
+        break;
+
+      case 'cluster':
+        updatedValueOptions = valueList.cluster;
+        break;
+
+      case 'workspace':
+        updatedValueOptions = valueList.workspace;
+        break;
+
+      case 'infra':
+        updatedValueOptions = valueList.infra;
+        break;
+
+      default:
+        break;
+    }
+
+    updatedValueOptions = updatedValueOptions.filter((item) =>
+      item.includes(value.toLowerCase())
+    );
+
+    setValueOptions(updatedValueOptions);
+  }, [propertyValue, valueList, value]);
+
+  const handleValueChange = (e) => {
+    setValue(e.target.value);
+  };
+
+  return (
+    <>
+      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md">
+        <div className="border-r">
+          <Select
+            onValueChange={(value) => setPropertValue(value)}
+            value={propertyValue}
+          >
+            <SelectTrigger
+              aria-label="Node"
+              className="focus:ring-0 focus:ring-offset-0 border-none w-36"
+            >
+              <SelectValue placeholder="Select Property" />
+            </SelectTrigger>
+            <SelectContent>
+              {propertyList.map((item, index) => (
+                <SelectItem key={`property-item-${index}`} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="relative">
+          <input
+            type="text"
+            ref={inputRef}
+            placeholder={placeholder}
+            value={value}
+            onChange={(e) => handleValueChange(e)}
+            onFocus={() => setIsOpen(true)}
+            onBlur={() => setIsOpen(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && value !== '') {
+                setFilters((prevFilters) => {
+                  const updatedFilters = [
+                    ...prevFilters,
+                    {
+                      property: propertyValue,
+                      operator: ':',
+                      value: value,
+                    },
+                  ];
+
+                  updateURLParams(updatedFilters);
+
+                  return updatedFilters;
+                });
+                setValue('');
+                setIsOpen(false);
+                inputRef.current.blur();
+              }
+            }}
+            className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
+            autoComplete="off"
+          />
+          {value && (
+            <button
+              onClick={() => {
+                setValue('');
+              }}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              title="Clear filter"
+              tabIndex={-1}
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+          {isOpen && valueOptions.length > 0 && (
+            <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
+              {valueOptions.map((option, index) => (
+                <div
+                  key={option}
+                  className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setFilters((prevFilters) => {
+                      const updatedFilters = [
+                        ...prevFilters,
+                        {
+                          property: propertyValue,
+                          operator: '=',
+                          value: option,
+                        },
+                      ];
+
+                      updateURLParams(updatedFilters);
+
+                      return updatedFilters;
+                    });
+                    setIsOpen(false);
+                    setValue('');
+                    inputRef.current.blur();
+                  }}
+                >
+                  <span className="text-sm text-gray-600">{option}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
+const Filters = ({ filters = [], setFilters, updateURLParams }) => {
+  const onRemove = (index) => {
+    setFilters((prevFilters) => {
+      const updatedFilters = prevFilters.filter(
+        (_, _index) => _index !== index
+      );
+
+      updateURLParams(updatedFilters);
+
+      return updatedFilters;
+    });
+  };
+
+  const clearFilters = () => {
+    updateURLParams([]);
+    setFilters([]);
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-4 p-2">
+        <div className="flex flex-wrap items-content gap-2">
+          {filters.map((filter, _index) => (
+            <FilterItem
+              key={`filteritem-${_index}`}
+              filter={filter}
+              onRemove={() => onRemove(_index)}
+            />
+          ))}
+
+          {filters.length > 0 && (
+            <>
+              <div className="border border-gray-400 h-8"></div>
+              <button
+                onClick={clearFilters}
+                className="rounded-full px-4 py-1 text-blue-600 bg-blue-100 hover:bg-blue-200"
+              >
+                Clear filters
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
+const FilterItem = ({ filter, onRemove }) => {
+  return (
+    <>
+      <div className="flex items-center gap-2 text-blue-600 bg-blue-100 px-2 rounded-full">
+        <div className="flex items-center gap-1 px-2 py-1 rounded-l-lg">
+          <span>{`${filter.property} `}</span>
+          <span className="font-bold">{`${filter.operator} ${filter.value}`}</span>
+        </div>
+
+        <button
+          onClick={() => onRemove()}
+          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          title="Clear filter"
+        >
+          <svg
+            className="h-3 w-3"
+            fill="none"
+            stroke="white"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={5}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+};

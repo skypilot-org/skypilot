@@ -313,6 +313,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
         # have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
+    elif accelerator == 'H200':
+        # H200s on GCP use this label format
+        return 'nvidia-h200-141gb'
     elif accelerator.startswith('tpu-'):
         return accelerator
     else:
@@ -451,7 +454,10 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
-        acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+        # If the TPU type is in the GKE_TPU_ACCELERATOR_TO_GENERATION, it means
+        # that it has been normalized before, no need to normalize again.
+        if acc_type not in GKE_TPU_ACCELERATOR_TO_GENERATION:
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
         count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
                                                        {}).get(acc_count, None)
         if count_to_topology is None:
@@ -479,6 +485,8 @@ class GKELabelFormatter(GPULabelFormatter):
                 # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
                 # to distinguish between a3-high and a3-mega instances
                 return 'H100'
+            elif acc == 'H200-141GB':
+                return 'H200'
             return acc
         elif is_tpu_on_gke(value):
             return value
@@ -1203,7 +1211,8 @@ def get_accelerator_label_key_values(
             # early since we assume the cluster autoscaler will handle GPU
             # node provisioning.
             return None, None, None, None
-        autoscaler = AUTOSCALER_TYPE_TO_AUTOSCALER.get(autoscaler_type)
+        autoscaler = AUTOSCALER_TYPE_TO_AUTOSCALER.get(
+            kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
         assert autoscaler is not None, ('Unsupported autoscaler type:'
                                         f' {autoscaler_type}')
         formatter = autoscaler.label_formatter

@@ -110,7 +110,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
         resources_str = backend_utils.get_task_resources_str(
             task, is_managed_job=True)
         managed_job_state.set_pending(consolidation_mode_job_id, task_id,
-                                      task.name, resources_str)
+                                      task.name, resources_str,
+                                      task.metadata_json)
     return consolidation_mode_job_id
 
 
@@ -494,13 +495,15 @@ def queue(refresh: bool,
                 'resources': str,
                 'submitted_at': (float) timestamp of submission,
                 'end_at': (float) timestamp of end,
-                'duration': (float) duration in seconds,
+                'job_duration': (float) duration in seconds,
                 'recovery_count': (int) Number of retries,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
                 'user_name': (Optional[str]) job creator's user name,
                 'user_hash': (str) job creator's user hash,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
             }
         ]
     Raises:

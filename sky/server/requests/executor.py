@@ -53,6 +53,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.workspaces import core as workspaces_core
 
@@ -338,6 +339,7 @@ def _request_execution_wrapper(request_id: str,
     2. Update the request status based on the execution result;
     3. Redirect the stdout and stderr of the execution to log file;
     4. Handle the SIGTERM signal to abort the request gracefully.
+    5. Maintain the lifecycle of the temp dir used by the request.
     """
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -361,7 +363,8 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body):
+            with override_request_env_and_config(request_body), \
+                tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
@@ -396,11 +399,8 @@ def _request_execution_wrapper(request_id: str,
                         f'{common_utils.format_exception(e)}')
             return
         else:
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.SUCCEEDED
-                if not ignore_return_value:
-                    request_task.set_return_value(return_value)
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 
