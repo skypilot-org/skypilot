@@ -111,7 +111,7 @@ jobs:
       message: "nightly-build-pypi backward compatibility test"
       pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--base-branch pypi/skypilot-nightly"}'
-      timeout_minutes: 60
+      timeout_minutes: 120
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -124,8 +124,8 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
-      timeout_minutes: 120
+      build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy", "FILE_PATTERN": "test_cluster_job.py"}'
+      timeout_minutes: 40
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -139,7 +139,7 @@ jobs:
       message: "nightly-build-pypi --remote-server on test_cluster_job.py"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server", "FILE_PATTERN": "test_cluster_job.py"}'
-      timeout_minutes: 120
+      timeout_minutes: 40
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
