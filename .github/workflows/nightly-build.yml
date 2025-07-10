@@ -97,7 +97,7 @@ jobs:
       message: "nightly-build-pypi --aws"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--aws"}'
-      timeout_minutes: 120
+      timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -111,7 +111,7 @@ jobs:
       message: "nightly-build-pypi backward compatibility test"
       pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--base-branch pypi/skypilot-nightly"}'
-      timeout_minutes: 120
+      timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
