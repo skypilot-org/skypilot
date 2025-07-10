@@ -36,8 +36,8 @@ class PrimeIntellect(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: ('Multi-node not supported yet.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk tier not supported yet.',
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER: 'Custom network tier not supported yet.',
-        clouds.CloudImplementationFeatures.IMAGE_ID: 'Custom network tier not supported yet.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Custom network tier not supported yet.',
+        clouds.CloudImplementationFeatures.IMAGE_ID: 'Custom image not supported yet.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Custom docker image not supported yet.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
