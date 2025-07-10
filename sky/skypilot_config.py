@@ -904,4 +904,5 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             # easy access.
             config_map_utils.patch_configmap_with_config(
                 config, global_config_path)
+
     reload_config()
