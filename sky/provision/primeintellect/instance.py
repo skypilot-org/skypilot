@@ -125,6 +125,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             # Extract vCPUs and memory from instance type
             # Format: provider__gpu_prefix_base_type__vcpus__memory[_SPOT]
             instance_type = config.node_config['InstanceType']
+            disk_size = config.node_config.get('DiskSize')
             vcpus = -1
             memory = -1
             try:
@@ -148,7 +149,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 "instance_type": config.node_config['InstanceType'],
                 "region": region,
                 "availability_zone": config.provider_config['zones'],
-                "disk_size": 120,
+                "disk_size": disk_size,
                 "vcpus": vcpus,
                 "memory": memory,
             }
