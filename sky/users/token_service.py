@@ -48,6 +48,7 @@ class TokenService:
 
     def _get_or_generate_secret(self) -> str:
         """Get JWT secret from database or generate a new one."""
+
         def _get_secret_from_db():
             try:
                 db_secret = global_user_state.get_system_config(
