@@ -479,57 +479,6 @@ class TestDetectLockType:
         assert result == 'filelock'
 
 
-class TestDistributedLockContextManager:
-    """Test distributed_lock context manager."""
-
-    @mock.patch.object(locks, 'get_lock')
-    def test_distributed_lock_context_manager(self, mock_get_lock):
-        """Test distributed_lock context manager."""
-        mock_lock = mock.Mock()
-        mock_lock.__enter__ = mock.Mock(return_value=mock_lock)
-        mock_lock.__exit__ = mock.Mock(return_value=None)
-        mock_get_lock.return_value = mock_lock
-
-        with locks.get_lock('test_lock') as lock:
-            assert lock is mock_lock
-
-        mock_get_lock.assert_called_once_with('test_lock', None, None, 0.1)
-        mock_lock.__enter__.assert_called_once()
-        mock_lock.__exit__.assert_called_once()
-
-    @mock.patch.object(locks, 'get_lock')
-    def test_distributed_lock_with_parameters(self, mock_get_lock):
-        """Test distributed_lock context manager with parameters."""
-        mock_lock = mock.Mock()
-        mock_lock.__enter__ = mock.Mock(return_value=mock_lock)
-        mock_lock.__exit__ = mock.Mock(return_value=None)
-        mock_get_lock.return_value = mock_lock
-
-        with locks.get_lock('test_lock',
-                            timeout=5.0,
-                            lock_type='postgres',
-                            poll_interval=0.5) as lock:
-            assert lock is mock_lock
-
-        mock_get_lock.assert_called_once_with('test_lock', 5.0, 'postgres', 0.5)
-
-    @mock.patch.object(locks, 'get_lock')
-    def test_distributed_lock_exception_propagation(self, mock_get_lock):
-        """Test distributed_lock propagates exceptions from context."""
-        mock_lock = mock.Mock()
-        mock_lock.__enter__ = mock.Mock(return_value=mock_lock)
-        mock_lock.__exit__ = mock.Mock(return_value=None)
-        mock_get_lock.return_value = mock_lock
-
-        with pytest.raises(RuntimeError):
-            with locks.get_lock('test_lock'):
-                raise RuntimeError("Test exception")
-
-        # Lock should still be properly cleaned up
-        mock_lock.__enter__.assert_called_once()
-        mock_lock.__exit__.assert_called_once()
-
-
 class TestDistributedLockIntegration:
     """Integration tests for distributed locks."""
 
