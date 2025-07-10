@@ -36,7 +36,6 @@ class PermissionService:
 
     def __init__(self):
         self.enforcer = None
-        self.init_lock = threading.Lock()
 
     def _lazy_initialize(self):
         if self.enforcer is not None:
