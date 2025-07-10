@@ -19,7 +19,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
-    global_user_state.create_table()
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 @pytest.fixture
