@@ -91,11 +91,13 @@ def add_tables_to_db_sqlalchemy(
     for table in metadata.tables.values():
         try:
             table.create(bind=engine, checkfirst=True)
+        #sqlite
         except sqlalchemy_exc.OperationalError as e:
             if 'already exists' in str(e):
                 pass
             else:
                 raise
+        #postgressql
         except sqlalchemy_exc.ProgrammingError as e:
             if 'already exists' in str(e):
                 pass
