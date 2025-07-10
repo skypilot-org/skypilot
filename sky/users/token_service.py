@@ -48,8 +48,7 @@ class TokenService:
 
     def _get_or_generate_secret(self) -> str:
         """Get JWT secret from database or generate a new one."""
-        with _jwt_secret_lock():
-            # Try to get from database (persistent across deployments)
+        def _get_secret_from_db():
             try:
                 db_secret = global_user_state.get_system_config(
                     JWT_SECRET_DB_KEY)
@@ -58,7 +57,17 @@ class TokenService:
                     return db_secret
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get JWT secret from database: {e}')
+            return None
 
+        # Try to get from database (persistent across deployments)
+        token_from_db = _get_secret_from_db()
+        if token_from_db:
+            return token_from_db
+
+        with _jwt_secret_lock():
+            token_from_db = _get_secret_from_db()
+            if token_from_db:
+                return token_from_db
             # Generate a new secret and store in database
             new_secret = secrets.token_urlsafe(64)
             try:
