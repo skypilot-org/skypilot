@@ -130,15 +130,15 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
-def _check_consolidation_mode_consistency(
+def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
-    """Check the consistency of the consolidation mode."""
-    # Check whether the consolidation mode config is changed.
+    """Validate the consolidation mode config."""
     if (current_is_consolidation_mode and
             not env_options.Options.IS_DEVELOPER.get() and
             server_common.is_api_server_local()):
         raise exceptions.NotSupportedError(
             'Consolidation mode is not supported when running locally.')
+    # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
@@ -183,7 +183,7 @@ def _check_consolidation_mode_consistency(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _check_consolidation_mode_consistency(consolidation_mode)
+    _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 
