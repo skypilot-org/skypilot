@@ -1048,7 +1048,7 @@ def submit(
         raise RuntimeError(e.error_msg) from e
 
     submit_result = serve_utils.load_submit_result(submit_payload)
-    logger.info(f'Submit result: {submit_result}')
+    logger.info(submit_result)
 
 
 @usage_lib.entrypoint
@@ -1079,12 +1079,12 @@ def query(
         separate_stderr=True)
     try:
         subprocess_utils.handle_returncode(returncode,
-                                           code, 'Failed to get service status '
-                                           'when update service',
+                                           code,
+                                           'Failed to query service',
                                            stderr,
                                            stream_logs=True)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
     query_result = serve_utils.load_query_result(query_payload)
-    logger.info(f'Query result:\n{query_result}')
+    logger.info(query_result)

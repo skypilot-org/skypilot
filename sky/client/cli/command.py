@@ -5197,7 +5197,7 @@ def serve_submit(
         ports=ports,
         not_supported_cmd='sky serve submit',
     )
-    click.secho('Command to run', fg='cyan')
+    click.secho('Command to run:', fg='cyan')
     click.echo(task.run)
     # TODO(tian): warning on only run section will be respected.
     request_id = serve_lib.submit(task,
