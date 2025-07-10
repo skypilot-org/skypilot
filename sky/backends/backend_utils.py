@@ -2541,7 +2541,8 @@ def is_controller_accessible(
     """
     if (managed_job_utils.is_consolidation_mode() and
             controller == controller_utils.Controllers.JOBS_CONTROLLER):
-        if server_common.is_api_server_local():
+        if not env_options.Options.IS_DEVELOPER.get(
+        ) and server_common.is_api_server_local():
             raise exceptions.NotSupportedError(
                 'Consolidation mode is not supported when running locally.')
 
