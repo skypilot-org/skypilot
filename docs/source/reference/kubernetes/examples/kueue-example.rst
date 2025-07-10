@@ -196,7 +196,7 @@ Here, a cluster queue and a local queue are created.
     .. tab-item:: kueue.yaml with GKE DWS Enabled
         :sync: kueue-yaml-gke-dws-tab
 
-        When using :ref:`GKE DWS <dws-with-kueue>`, the ``kueue.yaml`` file should include the following:
+        When using :ref:`GKE DWS <dws-with-kueue>`, an ``AdmissionCheck`` and ``ProvisioningRequestConfig`` should be added to the ``kueue.yaml`` file to make sure that the head and worker PodSets in a multi-node cluster are merged into a single PodSet when creating ProvisioningRequest to trigger scale up in GKE.
 
         .. code-block:: yaml
 
