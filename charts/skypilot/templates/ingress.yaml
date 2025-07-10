@@ -14,8 +14,7 @@ metadata:
     # Enable session affinity and retry on 502 for RollingUpdate strategy
     nginx.ingress.kubernetes.io/affinity: "cookie"
     nginx.ingress.kubernetes.io/session-cookie-name: "ROUTEID"
-    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
-    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
     nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
     nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "2"
     {{- end }}

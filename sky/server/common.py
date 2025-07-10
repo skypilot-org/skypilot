@@ -138,7 +138,7 @@ def set_api_cookie_jar(cookie_jar: CookieJar,
         return
     if not cookie_path.parent.exists():
         cookie_path.parent.mkdir(parents=True, exist_ok=True)
-
+    
     # Writing directly to the cookie jar path can race with other processes that
     # are reading the cookie jar, making it look malformed. Instead, write to a
     # temporary file and then move it to the final location.
@@ -350,7 +350,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                      error=version_info.error)
 
             cookies = get_cookies_from_response(response)
-            set_api_cookie_jar(cookies, create_if_not_exists=False)
+            set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
         except (json.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
