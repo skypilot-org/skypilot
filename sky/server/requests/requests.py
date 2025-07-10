@@ -584,9 +584,9 @@ def create_table():
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
-    if _SQLALCHEMY_ENGINE is not None:
-        return _SQLALCHEMY_ENGINE
     with _DB_INIT_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
         if _SQLALCHEMY_ENGINE is None:
             conn_string = None
             if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
