@@ -212,8 +212,10 @@ class PostgresLock(DistributedLock):
                                (self._lock_key,))
                 result = cursor.fetchone()[0]
 
+                logger.info(f'Try lock {self.lock_id}: {result}')
                 if result:
                     self._acquired = True
+                    logger.info(f'Acquired lock {self.lock_id}')
                     return AcquireReturnProxy(self)
 
                 if not blocking:
@@ -237,6 +239,7 @@ class PostgresLock(DistributedLock):
 
     def release(self) -> None:
         """Release the postgres advisory lock."""
+        logger.info(f'Released lock {self.lock_id}')
         if not self._acquired or not self._connection:
             return
 
