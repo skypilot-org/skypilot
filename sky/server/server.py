@@ -1449,9 +1449,7 @@ async def stream(
                 status_code=404, detail=f'Request {request_id!r} not found')
         if (request_task.host_uuid is not None and
                 request_task.host_uuid != state.get_host_uuid()):
-            # Ask the ingress-controller to retry next upstream, if none
-            # of the upstreams can handle the request, a 502 error will be
-            # returned to the client.
+            # Ask the ingress-controller to retry next upstream
             raise fastapi.HTTPException(
                 status_code=502,
                 detail=f'Request {request_id!r} is not local, try next upstream'
@@ -1465,6 +1463,8 @@ async def stream(
                 detail=f'Log of request {request_id!r} has been deleted')
     else:
         assert log_path is not None, (request_id, log_path)
+        # TODO(aylei): log_path may not exist locally, should associate log
+        # with the request ID, e.g. sky logs <request_id> --provision-logs
         if log_path == constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
                 constants.API_SERVER_LOGS).expanduser()

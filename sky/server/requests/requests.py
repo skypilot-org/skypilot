@@ -26,9 +26,9 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky.server import state
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import state
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
