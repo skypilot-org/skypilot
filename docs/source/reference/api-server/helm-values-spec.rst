@@ -35,6 +35,7 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.1
+    :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
     :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
     :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
@@ -50,6 +51,8 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`: null
+    :ref:`dbConnectionString <helm-values-apiService-dbConnectionString>`: null
     :ref:`enableServiceAccounts <helm-values-apiService-enableServiceAccounts>`: true
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
@@ -212,6 +215,25 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
 
+.. _helm-values-apiService-upgradeStrategy:
+
+``apiService.upgradeStrategy``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Upgrade strategy for the API server deployment. Available options are:
+
+- ``Recreate``: Delete the old pod first and create a new one (has downtime).
+- ``RollingUpdate``: Create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
+
+When set to ``RollingUpdate``, an external database must be configured via :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`.
+
+Default: ``"Recreate"``
+
+.. code-block:: yaml
+
+  apiService:
+    upgradeStrategy: Recreate
+
 .. _helm-values-apiService-enableUserManagement:
 
 ``apiService.enableUserManagement``
@@ -325,6 +347,38 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-dbConnectionSecretName:
+
+``apiService.dbConnectionSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the database connection string for the API server. This is used to configure an external database for the API server. 
+
+If either this field or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` is set, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. Refer to the :ref:`API server deployment guide <sky-api-server-helm-deploy-command>` for more details on configuring an external database.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    dbConnectionSecretName: my-db-secret
+
+.. _helm-values-apiService-dbConnectionString:
+
+``apiService.dbConnectionString``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Database connection string for the API server. This is a shortcut for setting the database connection string directly instead of using a secret.
+
+If either this field or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is set, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. Refer to the :ref:`API server deployment guide <sky-api-server-helm-deploy-command>` for more details on configuring an external database.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    dbConnectionString: "postgresql://user:password@host:port/database"
 
 .. _helm-values-apiService-enableServiceAccounts:
 
