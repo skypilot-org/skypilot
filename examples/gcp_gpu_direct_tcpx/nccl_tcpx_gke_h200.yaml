@@ -1,6 +1,6 @@
 # This example is used to test the NCCL performance with
 # GPUDirect TCPX on GKE.
-name: nccl-gpudirect-tcpx-h200
+name: nccl-gpudirect-rdma-h200
 
 resources:
   infra: k8s
