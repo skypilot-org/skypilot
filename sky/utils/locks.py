@@ -4,6 +4,7 @@ This module provides an abstraction for locking that can use
 either local file locks or database-based distributed locks.
 """
 import abc
+import hashlib
 import logging
 import os
 import time
@@ -11,7 +12,6 @@ from typing import Any, Optional
 
 import filelock
 import sqlalchemy
-import hashlib
 
 from sky import global_user_state
 from sky.skylet import constants
@@ -186,8 +186,9 @@ class PostgresLock(DistributedLock):
 
     def _string_to_lock_key(self, s: str) -> int:
         """Convert string to a 64-bit integer for advisory lock key."""
-        # Use hash to convert string to integer, ensuring it fits in 64-bit
-        return hash(s) & ((1 << 63) - 1)  # Ensure positive 64-bit int
+        hash_digest = hashlib.sha256(s.encode('utf-8')).digest()
+        # Take first 8 bytes and convert to int, ensure positive 64-bit
+        return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
@@ -213,10 +214,12 @@ class PostgresLock(DistributedLock):
                                (self._lock_key,))
                 result = cursor.fetchone()[0]
 
-                logger.info(f'Try lock {self.lock_id}, {self._lock_key}: {result}')
+                logger.info(
+                    f'Try lock {self.lock_id}, {self._lock_key}: {result}')
                 if result:
                     self._acquired = True
-                    logger.info(f'Acquired lock {self.lock_id}, {self._lock_key}')
+                    logger.info(
+                        f'Acquired lock {self.lock_id}, {self._lock_key}')
                     return AcquireReturnProxy(self)
 
                 if not blocking:

@@ -207,9 +207,10 @@ class TestPostgresLock:
         assert lock._connection is None
 
     def test_postgres_lock_string_to_lock_key(self):
-        """Test string to lock key conversion."""
+        """Test string to lock key conversion is deterministic across processes."""
         lock = locks.PostgresLock('test_lock')
 
+        # Test deterministic behavior - same input always produces same output
         key1 = lock._string_to_lock_key('test_string')
         key2 = lock._string_to_lock_key('test_string')
         key3 = lock._string_to_lock_key('different_string')
@@ -220,6 +221,22 @@ class TestPostgresLock:
         assert key1 != key3
         # Should be positive 64-bit integer
         assert 0 <= key1 < (1 << 63)
+
+        # Test specific known values to ensure deterministic hashing
+        # These values must remain constant across Python processes/versions
+        # This test would have caught the original hash() bug
+        test_cases = [
+            ('test_status', 7396834654636105082),
+            ('cluster_lock', 1956631540824474243),
+            ('job_queue', 6631142408643071799),
+        ]
+
+        for input_str, expected_key in test_cases:
+            actual_key = lock._string_to_lock_key(input_str)
+            assert actual_key == expected_key, (
+                f"Expected deterministic key {expected_key} for '{input_str}', "
+                f"but got {actual_key}. This indicates the hash function is "
+                f"not deterministic across processes.")
 
     @mock.patch.object(locks.PostgresLock, '_get_connection')
     def test_postgres_lock_acquire_success(self, mock_get_connection,
