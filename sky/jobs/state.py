@@ -12,143 +12,130 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
+import sqlalchemy
+from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy import orm
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
-    import sqlalchemy
-else:
-    sqlalchemy = adaptors_common.LazyImport('sqlalchemy')
+    from sqlalchemy.engine import row
+
+    import sky
 
 CallbackType = Callable[[str], None]
 
 logger = sky_logging.init_logger(__name__)
 
-_SQLALCHEMY_ENGINE: Optional['sqlalchemy.engine.Engine'] = None
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _DB_INIT_LOCK = threading.Lock()
-_DB_SCHEMA_CACHE = None
-_DB_SCHEMA_LOCK = threading.Lock()
 
+Base = declarative.declarative_base()
 
-def _get_db_schema():
-    """Get the database schema objects. This function lazy-loads SQLAlchemy."""
-    global _DB_SCHEMA_CACHE
+# === Database schema ===
+# `spot` table contains all the finest-grained tasks, including all the
+# tasks of a managed job (called spot for legacy reason, as it is generalized
+# from the previous managed spot jobs). All tasks of the same job will have the
+# same `spot_job_id`.
+# The `job_name` column is now deprecated. It now holds the task's name, i.e.,
+# the same content as the `task_name` column.
+# The `job_id` is now not really a job id, but a only a unique
+# identifier/primary key for all the tasks. We will use `spot_job_id`
+# to identify the job.
+# TODO(zhwu): schema migration may be needed.
 
-    with _DB_SCHEMA_LOCK:
-        if _DB_SCHEMA_CACHE is not None:
-            return _DB_SCHEMA_CACHE
+spot_table = sqlalchemy.Table(
+    'spot',
+    Base.metadata,
+    sqlalchemy.Column('job_id',
+                      sqlalchemy.Integer,
+                      primary_key=True,
+                      autoincrement=True),
+    sqlalchemy.Column('job_name', sqlalchemy.Text),
+    sqlalchemy.Column('resources', sqlalchemy.Text),
+    sqlalchemy.Column('submitted_at', sqlalchemy.Float),
+    sqlalchemy.Column('status', sqlalchemy.Text),
+    sqlalchemy.Column('run_timestamp', sqlalchemy.Text),
+    sqlalchemy.Column('start_at', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('end_at', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('last_recovered_at',
+                      sqlalchemy.Float,
+                      server_default='-1'),
+    sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
+    sqlalchemy.Column('failure_reason', sqlalchemy.Text),
+    sqlalchemy.Column('spot_job_id', sqlalchemy.Integer),
+    sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('task_name', sqlalchemy.Text),
+    sqlalchemy.Column('specs', sqlalchemy.Text),
+    sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
+)
 
-        Base = sqlalchemy.ext.declarative.declarative_base()  # pylint: disable=invalid-name
+job_info_table = sqlalchemy.Table(
+    'job_info',
+    Base.metadata,
+    sqlalchemy.Column('spot_job_id',
+                      sqlalchemy.Integer,
+                      primary_key=True,
+                      autoincrement=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('schedule_state', sqlalchemy.Text),
+    sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
+    sqlalchemy.Column('env_file_path', sqlalchemy.Text),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('priority',
+                      sqlalchemy.Integer,
+                      server_default=str(constants.DEFAULT_PRIORITY)),
+    sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('original_user_yaml_path',
+                      sqlalchemy.Text,
+                      server_default=None),
+)
 
-        spot_table = sqlalchemy.Table(
-            'spot',
-            Base.metadata,
-            sqlalchemy.Column('job_id',
-                              sqlalchemy.Integer,
-                              primary_key=True,
-                              autoincrement=True),
-            sqlalchemy.Column('job_name', sqlalchemy.Text),
-            sqlalchemy.Column('resources', sqlalchemy.Text),
-            sqlalchemy.Column('submitted_at', sqlalchemy.Float),
-            sqlalchemy.Column('status', sqlalchemy.Text),
-            sqlalchemy.Column('run_timestamp', sqlalchemy.Text),
-            sqlalchemy.Column('start_at', sqlalchemy.Float,
-                              server_default=None),
-            sqlalchemy.Column('end_at', sqlalchemy.Float, server_default=None),
-            sqlalchemy.Column('last_recovered_at',
-                              sqlalchemy.Float,
-                              server_default='-1'),
-            sqlalchemy.Column('recovery_count',
-                              sqlalchemy.Integer,
-                              server_default='0'),
-            sqlalchemy.Column('job_duration',
-                              sqlalchemy.Float,
-                              server_default='0'),
-            sqlalchemy.Column('failure_reason', sqlalchemy.Text),
-            sqlalchemy.Column('spot_job_id', sqlalchemy.Integer),
-            sqlalchemy.Column('task_id', sqlalchemy.Integer,
-                              server_default='0'),
-            sqlalchemy.Column('task_name', sqlalchemy.Text),
-            sqlalchemy.Column('specs', sqlalchemy.Text),
-            sqlalchemy.Column('local_log_file',
-                              sqlalchemy.Text,
-                              server_default=None),
-            sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
-        )
-
-        job_info_table = sqlalchemy.Table(
-            'job_info',
-            Base.metadata,
-            sqlalchemy.Column('spot_job_id',
-                              sqlalchemy.Integer,
-                              primary_key=True,
-                              autoincrement=True),
-            sqlalchemy.Column('name', sqlalchemy.Text),
-            sqlalchemy.Column('schedule_state', sqlalchemy.Text),
-            sqlalchemy.Column('controller_pid',
-                              sqlalchemy.Integer,
-                              server_default=None),
-            sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
-            sqlalchemy.Column('env_file_path', sqlalchemy.Text),
-            sqlalchemy.Column('user_hash', sqlalchemy.Text),
-            sqlalchemy.Column('workspace', sqlalchemy.Text,
-                              server_default=None),
-            sqlalchemy.Column('priority',
-                              sqlalchemy.Integer,
-                              server_default=str(constants.DEFAULT_PRIORITY)),
-            sqlalchemy.Column('entrypoint',
-                              sqlalchemy.Text,
-                              server_default=None),
-            sqlalchemy.Column('original_user_yaml_path',
-                              sqlalchemy.Text,
-                              server_default=None),
-        )
-
-        ha_recovery_script_table = sqlalchemy.Table(
-            'ha_recovery_script',
-            Base.metadata,
-            sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
-            sqlalchemy.Column('script', sqlalchemy.Text),
-        )
-
-        _DB_SCHEMA_CACHE = (Base, spot_table, job_info_table,
-                            ha_recovery_script_table)
-        return _DB_SCHEMA_CACHE
-
-
-def _get_base():
-    """Get the SQLAlchemy Base object."""
-    return _get_db_schema()[0]
-
-
-def _get_spot_table():
-    """Get the spot table object."""
-    return _get_db_schema()[1]
-
-
-def _get_job_info_table():
-    """Get the job info table object."""
-    return _get_db_schema()[2]
-
-
-def _get_ha_recovery_script_table():
-    """Get the ha recovery script table object."""
-    return _get_db_schema()[3]
+ha_recovery_script_table = sqlalchemy.Table(
+    'ha_recovery_script',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('script', sqlalchemy.Text),
+)
 
 
 def create_table():
-    Base = _get_base()  # pylint: disable=invalid-name
-    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
-    # For backward compatibility, we need to add columns for old versions of
-    # the spot table.
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Add the spot_job_id column if it doesn't exist.
+    # Enable WAL mode to avoid locking issues.
+    # See: issue #3863, #1441 and PR #1509
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if (_SQLALCHEMY_ENGINE.dialect.name
+            == db_utils.SQLAlchemyDialect.SQLITE.value and
+            not common_utils.is_wsl()):
+        try:
+            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                session.commit()
+        except sqlalchemy_exc.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
+    # Create tables if they don't exist
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, _SQLALCHEMY_ENGINE)
+
+    # Backward compatibility: add columns that not exist in older databases
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         db_utils.add_column_to_table_sqlalchemy(session, 'spot',
                                                 'failure_reason',
                                                 sqlalchemy.Text())
@@ -157,18 +144,26 @@ def create_table():
                                                 'spot_job_id',
                                                 sqlalchemy.Integer(),
                                                 copy_from='job_id')
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'task_id',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT 0')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'spot',
+            'task_id',
+            sqlalchemy.Integer(),
+            default_statement='DEFAULT 0',
+            value_to_replace_existing_entries=0)
         db_utils.add_column_to_table_sqlalchemy(session,
                                                 'spot',
                                                 'task_name',
                                                 sqlalchemy.Text(),
                                                 copy_from='job_name')
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'specs',
-                                                sqlalchemy.Text())
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'spot',
+            'specs',
+            sqlalchemy.Text(),
+            value_to_replace_existing_entries=json.dumps({
+                'max_restarts_on_errors': 0,
+            }))
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'spot',
@@ -187,20 +182,42 @@ def create_table():
         db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
                                                 'schedule_state',
                                                 sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'region',
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'job_info',
+            'controller_pid',
+            sqlalchemy.Integer(),
+            default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                                'dag_yaml_path',
                                                 sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'zone',
+        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                                'env_file_path',
                                                 sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'submitted_at',
-                                                sqlalchemy.Integer())
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'started_at',
-                                                sqlalchemy.Integer())
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot', 'ended_at',
-                                                sqlalchemy.Integer())
+        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                                'user_hash', sqlalchemy.Text())
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'job_info',
+            'workspace',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL',
+            value_to_replace_existing_entries='default')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'job_info',
+            'priority',
+            sqlalchemy.Integer(),
+            value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
+        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                                'entrypoint', sqlalchemy.Text())
+        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
+                                                'original_user_yaml_path',
+                                                sqlalchemy.Text())
         session.commit()
 
 
-def initialize_and_get_db() -> 'sqlalchemy.engine.Engine':
+def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
@@ -246,7 +263,7 @@ def _init_db(func):
 # e.g., via sky jobs queue. These may not correspond to actual
 # column names in the DB and it corresponds to the combined view
 # by joining the spot and job_info tables.
-def _get_jobs_dict(r: 'sqlalchemy.engine.RowMapping') -> Dict[str, Any]:
+def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
     return {
         '_job_id': r['job_id'],  # from spot table
         '_task_name': r['job_name'],  # deprecated, from spot table
@@ -260,15 +277,14 @@ def _get_jobs_dict(r: 'sqlalchemy.engine.RowMapping') -> Dict[str, Any]:
         'recovery_count': r['recovery_count'],
         'job_duration': r['job_duration'],
         'failure_reason': r['failure_reason'],
-        'job_id': r[_get_spot_table().c.spot_job_id
-                   ],  # ambiguous, use table.column
+        'job_id': r[spot_table.c.spot_job_id],  # ambiguous, use table.column
         'task_id': r['task_id'],
         'task_name': r['task_name'],
         'specs': r['specs'],
         'local_log_file': r['local_log_file'],
         'metadata': r['metadata'],
         # columns from job_info table (some may be None for legacy jobs)
-        '_job_info_job_id': r[_get_job_info_table().c.spot_job_id
+        '_job_info_job_id': r[job_info_table.c.spot_job_id
                              ],  # ambiguous, use table.column
         'job_name': r['name'],  # from job_info table
         'schedule_state': r['schedule_state'],
@@ -496,16 +512,16 @@ class ManagedJobScheduleState(enum.Enum):
 @_init_db
 def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlalchemy.dialects.sqlite.insert
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = sqlalchemy.dialects.postgresql.insert
+            insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmt = insert_func(_get_job_info_table()).values(
+        insert_stmt = insert_func(job_info_table).values(
             spot_job_id=job_id,
             name=name,
             schedule_state=ManagedJobScheduleState.INACTIVE.value,
@@ -519,17 +535,17 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
 def set_job_info_without_job_id(name: str, workspace: str,
                                 entrypoint: str) -> int:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlalchemy.dialects.sqlite.insert
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = sqlalchemy.dialects.postgresql.insert
+            insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
 
-        insert_stmt = insert_func(_get_job_info_table()).values(
+        insert_stmt = insert_func(job_info_table).values(
             name=name,
             schedule_state=ManagedJobScheduleState.INACTIVE.value,
             workspace=workspace,
@@ -545,7 +561,7 @@ def set_job_info_without_job_id(name: str, workspace: str,
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             result = session.execute(
-                insert_stmt.returning(_get_job_info_table().c.spot_job_id))
+                insert_stmt.returning(job_info_table.c.spot_job_id))
             ret = result.scalar()
             session.commit()
             return ret
@@ -563,9 +579,9 @@ def set_pending(
 ):
     """Set the task to pending state."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(
-            sqlalchemy.insert(_get_spot_table()).values(
+            sqlalchemy.insert(spot_table).values(
                 spot_job_id=job_id,
                 task_id=task_id,
                 task_name=task_name,
@@ -600,19 +616,19 @@ def set_starting(job_id: int, task_id: int, run_timestamp: str,
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the managed task is submitted.
     logger.info('Launching the spot cluster...')
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
-                _get_spot_table().c.status == ManagedJobStatus.PENDING.value,
-                _get_spot_table().c.end_at.is_(None),
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                spot_table.c.end_at.is_(None),
             )).update({
-                _get_spot_table().c.resources: resources_str,
-                _get_spot_table().c.submitted_at: submit_time,
-                _get_spot_table().c.status: ManagedJobStatus.STARTING.value,
-                _get_spot_table().c.run_timestamp: run_timestamp,
-                _get_spot_table().c.specs: json.dumps(specs),
+                spot_table.c.resources: resources_str,
+                spot_table.c.submitted_at: submit_time,
+                spot_table.c.status: ManagedJobStatus.STARTING.value,
+                spot_table.c.run_timestamp: run_timestamp,
+                spot_table.c.specs: json.dumps(specs),
             })
         session.commit()
         if count != 1:
@@ -633,18 +649,17 @@ def set_backoff_pending(job_id: int, task_id: int):
     PENDING.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
-                _get_spot_table().c.status.in_([
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status.in_([
                     ManagedJobStatus.STARTING.value,
                     ManagedJobStatus.RECOVERING.value
                 ]),
-                _get_spot_table().c.end_at.is_(None),
-            )).update(
-                {_get_spot_table().c.status: ManagedJobStatus.PENDING.value})
+                spot_table.c.end_at.is_(None),
+            )).update({spot_table.c.status: ManagedJobStatus.PENDING.value})
         session.commit()
         logger.debug('back to PENDING')
         if count != 1:
@@ -667,14 +682,14 @@ def set_restarting(job_id: int, task_id: int, recovering: bool):
     target_status = ManagedJobStatus.STARTING.value
     if recovering:
         target_status = ManagedJobStatus.RECOVERING.value
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
-                _get_spot_table().c.status == ManagedJobStatus.PENDING.value,
-                _get_spot_table().c.end_at.is_(None),
-            )).update({_get_spot_table().c.status: target_status})
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                spot_table.c.end_at.is_(None),
+            )).update({spot_table.c.status: target_status})
         session.commit()
         logger.debug(f'back to {target_status}')
         if count != 1:
@@ -691,22 +706,22 @@ def set_started(job_id: int, task_id: int, start_time: float,
     """Set the task to started state."""
     assert _SQLALCHEMY_ENGINE is not None
     logger.info('Job started.')
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
-                _get_spot_table().c.status.in_([
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status.in_([
                     ManagedJobStatus.STARTING.value,
                     # If the task is empty, we will jump straight
                     # from PENDING to RUNNING
                     ManagedJobStatus.PENDING.value
                 ]),
-                _get_spot_table().c.end_at.is_(None),
+                spot_table.c.end_at.is_(None),
             )).update({
-                _get_spot_table().c.status: ManagedJobStatus.RUNNING.value,
-                _get_spot_table().c.start_at: start_time,
-                _get_spot_table().c.last_recovered_at: start_time,
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.start_at: start_time,
+                spot_table.c.last_recovered_at: start_time,
             })
         session.commit()
         if count != 1:
@@ -728,34 +743,34 @@ def set_recovering(job_id: int, task_id: int, force_transit_to_recovering: bool,
     # Otherwise, the job duration will be incorrect (~55 years from 1970).
     current_time = time.time()
 
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if force_transit_to_recovering:
             # For the HA job controller, it is possible that the jobs came from
             # any processing status to recovering. But it should not be any
             # terminal status as such jobs will not be recovered; and it should
             # not be CANCELLING as we will directly trigger a cleanup.
-            status_condition = _get_spot_table().c.status.in_(
+            status_condition = spot_table.c.status.in_(
                 [s.value for s in ManagedJobStatus.processing_statuses()])
         else:
             status_condition = (
-                _get_spot_table().c.status == ManagedJobStatus.RUNNING.value)
+                spot_table.c.status == ManagedJobStatus.RUNNING.value)
 
-        count = session.query(_get_spot_table()).filter(
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
                 status_condition,
-                _get_spot_table().c.end_at.is_(None),
+                spot_table.c.end_at.is_(None),
             )).update({
-                _get_spot_table().c.status: ManagedJobStatus.RECOVERING.value,
-                _get_spot_table().c.job_duration: sqlalchemy.case(
-                    (_get_spot_table().c.last_recovered_at >= 0,
-                     _get_spot_table().c.job_duration + current_time -
-                     _get_spot_table().c.last_recovered_at),
-                    else_=_get_spot_table().c.job_duration),
-                _get_spot_table().c.last_recovered_at: sqlalchemy.case(
-                    (_get_spot_table().c.last_recovered_at < 0, current_time),
-                    else_=_get_spot_table().c.last_recovered_at),
+                spot_table.c.status: ManagedJobStatus.RECOVERING.value,
+                spot_table.c.job_duration: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at >= 0,
+                     spot_table.c.job_duration + current_time -
+                     spot_table.c.last_recovered_at),
+                    else_=spot_table.c.job_duration),
+                spot_table.c.last_recovered_at: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at < 0, current_time),
+                    else_=spot_table.c.last_recovered_at),
             })
         session.commit()
         if count != 1:
@@ -770,18 +785,17 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
                   callback_func: CallbackType):
     """Set the task to recovered."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
-                _get_spot_table().c.status == ManagedJobStatus.RECOVERING.value,
-                _get_spot_table().c.end_at.is_(None),
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.RECOVERING.value,
+                spot_table.c.end_at.is_(None),
             )).update({
-                _get_spot_table().c.status: ManagedJobStatus.RUNNING.value,
-                _get_spot_table().c.last_recovered_at: recovered_time,
-                _get_spot_table().c.recovery_count:
-                    _get_spot_table().c.recovery_count + 1,
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.last_recovered_at: recovered_time,
+                spot_table.c.recovery_count: spot_table.c.recovery_count + 1,
             })
         session.commit()
         if count != 1:
@@ -797,16 +811,16 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
                   callback_func: CallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.task_id == task_id,
-                _get_spot_table().c.status == ManagedJobStatus.RUNNING.value,
-                _get_spot_table().c.end_at.is_(None),
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.status == ManagedJobStatus.RUNNING.value,
+                spot_table.c.end_at.is_(None),
             )).update({
-                _get_spot_table().c.status: ManagedJobStatus.SUCCEEDED.value,
-                _get_spot_table().c.end_at: end_time,
+                spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
+                spot_table.c.end_at: end_time,
             })
         session.commit()
         if count != 1:
@@ -847,33 +861,32 @@ def set_failed(
     end_time = time.time() if end_time is None else end_time
 
     fields_to_set: Dict[str, Any] = {
-        _get_spot_table().c.status: failure_type.value,
-        _get_spot_table().c.failure_reason: failure_reason,
+        spot_table.c.status: failure_type.value,
+        spot_table.c.failure_reason: failure_reason,
     }
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Get previous status
         previous_status = session.execute(
-            sqlalchemy.select(_get_spot_table().c.status).where(
-                _get_spot_table().c.spot_job_id == job_id)).fetchone()[0]
+            sqlalchemy.select(spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id)).fetchone()[0]
         previous_status = ManagedJobStatus(previous_status)
         if previous_status == ManagedJobStatus.RECOVERING:
             # If the job is recovering, we should set the last_recovered_at to
             # the end_time, so that the end_at - last_recovered_at will not be
             # affect the job duration calculation.
-            fields_to_set[_get_spot_table().c.last_recovered_at] = end_time
-        where_conditions = [_get_spot_table().c.spot_job_id == job_id]
+            fields_to_set[spot_table.c.last_recovered_at] = end_time
+        where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
-            where_conditions.append(_get_spot_table().c.task_id == task_id)
+            where_conditions.append(spot_table.c.task_id == task_id)
         if override_terminal:
             # Use COALESCE for end_at to avoid overriding the existing end_at if
             # it's already set.
-            fields_to_set[
-                _get_spot_table().c.end_at] = sqlalchemy.func.coalesce(
-                    _get_spot_table().c.end_at, end_time)
+            fields_to_set[spot_table.c.end_at] = sqlalchemy.func.coalesce(
+                spot_table.c.end_at, end_time)
         else:
-            fields_to_set[_get_spot_table().c.end_at] = end_time
-            where_conditions.append(_get_spot_table().c.end_at.is_(None))
-        count = session.query(_get_spot_table()).filter(
+            fields_to_set[spot_table.c.end_at] = end_time
+            where_conditions.append(spot_table.c.end_at.is_(None))
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(*where_conditions)).update(fields_to_set)
         session.commit()
         updated = count > 0
@@ -890,13 +903,12 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
     as a whole, and we should not cancel a single task.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.end_at.is_(None),
-            )).update(
-                {_get_spot_table().c.status: ManagedJobStatus.CANCELLING.value})
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.end_at.is_(None),
+            )).update({spot_table.c.status: ManagedJobStatus.CANCELLING.value})
         session.commit()
         updated = count > 0
     if updated:
@@ -913,14 +925,14 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
     The set_cancelling should be called before this function.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        count = session.query(_get_spot_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        count = session.query(spot_table).filter(
             sqlalchemy.and_(
-                _get_spot_table().c.spot_job_id == job_id,
-                _get_spot_table().c.status == ManagedJobStatus.CANCELLING.value,
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.status == ManagedJobStatus.CANCELLING.value,
             )).update({
-                _get_spot_table().c.status: ManagedJobStatus.CANCELLED.value,
-                _get_spot_table().c.end_at: time.time(),
+                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                spot_table.c.end_at: time.time(),
             })
         session.commit()
         updated = count > 0
@@ -936,13 +948,13 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
                        local_log_file: str):
     """Set the local log file for a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        where_conditions = [_get_spot_table().c.spot_job_id == job_id]
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
-            where_conditions.append(_get_spot_table().c.task_id == task_id)
-        session.query(_get_spot_table()).filter(
+            where_conditions.append(spot_table.c.task_id == task_id)
+        session.query(spot_table).filter(
             sqlalchemy.and_(*where_conditions)).update(
-                {_get_spot_table().c.local_log_file: local_log_file})
+                {spot_table.c.local_log_file: local_log_file})
         session.commit()
 
 
@@ -953,35 +965,34 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
     """Get non-terminal job ids by name."""
     assert _SQLALCHEMY_ENGINE is not None
 
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Build the query using SQLAlchemy core
         query = sqlalchemy.select(
-            _get_spot_table().c.spot_job_id.distinct()).select_from(
-                _get_spot_table().outerjoin(
-                    _get_job_info_table(),
-                    _get_spot_table().c.spot_job_id ==
-                    _get_job_info_table().c.spot_job_id,
+            spot_table.c.spot_job_id.distinct()).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
                 ))
         where_conditions = [
-            ~_get_spot_table().c.status.in_([
+            ~spot_table.c.status.in_([
                 status.value for status in ManagedJobStatus.terminal_statuses()
             ])
         ]
         if name is None and not all_users:
-            where_conditions.append(_get_job_info_table().c.user_hash ==
-                                    common_utils.get_user_hash())
+            where_conditions.append(
+                job_info_table.c.user_hash == common_utils.get_user_hash())
         if name is not None:
             # We match the job name from `job_info` for the jobs submitted after
             # #1982, and from `spot` for the jobs submitted before #1982, whose
             # job_info is not available.
             where_conditions.append(
                 sqlalchemy.or_(
-                    _get_job_info_table().c.name == name,
-                    sqlalchemy.and_(_get_job_info_table().c.name.is_(None),
-                                    _get_spot_table().c.task_name == name),
+                    job_info_table.c.name == name,
+                    sqlalchemy.and_(job_info_table.c.name.is_(None),
+                                    spot_table.c.task_name == name),
                 ))
         query = query.where(sqlalchemy.and_(*where_conditions)).order_by(
-            _get_spot_table().c.spot_job_id.desc())
+            spot_table.c.spot_job_id.desc())
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
@@ -998,21 +1009,21 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = sqlalchemy.select(
-            _get_job_info_table().c.spot_job_id,
-            _get_job_info_table().c.schedule_state,
-            _get_job_info_table().c.controller_pid,
-        ).where(~_get_job_info_table().c.schedule_state.in_([
+            job_info_table.c.spot_job_id,
+            job_info_table.c.schedule_state,
+            job_info_table.c.controller_pid,
+        ).where(~job_info_table.c.schedule_state.in_([
             ManagedJobScheduleState.INACTIVE.value,
             ManagedJobScheduleState.WAITING.value,
             ManagedJobScheduleState.DONE.value,
         ]))
 
         if job_id is not None:
-            query = query.where(_get_job_info_table().c.spot_job_id == job_id)
+            query = query.where(job_info_table.c.spot_job_id == job_id)
 
-        query = query.order_by(_get_job_info_table().c.spot_job_id.desc())
+        query = query.order_by(job_info_table.c.spot_job_id.desc())
 
         rows = session.execute(query).fetchall()
         jobs = []
@@ -1040,17 +1051,16 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         terminal_status_values = [
             status.value for status in ManagedJobStatus.terminal_statuses()
         ]
 
         query = sqlalchemy.select(
-            _get_spot_table().c.spot_job_id.distinct()).select_from(
-                _get_spot_table().outerjoin(
-                    _get_job_info_table(),
-                    _get_spot_table().c.spot_job_id ==
-                    _get_job_info_table().c.spot_job_id))
+            spot_table.c.spot_job_id.distinct()).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
 
         # Get jobs that are either:
         # 1. Have schedule state that is not DONE, or
@@ -1060,29 +1070,28 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
 
         # non-legacy jobs that are not DONE
         condition1 = sqlalchemy.and_(
-            _get_job_info_table().c.schedule_state.is_not(None),
-            _get_job_info_table().c.schedule_state !=
+            job_info_table.c.schedule_state.is_not(None),
+            job_info_table.c.schedule_state !=
             ManagedJobScheduleState.DONE.value)
         # legacy or that are in non-terminal status or
         # DONE jobs that are in non-terminal status
         condition2 = sqlalchemy.and_(
             sqlalchemy.or_(
                 # legacy jobs
-                _get_job_info_table().c.schedule_state.is_(None),
+                job_info_table.c.schedule_state.is_(None),
                 # non-legacy DONE jobs
-                _get_job_info_table().c.schedule_state ==
+                job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.DONE.value),
             # non-terminal
-            ~_get_spot_table().c.status.in_(terminal_status_values),
+            ~spot_table.c.status.in_(terminal_status_values),
         )
         where_condition = sqlalchemy.or_(condition1, condition2)
         if job_id is not None:
             where_condition = sqlalchemy.and_(
-                where_condition,
-                _get_spot_table().c.spot_job_id == job_id)
+                where_condition, spot_table.c.spot_job_id == job_id)
 
         query = query.where(where_condition).order_by(
-            _get_spot_table().c.spot_job_id.desc())
+            spot_table.c.spot_job_id.desc())
 
         rows = session.execute(query).fetchall()
         return [row[0] for row in rows if row[0] is not None]
@@ -1093,23 +1102,22 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
     assert _SQLALCHEMY_ENGINE is not None
 
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = sqlalchemy.select(
-            _get_spot_table().c.spot_job_id.distinct()).select_from(
-                _get_spot_table().outerjoin(
-                    _get_job_info_table(),
-                    _get_spot_table().c.spot_job_id ==
-                    _get_job_info_table().c.spot_job_id))
+            spot_table.c.spot_job_id.distinct()).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
         if name is not None:
             # We match the job name from `job_info` for the jobs submitted after
             # #1982, and from `spot` for the jobs submitted before #1982, whose
             # job_info is not available.
             name_condition = sqlalchemy.or_(
-                _get_job_info_table().c.name == name,
-                sqlalchemy.and_(_get_job_info_table().c.name.is_(None),
-                                _get_spot_table().c.task_name == name))
+                job_info_table.c.name == name,
+                sqlalchemy.and_(job_info_table.c.name.is_(None),
+                                spot_table.c.task_name == name))
             query = query.where(name_condition)
-        query = query.order_by(_get_spot_table().c.spot_job_id.desc())
+        query = query.order_by(spot_table.c.spot_job_id.desc())
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
@@ -1119,13 +1127,13 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         id_statuses = session.execute(
             sqlalchemy.select(
-                _get_spot_table().c.task_id,
-                _get_spot_table().c.status,
-            ).where(_get_spot_table().c.spot_job_id == job_id).order_by(
-                _get_spot_table().c.task_id.asc())).fetchall()
+                spot_table.c.task_id,
+                spot_table.c.status,
+            ).where(spot_table.c.spot_job_id == job_id).order_by(
+                spot_table.c.task_id.asc())).fetchall()
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
@@ -1133,12 +1141,11 @@ def _get_all_task_ids_statuses(
 def get_job_status_with_task_id(job_id: int,
                                 task_id: int) -> Optional[ManagedJobStatus]:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         status = session.execute(
-            sqlalchemy.select(_get_spot_table().c.status).where(
-                sqlalchemy.and_(
-                    _get_spot_table().c.spot_job_id == job_id,
-                    _get_spot_table().c.task_id == task_id))).fetchone()
+            sqlalchemy.select(spot_table.c.status).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id))).fetchone()
         return ManagedJobStatus(status[0]) if status else None
 
 
@@ -1181,11 +1188,11 @@ def get_failure_reason(job_id: int) -> Optional[str]:
     If the job has multiple tasks, we return the first failure reason.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         reason = session.execute(
-            sqlalchemy.select(_get_spot_table().c.failure_reason).where(
-                _get_spot_table().c.spot_job_id == job_id).order_by(
-                    _get_spot_table().c.task_id.asc())).fetchall()
+            sqlalchemy.select(spot_table.c.failure_reason).where(
+                spot_table.c.spot_job_id == job_id).order_by(
+                    spot_table.c.task_id.asc())).fetchall()
         reason = [r[0] for r in reason if r[0] is not None]
         if not reason:
             return None
@@ -1205,53 +1212,52 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     # Note: we will get the user_hash here, but don't try to call
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        query = sqlalchemy.select(_get_spot_table(),
-                                  _get_job_info_table()).select_from(
-                                      _get_spot_table().outerjoin(
-                                          _get_job_info_table(),
-                                          _get_spot_table().c.spot_job_id ==
-                                          _get_job_info_table().c.spot_job_id))
-        if job_id is not None:
-            query = query.where(_get_spot_table().c.spot_job_id == job_id)
-        query = query.order_by(_get_spot_table().c.spot_job_id.desc(),
-                               _get_spot_table().c.task_id.asc())
+    query = sqlalchemy.select(spot_table, job_info_table).select_from(
+        spot_table.outerjoin(
+            job_info_table,
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+    if job_id is not None:
+        query = query.where(spot_table.c.spot_job_id == job_id)
+    query = query.order_by(spot_table.c.spot_job_id.desc(),
+                           spot_table.c.task_id.asc())
+    rows = None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.execute(query).fetchall()
-        jobs = []
-        for row in rows:
-            job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-            if job_dict['job_name'] is None:
-                job_dict['job_name'] = job_dict['task_name']
-            job_dict['metadata'] = json.loads(job_dict['metadata'])
+    jobs = []
+    for row in rows:
+        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        job_dict['schedule_state'] = ManagedJobScheduleState(
+            job_dict['schedule_state'])
+        if job_dict['job_name'] is None:
+            job_dict['job_name'] = job_dict['task_name']
+        job_dict['metadata'] = json.loads(job_dict['metadata'])
 
-            # Add user YAML content for managed jobs.
-            yaml_path = job_dict.get('original_user_yaml_path')
-            if yaml_path:
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['user_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError):
-                    job_dict['user_yaml'] = None
-            else:
+        # Add user YAML content for managed jobs.
+        yaml_path = job_dict.get('original_user_yaml_path')
+        if yaml_path:
+            try:
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    job_dict['user_yaml'] = f.read()
+            except (FileNotFoundError, IOError, OSError):
                 job_dict['user_yaml'] = None
+        else:
+            job_dict['user_yaml'] = None
 
-            jobs.append(job_dict)
-        return jobs
+        jobs.append(job_dict)
+    return jobs
 
 
 @_init_db
 def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         task_name = session.execute(
-            sqlalchemy.select(_get_spot_table().c.task_name).where(
+            sqlalchemy.select(spot_table.c.task_name).where(
                 sqlalchemy.and_(
-                    _get_spot_table().c.spot_job_id == job_id,
-                    _get_spot_table().c.task_id == task_id,
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
                 ))).fetchone()
         return task_name[0]
 
@@ -1260,23 +1266,23 @@ def get_task_name(job_id: int, task_id: int) -> str:
 def get_latest_job_id() -> Optional[int]:
     """Get the latest job id."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         job_id = session.execute(
-            sqlalchemy.select(_get_spot_table().c.spot_job_id).
-            where(_get_spot_table().c.task_id == 0).order_by(
-                _get_spot_table().c.submitted_at.desc()).limit(1)).fetchone()
+            sqlalchemy.select(spot_table.c.spot_job_id).where(
+                spot_table.c.task_id == 0).order_by(
+                    spot_table.c.submitted_at.desc()).limit(1)).fetchone()
         return job_id[0] if job_id else None
 
 
 @_init_db
 def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         task_specs = session.execute(
-            sqlalchemy.select(_get_spot_table().c.specs).where(
+            sqlalchemy.select(spot_table.c.specs).where(
                 sqlalchemy.and_(
-                    _get_spot_table().c.spot_job_id == job_id,
-                    _get_spot_table().c.task_id == task_id,
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
                 ))).fetchone()
         return json.loads(task_specs[0])
 
@@ -1286,12 +1292,12 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
     assert _SQLALCHEMY_ENGINE is not None
 
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        where_conditions = [_get_spot_table().c.spot_job_id == job_id]
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
-            where_conditions.append(_get_spot_table().c.task_id == task_id)
+            where_conditions.append(spot_table.c.task_id == task_id)
         local_log_file = session.execute(
-            sqlalchemy.select(_get_spot_table().c.local_log_file).where(
+            sqlalchemy.select(spot_table.c.local_log_file).where(
                 sqlalchemy.and_(*where_conditions))).fetchone()
         return local_log_file[-1] if local_log_file else None
 
@@ -1314,22 +1320,21 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
         Otherwise, we return False.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        o_user_yaml_path = original_user_yaml_path
-        updated_count = session.query(_get_job_info_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
-                _get_job_info_table().c.spot_job_id == job_id,
-                _get_job_info_table().c.schedule_state ==
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.INACTIVE.value,
             )
         ).update({
-            _get_job_info_table().c.schedule_state:
+            job_info_table.c.schedule_state:
                 ManagedJobScheduleState.WAITING.value,
-            _get_job_info_table().c.dag_yaml_path: dag_yaml_path,
-            _get_job_info_table().c.original_user_yaml_path: o_user_yaml_path,
-            _get_job_info_table().c.env_file_path: env_file_path,
-            _get_job_info_table().c.user_hash: user_hash,
-            _get_job_info_table().c.priority: priority,
+            job_info_table.c.dag_yaml_path: dag_yaml_path,
+            job_info_table.c.original_user_yaml_path: original_user_yaml_path,
+            job_info_table.c.env_file_path: env_file_path,
+            job_info_table.c.user_hash: user_hash,
+            job_info_table.c.priority: priority,
         })
         session.commit()
         # For a recovery run, the job may already be in the WAITING state.
@@ -1342,13 +1347,13 @@ def scheduler_set_launching(job_id: int,
                             current_state: ManagedJobScheduleState) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(_get_job_info_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
-                _get_job_info_table().c.spot_job_id == job_id,
-                _get_job_info_table().c.schedule_state == current_state.value,
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state == current_state.value,
             )).update({
-                _get_job_info_table().c.schedule_state:
+                job_info_table.c.schedule_state:
                     ManagedJobScheduleState.LAUNCHING.value
             })
         session.commit()
@@ -1359,14 +1364,14 @@ def scheduler_set_launching(job_id: int,
 def scheduler_set_alive(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(_get_job_info_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
-                _get_job_info_table().c.spot_job_id == job_id,
-                _get_job_info_table().c.schedule_state ==
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.LAUNCHING.value,
             )).update({
-                _get_job_info_table().c.schedule_state:
+                job_info_table.c.schedule_state:
                     ManagedJobScheduleState.ALIVE.value
             })
         session.commit()
@@ -1377,14 +1382,14 @@ def scheduler_set_alive(job_id: int) -> None:
 def scheduler_set_alive_backoff(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(_get_job_info_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
-                _get_job_info_table().c.spot_job_id == job_id,
-                _get_job_info_table().c.schedule_state ==
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.LAUNCHING.value,
             )).update({
-                _get_job_info_table().c.schedule_state:
+                job_info_table.c.schedule_state:
                     ManagedJobScheduleState.ALIVE_BACKOFF.value
             })
         session.commit()
@@ -1395,15 +1400,15 @@ def scheduler_set_alive_backoff(job_id: int) -> None:
 def scheduler_set_alive_waiting(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(_get_job_info_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
-                _get_job_info_table().c.spot_job_id == job_id,
-                _get_job_info_table().c.schedule_state.in_([
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state.in_([
                     ManagedJobScheduleState.ALIVE.value,
                     ManagedJobScheduleState.ALIVE_BACKOFF.value,
                 ]))).update({
-                    _get_job_info_table().c.schedule_state:
+                    job_info_table.c.schedule_state:
                         ManagedJobScheduleState.ALIVE_WAITING.value
                 })
         session.commit()
@@ -1414,14 +1419,14 @@ def scheduler_set_alive_waiting(job_id: int) -> None:
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(_get_job_info_table()).filter(
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
-                _get_job_info_table().c.spot_job_id == job_id,
-                _get_job_info_table().c.schedule_state !=
+                job_info_table.c.spot_job_id == job_id,
+                job_info_table.c.schedule_state !=
                 ManagedJobScheduleState.DONE.value,
             )).update({
-                _get_job_info_table().c.schedule_state:
+                job_info_table.c.schedule_state:
                     ManagedJobScheduleState.DONE.value
             })
         session.commit()
@@ -1432,10 +1437,9 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
 @_init_db
 def set_job_controller_pid(job_id: int, pid: int):
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(
-            _get_job_info_table()).filter_by(spot_job_id=job_id).update(
-                {_get_job_info_table().c.controller_pid: pid})
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        updated_count = session.query(job_info_table).filter_by(
+            spot_job_id=job_id).update({job_info_table.c.controller_pid: pid})
         session.commit()
         assert updated_count == 1, (job_id, updated_count)
 
@@ -1443,34 +1447,34 @@ def set_job_controller_pid(job_id: int, pid: int):
 @_init_db
 def get_job_schedule_state(job_id: int) -> ManagedJobScheduleState:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         state = session.execute(
-            sqlalchemy.select(_get_job_info_table().c.schedule_state).where(
-                _get_job_info_table().c.spot_job_id == job_id)).fetchone()[0]
+            sqlalchemy.select(job_info_table.c.schedule_state).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()[0]
         return ManagedJobScheduleState(state)
 
 
 @_init_db
 def get_num_launching_jobs() -> int:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         return session.execute(
             sqlalchemy.select(
                 sqlalchemy.func.count()  # pylint: disable=not-callable
-            ).select_from(_get_job_info_table()).where(
-                _get_job_info_table().c.schedule_state ==
+            ).select_from(job_info_table).where(
+                job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.LAUNCHING.value)).fetchone()[0]
 
 
 @_init_db
 def get_num_alive_jobs() -> int:
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         return session.execute(
             sqlalchemy.select(
                 sqlalchemy.func.count()  # pylint: disable=not-callable
-            ).select_from(_get_job_info_table()).where(
-                _get_job_info_table().c.schedule_state.in_([
+            ).select_from(job_info_table).where(
+                job_info_table.c.schedule_state.in_([
                     ManagedJobScheduleState.ALIVE_WAITING.value,
                     ManagedJobScheduleState.LAUNCHING.value,
                     ManagedJobScheduleState.ALIVE.value,
@@ -1490,34 +1494,34 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     schedule_state and will be ignored by this SQL query.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Get the highest-priority WAITING or ALIVE_WAITING job whose priority
         # is greater than or equal to the highest priority LAUNCHING or
         # ALIVE_BACKOFF job's priority.
         # First, get the max priority of LAUNCHING or ALIVE_BACKOFF jobs
         max_priority_subquery = sqlalchemy.select(
-            sqlalchemy.func.max(_get_job_info_table().c.priority)).where(
-                _get_job_info_table().c.schedule_state.in_([
+            sqlalchemy.func.max(job_info_table.c.priority)).where(
+                job_info_table.c.schedule_state.in_([
                     ManagedJobScheduleState.LAUNCHING.value,
                     ManagedJobScheduleState.ALIVE_BACKOFF.value,
                 ])).scalar_subquery()
         # Main query for waiting jobs
         query = sqlalchemy.select(
-            _get_job_info_table().c.spot_job_id,
-            _get_job_info_table().c.schedule_state,
-            _get_job_info_table().c.dag_yaml_path,
-            _get_job_info_table().c.env_file_path,
+            job_info_table.c.spot_job_id,
+            job_info_table.c.schedule_state,
+            job_info_table.c.dag_yaml_path,
+            job_info_table.c.env_file_path,
         ).where(
             sqlalchemy.and_(
-                _get_job_info_table().c.schedule_state.in_([
+                job_info_table.c.schedule_state.in_([
                     ManagedJobScheduleState.WAITING.value,
                     ManagedJobScheduleState.ALIVE_WAITING.value,
                 ]),
-                _get_job_info_table().c.priority >= sqlalchemy.func.coalesce(
+                job_info_table.c.priority >= sqlalchemy.func.coalesce(
                     max_priority_subquery, 0),
             )).order_by(
-                _get_job_info_table().c.priority.desc(),
-                _get_job_info_table().c.spot_job_id.asc(),
+                job_info_table.c.priority.desc(),
+                job_info_table.c.spot_job_id.asc(),
             ).limit(1)
         waiting_job_row = session.execute(query).fetchone()
         if waiting_job_row is None:
@@ -1535,10 +1539,10 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
 def get_workspace(job_id: int) -> str:
     """Get the workspace of a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         workspace = session.execute(
-            sqlalchemy.select(_get_job_info_table().c.workspace).where(
-                _get_job_info_table().c.spot_job_id == job_id)).fetchone()
+            sqlalchemy.select(job_info_table.c.workspace).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
         job_workspace = workspace[0] if workspace else None
         if job_workspace is None:
             return constants.SKYPILOT_DEFAULT_WORKSPACE
@@ -1552,9 +1556,9 @@ def get_workspace(job_id: int) -> str:
 def get_ha_recovery_script(job_id: int) -> Optional[str]:
     """Get the HA recovery script for a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(
-            _get_ha_recovery_script_table()).filter_by(job_id=job_id).first()
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(ha_recovery_script_table).filter_by(
+            job_id=job_id).first()
     if row is None:
         return None
     return row.script
@@ -1564,20 +1568,20 @@ def get_ha_recovery_script(job_id: int) -> Optional[str]:
 def set_ha_recovery_script(job_id: int, script: str) -> None:
     """Set the HA recovery script for a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            insert_func = sqlalchemy.dialects.sqlite.insert
+            insert_func = sqlite.insert
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            insert_func = sqlalchemy.dialects.postgresql.insert
+            insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmt = insert_func(_get_ha_recovery_script_table()).values(
+        insert_stmt = insert_func(ha_recovery_script_table).values(
             job_id=job_id, script=script)
         do_update_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[_get_ha_recovery_script_table().c.job_id],
-            set_={_get_ha_recovery_script_table().c.script: script})
+            index_elements=[ha_recovery_script_table.c.job_id],
+            set_={ha_recovery_script_table.c.script: script})
         session.execute(do_update_stmt)
         session.commit()
 
@@ -1586,7 +1590,7 @@ def set_ha_recovery_script(job_id: int, script: str) -> None:
 def remove_ha_recovery_script(job_id: int) -> None:
     """Remove the HA recovery script for a job."""
     assert _SQLALCHEMY_ENGINE is not None
-    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(
-            _get_ha_recovery_script_table()).filter_by(job_id=job_id).delete()
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(ha_recovery_script_table).filter_by(
+            job_id=job_id).delete()
         session.commit()

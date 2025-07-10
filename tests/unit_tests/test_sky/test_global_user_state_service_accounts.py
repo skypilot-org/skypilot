@@ -9,21 +9,7 @@ from sky import global_user_state
 
 
 class TestServiceAccountDatabaseOperations:
-    """Test database operations for service account tokens."""
-
-    @pytest.fixture(autouse=True)
-    def setup_postgresql_dialect(self):
-        """Ensure postgresql dialect is available for tests."""
-        # Create a mock postgresql module to prevent AttributeError
-        mock_postgresql = mock.Mock()
-        mock_postgresql.insert = mock.Mock()
-
-        # Patch the postgresql dialect if it doesn't exist
-        with mock.patch.object(global_user_state.sqlalchemy.dialects,
-                               'postgresql',
-                               mock_postgresql,
-                               create=True):
-            yield
+    """Test cases for service account database operations."""
 
     @pytest.fixture
     def mock_engine(self):
@@ -34,35 +20,20 @@ class TestServiceAccountDatabaseOperations:
             yield mock_engine
 
     @pytest.fixture
-    def mock_session(self):
+    def mock_session(self, mock_engine):
         """Mock SQLAlchemy session."""
-        mock_session = mock.Mock()
-        with mock.patch('sky.global_user_state.sqlalchemy.orm.Session'
-                       ) as mock_session_class:
+        with mock.patch(
+                'sky.global_user_state.orm.Session') as mock_session_class:
+            mock_session = mock.Mock()
             mock_session_class.return_value.__enter__.return_value = mock_session
             yield mock_session
 
-    @pytest.fixture
-    def mock_table(self):
-        """Mock service account token table."""
-        with mock.patch.object(
-                global_user_state,
-                '_get_service_account_token_table') as mock_table_func:
-            mock_table = mock.Mock()
-            mock_table_func.return_value = mock_table
-            yield mock_table
-
-    def test_add_service_account_token(self, mock_engine, mock_session,
-                                       mock_table):
+    def test_add_service_account_token(self, mock_engine, mock_session):
         """Test adding a service account token."""
-        with mock.patch('time.time', return_value=1234567890):
-            with mock.patch(
-                    'sky.global_user_state.sqlalchemy.dialects.sqlite.insert'
-            ) as mock_insert:
-                # Mock the upsert functionality
-                mock_engine.dialect.name = 'sqlite'
-                mock_insert_obj = mock.Mock()
-                mock_insert.return_value = mock_insert_obj
+        with mock.patch('sky.global_user_state.sqlite') as mock_sqlite:
+            with mock.patch('time.time', return_value=1234567890):
+                mock_insert = mock.Mock()
+                mock_sqlite.insert.return_value = mock_insert
 
                 global_user_state.add_service_account_token(
                     token_id='token123',
@@ -73,21 +44,29 @@ class TestServiceAccountDatabaseOperations:
                     expires_at=1234567890 + 2592000  # 30 days
                 )
 
-                # Verify session operations were called
-                mock_session.execute.assert_called()
+                # Verify insert statement was created with correct values
+                mock_sqlite.insert.assert_called_once()
+                mock_insert.values.assert_called_once_with(
+                    token_id='token123',
+                    token_name='test-token',
+                    token_hash='hash123',
+                    created_at=1234567890,
+                    expires_at=1234567890 + 2592000,
+                    creator_user_hash='user456',
+                    service_account_user_id='sa789')
+                mock_session.execute.assert_called_once_with(
+                    mock_insert.values.return_value)
                 mock_session.commit.assert_called_once()
 
     def test_add_service_account_token_postgresql(self, mock_engine,
-                                                  mock_session, mock_table):
+                                                  mock_session):
         """Test adding a service account token with PostgreSQL dialect."""
         mock_engine.dialect.name = 'postgresql'
 
-        with mock.patch('time.time', return_value=1234567890):
-            with mock.patch(
-                    'sky.global_user_state.sqlalchemy.dialects.postgresql.insert'
-            ) as mock_insert:
-                mock_insert_obj = mock.Mock()
-                mock_insert.return_value = mock_insert_obj
+        with mock.patch('sky.global_user_state.postgresql') as mock_postgresql:
+            with mock.patch('time.time', return_value=1234567890):
+                mock_insert = mock.Mock()
+                mock_postgresql.insert.return_value = mock_insert
 
                 global_user_state.add_service_account_token(
                     token_id='token123',
@@ -96,12 +75,10 @@ class TestServiceAccountDatabaseOperations:
                     creator_user_hash='user456',
                     service_account_user_id='sa789')
 
-                # Verify session operations were called
-                mock_session.execute.assert_called()
-                mock_session.commit.assert_called_once()
+                mock_postgresql.insert.assert_called_once()
 
     def test_add_service_account_token_unsupported_dialect(
-            self, mock_engine, mock_session, mock_table):
+            self, mock_engine, mock_session):
         """Test adding a service account token with unsupported database dialect."""
         mock_engine.dialect.name = 'mysql'
 
@@ -113,8 +90,7 @@ class TestServiceAccountDatabaseOperations:
                 creator_user_hash='user456',
                 service_account_user_id='sa789')
 
-    def test_get_service_account_token_found(self, mock_engine, mock_session,
-                                             mock_table):
+    def test_get_service_account_token_found(self, mock_engine, mock_session):
         """Test getting a service account token that exists."""
         mock_row = mock.Mock()
         mock_row.token_id = 'token123'
@@ -143,7 +119,7 @@ class TestServiceAccountDatabaseOperations:
         mock_session.query.assert_called_once()
 
     def test_get_service_account_token_not_found(self, mock_engine,
-                                                 mock_session, mock_table):
+                                                 mock_session):
         """Test getting a service account token that doesn't exist."""
         mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
@@ -151,8 +127,7 @@ class TestServiceAccountDatabaseOperations:
 
         assert result is None
 
-    def test_get_all_service_account_tokens(self, mock_engine, mock_session,
-                                            mock_table):
+    def test_get_all_service_account_tokens(self, mock_engine, mock_session):
         """Test getting all service account tokens."""
         mock_row1 = mock.Mock()
         mock_row1.token_id = 'token1'
@@ -185,7 +160,7 @@ class TestServiceAccountDatabaseOperations:
         assert result[1]['token_id'] == 'token2'
 
     def test_update_service_account_token_last_used(self, mock_engine,
-                                                    mock_session, mock_table):
+                                                    mock_session):
         """Test updating the last_used_at timestamp."""
         with mock.patch('time.time', return_value=1234567999):
             global_user_state.update_service_account_token_last_used('token123')
@@ -198,7 +173,7 @@ class TestServiceAccountDatabaseOperations:
             mock_session.commit.assert_called_once()
 
     def test_delete_service_account_token_success(self, mock_engine,
-                                                  mock_session, mock_table):
+                                                  mock_session):
         """Test successfully deleting a service account token."""
         mock_session.query.return_value.filter_by.return_value.delete.return_value = 1
 
@@ -210,7 +185,7 @@ class TestServiceAccountDatabaseOperations:
         mock_session.commit.assert_called_once()
 
     def test_delete_service_account_token_not_found(self, mock_engine,
-                                                    mock_session, mock_table):
+                                                    mock_session):
         """Test deleting a service account token that doesn't exist."""
         mock_session.query.return_value.filter_by.return_value.delete.return_value = 0
 
@@ -219,7 +194,7 @@ class TestServiceAccountDatabaseOperations:
         assert result is False
 
     def test_rotate_service_account_token_success(self, mock_engine,
-                                                  mock_session, mock_table):
+                                                  mock_session):
         """Test successfully rotating a service account token."""
         with mock.patch('time.time', return_value=1234568000):
             mock_session.query.return_value.filter_by.return_value.update.return_value = 1
@@ -244,40 +219,30 @@ class TestServiceAccountDatabaseOperations:
             mock_session.commit.assert_called_once()
 
     def test_rotate_service_account_token_not_found(self, mock_engine,
-                                                    mock_session, mock_table):
+                                                    mock_session):
         """Test rotating a service account token that doesn't exist."""
         with mock.patch('time.time', return_value=1234568000):
             mock_session.query.return_value.filter_by.return_value.update.return_value = 0
 
             with pytest.raises(
                     ValueError,
-                    match='Service account token nonexistent not found'):
+                    match='Service account token token123 not found'):
                 global_user_state.rotate_service_account_token(
-                    token_id='nonexistent',
-                    new_token_hash='new_hash456',
-                    new_expires_at=1234568000 + 2592000)
+                    token_id='token123', new_token_hash='new_hash456')
 
     def test_rotate_service_account_token_without_expiration(
-            self, mock_engine, mock_session, mock_table):
+            self, mock_engine, mock_session):
         """Test rotating a service account token without setting expiration."""
         with mock.patch('time.time', return_value=1234568000):
             mock_session.query.return_value.filter_by.return_value.update.return_value = 1
 
             global_user_state.rotate_service_account_token(
-                token_id='token123', new_token_hash='new_hash456')
+                token_id='token123',
+                new_token_hash='new_hash456',
+                new_expires_at=None)
 
-            mock_session.query.return_value.filter_by.assert_called_once_with(
-                token_id='token123')
             update_call = mock_session.query.return_value.filter_by.return_value.update
             update_call.assert_called_once()
-
-            # Verify the update parameters (no expires_at should be set)
-            update_args = update_call.call_args[0][0]
-            assert 'token_hash' in str(update_args)
-            assert 'last_used_at' in str(update_args)
-            assert 'created_at' in str(update_args)
-
-            mock_session.commit.assert_called_once()
 
     def test_function_decorators_present(self):
         """Test that all service account functions have proper attributes."""
