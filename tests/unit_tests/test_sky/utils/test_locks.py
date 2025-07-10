@@ -202,7 +202,7 @@ class TestPostgresLock:
 
         assert lock.lock_id == 'test_lock'
         assert lock.timeout is None
-        assert lock.poll_interval == 0.1
+        assert lock.poll_interval == 1
         assert not lock._acquired
         assert lock._connection is None
 
