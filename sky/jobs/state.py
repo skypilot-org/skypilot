@@ -44,6 +44,9 @@ _DB_INIT_LOCK = threading.Lock()
 
 _DB_RETRY_TIMES = 10
 
+# File lock for database operations to prevent race conditions
+_DB_LOCK_PATH = os.path.expanduser('~/.sky/locks/managed_job_db.lock')
+
 Base = declarative.declarative_base()
 
 # === Database schema ===
@@ -240,6 +243,7 @@ def create_table():
         try:
             with orm.Session(_SQLALCHEMY_ENGINE) as session:
                 session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                session.execute(sqlalchemy.text('PRAGMA synchronous=1'))
                 session.commit()
         except sqlalchemy_exc.OperationalError as e:
             if 'database is locked' not in str(e):
@@ -698,6 +702,7 @@ def set_job_info_without_job_id(name: str, workspace: str,
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the task to pending state."""
     assert _SQLALCHEMY_ENGINE is not None
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(
             sqlalchemy.insert(spot_table).values(
@@ -1623,56 +1628,73 @@ def get_num_alive_jobs() -> int:
                 ]))).fetchone()[0]
 
 
-@_init_db
-def get_waiting_job() -> Optional[Dict[str, Any]]:
-    """Get the next job that should transition to LAUNCHING.
+@_init_db_async
+async def get_waiting_job() -> Optional[Dict[str, Any]]:
+    """Atomically find and set the highest priority waiting job to LAUNCHING.
 
-    Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
-    priority is greater than or equal to any currently LAUNCHING or
-    ALIVE_BACKOFF job.
+    Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
+    transitions it to LAUNCHING state to prevent race conditions.
+
+    Returns the job information if a job was successfully transitioned to
+    LAUNCHING, or None if no suitable job was found.
 
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Get the highest-priority WAITING or ALIVE_WAITING job whose priority
-        # is greater than or equal to the highest priority LAUNCHING or
-        # ALIVE_BACKOFF job's priority.
-        # First, get the max priority of LAUNCHING or ALIVE_BACKOFF jobs
-        max_priority_subquery = sqlalchemy.select(
-            sqlalchemy.func.max(job_info_table.c.priority)).where(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.LAUNCHING.value,
-                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                ])).scalar_subquery()
-        # Main query for waiting jobs
-        query = sqlalchemy.select(
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        # Select the highest priority waiting job for update (locks the row)
+        select_query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
             job_info_table.c.dag_yaml_path,
             job_info_table.c.env_file_path,
         ).where(
-            sqlalchemy.and_(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.WAITING.value,
-                    ManagedJobScheduleState.ALIVE_WAITING.value,
-                ]),
-                job_info_table.c.priority >= sqlalchemy.func.coalesce(
-                    max_priority_subquery, 0),
-            )).order_by(
+            job_info_table.c.schedule_state.in_([
+                ManagedJobScheduleState.WAITING.value,
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+            ])).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
-            ).limit(1)
-        waiting_job_row = session.execute(query).fetchone()
+            ).limit(1).with_for_update()
+
+        # Execute the select with row locking
+        result = await session.execute(select_query)
+        waiting_job_row = result.fetchone()
         if waiting_job_row is None:
             return None
 
+        job_id = waiting_job_row[0]
+        current_state = ManagedJobScheduleState(waiting_job_row[1])
+        dag_yaml_path = waiting_job_row[2]
+        env_file_path = waiting_job_row[3]
+
+        # Update the job state to LAUNCHING
+        update_result = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state == current_state.value,
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.LAUNCHING.value,
+                    job_info_table.c.controller_pid: -1,
+                }))
+
+        if update_result.rowcount != 1:
+            # Update failed, rollback and return None
+            await session.rollback()
+            return None
+
+        # Commit the transaction
+        await session.commit()
+
         return {
-            'job_id': waiting_job_row[0],
-            'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
-            'dag_yaml_path': waiting_job_row[2],
-            'env_file_path': waiting_job_row[3],
+            'job_id': job_id,
+            'schedule_state': current_state,
+            'dag_yaml_path': dag_yaml_path,
+            'env_file_path': env_file_path,
         }
 
 

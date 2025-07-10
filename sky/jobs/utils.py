@@ -18,12 +18,11 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
+                    Tuple, Union)
 
 import colorama
 import filelock
-import requests
-from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
@@ -623,9 +622,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             # This is a consolidated job controller, so we need to cancel the
             # with the controller server API
             try:
-                requests.post(f'http://localhost:8000/cancel/{job_id}')
+                # we create a file as a signal to the controller server
+                signal_file = pathlib.Path(managed_job_constants.SIGNAL_PATH,
+                                           f'{job_id}')
+                signal_file.touch()
                 cancelled_job_ids.append(job_id)
-            except requests.exceptions.RequestException as e:
+            except OSError as e:
                 logger.error(f'Failed to cancel job {job_id} '
                              f'with controller server: {e}')
                 # don't add it to the to be cancelled job ids, since we don't

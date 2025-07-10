@@ -41,20 +41,16 @@ import contextlib
 from functools import lru_cache
 import os
 import sys
-import threading
 import time
 import typing
 
 import filelock
-import requests
 
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import controller_server
 from sky.jobs import state
-from sky.jobs import utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -81,12 +77,13 @@ JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
 # Based on testing, assume a running job uses 350MB memory.
 JOB_MEMORY_MB = 350
 # Number of ongoing launches launches allowed per CPU.
-LAUNCHES_PER_CPU = 4
+LAUNCHES_PER_CPU = 2
 
 # os.cpu_count gives us an Optional[int], ignoring type since mypy has issues
 # if I don't
 WORKERS = (os.cpu_count() or 1)
-JOBS_PER_WORKER = 100
+WORKERS = 1
+JOBS_PER_WORKER = 1000
 
 
 @lru_cache(maxsize=1)
@@ -96,8 +93,7 @@ def _get_lock_path() -> str:
     return path
 
 
-def _start_controller(job_id: int, dag_yaml_path: str,
-                      env_file_path: str) -> None:
+def _start_controller(env_file_path: str) -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
@@ -116,15 +112,12 @@ def _start_controller(job_id: int, dag_yaml_path: str,
                               encoding='utf-8') as f:
                         pid = int(f.read())
                         if subprocess_utils.is_process_alive(pid):
-                            logger.debug(
-                                f'Job {job_id} already started with pid {pid}')
+                            return
                         else:
                             to_start = True
                 else:
                     to_start = True
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(
-                    f'Error checking if job {job_id} is already started: {e}')
+            except Exception:  # pylint: disable=broad-except
                 to_start = True
                 # Starting the server might error in case its already running.
                 # But that should be fine since at least we will have one
@@ -135,7 +128,6 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         pass
 
     if to_start:
-        print(f'Starting controller for job {job_id}')
         activate_python_env_cmd = (
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
         source_environment_cmd = (f'source {env_file_path};'
@@ -157,116 +149,6 @@ def _start_controller(job_id: int, dag_yaml_path: str,
         with open(JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
             f.write(str(pid))
 
-    req = controller_server.JobRequest(
-        job_id=str(job_id),
-        dag_yaml_path=dag_yaml_path,
-        env_file_path=env_file_path,
-    )
-    backoff = common_utils.Backoff()
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            res = requests.post('http://localhost:8000/create',
-                                json=req.model_dump(),
-                                timeout=30)
-            break
-        except requests.exceptions.RequestException:
-            delay = backoff.current_backoff()
-            logger.warning('Failed to connect to controller server (attempt '
-                           f'{attempt + 1}/{max_retries}). Retrying in '
-                           f'{delay} seconds...')
-            time.sleep(delay)
-    if res.status_code != 200:
-        raise RuntimeError(f'Failed to start job {job_id}')
-    logger.debug(f'Job {job_id} started with pid {pid}')
-
-
-def maybe_schedule_next_jobs() -> None:
-    """Determine if any managed jobs can be scheduled, and if so, schedule them.
-
-    Here, "schedule" means to select job that is waiting, and allow it to
-    proceed. It does NOT mean to submit a job to the scheduler.
-
-    For newly submitted jobs, scheduling means updating the state of the jobs,
-    and starting the job controller process. For jobs that are already alive but
-    are waiting to launch a new task or recover, just update the state of the
-    job to indicate that the launch can proceed.
-
-    This function transitions jobs into LAUNCHING on a best-effort basis. That
-    is, if we can start any jobs, we will, but if not, we will exit (almost)
-    immediately. It's expected that if some WAITING or ALIVE_WAITING jobs cannot
-    be started now (either because the lock is held, or because there are not
-    enough resources), another call to this function will be made whenever that
-    situation is resolved. (If the lock is held, the lock holder should start
-    the jobs. If there aren't enough resources, the next controller to exit and
-    free up resources should start the jobs.)
-
-    If this function obtains the lock, it will launch as many jobs as possible
-    before releasing the lock. This is what allows other calls to exit
-    immediately if the lock is held, while ensuring that all jobs are started as
-    soon as possible.
-
-    This uses subprocess_utils.launch_new_process_tree() to start the controller
-    processes, which should be safe to call from pretty much any code running on
-    the jobs controller instance. New job controller processes will be detached
-    from the current process and there will not be a parent/child relationship.
-    See launch_new_process_tree for more.
-    """
-    try:
-        # We must use a global lock rather than a per-job lock to ensure correct
-        # parallelism control. If we cannot obtain the lock, exit immediately.
-        # The current lock holder is expected to launch any jobs it can before
-        # releasing the lock.
-        with filelock.FileLock(_get_lock_path(), blocking=False):
-            while True:
-                maybe_next_job = state.get_waiting_job()
-                if maybe_next_job is None:
-                    # Nothing left to start, break from scheduling loop
-                    break
-
-                current_state = maybe_next_job['schedule_state']
-
-                assert current_state in (
-                    state.ManagedJobScheduleState.ALIVE_WAITING,
-                    state.ManagedJobScheduleState.WAITING), maybe_next_job
-
-                # Note: we expect to get ALIVE_WAITING jobs before WAITING jobs,
-                # since they will have been submitted and therefore started
-                # first. The requirements to launch in an alive job are more
-                # lenient, so there is no way that we wouldn't be able to launch
-                # an ALIVE_WAITING job, but we would be able to launch a WAITING
-                # job.
-                if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
-                    if not _can_lauch_in_alive_job():
-                        # Can't schedule anything, break from scheduling loop.
-                        break
-                elif current_state == state.ManagedJobScheduleState.WAITING:
-                    if not _can_start_new_job():
-                        # Can't schedule anything, break from scheduling loop.
-                        break
-
-                logger.debug(f'Scheduling job {maybe_next_job["job_id"]}')
-                state.scheduler_set_launching(maybe_next_job['job_id'],
-                                              current_state)
-
-                if current_state == state.ManagedJobScheduleState.WAITING:
-                    # The job controller has not been started yet. We must start
-                    # it.
-                    job_id = maybe_next_job['job_id']
-                    dag_yaml_path = maybe_next_job['dag_yaml_path']
-                    env_file_path = maybe_next_job['env_file_path']
-
-                    # quick hack to "instantly" launch the controller
-                    thread = threading.Thread(target=_start_controller,
-                                              args=(job_id, dag_yaml_path,
-                                                    env_file_path))
-                    thread.start()
-
-    except filelock.Timeout:
-        # If we can't get the lock, just exit. The process holding the lock
-        # should launch any pending jobs.
-        pass
-
 
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                env_file_path: str, priority: int) -> None:
@@ -279,18 +161,10 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    is_resume = False
-    with filelock.FileLock(_get_lock_path()):
-        is_resume = state.scheduler_set_waiting(job_id, dag_yaml_path,
-                                                original_user_yaml_path,
-                                                env_file_path,
-                                                common_utils.get_user_hash(),
-                                                priority)
-
-    if is_resume:
-        _start_controller(job_id, dag_yaml_path, env_file_path)
-    else:
-        maybe_schedule_next_jobs()
+    state.scheduler_set_waiting(job_id, dag_yaml_path,
+                                original_user_yaml_path, env_file_path,
+                                common_utils.get_user_hash(), priority)
+    _start_controller(env_file_path)
 
 
 @contextlib.contextmanager
@@ -332,14 +206,10 @@ def scheduled_launch(job_id: int):
     except exceptions.NoClusterLaunchedError:
         # NoClusterLaunchedError is indicates that the job is in retry backoff.
         # We should transition to ALIVE_BACKOFF instead of ALIVE.
-        with filelock.FileLock(_get_lock_path()):
-            state.scheduler_set_alive_backoff(job_id)
+        state.scheduler_set_alive_backoff(job_id)
         raise
     else:
-        with filelock.FileLock(_get_lock_path()):
-            state.scheduler_set_alive(job_id)
-    finally:
-        maybe_schedule_next_jobs()
+        state.scheduler_set_alive(job_id)
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -355,16 +225,13 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs()
+    state.scheduler_set_done(job_id, idempotent)
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
-    maybe_schedule_next_jobs()
 
 
 def _get_job_parallelism() -> int:
@@ -372,8 +239,7 @@ def _get_job_parallelism() -> int:
 
 
 def _get_launch_parallelism() -> int:
-    cpus = os.cpu_count()
-    return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
+    return WORKERS * LAUNCHES_PER_CPU
 
 
 def _can_start_new_job() -> bool:
@@ -406,10 +272,6 @@ async def job_done_async(job_id: int, idempotent: bool = False) -> None:
 
     async with filelock.AsyncFileLock(_get_lock_path()):
         await state.scheduler_set_done_async(job_id, idempotent)
-    # TODO(luca): this is a hack to avoid blocking the asyncio event loop
-    # making maybe_schedule_next_jobs async is far better, it will probably
-    # take a while though.
-    utils.to_thread(maybe_schedule_next_jobs)
 
 
 if __name__ == '__main__':

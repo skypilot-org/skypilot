@@ -869,6 +869,34 @@ async def cancel_job():
         await asyncio.sleep(1)
 
 
+async def monitor_loop():
+    """Monitor the job loop."""
+    while True:
+        running_tasks = [task for task in job_tasks.values() if not task.done()]
+
+        if len(running_tasks) > scheduler.JOBS_PER_WORKER:
+            # TODO(luca) use semaphores here, or cond vars
+            await asyncio.sleep(5)
+            continue
+
+        # Check if there are any jobs that are waiting to launch
+        try:
+            waiting_job = await managed_job_state.get_waiting_job()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to get waiting job: {e}')
+            await asyncio.sleep(5)
+            continue
+
+        if waiting_job is None:
+            await asyncio.sleep(5)
+            continue
+
+        job_id = waiting_job['job_id']
+        dag_yaml_path = waiting_job['dag_yaml_path']
+
+        await start_job(job_id, dag_yaml_path)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--job-id',
