@@ -132,7 +132,7 @@ class TestWithNoCloudEnabled:
         common.get_api_server_status.cache_clear()
 
         cli_runner = cli_testing.CliRunner()
-        
+
         # Basic status command
         result = cli_runner.invoke(command.status, [])
         assert not result.exit_code

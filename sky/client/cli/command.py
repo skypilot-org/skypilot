@@ -132,13 +132,8 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-
-    # Submit status request
     request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
-
-    # Get cluster records
     cluster_records = sdk.stream_and_get(request_id)
-
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
@@ -1657,8 +1652,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if kubernetes:
         _status_kubernetes(verbose)
         return
-
-    # Phase 1: Setup and determine what needs to be queried
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
@@ -1666,6 +1659,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
 
+    # Phase 1: Validate arguments for IP/endpoint queries
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -1728,222 +1722,120 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 return None
         return None
 
-    def submit_cluster_status() -> str:
-        query_clusters: Optional[List[str]] = None if not clusters else clusters
-        refresh_mode = common.StatusRefreshMode.NONE
-        if refresh:
-            refresh_mode = common.StatusRefreshMode.FORCE
-        return sdk.status(query_clusters,
-                          refresh=refresh_mode,
-                          all_users=all_users)
-
     # Submit all requests in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         managed_jobs_request_future = executor.submit(submit_managed_jobs)
         services_request_future = executor.submit(submit_services)
         workspace_request_future = executor.submit(submit_workspace)
-        cluster_status_request_future = executor.submit(submit_cluster_status)
 
         # Get the request IDs
         managed_jobs_queue_request_id = managed_jobs_request_future.result()
         service_status_request_id = services_request_future.result()
         workspace_request_id = workspace_request_future.result()
-        cluster_status_request_id = cluster_status_request_future.result()
 
-    # Phase 3: Get cluster records and process them in parallel with SSH config
-    # updates
-    def update_ssh_configs(cluster_records):
-        # Update the SSH config for all clusters
-        for record in cluster_records:
-            handle = record['handle']
-
-            if not (handle is not None and handle.cached_external_ips
-                    is not None and 'credentials' in record):
-                # If the cluster is not UP or does not have credentials
-                # available, we need to remove the cluster from the SSH config.
-                cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
-                continue
-
-            # During the failover, even though a cluster does not exist, the
-            # handle can still exist in the record, and we check for credentials
-            # to avoid updating the SSH config for non-existent clusters.
-            credentials = record['credentials']
-            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                # Replace the proxy command to proxy through the SkyPilot API
-                # server with websocket.
-                key_path = (
-                    cluster_utils.SSHConfigHelper.generate_local_key_file(
-                        handle.cluster_name, credentials))
-                # Instead of directly use websocket_proxy.py, we add an
-                # additional proxy, so that ssh can use the head pod in the
-                # cluster to jump to worker pods.
-                proxy_command = (
-                    f'ssh -tt -i {key_path} '
-                    '-o StrictHostKeyChecking=no '
-                    '-o UserKnownHostsFile=/dev/null '
-                    '-o IdentitiesOnly=yes '
-                    '-W \'[%h]:%p\' '
-                    f'{handle.ssh_user}@127.0.0.1 '
-                    '-o ProxyCommand='
-                    # TODO(zhwu): write the template to a temp file, don't use
-                    # the one in skypilot repo, to avoid changing the file when
-                    # updating skypilot.
-                    f'\'{sys.executable} {sky.__root_dir__}/templates/'
-                    f'websocket_proxy.py '
-                    f'{server_common.get_server_url()} '
-                    f'{handle.cluster_name}\'')
-                credentials['ssh_proxy_command'] = proxy_command
-
-            cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name,
-                handle.cached_external_ips,
-                credentials,
-                handle.cached_external_ssh_ports,
-                handle.docker_user,
-                handle.ssh_user,
-            )
-
-        # Clean up SSH configs for clusters that do not exist.
-        clusters_exists = set(record['name'] for record in cluster_records)
-        clusters_to_remove = set()
-        if clusters is not None:
-            clusters_to_remove = set(clusters) - clusters_exists
-        elif all_users:
-            clusters_to_remove = set(cluster_utils.SSHConfigHelper.
-                                     list_cluster_names()) - clusters_exists
-
-        for cluster_name in clusters_to_remove:
-            cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
-
-    # Get cluster records
-    cluster_records = sdk.stream_and_get(cluster_status_request_id)
-
-    # Update SSH configs in background while we process other data
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        ssh_future = executor.submit(update_ssh_configs, cluster_records)
-
-        # Process cluster records while SSH configs are being updated
-        hints = []
-        normal_clusters = []
-        controllers = []
-        for cluster_record in cluster_records:
-            cluster_name = cluster_record['name']
-            controller = controller_utils.Controllers.from_name(cluster_name)
-            if controller is not None:
-                controllers.append(cluster_record)
-            else:
-                normal_clusters.append(cluster_record)
-
-        # Wait for SSH config updates to complete
-        ssh_future.result()
-
-    # Define query_clusters early for endpoint handling
-    query_clusters: Optional[List[str]] = None if not clusters else clusters
+    # Phase 3: Get cluster records and handle special cases
+    cluster_records = _get_cluster_records_and_set_ssh_config(
+        None if not clusters else clusters, common.StatusRefreshMode.FORCE
+        if refresh else common.StatusRefreshMode.NONE, all_users)
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
-        _show_endpoint(query_clusters, cluster_records, ip, endpoints, endpoint)
+        _show_endpoint(None if not clusters else clusters, cluster_records, ip,
+                       endpoints, endpoint)
         return
+    hints = []
+    normal_clusters = []
+    controllers = []
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        controller = controller_utils.Controllers.from_name(cluster_name)
+        if controller is not None:
+            controllers.append(cluster_record)
+        else:
+            normal_clusters.append(cluster_record)
 
-    # Phase 4: Handle workspace results and display clusters
     if workspace_request_id is not None:
         all_workspaces = sdk.get(workspace_request_id)
     else:
         all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
-
     active_workspace = skypilot_config.get_active_workspace()
     show_workspace = len(all_workspaces) > 1
     _show_enabled_infra(active_workspace, show_workspace)
-
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                f'{colorama.Style.RESET_ALL}')
 
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users, query_clusters,
-        show_workspace)
+        normal_clusters + controllers, verbose, all_users,
+        None if not clusters else clusters, show_workspace)
 
-    # Phase 5: Handle managed jobs and services results in parallel
-    def handle_managed_jobs() -> Tuple[Optional[int], str]:
-        if show_managed_jobs:
-            assert managed_jobs_queue_request_id is not None
+    managed_jobs_query_interrupted = False
+    if show_managed_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs{colorama.Style.RESET_ALL}')
+        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
             try:
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
                     show_all=False,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
-                    is_called_by_user=False,
-                )
-                return num_in_progress_jobs, msg
+                    is_called_by_user=False)
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
+                managed_jobs_query_interrupted = True
                 # Set to -1, so that the controller is not considered
                 # down, and the hint for showing sky jobs queue
                 # will still be shown.
-                return -1, 'KeyboardInterrupt'
-        return None, ''
+                num_in_progress_jobs = -1
+                msg = 'KeyboardInterrupt'
 
-    def handle_services() -> Tuple[Optional[int], str]:
-        if show_services:
-            assert service_status_request_id is not None
-            try:
-                num_services, msg = _handle_services_request(
-                    service_status_request_id,
-                    service_names=None,
-                    show_all=False,
-                    show_endpoint=False,
-                    is_called_by_user=False)
-                return num_services, msg
-            except KeyboardInterrupt:
-                sdk.api_cancel(service_status_request_id, silent=True)
-                return -1, 'KeyboardInterrupt'
-        return None, ''
+        click.echo(msg)
+        if num_in_progress_jobs is not None:
+            # jobs controller is UP.
+            job_info = ''
+            if num_in_progress_jobs > 0:
+                plural_and_verb = ' is'
+                if num_in_progress_jobs > 1:
+                    plural_and_verb = 's are'
+                job_info = (
+                    f'{num_in_progress_jobs} managed job{plural_and_verb} '
+                    'in progress')
+                if num_in_progress_jobs > _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS:
+                    job_info += (
+                        f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
+                        'ones shown)')
+                job_info += '. '
+            hints.append(
+                controller_utils.Controllers.JOBS_CONTROLLER.value.
+                in_progress_hint.format(job_info=job_info))
 
-    # Process managed jobs and services results in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        jobs_future = executor.submit(handle_managed_jobs)
-        services_future = executor.submit(handle_services)
+    if show_services:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Services{colorama.Style.RESET_ALL}')
+        num_services = None
+        if managed_jobs_query_interrupted:
+            msg = 'KeyboardInterrupt'
+        elif service_status_request_id is not None:
+            with rich_utils.client_status('[cyan]Checking services[/]'):
+                try:
+                    num_services, msg = _handle_services_request(
+                        service_status_request_id,
+                        service_names=None,
+                        show_all=False,
+                        show_endpoint=False,
+                        is_called_by_user=False)
+                except KeyboardInterrupt:
+                    sdk.api_cancel(service_status_request_id, silent=True)
+                    num_services = -1
+                    msg = 'KeyboardInterrupt'
+        else:
+            msg = 'Failed to initiate services request'
+        click.echo(msg)
+        if num_services is not None:
+            hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                         value.in_progress_hint)
 
-        # Get results
-        keyboard_interrupted = False
-        if show_managed_jobs:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed Jobs{colorama.Style.RESET_ALL}')
-            with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
-                num_in_progress_jobs, jobs_msg = jobs_future.result()
-                keyboard_interrupted = num_in_progress_jobs == -1
-            click.echo(jobs_msg)
-            if num_in_progress_jobs is not None:
-                # jobs controller is UP.
-                job_info = ''
-                if num_in_progress_jobs > 0:
-                    plural_and_verb = ' is'
-                    if num_in_progress_jobs > 1:
-                        plural_and_verb = 's are'
-                    job_info = (
-                        f'{num_in_progress_jobs} managed job{plural_and_verb} '
-                        'in progress')
-                    if (num_in_progress_jobs >
-                            _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
-                        job_info += (
-                            f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
-                            'ones shown)')
-                    job_info += '. '
-                hints.append(
-                    controller_utils.Controllers.JOBS_CONTROLLER.value.
-                    in_progress_hint.format(job_info=job_info))
-
-        if show_services and not keyboard_interrupted:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Services{colorama.Style.RESET_ALL}')
-            num_services, services_msg = services_future.result()
-            click.echo(services_msg)
-            if num_services is not None:
-                hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                             value.in_progress_hint)
-
-    # Phase 6: Final output
     if num_pending_autostop > 0 and not refresh:
         # Don't print this hint if there's no pending autostop or user has
         # already passed --refresh.
