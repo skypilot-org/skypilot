@@ -1,4 +1,4 @@
-"""Alembic environment configuration for SkyPilot database migrations."""
+"""Alembic environment configuration for state database migrations."""
 from logging.config import fileConfig
 
 from alembic import context

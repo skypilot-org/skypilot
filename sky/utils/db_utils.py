@@ -146,6 +146,63 @@ def add_column_to_table_sqlalchemy(
     session.commit()
 
 
+def add_column_to_table_alembic(
+    table_name: str,
+    column_name: str,
+    column_type: sqlalchemy.types.TypeEngine,
+    server_default: Optional[str] = None,
+    copy_from: Optional[str] = None,
+    value_to_replace_existing_entries: Optional[Any] = None,
+):
+    """Add a column to a table using Alembic operations.
+
+    This provides the same interface as add_column_to_table_sqlalchemy but
+    uses Alembic's op.add_column() for proper migration support.
+
+    Args:
+        table_name: Name of the table to add column to
+        column_name: Name of the new column
+        column_type: SQLAlchemy column type
+        server_default: Server-side default value for the column
+        copy_from: Column name to copy values from (for existing rows)
+        value_to_replace_existing_entries: Default value for existing NULL
+            entries
+    """
+    from alembic import op  # pylint: disable=import-outside-toplevel
+
+    # Try to add the column
+    try:
+        kwargs = {}
+        if server_default is not None:
+            kwargs['server_default'] = server_default
+        op.add_column(table_name,
+                      sqlalchemy.Column(column_name, column_type, **kwargs))
+    except (sqlalchemy.exc.DuplicateColumnError,
+            sqlalchemy.exc.OperationalError,
+            sqlalchemy.exc.ProgrammingError) as e:
+        if any(phrase in str(e).lower()
+               for phrase in ['duplicate column', 'already exists']):
+            pass  # Column already exists, that's fine
+        else:
+            raise
+
+    # Handle data migration - always run these (matches original behavior)
+    conn = op.get_bind()
+
+    if copy_from is not None:
+        conn.execute(
+            sqlalchemy.text(
+                f'UPDATE {table_name} SET {column_name} = {copy_from} '
+                f'WHERE {column_name} IS NULL'))
+
+    if value_to_replace_existing_entries is not None:
+        conn.execute(
+            sqlalchemy.text(
+                f'UPDATE {table_name} SET {column_name} = :replacement_value '
+                f'WHERE {column_name} IS NULL'),
+            {'replacement_value': value_to_replace_existing_entries})
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 

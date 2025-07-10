@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from alembic import command as alembic_command
-from alembic.config import Config
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -32,6 +31,7 @@ from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
+from sky.utils import alembic_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import db_utils
@@ -253,8 +253,10 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Run Alembic migrations - handles both fresh and existing databases
-    alembic_command.upgrade(_get_alembic_config(), 'head')
+    # Get alembic config for state db and run migrations
+    alembic_config = alembic_utils.get_alembic_config(engine,
+                                                      'state_db')
+    alembic_command.upgrade(alembic_config, 'head')
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:

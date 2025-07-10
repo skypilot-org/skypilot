@@ -11,6 +11,7 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from alembic import command as alembic_command
 import colorama
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -23,6 +24,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
+from sky.utils import alembic_utils
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -130,90 +132,10 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
-    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, engine)
-
-    # Backward compatibility: add columns that not exist in older databases
-    with orm.Session(engine) as session:
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot',
-                                                'failure_reason',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'spot_job_id',
-                                                sqlalchemy.Integer(),
-                                                copy_from='job_id')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'task_id',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0',
-            value_to_replace_existing_entries=0)
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'task_name',
-                                                sqlalchemy.Text(),
-                                                copy_from='job_name')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'specs',
-            sqlalchemy.Text(),
-            value_to_replace_existing_entries=json.dumps({
-                'max_restarts_on_errors': 0,
-            }))
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'local_log_file',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'metadata',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'{}\'',
-            value_to_replace_existing_entries='{}')
-
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'schedule_state',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'controller_pid',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'dag_yaml_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'env_file_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'user_hash', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'workspace',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries='default')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'priority',
-            sqlalchemy.Integer(),
-            value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'entrypoint', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'original_user_yaml_path',
-                                                sqlalchemy.Text())
-        session.commit()
+    # Get alembic config for spot jobs db and run migrations
+    alembic_config = alembic_utils.get_alembic_config(engine,
+                                                      'spot_jobs_db')
+    alembic_command.upgrade(alembic_config, 'head')
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
