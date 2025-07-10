@@ -24,14 +24,6 @@ _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _DB_INIT_LOCK = threading.Lock()
 
 
-class _IpRegistry(models.SSHBase):  # type: ignore[valid-type, misc]
-    """Ips currently being used by SSH Clusters"""
-    __tablename__ = 'ip_registry'
-
-    ip = sqlalchemy.Column(sqlalchemy.Text, primary_key=True)
-    cluster_name = sqlalchemy.Column(sqlalchemy.Text, nullable=False)
-
-
 def _create_table():
     # refer to `global_user_state.py` create_table()
     if _SQLALCHEMY_ENGINE is None:
@@ -140,75 +132,3 @@ def remove_cluster(cluster_name: str):
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(models.SSHCluster).filter_by(name=cluster_name).delete()
         session.commit()
-
-
-## ip registry ##
-
-# IpRegistry is meant to be a quicker way of figuring out whether
-# a specific IP is being used in an SSH cluster or not. This is only
-# for actual SSH nodes that have been deployed using `sky ssh up`.
-# Since a single node cannot be used for two ssh clusters, these methods
-# help to quickly find out whether this is the case. Therefore, the
-# underlying model class is transparent.
-
-# TODO(kyuds): currently, we use unresolved IPs. We should use resolved IPs.
-
-
-@_init_db
-def add_ips_to_registry(cluster_name: str, ips: List[str]):
-    """Add ips to cluster on IpRegistry"""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        existing_map = {
-            row.ip: row.cluster_name
-            for row in (session.query(_IpRegistry).filter(
-                _IpRegistry.ip.in_(ips)).all())
-        }
-
-        conflicting_ips = [
-            ip for ip, existing_cluster in existing_map.items()
-            if existing_cluster != cluster_name
-        ]
-        if conflicting_ips:
-            raise ValueError('The following ips are already '
-                             f'in use: {conflicting_ips}')
-
-        for ip in ips:
-            if ip not in existing_map:
-                session.add(_IpRegistry(ip=ip, cluster_name=cluster_name))
-        session.commit()
-
-
-@_init_db
-def remove_ips_from_registry(cluster_name: str, ips: List[str]):
-    """Remove ips from cluster on IpRegistry"""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(_IpRegistry).filter(
-            _IpRegistry.cluster_name == cluster_name,
-            _IpRegistry.ip.in_(ips)).delete(synchronize_session=False)
-        session.commit()
-
-
-@_init_db
-def query_ip_from_registry(ip: str) -> Optional[str]:
-    """Return cluster name of which this ip is registered"""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(_IpRegistry).filter_by(ip=ip).first()
-        if row is None:
-            return None
-        return row.cluster_name
-
-
-@_init_db
-def query_ips_from_registry(ips: List[str]) -> List[Optional[str]]:
-    """Return cluster names of which ips are registered
-
-    Ips not registered will return None.
-    len(ips) == len(return_value)"""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(_IpRegistry).filter(_IpRegistry.ip.in_(ips)).all()
-        ips_to_cluster = {row.ip: row.cluster_name for row in rows}
-        return [ips_to_cluster.get(ip) for ip in ips]
