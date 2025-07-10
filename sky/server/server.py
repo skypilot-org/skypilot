@@ -26,6 +26,7 @@ import fastapi
 from fastapi.middleware import cors
 from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
+import uvloop
 
 import sky
 from sky import catalog
@@ -128,7 +129,7 @@ async def _override_user_info_in_request_body(request: fastapi.Request,
     if body:
         try:
             original_json = await request.json()
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(f'Error parsing request JSON: {e}')
         else:
             logger.debug(f'Overriding user for {request.state.request_id}: '
@@ -1461,6 +1462,12 @@ async def stream(
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
+        if not log_path_to_stream.exists():
+            # The log file might be deleted by the request GC daemon but the
+            # request task is still in the database.
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Log of request {request_id!r} has been deleted')
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1775,13 +1782,18 @@ if __name__ == '__main__':
 
     queue_server: Optional[multiprocessing.Process] = None
     workers: List[executor.RequestWorker] = []
+    # Global background tasks that will be scheduled in a separate event loop.
+    global_tasks: List[asyncio.Task] = []
     try:
+        background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
-            metrics_thread = threading.Thread(target=metrics.run_metrics_server,
-                                              args=(cmd_args.host,
-                                                    cmd_args.metrics_port),
-                                              daemon=True)
-            metrics_thread.start()
+            metrics_server = metrics.build_metrics_server(
+                cmd_args.host, cmd_args.metrics_port)
+            global_tasks.append(background.create_task(metrics_server.serve()))
+        global_tasks.append(
+            background.create_task(requests_lib.requests_gc_daemon()))
+        threading.Thread(target=background.run_forever, daemon=True).start()
+
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
@@ -1799,6 +1811,8 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
 
+        for gt in global_tasks:
+            gt.cancel()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))

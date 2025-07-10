@@ -1600,7 +1600,8 @@ class RetryingVmProvisioner(object):
                     CloudVmRayBackend().post_teardown_cleanup(
                         handle,
                         terminate=not prev_cluster_ever_up,
-                        remove_from_db=False)
+                        remove_from_db=False,
+                        failover=True)
                     # TODO(suquark): other clouds may have different zone
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
@@ -3612,13 +3613,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str],
-                 resources_str: str) -> Tuple[int, str]:
+                 job_name: Optional[str], resources_str: str,
+                 metadata: str) -> Tuple[int, str]:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
-            resources_str=resources_str)
+            resources_str=resources_str,
+            metadata=metadata)
         returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -3701,7 +3703,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str)
+        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
+                                        task.metadata_json)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
@@ -4402,12 +4405,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               terminate: bool,
                               purge: bool = False,
-                              remove_from_db: bool = True) -> None:
+                              remove_from_db: bool = True,
+                              failover: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
         * Deleting the TPUs;
         * Removing ssh configs for the cluster;
+        * Deleting the open ports;
+        * Deleting the custom multi network infrastructure based on the
+          failover flag (e.g. delete firewalls, subnets, and VPCs for GPU
+          Direct if failover is False, otherwise, only delete the subnets);
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
         """
@@ -4439,12 +4447,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The cluster yaml does not exist when skypilot has not found
             # the right resource to provision the cluster.
             if handle.cluster_yaml is not None:
+                launched_resources = (
+                    handle.launched_resources.assert_launchable())
+                cloud = launched_resources.cloud
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                ports_cleaned_up = False
+                custom_multi_network_cleaned_up = False
                 try:
-                    launched_resources = (
-                        handle.launched_resources.assert_launchable())
-                    cloud = launched_resources.cloud
-                    config = global_user_state.get_cluster_yaml_dict(
-                        handle.cluster_yaml)
                     cloud.check_features_are_supported(
                         launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -4452,7 +4462,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 cluster_name_on_cloud,
                                                 handle.launched_resources.ports,
                                                 config['provider'])
-                    self.remove_cluster_config(handle)
+                    ports_cleaned_up = True
                 except exceptions.NotSupportedError:
                     pass
                 except exceptions.PortDoesNotExistError:
@@ -4465,6 +4475,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'set. Details: {msg}')
                     else:
                         raise
+
+                # Clean up custom multi networks, e.g. the subnets, firewalls,
+                # and VPCs created for GCP GPUDirect TCPX
+                try:
+                    cloud.check_features_are_supported(
+                        handle.launched_resources, {
+                            clouds.CloudImplementationFeatures.
+                            CUSTOM_MULTI_NETWORK
+                        })
+                    provision_lib.cleanup_custom_multi_network(
+                        repr(cloud), cluster_name_on_cloud, config['provider'],
+                        failover)
+                    custom_multi_network_cleaned_up = True
+                except exceptions.NotSupportedError:
+                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    if purge:
+                        msg = common_utils.format_exception(e, use_bracket=True)
+                        logger.warning(
+                            f'Failed to cleanup custom multi network. Skipping '
+                            f'since purge is set. Details: {msg}')
+                    else:
+                        raise
+
+                if ports_cleaned_up and custom_multi_network_cleaned_up:
+                    try:
+                        self.remove_cluster_config(handle)
+                    except Exception as e:  # pylint: disable=broad-except
+                        if purge:
+                            msg = common_utils.format_exception(
+                                e, use_bracket=True)
+                            logger.warning(
+                                f'Failed to remove cluster config. Skipping '
+                                f'since purge is set. Details: {msg}')
+                        else:
+                            raise
 
         sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
             handle.cluster_name)

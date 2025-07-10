@@ -9,7 +9,8 @@ CONTAINER_NAME_PREFIX = 'sky-remote-test'
 
 def is_inside_docker() -> bool:
     """Check if the current environment is running inside a Docker container."""
-    if os.path.exists('/.dockerenv'):
+    if os.path.exists('/.dockerenv') or os.path.exists(
+            '/proc/sys/fs/binfmt_misc/WSLInterop'):
         return True
 
     return False
@@ -71,6 +72,8 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         os.path.join(user_home, '.azure'): f'/home/{username}/.azure',
         os.path.join(user_home, '.config/gcloud'): f'/home/{username}/.config/gcloud',
         os.path.join(user_home, '.kube/config'): f'/home/{username}/.kube/config',
+        # Use this directory to check if all files are copied/mounted correctly.
+        os.path.join(workspace_path, 'tests/smoke_tests/docker'): f'/success_mount_directory',
     }
 
     if is_inside_docker():
