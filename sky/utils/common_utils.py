@@ -496,9 +496,7 @@ def dump_yaml(path: str,
         config: the configuration to dump.
     """
     if create_if_not_exists:
-        p = pathlib.Path(path).expanduser()
-        p.touch()
-        path = str(p)
+        pathlib.Path(path).touch()
     with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
