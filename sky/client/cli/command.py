@@ -5517,26 +5517,6 @@ def ssh_down(infra: Optional[str], async_call: bool, force: bool):
         sdk.stream_and_get(request_id)
 
 
-# TODO(kyuds)
-# @ssh.command('status', cls=_DocumentedCodeCommand)
-# @click.option(
-#     '--infra',
-#     help='Name of the cluster to show status of. If not specified, all '
-#     'cluster statuses will be queried.')
-# def ssh_status(infra: Optional[str]):
-#     """Show status of SSH Node Pool clusters."""
-#     raise NotImplementedError()  # TODO(kyuds)
-
-# @ssh.command('ls', cls=_DocumentedCodeCommand)
-# def ssh_list():
-#     """List the names of all SSH Node Pools that were launched.
-
-#     This command doesn't check whether the cluster itself is active.
-#     For that use case, use `sky ssh status` instead.
-#     """
-#     raise NotImplementedError()  # TODO(kyuds)
-
-
 def main():
     return cli()
 

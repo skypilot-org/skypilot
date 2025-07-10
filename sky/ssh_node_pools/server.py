@@ -40,25 +40,6 @@ async def update_ssh_node_pools(pool_config: Dict[str, Any]) -> Dict[str, str]:
                                     f' {common_utils.format_exception(e)}')
 
 
-# TODO(kyuds): ???
-# @router.delete('/{pool_name}')
-# async def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
-#     """Delete a SSH Node Pool configuration."""
-#     try:
-#         if ssh_node_pools_core.delete_pool(pool_name):
-#             return {'status': 'success'}
-#         else:
-#             raise fastapi.HTTPException(
-#                 status_code=404,
-#                 detail=f'SSH Node Pool `{pool_name}` not found')
-#     except fastapi.HTTPException:
-#         raise
-#     except Exception as e:
-#         raise fastapi.HTTPException(status_code=500,
-#                                     detail='Failed to delete SSH Node Pool: '
-#                                     f'{common_utils.format_exception(e)}')
-
-
 @router.post('/keys')
 async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
     """Upload SSH private key."""

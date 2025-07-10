@@ -116,11 +116,6 @@ def _validate_pool_config(config: Dict[str, Any]) -> None:
             raise InvalidSSHConfigError(
                 'Each host configuration must be a dictionary, got '
                 f'{type(host_config).__name__}')
-        # _validate_field(host_config, 'user', str)
-        # _validate_field(host_config, 'ip', str)
-        # _validate_field(host_config, 'password', str)
-        # _validate_field(host_config, 'identity_file', str)
-        # _validate_field(host_config, 'use_ssh_config', bool)
 
 
 def update_pool(pool_config: Dict[str, Any]) -> None:
