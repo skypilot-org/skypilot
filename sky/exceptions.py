@@ -634,6 +634,15 @@ class ServerTemporarilyUnavailableError(Exception):
     pass
 
 
+class RequestInterruptedError(Exception):
+    """Raised when a request is interrupted by the server.
+
+    Client is expected to retry the request immediately when
+    this error is raised.
+    """
+    pass
+
+
 class RestfulPolicyError(Exception):
     """Raised when failed to call a RESTful policy."""
     pass

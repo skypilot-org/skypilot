@@ -854,6 +854,16 @@ def delete_requests(req_ids: List[str]):
         session.commit()
 
 
+def delete_requests_by_host_uuid(host_uuid: str):
+    """Delete requests by host UUID."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        stmt = sqlalchemy.delete(request_table).where(
+            request_table.c.host_uuid == host_uuid)
+        session.execute(stmt)
+        session.commit()
+
+
 def clean_finished_requests_with_retention(retention_seconds: int):
     """Clean up finished requests older than the retention period.
 

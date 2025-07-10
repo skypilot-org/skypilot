@@ -1,7 +1,6 @@
 """State for API server process."""
 
 import os
-from typing import Optional
 
 from sky.skylet import constants
 
@@ -28,6 +27,6 @@ def set_block_requests(shutting_down: bool) -> None:
     _block_requests = shutting_down
 
 
-def get_host_uuid() -> Optional[str]:
+def get_host_uuid() -> str:
     """Get the UUID of the API server."""
     return _host_uuid

@@ -213,7 +213,17 @@ spec:
           httpGet:
             path: /api/health
             port: 46580
+          {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+          # When using RollingUpdate strategy, be more patient with the new
+          # API server to avoid flaky serving where one of the server process
+          # returns ready of the healthz check endpoint while others may still
+          # be starting up.
+          successThreshold: 3
+          {{- else }}
+          # For fast startup, just serve when healthz check passes. There is no
+          # other replica to serve requests anyway.
           successThreshold: 1
+          {{- end }}
           failureThreshold: 3
           periodSeconds: 5
           initialDelaySeconds: 5

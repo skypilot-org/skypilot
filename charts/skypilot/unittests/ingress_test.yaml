@@ -42,6 +42,9 @@ tests:
       - equal:
           path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
           value: "2"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-change-on-failure"]
+          value: "true"
 
   - it: should not add session affinity annotations for Recreate strategy
     set:

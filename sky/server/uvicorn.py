@@ -99,6 +99,7 @@ class Server(uvicorn.Server):
         with lock.acquire():
             logger.info(f'Worker {os.getpid()} elected as shutdown coordinator')
             self._wait_requests()
+            requests_lib.delete_requests_by_host_uuid(state.get_host_uuid())
 
         logger.info('Shutting down server...')
         self.should_exit = True

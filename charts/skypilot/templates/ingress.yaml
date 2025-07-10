@@ -15,8 +15,9 @@ metadata:
     nginx.ingress.kubernetes.io/affinity: "cookie"
     nginx.ingress.kubernetes.io/session-cookie-name: "ROUTEID"
     nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
     nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
-    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "2"
+    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
     {{- end }}
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: nginx

@@ -1066,10 +1066,6 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
-    if state.get_block_requests():
-        raise fastapi.HTTPException(
-            status_code=503,
-            detail='Server is shutting down, please try again later.')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
