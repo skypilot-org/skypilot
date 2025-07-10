@@ -35,6 +35,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -43,6 +44,7 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -134,9 +136,15 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
-def _check_consolidation_mode_consistency(
+def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
-    """Check the consistency of the consolidation mode."""
+    """Validate the consolidation mode config."""
+    if (current_is_consolidation_mode and
+            not env_options.Options.IS_DEVELOPER.get() and
+            server_common.is_api_server_local()):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
@@ -182,7 +190,7 @@ def _check_consolidation_mode_consistency(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _check_consolidation_mode_consistency(consolidation_mode)
+    _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 

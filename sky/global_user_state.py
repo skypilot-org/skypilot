@@ -220,17 +220,16 @@ def _glob_to_similar(glob_pattern):
     return like_pattern
 
 
-def create_table():
+def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
-    if (_SQLALCHEMY_ENGINE.dialect.name
-            == db_utils.SQLAlchemyDialect.SQLITE.value and
+    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
             not common_utils.is_wsl()):
         try:
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            with orm.Session(engine) as session:
                 session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
                 session.commit()
         except sqlalchemy_exc.OperationalError as e:
@@ -240,12 +239,12 @@ def create_table():
             # is not critical and is likely to be enabled by other processes.
 
     # Create tables if they don't exist
-    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, _SQLALCHEMY_ENGINE)
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, engine)
 
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         # Add autostop column to clusters table
         db_utils.add_column_to_table_sqlalchemy(session,
                                                 'clusters',
@@ -391,15 +390,15 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-                    conn_string, poolclass=sqlalchemy.NullPool)
+                engine = sqlalchemy.create_engine(conn_string,
+                                                  poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/state.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
                                                        exist_ok=True)
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
-                                                              db_path)
-            create_table()
+                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+            create_table(engine)
+            _SQLALCHEMY_ENGINE = engine
     return _SQLALCHEMY_ENGINE
 
 
