@@ -164,6 +164,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`projectId <helm-values-gcpCredentials-projectId>`: null
     :ref:`gcpSecretName <helm-values-gcpCredentials-gcpSecretName>`: gcp-credentials
 
+  :ref:`r2Credentials <helm-values-r2Credentials>`:
+    :ref:`enabled <helm-values-r2Credentials-enabled>`: false
+    :ref:`r2SecretName <helm-values-r2Credentials-r2SecretName>`: r2-credentials
+
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
 
   :ref:`securityContext <helm-values-securityContext>`:
@@ -1181,6 +1185,39 @@ Default: ``gcp-credentials``
 
   gcpCredentials:
     gcpSecretName: gcp-credentials
+
+.. _helm-values-r2Credentials:
+
+``r2Credentials``
+~~~~~~~~~~~~~~~~~
+
+.. _helm-values-r2Credentials-enabled:
+
+``r2Credentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable R2 credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  r2Credentials:
+    enabled: true
+
+.. _helm-values-r2Credentials-r2SecretName:
+
+``r2Credentials.r2SecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the R2 credentials. Only used if enabled is true.
+
+Default: ``r2-credentials``
+
+.. code-block:: yaml
+
+  r2Credentials:
+    r2SecretName: your-r2-credentials-secret-name
 
 .. _helm-values-podSecurityContext:
 

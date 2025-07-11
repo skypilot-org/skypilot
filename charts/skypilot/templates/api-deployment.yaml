@@ -248,6 +248,10 @@ spec:
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
         {{- end }}
+        {{- if .Values.r2Credentials.enabled }}
+        - name: r2-credentials
+          mountPath: /root/.cloudflare
+        {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
@@ -401,6 +405,11 @@ spec:
       - name: nebius-credentials
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
+      {{- end }}
+      {{- if .Values.r2Credentials.enabled }}
+      - name: r2-credentials
+        secret:
+          secretName: {{ .Values.r2Credentials.r2SecretName }}
       {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
