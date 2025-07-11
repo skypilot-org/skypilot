@@ -46,13 +46,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
-from sky.utils import env_options
-from sky.utils import infra_utils
-from sky.utils import rich_utils
-from sky.utils import status_lib
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -92,6 +86,9 @@ def stream_response(request_id: Optional[str],
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
+        # We import rich_utils here to avoid expensive imports when not needed.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import rich_utils
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 line_count += 1
@@ -131,6 +128,9 @@ def check(infra_list: Optional[Tuple[str, ...]],
         clouds = None
     else:
         specified_clouds = []
+        # We import infra_utils here to avoid expensive imports when not needed.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import infra_utils
         for infra_str in infra_list:
             infra = infra_utils.InfraInfo.from_str(infra_str)
             if infra.cloud is None:
@@ -583,6 +583,9 @@ def _launch(
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
         prompt = None
+        # We import status_lib here to avoid expensive imports when not needed.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import status_lib
         if cluster_status is None:
             prompt = (
                 f'Launching a new cluster {cluster_name!r}. '
@@ -1494,6 +1497,9 @@ def _update_remote_ssh_node_pools(file: str,
             raise ValueError(
                 f'SSH Node Pool config file {file} does not exist. '
                 'Please check if the file exists and the path is correct.')
+    # We import ssh_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.kubernetes import ssh_utils
     config = ssh_utils.load_ssh_targets(file)
     config = ssh_utils.get_cluster_config(config, infra)
     pools_config = {}
@@ -1729,6 +1735,9 @@ def get(request_id: str) -> Any:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
+        # We import env_options here to avoid expensive imports when not needed.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import env_options
         if env_options.Options.SHOW_DEBUG_INFO.get():
             stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
             logger.error('=== Traceback on SkyPilot API Server ===\n'
@@ -1995,6 +2004,10 @@ def api_stop() -> None:
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            # We import subprocess_utils here to avoid expensive imports when
+            # not needed.
+            # pylint: disable=import-outside-toplevel
+            from sky.utils import subprocess_utils
             subprocess_utils.kill_children_processes(parent_pids=[process.pid],
                                                      force=True)
             found = True
