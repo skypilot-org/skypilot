@@ -756,9 +756,8 @@ class Kubernetes(clouds.Cloud):
             network_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
         deploy_vars['k8s_enable_gpudirect_tcpxo'] = (
             network_type == KubernetesHighPerformanceNetworkType.GCP_TCPXO)
-        rdma_enabled = (
-            network_type ==
-            KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+        rdma_enabled = (network_type ==
+                        KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
         deploy_vars['k8s_enable_gpudirect_rdma'] = rdma_enabled
         if rdma_enabled and machine_type.startswith('a4'):
             deploy_vars['k8s_enable_gpudirect_rdma_a4'] = True
@@ -1089,7 +1088,8 @@ class Kubernetes(clouds.Cloud):
                     # Check for Nebius clusters
                     for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
-                            return KubernetesHighPerformanceNetworkType.NEBIUS, ''
+                            return (KubernetesHighPerformanceNetworkType.NEBIUS,
+                                    '')
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
@@ -1116,13 +1116,11 @@ class Kubernetes(clouds.Cloud):
                                 KubernetesHighPerformanceNetworkType.GCP_TCPXO,
                                 'a3-megagpu-8g')
                         elif 'a4-highgpu-8g' in instance_type:
-                            return (
-                                KubernetesHighPerformanceNetworkType.
-                                GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g')
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g')
                         elif 'a3-ultragpu-8g' in instance_type:
-                            return (
-                                KubernetesHighPerformanceNetworkType.
-                                GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g')
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g')
                         # Generic A3/A4 detection as fallback
                         elif machine_family == 'a4':
                             return (KubernetesHighPerformanceNetworkType.
@@ -1140,7 +1138,8 @@ class Kubernetes(clouds.Cloud):
                     if is_gpu_direct_tcpx_instance and has_high_perf_gpu:
                         # Default to TCPX if we can't determine the specific
                         # variant
-                        return KubernetesHighPerformanceNetworkType.GCP_TCPX, instance_type
+                        return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                instance_type)
 
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
@@ -1164,7 +1163,7 @@ class Kubernetes(clouds.Cloud):
         # Check if any machine type supports high perf networking for GKE.
         if 'a3-highgpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
-                     'a3-highgpu-8g')
+                    'a3-highgpu-8g')
         elif 'a3-edgegpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
                     'a3-edgegpu-8g')
