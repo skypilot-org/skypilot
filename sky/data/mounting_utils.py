@@ -6,9 +6,9 @@ import shlex
 import textwrap
 from typing import Optional
 
-from sky import exceptions
 from sky.skylet import constants
 from sky.utils import command_runner
+from sky.utils import exceptions
 
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'

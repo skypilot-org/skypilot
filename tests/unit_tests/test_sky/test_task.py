@@ -5,8 +5,8 @@ from unittest import mock
 import pytest
 
 import sky
-from sky import exceptions
 from sky import task
+from sky.utils import exceptions
 
 
 def test_validate_workdir():

@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from sky import exceptions
 from sky.data import storage as storage_lib
+from sky.utils import exceptions
 
 
 class TestStorageSpecLocalSource:

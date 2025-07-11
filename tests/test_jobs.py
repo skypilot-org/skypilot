@@ -3,9 +3,9 @@ from sqlalchemy import create_engine
 
 import sky
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky.utils import db_utils
+from sky.utils import exceptions
 from sky.utils import resources_utils
 
 

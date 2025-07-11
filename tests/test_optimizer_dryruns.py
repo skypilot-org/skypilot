@@ -10,10 +10,10 @@ import pytest
 
 import sky
 from sky import clouds
-from sky import exceptions
 from sky import optimizer
 from sky import skypilot_config
 from sky.client.cli import command
+from sky.utils import exceptions
 from sky.utils import registry
 from sky.utils import resources_utils
 

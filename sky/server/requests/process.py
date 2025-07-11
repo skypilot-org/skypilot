@@ -6,8 +6,8 @@ import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
 
-from sky import exceptions
 from sky.utils import atomic
+from sky.utils import exceptions
 from sky.utils import subprocess_utils
 
 logger = logging.getLogger(__name__)

@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from sky import exceptions
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import schemas
 from sky.volumes import volume as volume_lib
 
@@ -220,8 +220,8 @@ class TestVolume:
 
     def test_volume_schema_validation_valid_configs(self, monkeypatch):
         """Test volume schema validation with valid configurations."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -263,8 +263,8 @@ class TestVolume:
     def test_volume_schema_validation_missing_required_fields(
             self, monkeypatch):
         """Test volume schema validation with missing required fields."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -303,8 +303,8 @@ class TestVolume:
 
     def test_volume_schema_validation_invalid_type(self, monkeypatch):
         """Test volume schema validation with invalid type."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -337,8 +337,8 @@ class TestVolume:
 
     def test_volume_schema_validation_invalid_size_pattern(self, monkeypatch):
         """Test volume schema validation with invalid size pattern."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -365,8 +365,8 @@ class TestVolume:
 
     def test_volume_schema_validation_invalid_config_object(self, monkeypatch):
         """Test volume schema validation with invalid config object."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -403,8 +403,8 @@ class TestVolume:
 
     def test_volume_schema_validation_additional_properties(self, monkeypatch):
         """Test volume schema validation with additional properties."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -430,8 +430,8 @@ class TestVolume:
 
     def test_volume_schema_validation_case_insensitive_enums(self, monkeypatch):
         """Test volume schema validation with case insensitive enums."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str
@@ -467,8 +467,8 @@ class TestVolume:
 
     def test_volume_schema_validation_access_modes(self, monkeypatch):
         """Test volume schema validation with different access modes."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Mock infra_utils.InfraInfo.from_str

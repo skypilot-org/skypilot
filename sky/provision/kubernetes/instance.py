@@ -4,7 +4,6 @@ import json
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -19,6 +18,7 @@ from sky.provision.kubernetes import volume
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import exceptions
 from sky.utils import kubernetes_enums
 from sky.utils import status_lib
 from sky.utils import subprocess_utils

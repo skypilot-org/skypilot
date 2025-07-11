@@ -13,7 +13,6 @@ import subprocess
 import time
 import urllib.parse
 
-from sky import exceptions as sky_exceptions
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
@@ -24,6 +23,7 @@ from sky.adaptors import oci
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.skylet import constants
+from sky.utils import exceptions as sky_exceptions
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

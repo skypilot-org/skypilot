@@ -18,7 +18,6 @@ import requests
 import sky
 from sky import backends
 from sky import core
-from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
@@ -34,6 +33,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import status_lib
 from sky.utils import ux_utils
 

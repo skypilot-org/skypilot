@@ -4,9 +4,9 @@
 
 import pytest
 
-from sky import exceptions
 from sky.adaptors import aws
 from sky.provision.aws import utils
+from sky.utils import exceptions
 
 
 def test_handle_boto_error():

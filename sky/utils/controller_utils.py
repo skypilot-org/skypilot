@@ -12,7 +12,6 @@ import colorama
 
 from sky import check as sky_check
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import resources
 from sky import sky_logging
@@ -32,6 +31,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils

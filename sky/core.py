@@ -13,7 +13,6 @@ from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
 from sky import data
-from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import optimizer
@@ -33,6 +32,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import exceptions
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib

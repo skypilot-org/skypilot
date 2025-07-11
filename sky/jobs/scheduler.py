@@ -46,13 +46,13 @@ import typing
 
 import filelock
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:

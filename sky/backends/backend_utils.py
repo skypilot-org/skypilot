@@ -26,7 +26,6 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import logs
 from sky import provision as provision_lib
@@ -45,6 +44,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils

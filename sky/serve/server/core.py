@@ -11,7 +11,6 @@ import colorama
 
 import sky
 from sky import backends
-from sky import exceptions
 from sky import execution
 from sky import sky_logging
 from sky import skypilot_config
@@ -29,6 +28,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import exceptions
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

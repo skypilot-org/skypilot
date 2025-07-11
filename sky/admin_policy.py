@@ -8,10 +8,10 @@ import colorama
 import pydantic
 
 import sky
-from sky import exceptions
 from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import exceptions
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

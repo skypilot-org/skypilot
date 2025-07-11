@@ -46,7 +46,6 @@ import sky
 from sky import backends
 from sky import catalog
 from sky import clouds
-from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
@@ -71,6 +70,7 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry

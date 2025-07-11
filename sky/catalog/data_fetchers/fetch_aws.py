@@ -17,9 +17,9 @@ from typing import List, Optional, Set, Tuple, Union
 
 import numpy as np
 
-from sky import exceptions
 from sky.adaptors import aws
 from sky.adaptors import common as adaptors_common
+from sky.utils import exceptions
 from sky.utils import log_utils
 from sky.utils import ux_utils
 

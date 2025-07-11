@@ -7,12 +7,12 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct.16, 2024: Initial implementation
 """
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.provision import common
 from sky.provision.oci.query_utils import query_helper
+from sky.utils import exceptions
 
 logger = sky_logging.init_logger(__name__)
 

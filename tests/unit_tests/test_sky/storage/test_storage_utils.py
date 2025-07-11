@@ -9,9 +9,9 @@ import zipfile
 
 import pytest
 
-from sky import exceptions
 from sky.data import storage_utils
 from sky.skylet import constants
+from sky.utils import exceptions
 
 
 @pytest.fixture

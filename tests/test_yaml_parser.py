@@ -3,8 +3,8 @@ import textwrap
 
 import pytest
 
-from sky.exceptions import InvalidSkyPilotConfigError
 from sky.task import Task
+from sky.utils.exceptions import InvalidSkyPilotConfigError
 
 
 def _create_config_file(config: str, tmp_path: pathlib.Path) -> str:

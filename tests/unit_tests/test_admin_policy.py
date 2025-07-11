@@ -13,12 +13,12 @@ import pytest
 import requests
 
 import sky
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import exceptions
 
 logger = sky_logging.init_logger(__name__)
 

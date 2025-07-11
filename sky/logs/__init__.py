@@ -1,10 +1,10 @@
 """Sky logging agents."""
 from typing import Optional
 
-from sky import exceptions
 from sky import skypilot_config
 from sky.logs.agent import LoggingAgent
 from sky.logs.gcp import GCPLoggingAgent
+from sky.utils import exceptions
 
 
 def get_logging_agent() -> Optional[LoggingAgent]:

@@ -8,7 +8,7 @@ from google.auth import exceptions as google_exceptions
 import pytest
 
 from sky import authentication as auth
-from sky import exceptions
+from sky.utils import exceptions
 
 
 def test_setup_gcp_authentication():

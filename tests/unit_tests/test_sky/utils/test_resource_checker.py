@@ -4,7 +4,7 @@ import unittest.mock as mock
 
 import pytest
 
-from sky import exceptions
+from sky.utils import exceptions
 from sky.utils import resource_checker
 
 

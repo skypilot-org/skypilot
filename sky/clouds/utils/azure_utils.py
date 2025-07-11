@@ -2,8 +2,8 @@
 
 import typing
 
-from sky import exceptions
 from sky.adaptors import azure
+from sky.utils import exceptions
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

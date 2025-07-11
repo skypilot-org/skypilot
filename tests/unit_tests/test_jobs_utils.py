@@ -1,7 +1,7 @@
 from unittest import mock
 
-from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
+from sky.utils.exceptions import ClusterDoesNotExist
 
 
 @mock.patch('sky.core.down')

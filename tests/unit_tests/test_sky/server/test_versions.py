@@ -4,9 +4,9 @@ from unittest import mock
 
 import pytest
 
-from sky import exceptions
 from sky.server import constants
 from sky.server import versions
+from sky.utils import exceptions
 
 
 def test_check_version_compatibility_compatible_versions():

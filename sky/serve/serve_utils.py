@@ -20,7 +20,6 @@ import colorama
 import filelock
 
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky.adaptors import common as adaptors_common
 from sky.serve import constants
@@ -30,6 +29,7 @@ from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils

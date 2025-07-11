@@ -10,7 +10,6 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common
@@ -18,6 +17,7 @@ from sky.catalog import config
 from sky.catalog.data_fetchers import fetch_aws
 from sky.clouds import aws
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import timeline

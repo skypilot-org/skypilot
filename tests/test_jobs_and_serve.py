@@ -10,12 +10,12 @@ import yaml
 
 import sky
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky.client.cli import command
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import db_utils
+from sky.utils import exceptions
 
 
 def test_job_nonexist_strategy():

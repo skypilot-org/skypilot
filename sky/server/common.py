@@ -22,7 +22,6 @@ import uuid
 import colorama
 import filelock
 
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -35,6 +34,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 

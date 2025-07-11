@@ -10,12 +10,12 @@ import random
 import time
 from typing import Any, Callable, Tuple
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
 from sky.utils import common_utils
+from sky.utils import exceptions
 
 logger = sky_logging.init_logger(__name__)
 

@@ -3,10 +3,10 @@ import enum
 import time
 from typing import Any, Dict, Optional
 
-from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import infra_utils
 from sky.utils import resources_utils
 from sky.utils import schemas

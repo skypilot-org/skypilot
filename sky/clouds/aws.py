@@ -12,7 +12,6 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky import exceptions
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -22,6 +21,7 @@ from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils

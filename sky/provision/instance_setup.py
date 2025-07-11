@@ -7,7 +7,6 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from sky import exceptions
 from sky import logs
 from sky import provision
 from sky import sky_logging
@@ -22,6 +21,7 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
