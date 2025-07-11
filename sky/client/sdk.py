@@ -10,30 +10,20 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
-import base64
-import binascii
-from http import cookiejar
 import json
 import logging
 import os
-import pathlib
-import subprocess
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib import parse as urlparse
-import webbrowser
 
 import click
 import colorama
-import filelock
 
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
-from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -41,7 +31,6 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context as sky_context
@@ -170,6 +159,10 @@ def enabled_clouds(workspace: Optional[str] = None,
         A list of enabled clouds in string format.
     """
     if workspace is None:
+        # We import skypilot_config here to avoid
+        # expensive imports when not needed.
+        # pylint: disable=import-outside-toplevel
+        from sky import skypilot_config
         workspace = skypilot_config.get_active_workspace()
     response = server_common.make_authenticated_request(
         'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
@@ -357,6 +350,9 @@ def dashboard(starting_page: Optional[str] = None) -> None:
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
+    # We import webbrowser here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import webbrowser
     webbrowser.open(url)
 
 
@@ -473,6 +469,13 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    # Keep the import of packages specific to this function local to avoid
+    # expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky import admin_policy
+    from sky.utils import admin_policy_utils
+    from sky.utils import cluster_utils
+
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -494,11 +497,6 @@ def launch(
                 down = resource.autostop_config.down
                 idle_minutes_to_autostop = resource.autostop_config.idle_minutes
 
-    # Keep the import of admin policy local to avoid expensive
-    # imports when not needed.
-    # pylint: disable=import-outside-toplevel
-    from sky import admin_policy
-    from sky.utils import admin_policy_utils
     request_options = admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -2043,40 +2041,12 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         else:
             tail_args.extend(['-n', f'{tail}'])
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        # We import subprocess here to avoid expensive imports when not needed.
+        # pylint: disable=import-outside-toplevel
+        import subprocess
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
-
-
-def _save_config_updates(endpoint: Optional[str] = None,
-                         service_account_token: Optional[str] = None) -> None:
-    """Save endpoint and/or service account token to config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
-    with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not config_path.exists():
-            config_path.touch()
-            config: Dict[str, Any] = {}
-        else:
-            config = skypilot_config.get_user_config()
-            config = dict(config)
-
-        # Update endpoint if provided
-        if endpoint is not None:
-            # We should always reset the api_server config to avoid legacy
-            # service account token.
-            config['api_server'] = {}
-            config['api_server']['endpoint'] = endpoint
-
-        # Update service account token if provided
-        if service_account_token is not None:
-            if 'api_server' not in config:
-                config['api_server'] = {}
-            config['api_server'][
-                'service_account_token'] = service_account_token
-
-        common_utils.dump_yaml(str(config_path), config)
-        skypilot_config.reload_config()
 
 
 def _validate_endpoint(endpoint: Optional[str]) -> str:
@@ -2112,6 +2082,52 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    # We import packages needed for this function here to avoid expensive
+    # imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import base64
+    import binascii
+    from http import cookiejar
+    import pathlib
+    from urllib import parse as urlparse
+    import webbrowser
+
+    import filelock
+
+    from sky import skypilot_config
+    from sky.client import oauth as oauth_lib
+
+    def _save_config_updates(
+            endpoint: Optional[str] = None,
+            service_account_token: Optional[str] = None) -> None:
+        """Save endpoint and/or service account token to config file."""
+        config_path = pathlib.Path(
+            skypilot_config.get_user_config_path()).expanduser()
+        with filelock.FileLock(config_path.with_suffix('.lock')):
+            if not config_path.exists():
+                config_path.touch()
+                config: Dict[str, Any] = {}
+            else:
+                config = skypilot_config.get_user_config()
+                config = dict(config)
+
+            # Update endpoint if provided
+            if endpoint is not None:
+                # We should always reset the api_server config to avoid legacy
+                # service account token.
+                config['api_server'] = {}
+                config['api_server']['endpoint'] = endpoint
+
+            # Update service account token if provided
+            if service_account_token is not None:
+                if 'api_server' not in config:
+                    config['api_server'] = {}
+                config['api_server'][
+                    'service_account_token'] = service_account_token
+
+            common_utils.dump_yaml(str(config_path), config)
+            skypilot_config.reload_config()
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
