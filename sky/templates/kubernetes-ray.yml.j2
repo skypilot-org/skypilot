@@ -587,7 +587,7 @@ available_node_types:
             - name: NCCL_TUNER_PLUGIN
               value: libnccl-tuner.so
             - name: NCCL_TUNER_CONFIG_PATH
-              value: /usr/local/nvidia/lib64
+              value: /usr/local/nvidia/lib64/a3plus_tuner_config.textproto
             - name: CUDA_VISIBLE_DEVICES
               value: "0,1,2,3,4,5,6,7"
             {% endif %}
@@ -596,6 +596,29 @@ available_node_types:
               value: /usr/local/nvidia/lib64
             - name: NCCL_NET
               value: gIB
+            - name: NCCL_CROSS_NIC
+              value: "0"
+            - name: NCCL_NET_GDR_LEVEL
+              value: PIX
+            - name: NCCL_P2P_NET_CHUNKSIZE
+              value: "131072"
+            - name: NCCL_NVLS_CHUNKSIZE
+              value: "524288"
+            - name: NCCL_IB_ADAPTIVE_ROUTING
+              value: "1"
+            - name: NCCL_IB_QPS_PER_CONNECTION
+              value: "4"
+            - name: NCCL_IB_TC
+              value: "52"
+            - name: NCCL_IB_FIFO_TC
+              value: "84"
+            {% if k8s_enable_gpudirect_rdma_a4 %}
+            - name: NCCL_TUNER_CONFIG_PATH
+              value: /usr/local/gib/configs/tuner_config_a4.txtpb
+            {% else %}
+            - name: NCCL_TUNER_CONFIG_PATH
+              value: /usr/local/gib/configs/tuner_config_a3u.txtpb
+            {% endif %}
             {% endif %}
             {% if k8s_fuse_device_required %}
             - name: FUSERMOUNT_SHARED_DIR

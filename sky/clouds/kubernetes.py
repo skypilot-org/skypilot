@@ -129,8 +129,9 @@ class Kubernetes(clouds.Cloud):
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
             # Allow custom network tier if supported by the cluster
             # (e.g., Nebius clusters with high performance networking)
-            if cls._detect_cluster_type(context, resources.network_tier
-                                       ).supports_high_performance_networking():
+            network_type, _ = cls._detect_network_type(context,
+                                                       resources.network_tier)
+            if network_type.supports_high_performance_networking():
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                     None)
@@ -600,8 +601,8 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
-        cluster_type = self._detect_cluster_type(context,
-                                                 resources.network_tier)
+        network_type, machine_type = self._detect_network_type(
+            context, resources.network_tier)
 
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
@@ -615,9 +616,9 @@ class Kubernetes(clouds.Cloud):
                 # Add high-performance networking environment variables for
                 # Nebius (GCP environment variables are handled directly in
                 # the template)
-                if (cluster_type == KubernetesHighPerformanceNetworkType.NEBIUS
+                if (network_type == KubernetesHighPerformanceNetworkType.NEBIUS
                    ):
-                    network_env_vars = cluster_type.get_network_env_vars()
+                    network_env_vars = network_type.get_network_env_vars()
                     k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
@@ -752,15 +753,20 @@ class Kubernetes(clouds.Cloud):
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
-            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+            network_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
         deploy_vars['k8s_enable_gpudirect_tcpxo'] = (
-            cluster_type == KubernetesHighPerformanceNetworkType.GCP_TCPXO)
-        deploy_vars['k8s_enable_gpudirect_rdma'] = (
-            cluster_type ==
+            network_type == KubernetesHighPerformanceNetworkType.GCP_TCPXO)
+        rdma_enabled = (
+            network_type ==
             KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+        deploy_vars['k8s_enable_gpudirect_rdma'] = rdma_enabled
+        if rdma_enabled and machine_type.startswith('a4'):
+            deploy_vars['k8s_enable_gpudirect_rdma_a4'] = True
+        else:
+            deploy_vars['k8s_enable_gpudirect_rdma_a4'] = False
 
         deploy_vars['k8s_ipc_lock_capability'] = (
-            cluster_type.requires_ipc_lock_capability())
+            network_type.requires_ipc_lock_capability())
 
         return deploy_vars
 
@@ -1056,12 +1062,12 @@ class Kubernetes(clouds.Cloud):
         ]
 
     @classmethod
-    def _detect_cluster_type(
+    def _detect_network_type(
         cls,
         context: str,
         network_tier: Optional['resources_utils.NetworkTier'] = None
-    ) -> KubernetesHighPerformanceNetworkType:
-        """Detect the type of Kubernetes cluster based on node labels.
+    ) -> Tuple[KubernetesHighPerformanceNetworkType, str]:
+        """Detect the type of Kubernetes network based on node labels.
 
         Args:
             context: The Kubernetes context to check.
@@ -1069,12 +1075,12 @@ class Kubernetes(clouds.Cloud):
                          returns NONE (no high-performance networking).
 
         Returns:
-            The detected cluster type.
+            A tuple of the detected network type and the instance type.
         """
         # If network_tier is None or not BEST, return NONE
         if (network_tier is None or
                 network_tier != resources_utils.NetworkTier.BEST):
-            return KubernetesHighPerformanceNetworkType.NONE
+            return KubernetesHighPerformanceNetworkType.NONE, ''
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1083,7 +1089,7 @@ class Kubernetes(clouds.Cloud):
                     # Check for Nebius clusters
                     for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
-                            return KubernetesHighPerformanceNetworkType.NEBIUS
+                            return KubernetesHighPerformanceNetworkType.NEBIUS, ''
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
@@ -1097,21 +1103,30 @@ class Kubernetes(clouds.Cloud):
                     if machine_family in ['a3', 'a4']:
                         # Check instance type to determine specific GPUDirect
                         # variant
-                        if ('a3-highgpu-8g' in instance_type or
-                                'a3-edgegpu-8g' in instance_type):
+                        if 'a3-highgpu-8g' in instance_type:
                             return (
-                                KubernetesHighPerformanceNetworkType.GCP_TCPX)
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                'a3-highgpu-8g')
+                        elif 'a3-edgegpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                'a3-edgegpu-8g')
                         elif 'a3-megagpu-8g' in instance_type:
                             return (
-                                KubernetesHighPerformanceNetworkType.GCP_TCPXO)
-                        elif ('a4-highgpu-8g' in instance_type or
-                              'a3-ultragpu-8g' in instance_type):
-                            return (KubernetesHighPerformanceNetworkType.
-                                    GCP_GPUDIRECT_RDMA)
+                                KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                                'a3-megagpu-8g')
+                        elif 'a4-highgpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.
+                                GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g')
+                        elif 'a3-ultragpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.
+                                GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g')
                         # Generic A3/A4 detection as fallback
                         elif machine_family == 'a4':
                             return (KubernetesHighPerformanceNetworkType.
-                                    GCP_GPUDIRECT_RDMA)
+                                    GCP_GPUDIRECT_RDMA, 'a4')
 
                     # Fallback: Check for GPU Direct TCPX capable instance
                     # types with high-perf GPUs
@@ -1125,7 +1140,7 @@ class Kubernetes(clouds.Cloud):
                     if is_gpu_direct_tcpx_instance and has_high_perf_gpu:
                         # Default to TCPX if we can't determine the specific
                         # variant
-                        return KubernetesHighPerformanceNetworkType.GCP_TCPX
+                        return KubernetesHighPerformanceNetworkType.GCP_TCPX, instance_type
 
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
@@ -1141,19 +1156,26 @@ class Kubernetes(clouds.Cloud):
             default_value=None)
         if (autoscaler_type !=
                 kubernetes_enums.KubernetesAutoscalerType.GKE.value):
-            return KubernetesHighPerformanceNetworkType.NONE
+            return KubernetesHighPerformanceNetworkType.NONE, ''
         autoscaler = kubernetes_utils.get_autoscaler(
             kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
         logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
         machine_types = autoscaler.get_available_machine_types(context)
         # Check if any machine type supports high perf networking for GKE.
-        if ('a3-highgpu-8g' in machine_types or
-                'a3-edgegpu-8g' in machine_types):
-            return KubernetesHighPerformanceNetworkType.GCP_TCPX
+        if 'a3-highgpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                     'a3-highgpu-8g')
+        elif 'a3-edgegpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                    'a3-edgegpu-8g')
         elif 'a3-megagpu-8g' in machine_types:
-            return KubernetesHighPerformanceNetworkType.GCP_TCPXO
-        elif ('a3-ultragpu-8g' in machine_types or
-              'a4-highgpu-8g' in machine_types):
-            return KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                    'a3-megagpu-8g')
+        elif 'a4-highgpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
+                    'a4-highgpu-8g')
+        elif 'a3-ultragpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
+                    'a3-ultragpu-8g')
 
-        return KubernetesHighPerformanceNetworkType.NONE
+        return KubernetesHighPerformanceNetworkType.NONE, ''
