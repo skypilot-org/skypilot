@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import os
 import secrets
+import threading
 from typing import Any, Dict, Generator, Optional
 
 import filelock
@@ -44,7 +45,16 @@ class TokenService:
     """Service for managing JWT-based service account tokens."""
 
     def __init__(self):
-        self.secret_key = self._get_or_generate_secret()
+        self.secret_key = None
+        self.init_lock = threading.Lock()
+
+    def _lazy_initialize(self):
+        if self.secret_key is not None:
+            return
+        with self.init_lock:
+            if self.secret_key is not None:
+                return
+            self.secret_key = self._get_or_generate_secret()
 
     def _get_or_generate_secret(self) -> str:
         """Get JWT secret from database or generate a new one."""
@@ -101,6 +111,7 @@ class TokenService:
         Returns:
             Dict containing token info including the JWT token
         """
+        self._lazy_initialize()
         now = datetime.datetime.now(datetime.timezone.utc)
         token_id = secrets.token_urlsafe(12)  # Shorter ID for JWT
 
@@ -154,6 +165,7 @@ class TokenService:
         Returns:
             Decoded token payload or None if invalid
         """
+        self._lazy_initialize()
         if not token.startswith('sky_'):
             return None
 
