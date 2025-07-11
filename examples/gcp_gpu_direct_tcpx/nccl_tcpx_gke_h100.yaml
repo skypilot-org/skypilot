@@ -1,5 +1,8 @@
 # This example is used to test the NCCL performance with
-# GPUDirect TCPX on GKE.
+# GPUDirect TCPX on GKE.#
+#
+# Usage:
+# sky launch -c nccl examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h100.yaml
 name: nccl-gpudirect-tcpx
 
 resources:
