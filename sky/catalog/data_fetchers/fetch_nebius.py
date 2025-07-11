@@ -82,7 +82,6 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
     to create a list of PresetInfo objects.
 
     Args:
-        sdk (SDK): The Nebius SDK instance.
         platforms (List[Platform]): A List of compute platforms to estimate
         prices for.
         parent_id (str): The parent ID used for resource metadata
