@@ -28,8 +28,6 @@ import click
 import colorama
 import filelock
 
-from sky import admin_policy
-from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -42,7 +40,6 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import admin_policy_utils
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
@@ -64,6 +61,8 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
+    from sky import admin_policy
+    from sky import backends
 else:
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -273,7 +272,7 @@ def list_accelerator_counts(
 def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional['admin_policy.RequestOptions'] = None
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
 
@@ -317,7 +316,7 @@ def workspaces() -> server_common.RequestId:
 def validate(
     dag: 'sky.Dag',
     workdir_only: bool = False,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional['admin_policy.RequestOptions'] = None
 ) -> None:
     """Validates the tasks.
 
@@ -372,7 +371,7 @@ def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -495,6 +494,11 @@ def launch(
                 down = resource.autostop_config.down
                 idle_minutes_to_autostop = resource.autostop_config.idle_minutes
 
+    # Keep the import of admin policy local to avoid expensive
+    # imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky import admin_policy
+    from sky.utils import admin_policy_utils
     request_options = admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -525,12 +529,12 @@ def launch(
 def _launch(
     dag: 'sky.Dag',
     cluster_name: str,
-    request_options: admin_policy.RequestOptions,
+    request_options: 'admin_policy.RequestOptions',
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -639,7 +643,7 @@ def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
 ) -> server_common.RequestId:
     """Executes a task on an existing cluster.
 
