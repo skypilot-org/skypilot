@@ -1007,7 +1007,6 @@ class Optimizer:
                 for cloud, candidate_list in candidate_set.items():
                     # Filter only the candidates matching the best
                     # resources chosen by the optimizer.
-                    best_resources_candidates = []
                     best_resources_candidates = [
                         res for res in candidate_list if
                         res.get_accelerators_str() == f'{acc_name}:{acc_count}'
