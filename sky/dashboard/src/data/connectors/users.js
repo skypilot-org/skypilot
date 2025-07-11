@@ -39,6 +39,7 @@ export async function getUsers() {
         userId: user.id,
         username: user.name,
         role: user.role,
+        created_at: user.created_at,
       })) || []
     );
   } catch (error) {
