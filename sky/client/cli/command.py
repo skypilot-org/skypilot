@@ -1701,43 +1701,49 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     # Phase 2: Parallel submission of all API requests
     def submit_managed_jobs():
-        if show_managed_jobs:
-            return managed_jobs.queue(refresh=False,
-                                      skip_finished=True,
-                                      all_users=all_users)
-        return None
+        return managed_jobs.queue(refresh=False,
+                                  skip_finished=True,
+                                  all_users=all_users)
 
     def submit_services() -> Optional[str]:
-        if show_services:
-            return serve_lib.status(service_names=None)
-        return None
+        return serve_lib.status(service_names=None)
 
     def submit_workspace() -> Optional[str]:
-        if not (ip or show_endpoints):
-            try:
-                return sdk.workspaces()
-            except RuntimeError:
-                # Backward compatibility for API server before #5660.
-                # TODO(zhwu): remove this after 0.10.0.
-                logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
-                               'in an old version, and may miss feature: '
-                               'workspaces. Update with: sky api stop; '
-                               'sky api start'
-                               f'{colorama.Style.RESET_ALL}')
-                return None
-        return None
+        try:
+            return sdk.workspaces()
+        except RuntimeError:
+            # Backward compatibility for API server before #5660.
+            # TODO(zhwu): remove this after 0.10.0.
+            logger.warning(f'{colorama.Style.DIM}SkyPilot API server is '
+                           'in an old version, and may miss feature: '
+                           'workspaces. Update with: sky api stop; '
+                           'sky api start'
+                           f'{colorama.Style.RESET_ALL}')
+            return None
+
+    managed_jobs_queue_request_id = None
+    service_status_request_id = None
+    workspace_request_id = None
 
     # Submit all requests in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        managed_jobs_request_future = executor.submit(submit_managed_jobs)
-        services_request_future = executor.submit(submit_services)
-        workspace_request_future = executor.submit(submit_workspace)
+        if show_managed_jobs:
+            managed_jobs_request_future = executor.submit(submit_managed_jobs)
+        if show_services:
+            services_request_future = executor.submit(submit_services)
+        if not (ip or show_endpoints):
+            workspace_request_future = executor.submit(submit_workspace)
 
         # Get the request IDs
-        managed_jobs_queue_request_id = managed_jobs_request_future.result()
-        service_status_request_id = services_request_future.result()
-        workspace_request_id = workspace_request_future.result()
+        if show_managed_jobs:
+            managed_jobs_queue_request_id = managed_jobs_request_future.result()
+        if show_services:
+            service_status_request_id = services_request_future.result()
+        if not (ip or show_endpoints):
+            workspace_request_id = workspace_request_future.result()
 
+    managed_jobs_queue_request_id = '' if not managed_jobs_queue_request_id \
+        else managed_jobs_queue_request_id
     service_status_request_id = '' if not service_status_request_id \
         else service_status_request_id
 
