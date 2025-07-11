@@ -3,7 +3,7 @@
 LOG_URL = 'http://usage.skypilot.co:9090/loki/api/v1/push'  # pylint: disable=line-too-long
 
 USAGE_MESSAGE_SCHEMA_VERSION = 1
-PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
+PRIVACY_POLICY_SHOWN_PATH = '~/.sky/.privacy_policy_shown'
 
 USAGE_POLICY_MESSAGE = (
     'SkyPilot collects usage data to improve its services. '
