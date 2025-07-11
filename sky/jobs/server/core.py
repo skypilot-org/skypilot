@@ -136,8 +136,8 @@ def launch(
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.utils.exceptions.NotSupportedError: the feature is not supported.
-        sky.utils.exceptions.CachedClusterUnavailable: cached jobs controller cluster
-            is unavailable
+        sky.utils.exceptions.CachedClusterUnavailable: cached jobs controller
+            cluster is unavailable.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the

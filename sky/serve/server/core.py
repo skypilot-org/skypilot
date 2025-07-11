@@ -519,7 +519,8 @@ def down(
           may potentially lead to resource leaks.
 
     Raises:
-        sky.utils.exceptions.ClusterNotUpError: if the sky serve controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: if the sky serve controller
+            is not up.
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
@@ -578,7 +579,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
           resource leak.
 
     Raises:
-        sky.utils.exceptions.ClusterNotUpError: if the sky sere controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: if the sky sere controller
+            is not up.
         RuntimeError: if failed to terminate the replica.
     """
     handle = backend_utils.is_controller_accessible(
@@ -771,7 +773,8 @@ def tail_logs(
             follow=False, replica_id=3)
 
     Raises:
-        sky.utils.exceptions.ClusterNotUpError: the sky serve controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the sky serve controller
+            is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
     if isinstance(target, str):

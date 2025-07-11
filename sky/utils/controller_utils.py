@@ -374,9 +374,9 @@ def check_cluster_name_not_controller(
     """Errors out if the cluster name is a controller name.
 
     Raises:
-      sky.utils.exceptions.NotSupportedError: if the cluster name is a controller
-        name, raise with an error message explaining 'operation_str' is not
-        allowed.
+      sky.utils.exceptions.NotSupportedError: if the cluster name is a
+        controller name, raise with an error message explaining
+        'operation_str' is not allowed.
 
     Returns:
       None, if the cluster name is not a controller name.
