@@ -14,6 +14,8 @@ def get_alembic_config(engine: sqlalchemy.engine.Engine, section: str):
     alembic_cfg = Config(alembic_ini_path, ini_section=section)
 
     # Override the database URL to match SkyPilot's current connection
-    alembic_cfg.set_main_option('sqlalchemy.url', str(engine.url))
+    # Use render_as_string to get the full URL with password
+    url = engine.url.render_as_string(hide_password=False)
+    alembic_cfg.set_section_option(section, 'sqlalchemy.url', url)
 
     return alembic_cfg
