@@ -6,6 +6,7 @@ import requests
 from sky import clouds
 from sky import server
 from sky.client.cli import command
+from sky.server import common as server_common
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -50,63 +51,76 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda --all
         """
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.show_gpus, [])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.show_gpus, ['--all'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.show_gpus, ['V100:4'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.show_gpus, [':4'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.show_gpus, ['V100:0'])
-        assert isinstance(result.exception, SystemExit)
-
-        result = cli_runner.invoke(command.show_gpus, ['V100:-2'])
-        assert isinstance(result.exception, SystemExit)
-
-        result = cli_runner.invoke(command.show_gpus,
-                                   ['--cloud', 'aws', '--region', 'us-west-1'])
-        assert not result.exit_code
-
-        result = cli_runner.invoke(command.show_gpus,
-                                   ['--infra', 'aws/us-west-1'])
-        assert not result.exit_code
-
-        for cloud in CLOUDS_TO_TEST:
-            result = cli_runner.invoke(command.show_gpus, ['--infra', cloud])
+        
+        # Mock the server health check to avoid connection issues
+        with mock.patch('sky.server.common.check_server_healthy_or_start_fn') as mock_health_check:
+            mock_health_check.return_value = None
+            # Clear the cache to ensure fresh results
+            server_common.get_api_server_status.cache_clear()
+            
+            result = cli_runner.invoke(command.show_gpus, [])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
-                                       ['--cloud', cloud, '--all'])
+            result = cli_runner.invoke(command.show_gpus, ['--all'])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
-                                       ['V100', '--cloud', cloud])
+            result = cli_runner.invoke(command.show_gpus, ['V100:4'])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
-                                       ['V100:4', '--cloud', cloud])
+            result = cli_runner.invoke(command.show_gpus, [':4'])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
-                                       ['V100:4', '--cloud', cloud, '--all'])
+            result = cli_runner.invoke(command.show_gpus, ['V100:0'])
             assert isinstance(result.exception, SystemExit)
+
+            result = cli_runner.invoke(command.show_gpus, ['V100:-2'])
+            assert isinstance(result.exception, SystemExit)
+
+            result = cli_runner.invoke(command.show_gpus,
+                                       ['--cloud', 'aws', '--region', 'us-west-1'])
+            assert not result.exit_code
+
+            result = cli_runner.invoke(command.show_gpus,
+                                       ['--infra', 'aws/us-west-1'])
+            assert not result.exit_code
+
+            for cloud in CLOUDS_TO_TEST:
+                result = cli_runner.invoke(command.show_gpus, ['--infra', cloud])
+                assert not result.exit_code
+
+                result = cli_runner.invoke(command.show_gpus,
+                                           ['--cloud', cloud, '--all'])
+                assert not result.exit_code
+
+                result = cli_runner.invoke(command.show_gpus,
+                                           ['V100', '--cloud', cloud])
+                assert not result.exit_code
+
+                result = cli_runner.invoke(command.show_gpus,
+                                           ['V100:4', '--cloud', cloud])
+                assert not result.exit_code
+
+                result = cli_runner.invoke(command.show_gpus,
+                                           ['V100:4', '--cloud', cloud, '--all'])
+                assert isinstance(result.exception, SystemExit)
 
     def test_k8s_alias_check(self):
         cli_runner = cli_testing.CliRunner()
+        
+        # Mock the server health check to avoid connection issues
+        with mock.patch('sky.server.common.check_server_healthy_or_start_fn') as mock_health_check:
+            mock_health_check.return_value = None
+            # Clear the cache to ensure fresh results
+            server_common.get_api_server_status.cache_clear()
 
-        result = cli_runner.invoke(command.check, ['k8s'])
-        assert not result.exit_code
+            result = cli_runner.invoke(command.check, ['k8s'])
+            assert not result.exit_code
 
-        result = cli_runner.invoke(command.check, ['kubernetes'])
-        assert not result.exit_code
+            result = cli_runner.invoke(command.check, ['kubernetes'])
+            assert not result.exit_code
 
-        result = cli_runner.invoke(command.check, ['notarealcloud'])
-        assert isinstance(result.exception, ValueError)
+            result = cli_runner.invoke(command.check, ['notarealcloud'])
+            assert isinstance(result.exception, ValueError)
 
 
 class TestHelperFunctions:
