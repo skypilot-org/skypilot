@@ -420,7 +420,8 @@ def cleanup_custom_multi_network(
     failover: bool = False,
 ) -> None:
     """Cleanup custom multi-network. Not supported for Hyperbolic."""
-    raise NotImplementedError('cleanup_custom_multi_network is not supported for Hyperbolic')
+    raise NotImplementedError(
+        'cleanup_custom_multi_network is not supported for Hyperbolic')
 
 
 def open_ports(
