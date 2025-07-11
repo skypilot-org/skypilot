@@ -101,7 +101,7 @@ $ sky launch -c nccl nccl_rdma_gke_h200.yaml
 
 ### Comparing with raw NCCL test pods from GCP documentation
 
-```
+```console
 $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/refs/heads/master/gpudirect-rdma/nccl-test-a4.yaml
 ...
 $ kubectl exec nccl-test-host-1 -it -- /usr/local/gib/scripts/run_nccl_tests.sh -t all_gather -b 1K -e 8G nccl-host-1 nccl-host-2
