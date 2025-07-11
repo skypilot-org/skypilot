@@ -43,6 +43,7 @@ import os
 import sys
 import time
 import typing
+from typing import Optional
 
 import filelock
 
@@ -80,18 +81,22 @@ LAUNCHES_PER_CPU = 4
 
 @lru_cache(maxsize=1)
 def _get_lock_path() -> str:
+    # TODO(tian): Per pool-manager lock.
     path = os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
 
 
-def _start_controller(job_id: int, dag_yaml_path: str,
-                      env_file_path: str) -> None:
+def _start_controller(job_id: int, dag_yaml_path: str, env_file_path: str,
+                      pool_manager: Optional[str]) -> None:
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     source_environment_cmd = (f'source {env_file_path};'
                               if env_file_path else '')
-    run_controller_cmd = (f'{sys.executable} -u -m sky.jobs.controller '
-                          f'{dag_yaml_path} --job-id {job_id};')
+    maybe_pool_manager_arg = (f'--pool-manager {pool_manager}'
+                              if pool_manager is not None else '')
+    run_controller_cmd = (
+        f'{sys.executable} -u -m sky.jobs.controller '
+        f'{dag_yaml_path} --job-id {job_id} {maybe_pool_manager_arg};')
 
     # If the command line here is changed, please also update
     # utils._controller_process_alive. The substring `--job-id X`
@@ -111,7 +116,7 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     logger.debug(f'Job {job_id} started with pid {pid}')
 
 
-def maybe_schedule_next_jobs() -> None:
+def maybe_schedule_next_jobs(pool_manager: Optional[str]) -> None:
     """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
     Here, "schedule" means to select job that is waiting, and allow it to
@@ -149,7 +154,7 @@ def maybe_schedule_next_jobs() -> None:
         # releasing the lock.
         with filelock.FileLock(_get_lock_path(), blocking=False):
             while True:
-                maybe_next_job = state.get_waiting_job()
+                maybe_next_job = state.get_waiting_job(pool_manager)
                 if maybe_next_job is None:
                     # Nothing left to start, break from scheduling loop
                     break
@@ -187,7 +192,8 @@ def maybe_schedule_next_jobs() -> None:
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
                     env_file_path = maybe_next_job['env_file_path']
 
-                    _start_controller(job_id, dag_yaml_path, env_file_path)
+                    _start_controller(job_id, dag_yaml_path, env_file_path,
+                                      pool_manager)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -196,7 +202,8 @@ def maybe_schedule_next_jobs() -> None:
 
 
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
-               env_file_path: str, priority: int) -> None:
+               env_file_path: str, priority: int,
+               pool_manager: Optional[str]) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -211,11 +218,11 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                 original_user_yaml_path,
                                                 env_file_path,
                                                 common_utils.get_user_hash(),
-                                                priority)
+                                                priority, pool_manager)
     if is_resume:
-        _start_controller(job_id, dag_yaml_path, env_file_path)
+        _start_controller(job_id, dag_yaml_path, env_file_path, pool_manager)
     else:
-        maybe_schedule_next_jobs()
+        maybe_schedule_next_jobs(pool_manager)
 
 
 @contextlib.contextmanager
@@ -251,6 +258,7 @@ def scheduled_launch(job_id: int):
         while (state.get_job_schedule_state(job_id) !=
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
+    pm = state.get_pool_manager_from_job_id(job_id)
 
     try:
         yield
@@ -264,7 +272,7 @@ def scheduled_launch(job_id: int):
         with filelock.FileLock(_get_lock_path()):
             state.scheduler_set_alive(job_id)
     finally:
-        maybe_schedule_next_jobs()
+        maybe_schedule_next_jobs(pm)
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -279,17 +287,19 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
+    pm = state.get_pool_manager_from_job_id(job_id)
 
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs()
+    maybe_schedule_next_jobs(pm)
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
-    maybe_schedule_next_jobs()
+    pm = state.get_pool_manager_from_job_id(job_id)
+    maybe_schedule_next_jobs(pm)
 
 
 def _get_job_parallelism() -> int:
@@ -332,6 +342,11 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
+    parser.add_argument('--pool-manager',
+                        type=str,
+                        required=False,
+                        default=None,
+                        help='The pool manager to use for the controller job.')
     parser.add_argument(
         '--priority',
         type=int,
@@ -341,4 +356,4 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
-               args.priority)
+               args.priority, args.pool_manager)

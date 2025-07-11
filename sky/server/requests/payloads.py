@@ -462,6 +462,8 @@ class JobsLaunchBody(RequestBody):
     """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
+    pool_manager: Optional[str]
+    batch_size: Optional[int]
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

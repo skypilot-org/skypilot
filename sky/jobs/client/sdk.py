@@ -33,6 +33,8 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    pool_manager: Optional[str] = None,
+    batch_size: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -81,6 +83,8 @@ def launch(
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
+            pool_manager=pool_manager,
+            batch_size=batch_size,
         )
         response = server_common.make_authenticated_request(
             'POST',

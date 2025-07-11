@@ -101,6 +101,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('original_user_yaml_path',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('pool_manager', sqlalchemy.Text, server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(
@@ -205,6 +206,12 @@ def create_table():
         db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
                                                 'original_user_yaml_path',
                                                 sqlalchemy.Text())
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'job_info',
+            'pool_manager',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -286,6 +293,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'priority': r['priority'],
         'entrypoint': r['entrypoint'],
         'original_user_yaml_path': r['original_user_yaml_path'],
+        'pool_manager': r['pool_manager'],
     }
 
 
@@ -1291,7 +1299,8 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 @_init_db
 def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
                           original_user_yaml_path: str, env_file_path: str,
-                          user_hash: str, priority: int) -> bool:
+                          user_hash: str, priority: int,
+                          pool_manager: Optional[str]) -> bool:
     """Do not call without holding the scheduler lock.
 
     Returns: Whether this is a recovery run or not.
@@ -1316,11 +1325,23 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
             job_info_table.c.env_file_path: env_file_path,
             job_info_table.c.user_hash: user_hash,
             job_info_table.c.priority: priority,
+            job_info_table.c.pool_manager: pool_manager,
         })
         session.commit()
         # For a recovery run, the job may already be in the WAITING state.
         assert updated_count <= 1, (job_id, updated_count)
         return updated_count == 0
+
+
+@_init_db
+def get_pool_manager_from_job_id(job_id: int) -> Optional[str]:
+    """Get the pool manager from the job id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        pool_manager = session.execute(
+            sqlalchemy.select(job_info_table.c.pool_manager).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        return pool_manager[0] if pool_manager else None
 
 
 @_init_db
@@ -1464,7 +1485,7 @@ def get_num_alive_jobs() -> int:
 
 
 @_init_db
-def get_waiting_job() -> Optional[Dict[str, Any]]:
+def get_waiting_job(pool_manager: Optional[str]) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
@@ -1487,23 +1508,25 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
                     ManagedJobScheduleState.ALIVE_BACKOFF.value,
                 ])).scalar_subquery()
         # Main query for waiting jobs
+        select_conds = [
+            job_info_table.c.schedule_state.in_([
+                ManagedJobScheduleState.WAITING.value,
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+            ]),
+            job_info_table.c.priority >= sqlalchemy.func.coalesce(
+                max_priority_subquery, 0),
+        ]
+        if pool_manager is not None:
+            select_conds.append(job_info_table.c.pool_manager == pool_manager)
         query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
             job_info_table.c.dag_yaml_path,
             job_info_table.c.env_file_path,
-        ).where(
-            sqlalchemy.and_(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.WAITING.value,
-                    ManagedJobScheduleState.ALIVE_WAITING.value,
-                ]),
-                job_info_table.c.priority >= sqlalchemy.func.coalesce(
-                    max_priority_subquery, 0),
-            )).order_by(
-                job_info_table.c.priority.desc(),
-                job_info_table.c.spot_job_id.asc(),
-            ).limit(1)
+        ).where(sqlalchemy.and_(*select_conds)).order_by(
+            job_info_table.c.priority.desc(),
+            job_info_table.c.spot_job_id.asc(),
+        ).limit(1)
         waiting_job_row = session.execute(query).fetchone()
         if waiting_job_row is None:
             return None

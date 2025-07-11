@@ -4060,6 +4060,18 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
+@click.option('--pool-manager',
+              '-p',
+              default=None,
+              type=str,
+              required=False,
+              help='Which pool manager to use for batch jobs submission.')
+@click.option('--batch-size',
+              '-b',
+              default=None,
+              type=int,
+              required=False,
+              help='Batch size for batch jobs submission.')
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -4089,6 +4101,8 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
+    pool_manager: Optional[str],
+    batch_size: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
 ):
@@ -4106,6 +4120,13 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
+    if pool_manager is None and batch_size is not None:
+        raise click.UsageError(
+            'Cannot specify --batch-size without --pool-manager.')
+    if pool_manager is not None and batch_size is None:
+        raise click.UsageError(
+            'Cannot specify --pool-manager without --batch-size.')
+
     if cluster is not None:
         if name is not None and name != cluster:
             raise click.UsageError('Cannot specify both --name and --cluster. '
@@ -4154,22 +4175,40 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
+    if pool_manager is not None:
+        click.secho(
+            f'Submitting to pool {colorama.Fore.CYAN}{pool_manager!r}'
+            f'{colorama.Style.RESET_ALL} with batch size '
+            f'{colorama.Fore.CYAN}{batch_size}{colorama.Style.RESET_ALL}.')
+
     # Optimize info is only show if _need_confirmation.
     if not yes:
         click.secho(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    request_id = managed_jobs.launch(dag,
+                                     name,
+                                     pool_manager,
+                                     batch_size,
+                                     _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
-    if not async_call and not detach_run:
-        job_id = job_id_handle[0]
-        returncode = managed_jobs.tail_logs(name=None,
-                                            job_id=job_id,
-                                            follow=True,
-                                            controller=False)
-        sys.exit(returncode)
+    if pool_manager is None:
+        if not async_call and not detach_run:
+            job_id = job_id_handle[0]
+            returncode = managed_jobs.tail_logs(name=None,
+                                                job_id=job_id,
+                                                follow=True,
+                                                controller=False)
+            sys.exit(returncode)
+    else:
+        # TODO(tian): Add a batch ID.
+        batch_ids = job_id_handle[0]
+        ranges_raw = resources_utils.port_set_to_ranges(set(batch_ids))
+        ranges = ', '.join(ranges_raw)
+        click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{ranges}'
+                    f'{colorama.Style.RESET_ALL}.')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -5126,7 +5165,13 @@ def serve_logs(
             raise
 
 
-@serve.command('submit', cls=_DocumentedCodeCommand)
+@cli.group(cls=_NaturalOrderGroup)
+def batch():
+    """Sky batch CLI (multi-region, multi-cloud batch)."""
+    pass
+
+
+@batch.command('submit', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('service_name', required=True, type=str)
 @click.option('--batch-size',
@@ -5144,7 +5189,7 @@ def serve_logs(
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
-def serve_submit(
+def batch_submit(
     service_name: str,
     batch_size: int,
     service_yaml: Tuple[str, ...],
@@ -5204,24 +5249,24 @@ def serve_submit(
                                   service_name,
                                   batch_size,
                                   _need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'sky.serve.submit')
+    _async_call_or_wait(request_id, async_call, 'sky.batch.submit')
 
 
-@serve.command('query', cls=_DocumentedCodeCommand)
+@batch.command('query', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('service_name', required=True, type=str)
 @click.argument('batch_id', required=True, type=str)
 @_add_click_options(flags.COMMON_OPTIONS)
 @timeline.event
 @usage_lib.entrypoint
-def serve_query(
+def batch_query(
     service_name: str,
     batch_id: str,
     async_call: bool,
 ):
     """Query the status of a batch of requests."""
     request_id = serve_lib.query(service_name, batch_id)
-    _async_call_or_wait(request_id, async_call, 'sky.serve.query')
+    _async_call_or_wait(request_id, async_call, 'sky.batch.query')
 
 
 @cli.group(cls=_NaturalOrderGroup, hidden=True)
