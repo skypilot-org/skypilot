@@ -122,7 +122,6 @@ class TestRetryTransientErrorsDecorator:
         assert 'Persistent error' in str(exc_info.value)
         assert call_count == 2  # Should have retried exactly max_retries times
 
-
     def test_decorator_preserves_function_metadata(self):
         """Test that decorator preserves original function metadata."""
 
@@ -133,7 +132,6 @@ class TestRetryTransientErrorsDecorator:
 
         assert documented_function.__name__ == 'documented_function'
         assert 'test function with parameters' in documented_function.__doc__
-
 
     @mock.patch('sky.server.rest.logger')
     def test_debug_logging_during_retries(self, mock_logger):
@@ -160,10 +158,10 @@ class TestRetryTransientErrorsDecorator:
 
     def test_different_http_error_status_codes(self):
         """Test behavior with different HTTP error status codes."""
-        
+
         def create_http_error_function(status_code):
             call_count = 0
-            
+
             @rest.retry_transient_errors(max_retries=2, initial_backoff=0.1)
             def function_with_http_error():
                 nonlocal call_count
@@ -173,7 +171,7 @@ class TestRetryTransientErrorsDecorator:
                 http_error = rest.requests.exceptions.HTTPError()
                 http_error.response = mock_response
                 raise http_error
-            
+
             return function_with_http_error, lambda: call_count
 
         # Test non-transient errors (< 500) - should not retry
@@ -191,6 +189,7 @@ class TestRetryTransientErrorsDecorator:
                 with mock.patch('time.sleep'):
                     func()
             assert get_count() == 2  # Retried max_retries times
+
 
 class TestRetryOnServerUnavailableDecorator:
     """Test cases for retry_on_server_unavailable decorator."""
