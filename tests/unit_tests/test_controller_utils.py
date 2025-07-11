@@ -128,7 +128,7 @@ def test_get_controller_resources_with_task_resources(
             cloud.check_features_are_supported(
                 sky.Resources(),
                 {sky.clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
-        except sky.exceptions.NotSupportedError:
+        except sky.utils.exceptions.NotSupportedError:
             return False
         return True
 

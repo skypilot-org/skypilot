@@ -1542,7 +1542,7 @@ class TestStorageWithCredentials:
                                        'to use. This is higly unlikely - '
                                        'check if the tests are correct.')
 
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
+        with pytest.raises(sky.utils.exceptions.StorageBucketGetError,
                            match='Attempted to use a non-existent'):
             if nonexist_bucket_url.startswith('https'):
                 storage_obj = storage_lib.Storage(
@@ -1578,7 +1578,7 @@ class TestStorageWithCredentials:
         else:
             private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
         with pytest.raises(
-                sky.exceptions.StorageBucketGetError,
+                sky.utils.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
@@ -1711,7 +1711,7 @@ class TestStorageWithCredentials:
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
         for name in invalid_name_list:
-            with pytest.raises(sky.exceptions.StorageNameError):
+            with pytest.raises(sky.utils.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.construct()
                 storage_obj.add_store(store_type)
@@ -1792,7 +1792,7 @@ class TestStorageWithCredentials:
         ext_bucket_name, ext_bucket_uri = request.getfixturevalue(
             ext_bucket_fixture)
         # invalid spec
-        with pytest.raises(sky.exceptions.StorageSpecError) as e:
+        with pytest.raises(sky.utils.exceptions.StorageSpecError) as e:
             storage_obj = storage_lib.Storage(
                 name=ext_bucket_name, mode=storage_lib.StorageMode.MOUNT)
             storage_obj.construct()

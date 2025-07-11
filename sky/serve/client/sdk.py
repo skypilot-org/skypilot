@@ -167,7 +167,7 @@ def down(
         None
 
     Request Raises:
-        sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: if the sky serve controller is not up.
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
@@ -202,7 +202,7 @@ def terminate_replica(service_name: str, replica_id: int,
         The request ID of the terminate replica request.
 
     Request Raises:
-        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: if the sky sere controller is not up.
         RuntimeError: if failed to terminate the replica.
     """
     body = payloads.ServeTerminateReplicaBody(
@@ -356,7 +356,7 @@ def tail_logs(service_name: str,
         The request ID of the tail logs request.
 
     Request Raises:
-        sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
     # Avoid circular import.
@@ -416,7 +416,7 @@ def sync_down_logs(service_name: str,
     Raises:
         RuntimeError: If fails to gather logs or fails to rsync from the
           controller.
-        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
     # Avoid circular import.

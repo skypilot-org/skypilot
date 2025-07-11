@@ -14,7 +14,7 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
 
     Raises:
         ValueError: If there's a version mismatch and non-terminal jobs exist.
-        sky.exceptions.ClusterNotUpError: If the controller is not accessible.
+        sky.utils.exceptions.ClusterNotUpError: If the controller is not accessible.
     """
     # Get the current local SKYLET_VERSION
     local_version = skylet_constants.SKYLET_VERSION

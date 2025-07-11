@@ -61,10 +61,10 @@ For reference, below is a loss graph you may expect to see, and the amount of ti
 
 ## Q&A
 
-Q: I see some bucket permission errors `sky.exceptions.StorageBucketGetError` when running the above:
+Q: I see some bucket permission errors `sky.utils.exceptions.StorageBucketGetError` when running the above:
 ```
 ...
-sky.exceptions.StorageBucketGetError: Failed to connect to an existing bucket 'YOUR_OWN_BUCKET_NAME'.
+sky.utils.exceptions.StorageBucketGetError: Failed to connect to an existing bucket 'YOUR_OWN_BUCKET_NAME'.
 Please check if:
   1. the bucket name is taken and/or
   2. the bucket permissions are not setup correctly. To debug, consider using gsutil ls gs://YOUR_OWN_BUCKET_NAME.

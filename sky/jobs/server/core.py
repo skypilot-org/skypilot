@@ -135,8 +135,8 @@ def launch(
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
-        sky.exceptions.NotSupportedError: the feature is not supported.
-        sky.exceptions.CachedClusterUnavailable: cached jobs controller cluster
+        sky.utils.exceptions.NotSupportedError: the feature is not supported.
+        sky.utils.exceptions.CachedClusterUnavailable: cached jobs controller cluster
             is unavailable
 
     Returns:
@@ -507,7 +507,7 @@ def queue(refresh: bool,
             }
         ]
     Raises:
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up or
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
@@ -580,7 +580,7 @@ def cancel(name: Optional[str] = None,
     Please refer to sky.cli.job_cancel for documentation.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
     with rich_utils.safe_status(
@@ -654,7 +654,7 @@ def tail_logs(name: Optional[str],
 
     Raises:
         ValueError: invalid arguments.
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
     # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
@@ -704,7 +704,7 @@ def download_logs(
 
     Raises:
         ValueError: invalid arguments.
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
