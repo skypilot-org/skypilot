@@ -1,13 +1,13 @@
-# Using GCP High-Performance GPU Networking with SkyPilot
+# Using High-Performance GPU Networking on GCP and GKE with SkyPilot
 
 SkyPilot supports advanced GPU networking technologies on both GCP VMs and GKE clusters, enabling high-performance inter-GPU communication for distributed deep learning and HPC workloads. This includes support for:
 
-- **GPUDirect-TCPX**: a3-highgpu-8g, a3-edgegpu-8g (h100)
-- **GPUDirect-RDMA**: a3-ultragpu-8g (h200), a4-highgpu-8g (b200)
+- **GPUDirect-TCPX**: a3-highgpu-8g, a3-edgegpu-8g (H100)
+- **GPUDirect-RDMA**: a3-ultragpu-8g (H200), a4-highgpu-8g (B200)
 
-## Available Configurations
+## NCCL Test Example YAMLs
 
-We offer several example configurations for running NCCL tests with high-performance GPU networking on GCP, covering both VM-based and GKE-based deployments:
+We offer example YAMLs for running NCCL tests to verify high-performance GPU networking on GCP, covering both VM-based and GKE-based deployments:
 
 | Configuration | Target Platform | GPU Networking Technology | VM Types |
 |---------------|----------------|---------------------------|----------|
