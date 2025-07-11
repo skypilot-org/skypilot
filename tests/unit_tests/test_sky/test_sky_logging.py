@@ -1,4 +1,4 @@
-"""Unit tests for sky.sky_logging module."""
+"""Unit tests for sky.utils.sky_logging module."""
 
 import io
 import logging
