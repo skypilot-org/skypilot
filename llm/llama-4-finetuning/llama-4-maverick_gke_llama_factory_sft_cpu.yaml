@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick.yaml -c maverick --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick_gke_llama_factory_sft_cpu.yaml -c llama4_cpu --env HF_TOKEN
 #
 # This config uses H200 GPUs with 141GB memory each (much better for LLaMA-4!)
 
@@ -32,10 +32,6 @@ file_mounts:
   /configs: ./configs
 
 setup: |
-  # Optional: Mount additional NVMe if available
-  # sudo mkdir -p /mnt/nvme/deepspeed_offload
-  # sudo chmod 777 /mnt/nvme/deepspeed_offload
-
   # Download the repository configuration package
   wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
 
