@@ -42,9 +42,9 @@ The scaling curves and bandwidth measurements match exactly with Google's offici
 
 ### Running [`nccl_rdma_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_rdma_gke_h200.yaml) on SkyPilot
 
-```
-# sky launch nccl_rdma_gke_h200.yaml -c nccl_test -y
-
+```console
+$ sky launch -c nccl nccl_rdma_gke_h200.yaml
+...
 (head, rank=0, pid=3808) All nodes: 10.100.9.12:8,10.100.10.12:8
 (worker1, rank=1, pid=2769, ip=10.100.10.12) Worker nodes
 (head, rank=0, pid=3808) [1,0]<stdout>:# nThread 1 nGpus 1 minBytes 1024 maxBytes 8589934592 step: 2(factor) warmup iters: 5 iters: 100 agg iters: 1 validation: 1 graph: 0
@@ -99,12 +99,13 @@ The scaling curves and bandwidth measurements match exactly with Google's offici
 (head, rank=0, pid=3808) [1,0]<stdout>:#
 ```
 
-### Applying NCCL test from documentation
+### Comparing with raw NCCL test pods from GCP documentation
 
 ```
-# kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/refs/heads/master/gpudirect-rdma/nccl-test-a4.yaml
-# kubectl exec nccl-test-host-1 -it -- /usr/local/gib/scripts/run_nccl_tests.sh -t all_gather -b 1K -e 8G nccl-host-1 nccl-host-2
-
+$ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/refs/heads/master/gpudirect-rdma/nccl-test-a4.yaml
+...
+$ kubectl exec nccl-test-host-1 -it -- /usr/local/gib/scripts/run_nccl_tests.sh -t all_gather -b 1K -e 8G nccl-host-1 nccl-host-2
+...
 # nThread 1 nGpus 1 minBytes 1024 maxBytes 8589934592 step: 2(factor) warmup iters: 50 iters: 100 agg iters: 1 validation: 1 graph: 0
 #
 # Using devices
