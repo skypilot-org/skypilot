@@ -785,7 +785,7 @@ export function ClusterTable({
                       <TableCell className="hidden md:table-cell">
                         <Link
                           href="/workspaces"
-                          className="text-blue-600 hover:underline"
+                          className="text-gray-700 hover:text-blue-600 hover:underline"
                         >
                           {item.workspace || 'default'}
                         </Link>
@@ -1075,7 +1075,7 @@ const FilterDropdown = ({
 
   const [isOpen, setIsOpen] = useState(false);
   const [value, setValue] = useState('');
-  const [propertyValue, setPropertValue] = useState('cluster');
+  const [propertyValue, setPropertValue] = useState('status');
   const [valueOptions, setValueOptions] = useState([]);
 
   let filteredOptions = [];
@@ -1114,6 +1114,14 @@ const FilterDropdown = ({
 
     setValueOptions(updatedValueOptions);
   }, [propertyValue, valueList, value]);
+
+  // Helper function to get the capitalized label for a property value
+  const getPropertyLabel = (propertyValue) => {
+    const propertyItem = propertyList.find(
+      (item) => item.value === propertyValue
+    );
+    return propertyItem ? propertyItem.label : propertyValue;
+  };
 
   const handleValueChange = (e) => {
     setValue(e.target.value);
@@ -1157,7 +1165,7 @@ const FilterDropdown = ({
                   const updatedFilters = [
                     ...prevFilters,
                     {
-                      property: propertyValue,
+                      property: getPropertyLabel(propertyValue),
                       operator: ':',
                       value: value,
                     },
@@ -1211,7 +1219,7 @@ const FilterDropdown = ({
                       const updatedFilters = [
                         ...prevFilters,
                         {
-                          property: propertyValue,
+                          property: getPropertyLabel(propertyValue),
                           operator: '=',
                           value: option,
                         },
@@ -1269,10 +1277,9 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
           {filters.length > 0 && (
             <>
-              <div className="border border-gray-400 h-8"></div>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-blue-600 bg-blue-100 hover:bg-blue-200"
+                className="rounded-full px-4 py-1 text-gray-700 bg-gray-200 hover:bg-gray-300"
               >
                 Clear filters
               </button>
@@ -1287,10 +1294,11 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center gap-2 text-blue-600 bg-blue-100 px-2 rounded-full">
+      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-2 rounded-full">
         <div className="flex items-center gap-1 px-2 py-1 rounded-l-lg">
           <span>{`${filter.property} `}</span>
-          <span className="font-bold">{`${filter.operator} ${filter.value}`}</span>
+          <span>{filter.operator}</span>
+          <span className="font-bold">{` ${filter.value}`}</span>
         </div>
 
         <button
