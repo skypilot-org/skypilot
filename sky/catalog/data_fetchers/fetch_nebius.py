@@ -205,7 +205,6 @@ def _fetch_platforms_for_project(project_id: str) -> List[Any]:
     """Fetches all available compute platforms for a given project.
 
     Args:
-        sdk (SDK): The Nebius SDK instance.
         project_id (str): The ID of the project to fetch platforms from.
 
     Returns:
@@ -225,9 +224,6 @@ def _fetch_platforms_for_project(project_id: str) -> List[Any]:
 def _get_regions_map() -> Dict[str, str]:
     """Maps region codes to their full names by iterating through tenants and
      projects.
-
-    Args:
-        sdk (SDK): The Nebius SDK instance.
 
     Returns:
         dict[str, str]: A dictionary where keys are region codes (e.g., "e00")
@@ -261,9 +257,6 @@ def _get_all_platform_prices() -> List[PresetInfo]:
     iterates through each region, fetches available platforms for
     the corresponding project ID, and finally estimates prices for all presets
     on those platforms.
-
-    Args:
-        sdk (SDK): The Nebius SDK instance.
 
     Returns:
         List[PresetInfo]: A consolidated list of PresetInfo objects for all
@@ -302,9 +295,6 @@ def main() -> None:
     """
 
     output_file = 'nebius/vms.csv'
-
-    # # Init SDK
-    # sdk = _init_sdk()
 
     # Fetch presets and estimate
     presets = _get_all_platform_prices()
