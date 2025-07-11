@@ -60,12 +60,13 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
-    def __init__(self, job_id: int, dag_yaml: str) -> None:
+    def __init__(self, job_id: int, dag_yaml: str, pool_manager: Optional[str]) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        self._pool_manager = pool_manager
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -193,10 +194,10 @@ class JobsController:
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
+        # cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+        #     task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id)
+            '_dummy_name', self._backend, task, self._job_id, task_id, self._pool_manager)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -223,8 +224,9 @@ class JobsController:
         # Only do the initial cluster launch if not resuming from a controller
         # failure. Otherwise, we will transit to recovering immediately.
         remote_job_submitted_at = time.time()
+        cluster_name = None
         if not is_resume:
-            remote_job_submitted_at = self._strategy_executor.launch()
+            remote_job_submitted_at, cluster_name = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
 
         if not is_resume:
@@ -316,7 +318,7 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                managed_job_utils.terminate_cluster(cluster_name=cluster_name)
+                managed_job_utils.terminate_cluster(self._pool_manager)
                 return True
 
             # For single-node jobs, non-terminated job_status indicates a
@@ -466,7 +468,7 @@ class JobsController:
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
-            recovered_time = self._strategy_executor.recover()
+            recovered_time, cluster_name = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
@@ -541,11 +543,11 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-def _run_controller(job_id: int, dag_yaml: str):
+def _run_controller(job_id: int, dag_yaml: str, pool_manager: Optional[str]):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    jobs_controller = JobsController(job_id, dag_yaml)
+    jobs_controller = JobsController(job_id, dag_yaml, pool_manager)
     jobs_controller.run()
 
 
@@ -577,7 +579,7 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
-def _cleanup(job_id: int, dag_yaml: str):
+def _cleanup(job_id: int, dag_yaml: str, pool_manager: Optional[str]):
     """Clean up the cluster(s) and storages.
 
     (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -597,7 +599,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
-        managed_job_utils.terminate_cluster(cluster_name)
+        managed_job_utils.terminate_cluster(pool_manager)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -629,7 +631,7 @@ def _cleanup(job_id: int, dag_yaml: str):
                     f'Failed to clean up file mount {file_mount}: {e}')
 
 
-def start(job_id, dag_yaml):
+def start(job_id, dag_yaml, pool_manager):
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -643,7 +645,7 @@ def start(job_id, dag_yaml):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml))
+                                                     args=(job_id, dag_yaml, pool_manager))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
@@ -679,7 +681,7 @@ def start(job_id, dag_yaml):
         # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster job_state.
-        _cleanup(job_id, dag_yaml=dag_yaml)
+        _cleanup(job_id, dag_yaml=dag_yaml, pool_manager=pool_manager)
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
@@ -717,8 +719,13 @@ if __name__ == '__main__':
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
+    parser.add_argument('--pool-manager',
+                        required=False,
+                        default=None,
+                        type=str,
+                        help='The pool manager to use for the controller job.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml)
+    start(args.job_id, args.dag_yaml, args.pool_manager)

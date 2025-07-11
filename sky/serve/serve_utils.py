@@ -589,6 +589,34 @@ def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
 
+def get_next_cluster_name(service_name: str) -> Optional[str]:
+    service_status = _get_service_status(service_name)
+    if service_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
+    load_balancer_port = service_status['load_balancer_port']
+    resp = requests.get(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) +
+        '/acquire')
+    if resp.status_code == 404:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'The service is up-ed in an old version and does not '
+                'support acquire. Please `sky serve down` '
+                'it first and relaunch the service. ')
+    elif resp.status_code == 400:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Client error during service acquire: {resp.text}')
+    elif resp.status_code == 500:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Server error during service acquire: {resp.text}')
+    elif resp.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to acquire cluster: {resp.text}')
+    return resp.json()['cluster_name']
+
+
 def submit_encoded(run_script: str, service_name: str, batch_size: int) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
