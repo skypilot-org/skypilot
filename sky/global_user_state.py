@@ -242,6 +242,7 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
     # Get alembic config for state db and run migrations
     alembic_config = alembic_utils.get_alembic_config(engine, 'state_db')
+    alembic_config.config_ini_section = 'state_db'
     alembic_command.upgrade(alembic_config, 'head')
 
 

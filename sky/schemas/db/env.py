@@ -39,11 +39,13 @@ def run_migrations_offline() -> None:
 
     """
     url = config.get_main_option('sqlalchemy.url')
+    version_table = config.get_section_option(config.config_ini_section, 'version_table', 'alembic_version')
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={'paramstyle': 'named'},
+        version_table=version_table,
     )
 
     with context.begin_transaction():
@@ -62,10 +64,13 @@ def run_migrations_online() -> None:
         prefix='sqlalchemy.',
         poolclass=pool.NullPool,
     )
-
+    version_table = config.get_section_option(config.config_ini_section, 'version_table', 'alembic_version')
     with connectable.connect() as connection:
-        context.configure(connection=connection,
-                          target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table=version_table,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
