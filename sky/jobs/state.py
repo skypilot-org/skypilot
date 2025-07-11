@@ -10,7 +10,7 @@ import pathlib
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 import sqlalchemy
@@ -33,8 +33,7 @@ if typing.TYPE_CHECKING:
 
     import sky
 
-CallbackType = Union[Callable[[str], None], Callable[[str],
-                                                     'asyncio.Future[None]']]
+CallbackType = Union[Callable[[str], None], Callable[[str], 'Awaitable[Any]']]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -81,7 +80,10 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
-    sqlalchemy.Column('spot_job_id', sqlalchemy.Integer),
+    sqlalchemy.Column('spot_job_id',
+                      sqlalchemy.Integer,
+                      index=True,
+                      unique=True),
     sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('task_name', sqlalchemy.Text),
     sqlalchemy.Column('specs', sqlalchemy.Text),

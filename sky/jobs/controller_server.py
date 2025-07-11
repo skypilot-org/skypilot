@@ -30,17 +30,16 @@ async def main():
     except OSError as e:
         logger.warning(f'Failed to increase number of files we can open: {e}\n'
                        f'Current soft limit: {soft}, hard limit: {hard}')
-    
+
     # Will loop forever, do it in the background
     cancel_job_task = asyncio.create_task(controller.cancel_job())
     monitor_loop_task = asyncio.create_task(controller.monitor_loop())
-    
+
     try:
         await asyncio.gather(cancel_job_task, monitor_loop_task)
     except Exception as e:
         logger.error(f'Controller server crashed: {e}')
         os._exit(1)
-
 
 
 if __name__ == '__main__':
