@@ -1106,6 +1106,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'remote_identity': {
+        'type': 'string',
+    }
 }
 
 

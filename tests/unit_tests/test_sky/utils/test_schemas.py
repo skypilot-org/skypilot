@@ -423,5 +423,24 @@ class TestWorkspaceSchema(unittest.TestCase):
                                     schema=self.workspaces_schema)
 
 
+class TestKubernetesSchema(unittest.TestCase):
+    """Tests for the kubernetes schema in schemas.py."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.k8s_schema = self.config_schema['properties']['kubernetes']
+
+    def test_context_configs_allows_remote_identity(self):
+        """Test that context_configs allows remote_identity."""
+        valid_config = {
+            'context_configs': {
+                'my-context': {
+                    'remote_identity': 'my-service-account'
+                }
+            }
+        }
+        jsonschema.validate(instance=valid_config, schema=self.k8s_schema)
+
+
 if __name__ == "__main__":
     unittest.main()
