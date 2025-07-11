@@ -33,9 +33,8 @@ if typing.TYPE_CHECKING:
 
     import sky
 
-CallbackType = Union[
-    Callable[[str], None],
-    Callable[[str], 'asyncio.Future[None]']]
+CallbackType = Union[Callable[[str], None], Callable[[str],
+                                                     'asyncio.Future[None]']]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -298,7 +297,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            from sky.jobs import utils as job_utils # pylint: disable=import-outside-toplevel
+            from sky.jobs import utils as job_utils
             await job_utils.to_thread(initialize_and_get_db_async)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
@@ -1606,7 +1605,7 @@ def get_num_alive_jobs() -> int:
 
 @_init_db_async
 async def get_waiting_job(
-    pid: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        pid: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """Atomically find and set the highest priority waiting job to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
@@ -1648,7 +1647,7 @@ async def get_waiting_job(
         dag_yaml_path = waiting_job_row[2]
         env_file_path = waiting_job_row[3]
         controller_pid = waiting_job_row[4]
-        
+
         new_pid = (controller_pid if controller_pid is not None else
                    (pid if pid is not None else -1))
 

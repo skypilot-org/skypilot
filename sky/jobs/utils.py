@@ -4,13 +4,13 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+import asyncio
 from asyncio import events
 import collections
 import contextvars
 import datetime
 import enum
 import functools
-import asyncio
 import logging
 import os
 import pathlib
@@ -581,9 +581,11 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 
     try:
         asyncio.get_running_loop()
+
         # In async context
         async def async_callback_func(status: str):
             return await to_thread(callback_func, status)
+
         return async_callback_func
     except RuntimeError:
         # Not in async context

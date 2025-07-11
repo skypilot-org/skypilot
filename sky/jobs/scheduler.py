@@ -110,12 +110,11 @@ def start_controller() -> None:
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, 'controller.log')
-    
+
     with open(JOB_CONTROLLER_ENV_PATH, 'r', encoding='utf-8') as f:
         run_cmd = f.read()
 
-    pid = subprocess_utils.launch_new_process_tree(run_cmd,
-                                                    log_output=log_path)
+    pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
     with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
         f.write(str(pid) + '\n')
 
@@ -137,10 +136,9 @@ def maybe_start_controller(env_file_path: str) -> None:
                 if os.path.exists(JOB_CONTROLLER_PID_PATH):
                     with open(JOB_CONTROLLER_PID_PATH, 'r',
                               encoding='utf-8') as f:
-                        pids = f.read().split('\n')
+                        pids = f.read().split('\n')[:-1]
                     for pid in pids:
-                        if subprocess_utils.is_process_alive(
-                            int(pid.strip())):
+                        if subprocess_utils.is_process_alive(int(pid.strip())):
                             return
                     to_start = True
                 else:
@@ -156,14 +154,14 @@ def maybe_start_controller(env_file_path: str) -> None:
         activate_python_env_cmd = (
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
         source_environment_cmd = (f'source {env_file_path};'
-                                    if env_file_path else '')
+                                  if env_file_path else '')
         run_controller_cmd = (f'{sys.executable} -u -m'
-                                'sky.jobs.controller_server')
+                              'sky.jobs.controller_server')
 
         run_cmd = (f'{activate_python_env_cmd}'
-                    f'{source_environment_cmd}'
-                    f'{run_controller_cmd}')
-        
+                   f'{source_environment_cmd}'
+                   f'{run_controller_cmd}')
+
         with open(JOB_CONTROLLER_ENV_PATH, 'w', encoding='utf-8') as f:
             f.write(run_cmd)
 

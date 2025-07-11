@@ -10,8 +10,9 @@ import shutil
 import time
 import traceback
 import typing
+from typing import Dict, Optional, Set, Tuple
+
 import psutil
-from typing import Dict, Optional, Tuple
 
 # This import ensures backward compatibility. Controller processes may not have
 # imported this module initially, but will attempt to import it during job
@@ -33,11 +34,12 @@ from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import common, subprocess_utils
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -49,11 +51,12 @@ logger = logging.getLogger(__name__)
 
 # Global state for active jobs
 job_tasks: Dict[int, asyncio.Task] = {}
-starting = set()
+starting: Set[int] = set()
 
 # Lock for synchronizing access to global state dictionary
 _job_tasks_lock = asyncio.Lock()
 _scaling_semaphore = asyncio.Semaphore(0)
+
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     dag = dag_utils.load_chain_dag_from_yaml(dag_yaml)
@@ -699,6 +702,7 @@ async def _cleanup(job_id: int, dag_yaml: str, job_logger: logging.Logger):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
+
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
     # sky.exceptions.ResourcesUnavailableError).
@@ -802,7 +806,7 @@ async def run_job_loop(job_id: int, dag_yaml: str, job_logger: logging.Logger):
                                 f'run: sky jobs logs --controller {job_id}'))
 
         await scheduler.job_done_async(job_id)
-        
+
         async with _job_tasks_lock:
             try:
                 # just in case we were cancelled or some other error occurred
@@ -901,33 +905,16 @@ async def cancel_job():
 
 async def monitor_loop():
     """Monitor the job loop."""
+    logger.info('Starting monitor loop...')
+
     global starting
-    
+
     scaled_already = False
     while True:
         async with _job_tasks_lock:
             running_tasks = [
-                task for task in job_tasks.values() if not task.done()]
-        
-        if len(running_tasks) == 0:
-            # if there are no running tasks, we can scale down, there are no
-            # running tasks, so we don't care about slowing down the event loop
-            if can_scale()[1]:
-                # we can die, first we need to remove ourselves from the PID
-                # file
-                with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
-                          encoding='utf-8') as f:
-                    pids = f.read().split('\n')
-                    running_controllers = [
-                        pid for pid in pids if 
-                        subprocess_utils.is_process_alive(int(pid.strip()))]
-                with open(scheduler.JOB_CONTROLLER_PID_PATH, 'w',
-                          encoding='utf-8') as f:
-                    for pid in running_controllers:
-                        if pid != str(os.getpid()):
-                            f.write(pid + '\n')
-
-                os._exit(0)
+                task for task in job_tasks.values() if not task.done()
+            ]
 
         if len(running_tasks) >= scheduler.JOBS_PER_WORKER:
             # we are at maximum capacity, so we want to spawn a new worker,
@@ -935,7 +922,8 @@ async def monitor_loop():
             if not scaled_already:
                 # run in a different thread since this might be expensive
                 if await managed_job_utils.to_thread(can_scale)[0]:
-                    await managed_job_utils.to_thread(scheduler.start_controller)
+                    await managed_job_utils.to_thread(scheduler.start_controller
+                                                     )
                 scaled_already = True
 
             # most likely a job will take a while to finish,
@@ -947,7 +935,7 @@ async def monitor_loop():
             starting_count = len(starting)
 
         if starting_count >= scheduler.LAUNCHES_PER_WORKER:
-            # launching a job takes around 1 minute, so lets wait half that 
+            # launching a job takes around 1 minute, so lets wait half that
             # time
             await asyncio.sleep(30)
             continue
@@ -964,14 +952,14 @@ async def monitor_loop():
         if waiting_job is None:
             await asyncio.sleep(5)
             continue
-        
-        if (waiting_job['schedule_state']
-            != managed_job_state.ManagedJobScheduleState.WAITING):
+
+        if (waiting_job['schedule_state'] !=
+                managed_job_state.ManagedJobScheduleState.WAITING):
             # in this case it is already currently being restarted
 
             # two options, old_pid is > 0 meaning it is an old job, in which
             # case we do not support taking it over
-            # if old_pid is < 0, that means it was started by the new 
+            # if old_pid is < 0, that means it was started by the new
             # consolidated controller, in which case we can take it over if
             # the controller managing it is dead. if it is not dead, the other
             # process will handle restarting it.
@@ -989,7 +977,7 @@ async def monitor_loop():
         # here we need to sync, because we are modifying it
         async with _job_tasks_lock:
             starting.add(job_id)
-        
+
         await start_job(job_id, dag_yaml_path)
 
 
@@ -1007,11 +995,13 @@ def can_scale() -> Tuple[bool, bool]:
             down.
     """
     try:
-        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
-            pids = f.read().split('\n')
+        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
+                  encoding='utf-8') as f:
+            pids = f.read().split('\n')[:-1]
             running_controllers = [
-                pid for pid in pids if subprocess_utils.is_process_alive(
-                    int(pid.strip()))]
+                pid for pid in pids
+                if subprocess_utils.is_process_alive(int(pid.strip()))
+            ]
     except OSError as e:
         logger.error(f'Failed to get running controllers file: {e}')
         # return conservative values
