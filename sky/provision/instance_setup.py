@@ -46,7 +46,10 @@ _DUMP_RAY_PORTS = (
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
-    '"from sky.utils import sky_logging\n'
+    '"try:\n'
+    '  from sky.utils import sky_logging\n'
+    'except ImportError:\n'
+    '  from sky import sky_logging\n'
     'with sky_logging.silent(): '
     'from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
     '2> /dev/null || echo 6379);'
