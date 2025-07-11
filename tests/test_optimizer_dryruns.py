@@ -845,10 +845,9 @@ def test_accelerator_cloud_filtering(capfd, enable_all_clouds):
     stdout, _ = capfd.readouterr()
 
 
-def test_optimizer_candidate_logging(enable_all_clouds, capfd):
+def test_candidate_logging(enable_all_clouds, capfd):
     """
-    Verifies that the optimizer candidate log only lists matching resources for each accelerator
-    and that the chosen resource is correct.
+    Verifies that the optimizer candidate log outputs the correct chosen/cheapest resource.
     """
     with sky.Dag() as dag:
         task = sky.Task('test_candidate_logging')
@@ -856,6 +855,7 @@ def test_optimizer_candidate_logging(enable_all_clouds, capfd):
             sky.Resources(accelerators={'L4': 1},
                           use_spot=True,
                           cloud=sky.AWS()),
+            # Other more expensive GPUs
             sky.Resources(accelerators={'A100': 1}, use_spot=True),
             sky.Resources(accelerators={'H100': 1}, use_spot=True),
             sky.Resources(accelerators={'H200': 1}, use_spot=True),
@@ -865,5 +865,5 @@ def test_optimizer_candidate_logging(enable_all_clouds, capfd):
     stdout, _ = capfd.readouterr()
     l4_section = any(
         'L4:1' in line and '✔' in line for line in stdout.splitlines())
-    assert l4_section, 'Expected L4:1 to be marked as chosen.'
-    assert 'Multiple AWS instances satisfy L4:1. The cheapest [spot](gpus=L4:1' in stdout, 'Expected L4:1 to be marked as cheapest.'
+    assert l4_section, 'Expected L4:1 to be chosen.'
+    assert f'Multiple {sky.AWS()} instances satisfy L4:1. The cheapest [spot](gpus=L4:1' in stdout, 'Expected L4:1 to be marked as cheapest.'
