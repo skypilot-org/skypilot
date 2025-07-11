@@ -51,13 +51,14 @@ class TestWithNoCloudEnabled:
         -> sky show-gpus V100:4 --cloud lambda --all
         """
         cli_runner = cli_testing.CliRunner()
-        
+
         # Mock the server health check to avoid connection issues
-        with mock.patch('sky.server.common.check_server_healthy_or_start_fn') as mock_health_check:
+        with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
+                       ) as mock_health_check:
             mock_health_check.return_value = None
             # Clear the cache to ensure fresh results
             server_common.get_api_server_status.cache_clear()
-            
+
             result = cli_runner.invoke(command.show_gpus, [])
             assert not result.exit_code
 
@@ -76,8 +77,8 @@ class TestWithNoCloudEnabled:
             result = cli_runner.invoke(command.show_gpus, ['V100:-2'])
             assert isinstance(result.exception, SystemExit)
 
-            result = cli_runner.invoke(command.show_gpus,
-                                       ['--cloud', 'aws', '--region', 'us-west-1'])
+            result = cli_runner.invoke(
+                command.show_gpus, ['--cloud', 'aws', '--region', 'us-west-1'])
             assert not result.exit_code
 
             result = cli_runner.invoke(command.show_gpus,
@@ -85,7 +86,8 @@ class TestWithNoCloudEnabled:
             assert not result.exit_code
 
             for cloud in CLOUDS_TO_TEST:
-                result = cli_runner.invoke(command.show_gpus, ['--infra', cloud])
+                result = cli_runner.invoke(command.show_gpus,
+                                           ['--infra', cloud])
                 assert not result.exit_code
 
                 result = cli_runner.invoke(command.show_gpus,
@@ -100,15 +102,16 @@ class TestWithNoCloudEnabled:
                                            ['V100:4', '--cloud', cloud])
                 assert not result.exit_code
 
-                result = cli_runner.invoke(command.show_gpus,
-                                           ['V100:4', '--cloud', cloud, '--all'])
+                result = cli_runner.invoke(
+                    command.show_gpus, ['V100:4', '--cloud', cloud, '--all'])
                 assert isinstance(result.exception, SystemExit)
 
     def test_k8s_alias_check(self):
         cli_runner = cli_testing.CliRunner()
-        
+
         # Mock the server health check to avoid connection issues
-        with mock.patch('sky.server.common.check_server_healthy_or_start_fn') as mock_health_check:
+        with mock.patch('sky.server.common.check_server_healthy_or_start_fn'
+                       ) as mock_health_check:
             mock_health_check.return_value = None
             # Clear the cache to ensure fresh results
             server_common.get_api_server_status.cache_clear()
