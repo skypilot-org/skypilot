@@ -170,7 +170,7 @@ def add_column_to_table_alembic(
     """
     from alembic import op  # pylint: disable=import-outside-toplevel
 
-    # Try to add the column
+    # Try to add the column, ignoring duplicate column errors
     try:
         kwargs = {}
         if server_default is not None:
