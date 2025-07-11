@@ -55,6 +55,8 @@ class Hyperbolic(clouds.Cloud):
             ('Auto-stop not supported.'),
         clouds.CloudImplementationFeatures.AUTODOWN:
             ('Auto-down not supported.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces not supported.'),
     }
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
