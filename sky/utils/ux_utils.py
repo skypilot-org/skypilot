@@ -9,11 +9,11 @@ from typing import Callable, Optional, Union
 
 import colorama
 
-from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import rich_console_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import pathlib

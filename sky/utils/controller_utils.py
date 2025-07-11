@@ -15,7 +15,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import resources
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
@@ -34,6 +33,7 @@ from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

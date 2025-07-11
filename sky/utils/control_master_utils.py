@@ -1,7 +1,7 @@
 """Utils to check if the ssh control master should be disabled."""
 
-from sky import sky_logging
 from sky.utils import annotations
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)

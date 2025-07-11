@@ -1,10 +1,10 @@
 """Utilities for Kubernetes ConfigMap operations in SkyPilot."""
 import os
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

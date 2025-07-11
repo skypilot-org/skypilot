@@ -10,8 +10,8 @@ import sys
 import typing
 from typing import Any, Callable, IO, Optional, Tuple, TypeVar
 
-from sky import sky_logging
 from sky.utils import context
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 
 StreamHandler = Callable[[IO[Any], IO[Any]], str]

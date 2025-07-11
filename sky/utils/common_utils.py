@@ -22,12 +22,12 @@ import jsonschema
 
 from sky import exceptions
 from sky import models
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 from sky.utils import validator
 

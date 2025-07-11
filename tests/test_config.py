@@ -11,12 +11,12 @@ import sky
 from sky import skypilot_config
 import sky.exceptions
 from sky.server.requests import payloads
-from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils.sky_logging import INFO
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'

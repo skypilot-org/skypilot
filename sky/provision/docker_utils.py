@@ -5,9 +5,9 @@ import shlex
 import time
 from typing import Any, Dict, List
 
-from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import command_runner
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)

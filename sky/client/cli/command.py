@@ -50,7 +50,6 @@ from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
@@ -76,6 +75,7 @@ from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline

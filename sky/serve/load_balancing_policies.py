@@ -5,7 +5,7 @@ import threading
 import typing
 from typing import Dict, List, Optional
 
-from sky import sky_logging
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import fastapi

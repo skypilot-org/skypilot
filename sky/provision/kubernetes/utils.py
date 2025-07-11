@@ -19,7 +19,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import models
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
@@ -34,6 +33,7 @@ from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils

@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 import requests
 
 from sky import authentication
-from sky import sky_logging
+from sky.utils import sky_logging
 from sky.utils import status_lib
 
 #TODO update to prod endpoint

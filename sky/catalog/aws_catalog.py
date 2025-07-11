@@ -11,7 +11,6 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common
 from sky.catalog import config
@@ -20,6 +19,7 @@ from sky.clouds import aws
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import timeline
 from sky.utils import ux_utils
 

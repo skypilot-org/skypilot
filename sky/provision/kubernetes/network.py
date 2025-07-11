@@ -1,12 +1,12 @@
 """Kubernetes network provisioning."""
 from typing import Any, Dict, List, Optional
 
-from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
+from sky.utils import sky_logging
 from sky.utils.resources_utils import port_ranges_to_set
 
 logger = sky_logging.init_logger(__name__)

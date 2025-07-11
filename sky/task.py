@@ -13,7 +13,6 @@ import colorama
 import sky
 from sky import clouds
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 import sky.dag
 from sky.data import data_utils
@@ -23,6 +22,7 @@ from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 from sky.volumes import volume as volume_lib
 

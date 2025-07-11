@@ -8,9 +8,9 @@ from typing import Callable, Iterator, List, Optional, TextIO, Type
 import colorama
 import prettytable
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

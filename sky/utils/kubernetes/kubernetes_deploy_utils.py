@@ -9,7 +9,6 @@ from typing import List, Optional
 import colorama
 
 from sky import check as sky_check
-from sky import sky_logging
 from sky.backends import backend_utils
 from sky.clouds import cloud as sky_cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -17,6 +16,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import log_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

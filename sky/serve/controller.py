@@ -15,12 +15,12 @@ from fastapi import responses
 import uvicorn
 
 from sky import serve
-from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

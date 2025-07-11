@@ -20,11 +20,11 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row

@@ -5,10 +5,10 @@ from typing import Any, Dict, List, Optional
 
 import prettytable
 
-from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import sky_logging
 from sky.volumes import volume
 
 logger = sky_logging.init_logger(__name__)

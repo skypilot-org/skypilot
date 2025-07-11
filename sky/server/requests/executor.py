@@ -36,7 +36,6 @@ import setproctitle
 from sky import exceptions
 from sky import global_user_state
 from sky import models
-from sky import sky_logging
 from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
@@ -52,6 +51,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline

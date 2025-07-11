@@ -11,7 +11,6 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
@@ -29,6 +28,7 @@ from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import sky_logging
 from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:

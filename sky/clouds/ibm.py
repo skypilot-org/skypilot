@@ -7,11 +7,11 @@ import colorama
 
 from sky import catalog
 from sky import clouds
-from sky import sky_logging
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import ux_utils
 

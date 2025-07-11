@@ -6,9 +6,9 @@ from unittest import mock
 
 import pytest
 
-from sky import sky_logging
 from sky.utils import context
 from sky.utils import env_options
+from sky.utils import sky_logging
 
 
 @pytest.fixture

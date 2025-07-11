@@ -8,10 +8,10 @@ from typing import AsyncGenerator, Deque, List, Optional
 import aiofiles
 import fastapi
 
-from sky import sky_logging
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

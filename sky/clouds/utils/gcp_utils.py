@@ -14,11 +14,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cachetools
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.provision.gcp import constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:

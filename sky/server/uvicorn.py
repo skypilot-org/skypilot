@@ -15,11 +15,11 @@ import filelock
 import uvicorn
 from uvicorn.supervisors import multiprocess
 
-from sky import sky_logging
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)

@@ -13,7 +13,6 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.provision import common
@@ -21,6 +20,7 @@ from sky.provision import constants
 from sky.provision.oci import query_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

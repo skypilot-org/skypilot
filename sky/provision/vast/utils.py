@@ -7,8 +7,8 @@
 """Vast library wrapper for SkyPilot."""
 from typing import Any, Dict, List
 
-from sky import sky_logging
 from sky.adaptors import vast
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

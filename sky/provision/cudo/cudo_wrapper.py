@@ -2,9 +2,9 @@
 import time
 from typing import Dict
 
-from sky import sky_logging
 from sky.adaptors import cudo
 import sky.provision.cudo.cudo_utils as utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

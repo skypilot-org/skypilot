@@ -3,9 +3,9 @@
 import time
 
 import sky
-from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import events
+from sky.utils import sky_logging
 
 # Use the explicit logger name so that the logger is under the
 # `sky.skylet.skylet` namespace when executed directly, so as

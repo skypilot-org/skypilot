@@ -15,7 +15,6 @@ import filelock
 
 from sky import authentication
 from sky import exceptions
-from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -27,6 +26,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

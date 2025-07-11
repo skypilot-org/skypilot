@@ -3,12 +3,12 @@ import time
 from typing import Any, Dict, List, Optional
 import uuid
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.provision.nebius import constants as nebius_constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

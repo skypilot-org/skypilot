@@ -1,10 +1,10 @@
 """Utility functions for managed jobs."""
 from sky import backends
-from sky import sky_logging
 from sky.backends import backend_utils
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants as skylet_constants
 from sky.utils import controller_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

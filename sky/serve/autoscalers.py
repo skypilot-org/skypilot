@@ -8,10 +8,10 @@ import time
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Union
 
-from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers

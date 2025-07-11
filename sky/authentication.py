@@ -35,7 +35,6 @@ import filelock
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
@@ -49,6 +48,7 @@ from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

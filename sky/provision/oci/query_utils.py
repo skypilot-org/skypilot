@@ -19,12 +19,12 @@ import traceback
 import typing
 from typing import List, Optional, Tuple
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.provision import constants
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import pandas as pd

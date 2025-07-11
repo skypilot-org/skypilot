@@ -13,7 +13,6 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import resources as resources_lib
-from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
@@ -25,6 +24,7 @@ from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils

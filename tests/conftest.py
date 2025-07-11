@@ -15,7 +15,7 @@ from sqlalchemy import text as sqlalchemy_text
 import sqlalchemy_adapter
 
 from sky import global_user_state
-from sky import sky_logging
+from sky.utils import sky_logging
 
 # Initialize logger at the top level
 logger = sky_logging.init_logger(__name__)

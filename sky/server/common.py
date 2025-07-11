@@ -23,7 +23,6 @@ import colorama
 import filelock
 
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -36,6 +35,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

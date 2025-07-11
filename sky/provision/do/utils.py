@@ -10,13 +10,13 @@ from typing import Any, Dict, List, Optional
 import urllib
 import uuid
 
-from sky import sky_logging
 from sky.adaptors import do
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.do import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

@@ -9,7 +9,6 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
-from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
@@ -17,6 +16,7 @@ from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 # Tag for the name of the node

@@ -14,7 +14,6 @@ from passlib.hash import apr_md5_crypt
 
 from sky import global_user_state
 from sky import models
-from sky import sky_logging
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import permission
@@ -23,6 +22,7 @@ from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

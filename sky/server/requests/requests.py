@@ -20,7 +20,6 @@ import filelock
 
 from sky import exceptions
 from sky import global_user_state
-from sky import sky_logging
 from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -31,6 +30,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

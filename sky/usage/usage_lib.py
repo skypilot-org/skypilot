@@ -11,11 +11,11 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import sky
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

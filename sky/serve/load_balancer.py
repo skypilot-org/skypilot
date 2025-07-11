@@ -11,11 +11,11 @@ import httpx
 from starlette import background
 import uvicorn
 
-from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
 from sky.utils import common_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

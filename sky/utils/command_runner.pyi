@@ -10,8 +10,8 @@ from typing import Any, Iterable, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
-from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
+from sky.utils import sky_logging as sky_logging
 from sky.utils import subprocess_utils as subprocess_utils
 
 GIT_EXCLUDE: str

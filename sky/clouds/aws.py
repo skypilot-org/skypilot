@@ -14,7 +14,6 @@ from sky import catalog
 from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.catalog import common as catalog_common
@@ -25,6 +24,7 @@ from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

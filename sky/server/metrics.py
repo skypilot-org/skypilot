@@ -10,7 +10,7 @@ import prometheus_client as prom
 import starlette.middleware.base
 import uvicorn
 
-from sky import sky_logging
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

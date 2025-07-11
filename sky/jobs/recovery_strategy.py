@@ -15,7 +15,6 @@ from sky import backends
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import sky_logging
 from sky.backends import backend_utils
 from sky.jobs import scheduler
 from sky.jobs import state
@@ -24,6 +23,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import ux_utils
 

@@ -3,13 +3,13 @@ import json
 import typing
 from typing import List
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import context
+from sky.utils import sky_logging
 from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:

@@ -30,7 +30,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import logs
 from sky import provision as provision_lib
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
@@ -49,6 +48,7 @@ from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import tempstore

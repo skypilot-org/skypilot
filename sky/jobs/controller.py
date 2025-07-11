@@ -22,7 +22,6 @@ import filelock
 # pylint: disable=unused-import
 from sky import core
 from sky import exceptions
-from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
@@ -37,6 +36,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

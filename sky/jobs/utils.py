@@ -23,7 +23,6 @@ from typing_extensions import Literal
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
@@ -45,6 +44,7 @@ from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

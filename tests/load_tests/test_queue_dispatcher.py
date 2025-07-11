@@ -3,7 +3,6 @@ import threading
 import time
 import uuid
 
-from sky import sky_logging
 from sky.server import config as server_config
 from sky.server.requests import executor
 from sky.server.requests import payloads
@@ -12,6 +11,7 @@ from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

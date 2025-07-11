@@ -8,12 +8,12 @@ import colorama
 
 from sky import backends
 from sky import global_user_state
-from sky import sky_logging
 from sky.adaptors import docker
 from sky.backends import backend_utils
 from sky.backends import docker_utils
 from sky.data import storage as storage_lib
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

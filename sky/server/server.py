@@ -37,7 +37,6 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import models
-from sky import sky_logging
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
@@ -66,6 +65,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest

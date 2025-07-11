@@ -15,10 +15,10 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 import colorama
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import timeline
 from sky.utils import ux_utils
 

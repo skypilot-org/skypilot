@@ -4,7 +4,6 @@ import pathlib
 
 import fastapi
 
-from sky import sky_logging
 from sky.serve.server import core
 from sky.server import common as server_common
 from sky.server import stream_utils
@@ -13,6 +12,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as api_requests
 from sky.skylet import constants
 from sky.utils import common
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()

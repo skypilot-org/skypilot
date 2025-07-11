@@ -1,9 +1,9 @@
 """Paperspace configuration bootstrapping."""
 
-from sky import sky_logging
 from sky.provision import common
 from sky.provision.paperspace import constants
 from sky.provision.paperspace import utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

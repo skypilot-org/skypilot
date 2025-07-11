@@ -19,12 +19,12 @@ from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
 
 import colorama
 
-from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import log_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

@@ -3,9 +3,9 @@
 import enum
 from typing import Dict, List
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
+from sky.utils import sky_logging
 from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)

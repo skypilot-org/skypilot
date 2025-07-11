@@ -2,9 +2,9 @@
 import time
 from typing import Any, Dict, List, Optional
 
-from sky import sky_logging
 from sky.provision import common
 from sky.provision.hyperbolic import utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 
 PROVIDER_NAME = 'hyperbolic'

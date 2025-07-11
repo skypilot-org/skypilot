@@ -14,7 +14,6 @@ from typing import Dict, Generator, Iterable
 import uuid
 import zipfile
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.data import storage_utils
@@ -23,6 +22,7 @@ from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

@@ -3,10 +3,10 @@ import os
 import threading
 from typing import List, Optional
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
