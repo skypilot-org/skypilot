@@ -76,9 +76,10 @@ if [[ -z "$OKTA_ISSUER_URL" ]]; then
     exit 1
 fi
 
+# Set default DOCKER_IMAGE if not provided
 if [[ -z "$DOCKER_IMAGE" ]]; then
-    echo "❌ DOCKER_IMAGE is required"
-    exit 1
+    DOCKER_IMAGE="skypilot:local"
+    echo "ℹ️  DOCKER_IMAGE not provided, using default: $DOCKER_IMAGE"
 fi
 
 echo "Using OAuth client ID: $OKTA_CLIENT_ID"
