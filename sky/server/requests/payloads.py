@@ -27,8 +27,6 @@ import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from sky import admin_policy
-from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -43,6 +41,9 @@ from sky.utils import registry
 
 if typing.TYPE_CHECKING:
     import pydantic
+
+    from sky import admin_policy
+    from sky import serve
 else:
     pydantic = adaptors_common.LazyImport('pydantic')
 
@@ -206,14 +207,14 @@ class DagRequestBody(RequestBody):
 class ValidateBody(DagRequestBody):
     """The request body for the validate endpoint."""
     dag: str
-    request_options: Optional[admin_policy.RequestOptions]
+    request_options: Optional['admin_policy.RequestOptions']
 
 
 class OptimizeBody(DagRequestBody):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: Optional[admin_policy.RequestOptions]
+    request_options: Optional['admin_policy.RequestOptions']
 
 
 class LaunchBody(RequestBody):
@@ -530,7 +531,7 @@ class ServeUpdateBody(RequestBody):
     """The request body for the serve update endpoint."""
     task: str
     service_name: str
-    mode: serve.UpdateMode
+    mode: 'serve.UpdateMode'
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -554,7 +555,7 @@ class ServeDownBody(RequestBody):
 class ServeLogsBody(RequestBody):
     """The request body for the serve logs endpoint."""
     service_name: str
-    target: Union[str, serve.ServiceComponent]
+    target: Union[str, 'serve.ServiceComponent']
     replica_id: Optional[int] = None
     follow: bool = True
 
@@ -563,8 +564,8 @@ class ServeDownloadLogsBody(RequestBody):
     """The request body for the serve download logs endpoint."""
     service_name: str
     local_dir: str
-    targets: Optional[Union[str, serve.ServiceComponent,
-                            List[Union[str, serve.ServiceComponent]]]]
+    targets: Optional[Union[str, 'serve.ServiceComponent',
+                            List[Union[str, 'serve.ServiceComponent']]]]
     replica_ids: Optional[List[int]] = None
 
 
