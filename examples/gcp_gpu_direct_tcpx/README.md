@@ -21,13 +21,13 @@ After setting up the GKE cluster, you can run NCCL Tests with the appropriate GP
 |---------------|----------------|---------------------------|----------|
 | [`gpu_direct_tcpx.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/gpu_direct_tcpx.yaml) | GCP VM | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
 | [`nccl_tcpx_gke_h100.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke.yaml) | GKE | GPUDirect-TCPX | a3-highgpu-8g, a3-edgegpu-8g |
-| [`nccl_tcpx_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h200.yaml) | GKE | GPUDirect-RDMA | a3-ultragpu-8g |
+| [`nccl_rdma_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_rdma_gke_h200.yaml) | GKE | GPUDirect-RDMA | a3-ultragpu-8g |
 
 ## GPUDirect-TCPX on A3 VMs (h100)
 
 This example demonstrates how to run [NCCL tests](https://github.com/NVIDIA/nccl-tests) on a GCP cluster with A3 VMs, comparing performance with and without GPUDirect-TCPX enabled.
 
-Enable GPUDirect-TCPX on GCP clusters with `a3-highgpu-8g`, `a3-edgegpu-8g`, or `a3-ultragpu-8g` VMs by adding a single configuration parameter to your SkyPilot YAML:
+Enable GPUDirect-TCPX on GCP clusters with `a3-highgpu-8g` or `a3-edgegpu-8g` VMs by adding a single configuration parameter to your SkyPilot YAML:
 
 ```yaml
 config:
@@ -129,11 +129,11 @@ GPUDirect-TCPX's direct GPU-to-NIC communication path eliminates CPU and system 
 
 ## GPUDirect-RDMA on A3-ultragpu-8g (h200)
 
-We have also validated GPUDirect-RDMA performance on `a3-ultragpu-8g` instances with H200 GPUs. Testing was conducted on a 2-node cluster with 16x H200 GPUs (8 per node) using the configuration in [`nccl_tcpx_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h200.yaml).
+We have also validated GPUDirect-RDMA performance on `a3-ultragpu-8g` instances with H200 GPUs. Testing was conducted on a 2-node cluster with 16x H200 GPUs (8 per node) using the configuration in [`nccl_rdma_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_rdma_gke_h200.yaml).
 
 The scaling curves and bandwidth measurements match exactly with Google's official benchmarks shown in their [documentation](https://cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom#flex-start).
 
-#### Applying NCCL test from documentation
+### Applying NCCL test from documentation
 
 ```
 # kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/refs/heads/master/gpudirect-rdma/nccl-test-a4.yaml
@@ -192,10 +192,10 @@ NCCL version 2.26.6+cuda12.8
 #
 ```
 
-#### Running [`nccl_tcpx_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_tcpx_gke_h200.yaml) on SkyPilot
+### Running [`nccl_rdma_gke_h200.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/gcp_gpu_direct_tcpx/nccl_rdma_gke_h200.yaml) on SkyPilot
 
 ```
-# sky launch nccl_tcpx_gke_h200.yaml -c nccl_test -y
+# sky launch nccl_rdma_gke_h200.yaml -c nccl_test -y
 
 (head, rank=0, pid=3808) All nodes: 10.100.9.12:8,10.100.10.12:8
 (worker1, rank=1, pid=2769, ip=10.100.10.12) Worker nodes
