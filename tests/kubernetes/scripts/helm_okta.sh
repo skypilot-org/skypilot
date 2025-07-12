@@ -88,6 +88,11 @@ echo "Using test credentials for user: $OKTA_TEST_USERNAME"
 echo "Using Okta issuer URL: $OKTA_ISSUER_URL"
 echo "Building Docker image locally: $DOCKER_IMAGE"
 
+# Debug: Check if running inside Docker container
+if [ -f /.dockerenv ]; then
+    echo "ℹ️  Running inside Docker container - using enhanced image loading for kind cluster"
+fi
+
 # Verify that nginx ingress controller is already running (installed by sky local up)
 echo "Verifying nginx ingress controller is running..."
 if ! kubectl get pods -n ingress-nginx -l app.kubernetes.io/component=controller --no-headers | grep -q "Running"; then
@@ -142,7 +147,35 @@ echo "✅ Docker image built successfully"
 
 # Load the image into kind cluster
 echo "Loading image $DOCKER_IMAGE into kind cluster..."
-kind load docker-image $DOCKER_IMAGE --name skypilot
+if ! kind load docker-image $DOCKER_IMAGE --name skypilot; then
+    echo "❌ Failed to load Docker image into kind cluster"
+    exit 1
+fi
+
+# Verify the image was loaded successfully
+echo "Verifying image was loaded into kind cluster..."
+if ! docker exec skypilot-control-plane crictl images | grep -q "skypilot.*local"; then
+    echo "❌ Docker image not found in kind cluster. Attempting alternative loading method..."
+
+    # Try saving and loading the image directly
+    echo "Saving Docker image to tar file..."
+    docker save $DOCKER_IMAGE -o /tmp/skypilot-image.tar
+
+    echo "Loading image directly into kind cluster..."
+    docker cp /tmp/skypilot-image.tar skypilot-control-plane:/tmp/
+    docker exec skypilot-control-plane ctr -n k8s.io images import /tmp/skypilot-image.tar
+
+    # Clean up
+    rm -f /tmp/skypilot-image.tar
+    docker exec skypilot-control-plane rm -f /tmp/skypilot-image.tar
+
+    # Verify again
+    if ! docker exec skypilot-control-plane crictl images | grep -q "skypilot.*local"; then
+        echo "❌ Failed to load Docker image into kind cluster after retry"
+        exit 1
+    fi
+fi
+echo "✅ Docker image successfully loaded into kind cluster"
 
 # Add required Helm repositories for dependencies
 echo "Adding required Helm repositories..."
@@ -161,6 +194,10 @@ if [ $? -ne 0 ]; then
 fi
 echo "✅ Helm chart dependencies built successfully"
 
+# Debug: List available images in kind cluster
+echo "Debug: Listing available images in kind cluster..."
+docker exec skypilot-control-plane crictl images | grep -E "(skypilot|local)" || echo "No skypilot images found"
+
 # Install the Skypilot Helm chart with the OAuth2 Proxy
 # Disable the ingress-nginx subchart since sky local up already installed nginx
 echo "Installing Skypilot Helm chart..."
@@ -168,7 +205,7 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --namespace $NAMESPACE \
     --create-namespace \
     --set apiService.image=$DOCKER_IMAGE \
-    --set imagePullPolicy=IfNotPresent \
+    --set imagePullPolicy=Never \
     --set ingress.oauth2-proxy.enabled=true \
     --set ingress.oauth2-proxy.oidc-issuer-url="$OKTA_ISSUER_URL" \
     --set ingress.oauth2-proxy.client-id="$OKTA_CLIENT_ID" \
