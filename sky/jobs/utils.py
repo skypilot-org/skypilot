@@ -4,9 +4,14 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+import asyncio
+from asyncio import events
 import collections
+import contextvars
 import datetime
 import enum
+import functools
+import logging
 import os
 import pathlib
 import shlex
@@ -14,11 +19,11 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
+                    Tuple, Union)
 
 import colorama
 import filelock
-from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
@@ -60,7 +65,8 @@ logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
-JOB_STATUS_CHECK_GAP_SECONDS = 20
+# This is a tradeoff between the latency and the resource usage.
+JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
@@ -236,8 +242,8 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-def get_job_status(backend: 'backends.CloudVmRayBackend',
-                   cluster_name: str) -> Optional['job_lib.JobStatus']:
+def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                   job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
@@ -247,27 +253,29 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        job_logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
-        logger.info('=== Checking the job status... ===')
+        job_logger.info('=== Checking the job status... ===')
         statuses = backend.get_job_status(handle, stream_logs=False)
         status = list(statuses.values())[0]
         if status is None:
-            logger.info('No job found.')
+            job_logger.info('No job found.')
         else:
-            logger.info(f'Job status: {status}')
+            job_logger.info(f'Job status: {status}')
     except exceptions.CommandError:
-        logger.info('Failed to connect to the cluster.')
-    logger.info('=' * 34)
+        job_logger.info('Failed to connect to the cluster.')
+    job_logger.info('=' * 34)
     return status
 
 
 def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
+        if pid < 0:
+            pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
         return process.is_running() and f'--job-id {job_id}' in cmd_str
@@ -435,6 +443,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Expected to find a controller pid for state '
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
+        elif pid < 0:
+            logger.debug('Controller pid is -1 for consolidated job controller')
+            continue
         else:
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):
@@ -568,7 +579,17 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
 
-    return callback_func
+    try:
+        asyncio.get_running_loop()
+
+        # In async context
+        async def async_callback_func(status: str):
+            return await to_thread(callback_func, status)
+
+        return async_callback_func
+    except RuntimeError:
+        # Not in async context
+        return callback_func
 
 
 # ======== user functions ========
@@ -617,6 +638,24 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         update_managed_jobs_statuses(job_id)
+
+        job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
+        if job_controller_pid is not None and job_controller_pid < 0:
+            # This is a consolidated job controller, so we need to cancel the
+            # with the controller server API
+            try:
+                # we create a file as a signal to the controller server
+                signal_file = pathlib.Path(managed_job_constants.SIGNAL_PATH,
+                                           f'{job_id}')
+                signal_file.touch()
+                cancelled_job_ids.append(job_id)
+            except OSError as e:
+                logger.error(f'Failed to cancel job {job_id} '
+                             f'with controller server: {e}')
+                # don't add it to the to be cancelled job ids, since we don't
+                # know for sure yet.
+                continue
+            continue
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
@@ -1618,3 +1657,17 @@ class ManagedJobCodeGen:
             f'export {constants.USER_ID_ENV_VAR}='
             f'"{common_utils.get_user_hash()}"; '
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
+
+
+async def to_thread(func, /, *args, **kwargs):
+    """This is an identical copy of asyncio.to_thread, however,
+    asyncio.to_thread was added in python 3.9, so we use this for compatibility
+    for 3.7 and 3.8.
+
+    For full documentation, see:
+    https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
+    """
+    loop = events.get_running_loop()
+    ctx = contextvars.copy_context()
+    func_call = functools.partial(ctx.run, func, *args, **kwargs)
+    return await loop.run_in_executor(None, func_call)
