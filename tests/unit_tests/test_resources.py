@@ -1131,7 +1131,8 @@ def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):
             'use_spot': True
         }, False),
     ])
-def test_should_be_blocked_by_table(r_kwargs, blocked_kwargs, expected):
+def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
+    """Test should_be_blocked_by method."""
     r = Resources(**r_kwargs)
     blocked = Resources(**blocked_kwargs)
     assert r.should_be_blocked_by(blocked) == expected
