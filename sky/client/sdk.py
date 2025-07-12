@@ -10,52 +10,28 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
-import base64
-import binascii
-from http import cookiejar
 import json
 import logging
 import os
-import pathlib
-import subprocess
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib import parse as urlparse
-import webbrowser
 
-import click
 import colorama
-import filelock
 
-from sky import admin_policy
-from sky import backends
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
-from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import admin_policy_utils
 from sky.utils import annotations
-from sky.utils import cluster_utils
 from sky.utils import common
-from sky.utils import common_utils
 from sky.utils import context as sky_context
-from sky.utils import dag_utils
-from sky.utils import env_options
-from sky.utils import infra_utils
-from sky.utils import rich_utils
-from sky.utils import status_lib
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -64,6 +40,8 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
+    from sky import admin_policy
+    from sky import backends
 else:
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -87,6 +65,9 @@ def stream_response(request_id: Optional[str],
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
     """
+    # We import rich_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import rich_utils
 
     retry_context: Optional[rest.RetryContext] = None
     if resumable:
@@ -128,6 +109,9 @@ def check(infra_list: Optional[Tuple[str, ...]],
     Request Returns:
         None
     """
+    # We import infra_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import infra_utils
     if infra_list is None:
         clouds = None
     else:
@@ -170,6 +154,10 @@ def enabled_clouds(workspace: Optional[str] = None,
     Request Returns:
         A list of enabled clouds in string format.
     """
+    # We import skypilot_config here to avoid
+    # expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky import skypilot_config
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     response = server_common.make_authenticated_request(
@@ -273,7 +261,7 @@ def list_accelerator_counts(
 def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional['admin_policy.RequestOptions'] = None
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
 
@@ -295,6 +283,9 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -317,7 +308,7 @@ def workspaces() -> server_common.RequestId:
 def validate(
     dag: 'sky.Dag',
     workdir_only: bool = False,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+    admin_policy_request_options: Optional['admin_policy.RequestOptions'] = None
 ) -> None:
     """Validates the tasks.
 
@@ -334,6 +325,9 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
     for task in dag.tasks:
         task.expand_and_validate_workdir()
         if not workdir_only:
@@ -354,6 +348,9 @@ def validate(
 @annotations.client_api
 def dashboard(starting_page: Optional[str] = None) -> None:
     """Starts the dashboard for SkyPilot."""
+    # We import webbrowser here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import webbrowser
     api_server_url = server_common.get_server_url()
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
@@ -372,7 +369,7 @@ def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -474,6 +471,14 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    # Keep the import of packages specific to this function local to avoid
+    # expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky import admin_policy
+    from sky.utils import admin_policy_utils
+    from sky.utils import cluster_utils
+    from sky.utils import dag_utils
+
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -525,12 +530,12 @@ def launch(
 def _launch(
     dag: 'sky.Dag',
     cluster_name: str,
-    request_options: admin_policy.RequestOptions,
+    request_options: 'admin_policy.RequestOptions',
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -543,6 +548,13 @@ def _launch(
     _disable_controller_check: bool = False,
 ) -> server_common.RequestId:
     """Auxiliary function for launch(), refer to launch() for details."""
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import click
+
+    from sky.utils import common_utils
+    from sky.utils import dag_utils
+    from sky.utils import status_lib
 
     validate(dag, admin_policy_request_options=request_options)
     # The flags have been applied to the task YAML and the backward
@@ -639,7 +651,7 @@ def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
 ) -> server_common.RequestId:
     """Executes a task on an existing cluster.
 
@@ -694,6 +706,9 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
@@ -1484,6 +1499,9 @@ def _update_remote_ssh_node_pools(file: str,
         infra: The name of the cluster configuration in the local SSH node
             pools config file. If None, all clusters in the file are updated.
     """
+    # We import ssh_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.kubernetes import ssh_utils
     file = os.path.expanduser(file)
     if not os.path.exists(file):
         with ux_utils.print_exception_no_traceback():
@@ -1701,6 +1719,9 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
+    # We import env_options here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import env_options
     response = server_common.make_authenticated_request(
         'GET',
         f'/api/get?request_id={request_id}',
@@ -1820,6 +1841,11 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         click.BadParameter: If no request ID is specified and not all or
             all_users is not set.
     """
+    # We import common_utils here to avoid
+    # expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import common_utils
+
     echo = logger.info if not silent else logger.debug
     user_id = None
     if not all_users:
@@ -1979,6 +2005,11 @@ def api_stop() -> None:
     Returns:
         None
     """
+    # We import subprocess_utils here to avoid expensive imports when
+    # not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import subprocess_utils
+
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
     if not server_common.is_api_server_local():
@@ -2019,6 +2050,9 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
     Returns:
         None
     """
+    # We import subprocess here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import subprocess
     if server_common.is_api_server_local():
         tail_args = ['-f'] if follow else []
         if tail is None:
@@ -2029,48 +2063,6 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
-
-
-def _save_config_updates(endpoint: Optional[str] = None,
-                         service_account_token: Optional[str] = None) -> None:
-    """Save endpoint and/or service account token to config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
-    with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not config_path.exists():
-            config_path.touch()
-            config: Dict[str, Any] = {}
-        else:
-            config = skypilot_config.get_user_config()
-            config = dict(config)
-
-        # Update endpoint if provided
-        if endpoint is not None:
-            # We should always reset the api_server config to avoid legacy
-            # service account token.
-            config['api_server'] = {}
-            config['api_server']['endpoint'] = endpoint
-
-        # Update service account token if provided
-        if service_account_token is not None:
-            if 'api_server' not in config:
-                config['api_server'] = {}
-            config['api_server'][
-                'service_account_token'] = service_account_token
-
-        common_utils.dump_yaml(str(config_path), config)
-        skypilot_config.reload_config()
-
-
-def _validate_endpoint(endpoint: Optional[str]) -> str:
-    """Validate and normalize the endpoint URL."""
-    if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
-    # Check endpoint is a valid URL
-    if (endpoint is not None and not endpoint.startswith('http://') and
-            not endpoint.startswith('https://')):
-        raise click.BadParameter('Endpoint must be a valid URL.')
-    return endpoint.rstrip('/')
 
 
 @usage_lib.entrypoint
@@ -2095,6 +2087,65 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    # We import packages needed for this function here to avoid expensive
+    # imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import base64
+    import binascii
+    from http import cookiejar
+    import pathlib
+    import time
+    from urllib import parse as urlparse
+    import webbrowser
+
+    import click
+    import filelock
+
+    from sky import skypilot_config
+    from sky.client import oauth as oauth_lib
+    from sky.utils import common_utils
+
+    def _validate_endpoint(endpoint: Optional[str]) -> str:
+        """Validate and normalize the endpoint URL."""
+        if endpoint is None:
+            endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+        # Check endpoint is a valid URL
+        if (endpoint is not None and not endpoint.startswith('http://') and
+                not endpoint.startswith('https://')):
+            raise click.BadParameter('Endpoint must be a valid URL.')
+        return endpoint.rstrip('/')
+
+    def _save_config_updates(
+            endpoint: Optional[str] = None,
+            service_account_token: Optional[str] = None) -> None:
+        """Save endpoint and/or service account token to config file."""
+        config_path = pathlib.Path(
+            skypilot_config.get_user_config_path()).expanduser()
+        with filelock.FileLock(config_path.with_suffix('.lock')):
+            if not config_path.exists():
+                config_path.touch()
+                config: Dict[str, Any] = {}
+            else:
+                config = skypilot_config.get_user_config()
+                config = dict(config)
+
+            # Update endpoint if provided
+            if endpoint is not None:
+                # We should always reset the api_server config to avoid legacy
+                # service account token.
+                config['api_server'] = {}
+                config['api_server']['endpoint'] = endpoint
+
+            # Update service account token if provided
+            if service_account_token is not None:
+                if 'api_server' not in config:
+                    config['api_server'] = {}
+                config['api_server'][
+                    'service_account_token'] = service_account_token
+
+            common_utils.dump_yaml(str(config_path), config)
+            skypilot_config.reload_config()
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
