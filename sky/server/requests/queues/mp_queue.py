@@ -5,7 +5,7 @@ import queue
 import time
 from typing import List
 
-from sky import sky_logging
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

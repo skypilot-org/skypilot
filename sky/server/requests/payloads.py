@@ -29,7 +29,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import admin_policy
 from sky import serve
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
@@ -40,6 +39,7 @@ from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import pydantic

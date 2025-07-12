@@ -15,9 +15,9 @@ History:
 """
 import os
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)

@@ -7,10 +7,10 @@ import re
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky import clouds as cloud_lib
-from sky import sky_logging
 from sky.catalog import common
 from sky.clouds import Azure
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

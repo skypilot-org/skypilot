@@ -3,9 +3,9 @@
 import dataclasses
 import enum
 
-from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.utils import common_utils
+from sky.utils import sky_logging
 
 # Constants based on profiling the peak memory usage while serving various
 # sky commands. These estimation are highly related to usage patterns

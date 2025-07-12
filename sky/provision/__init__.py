@@ -9,7 +9,6 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from sky import models
-from sky import sky_logging
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
 # these modules, for lazy loading of cloud SDKs.
@@ -30,6 +29,7 @@ from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere
 from sky.utils import command_runner
+from sky.utils import sky_logging
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:

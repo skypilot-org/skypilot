@@ -6,7 +6,7 @@ import pathlib
 import shutil
 from typing import Optional
 
-from sky import sky_logging
+from sky.utils import sky_logging
 
 SKY_METADATA_VERSION = 'v1'
 SKY_METADATA_PATH = (pathlib.Path.home() / '.sky' / 'metadata' /

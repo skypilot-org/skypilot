@@ -6,10 +6,10 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Union
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 import sky.provision.paperspace.constants as constants
 from sky.utils import common_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import requests

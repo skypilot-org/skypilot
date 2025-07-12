@@ -6,7 +6,6 @@ import webbrowser
 
 import click
 
-from sky import sky_logging
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
@@ -18,6 +17,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import io

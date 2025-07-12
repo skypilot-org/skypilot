@@ -12,7 +12,6 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
-from sky import sky_logging
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
 from sky.clouds.utils import aws_utils
@@ -21,6 +20,7 @@ from sky.provision import constants
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import ux_utils
 

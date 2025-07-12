@@ -3,11 +3,11 @@ import copy
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import dag as dag_lib
-from sky import sky_logging
 from sky import task as task_lib
 from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

@@ -7,7 +7,6 @@ import filelock
 from sky import check as sky_check
 from sky import exceptions
 from sky import models
-from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -17,6 +16,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import resource_checker
 from sky.utils import schemas
+from sky.utils import sky_logging
 from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)

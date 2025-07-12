@@ -12,10 +12,10 @@ import zipfile
 import colorama
 
 from sky import exceptions
-from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

@@ -8,11 +8,11 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
-from sky import sky_logging as sky_logging
 from sky.skylet import constants as constants
 from sky.skylet import job_lib as job_lib
 from sky.utils import context
 from sky.utils import log_utils as log_utils
+from sky.utils import sky_logging as sky_logging
 
 SKY_LOG_WAITING_GAP_SECONDS: int = ...
 SKY_LOG_WAITING_MAX_RETRY: int = ...

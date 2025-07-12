@@ -31,7 +31,6 @@ import filelock
 from sky import admin_policy
 from sky import backends
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
@@ -52,6 +51,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

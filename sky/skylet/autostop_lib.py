@@ -5,11 +5,11 @@ import time
 import typing
 from typing import List, Optional
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import configs
 from sky.skylet import constants
 from sky.utils import message_utils
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     import psutil

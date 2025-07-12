@@ -10,10 +10,10 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import sky_logging
 from sky.clouds.utils import scp_utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:

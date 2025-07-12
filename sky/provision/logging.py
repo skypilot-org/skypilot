@@ -8,7 +8,7 @@ import pathlib
 import sys
 import threading
 
-from sky import sky_logging
+from sky.utils import sky_logging
 
 
 @dataclasses.dataclass
