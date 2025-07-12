@@ -596,8 +596,7 @@ def get_next_cluster_name(service_name: str) -> Optional[str]:
             raise ValueError(f'Service {service_name!r} does not exist.')
     load_balancer_port = service_status['load_balancer_port']
     resp = requests.get(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) +
-        '/acquire')
+        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) + '/acquire')
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -606,7 +605,8 @@ def get_next_cluster_name(service_name: str) -> Optional[str]:
                 'it first and relaunch the service. ')
     elif resp.status_code == 400:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Client error during service acquire: {resp.text}')
+            raise ValueError(
+                f'Client error during service acquire: {resp.text}')
     elif resp.status_code == 500:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -615,6 +615,23 @@ def get_next_cluster_name(service_name: str) -> Optional[str]:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Failed to acquire cluster: {resp.text}')
     return resp.json()['cluster_name']
+
+
+def release_cluster_name(service_name: str, cluster_name: str) -> str:
+    service_status = _get_service_status(service_name)
+    if service_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
+    load_balancer_port = service_status['load_balancer_port']
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) + '/release',
+        json={
+            'cluster_name': cluster_name,
+        })
+    if resp.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to release cluster: {resp.text}')
+    return resp.json()['message']
 
 
 def submit_encoded(run_script: str, service_name: str, batch_size: int) -> str:

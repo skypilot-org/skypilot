@@ -102,6 +102,9 @@ job_info_table = sqlalchemy.Table(
                       sqlalchemy.Text,
                       server_default=None),
     sqlalchemy.Column('pool_manager', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('current_cluster_name',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(
@@ -212,6 +215,12 @@ def create_table():
             'pool_manager',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'job_info',
+            'current_cluster_name',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -294,6 +303,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'entrypoint': r['entrypoint'],
         'original_user_yaml_path': r['original_user_yaml_path'],
         'pool_manager': r['pool_manager'],
+        'current_cluster_name': r['current_cluster_name'],
     }
 
 
@@ -1342,6 +1352,28 @@ def get_pool_manager_from_job_id(job_id: int) -> Optional[str]:
             sqlalchemy.select(job_info_table.c.pool_manager).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()
         return pool_manager[0] if pool_manager else None
+
+
+@_init_db
+def set_current_cluster_name(job_id: int, cluster_name: str) -> None:
+    """Set the current cluster name for the job id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update(
+                {job_info_table.c.current_cluster_name: cluster_name})
+        session.commit()
+
+
+@_init_db
+def get_current_cluster_name_from_job_id(job_id: int) -> Optional[str]:
+    """Get the current cluster name from the job id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        current_cluster_name = session.execute(
+            sqlalchemy.select(job_info_table.c.current_cluster_name).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        return current_cluster_name[0] if current_cluster_name else None
 
 
 @_init_db

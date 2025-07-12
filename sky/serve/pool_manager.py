@@ -5,17 +5,18 @@ import io
 import traceback
 from typing import Dict, List, Tuple
 import uuid
-from sky.utils import common_utils
-from sky.utils import usage_lib
-from sky import global_user_state
+
 import aiohttp
 import fastapi
 import uvicorn
 
 import sky
+from sky import global_user_state
 from sky import sky_logging
 from sky.client import sdk
 from sky.serve import constants
+from sky.usage import usage_lib
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -81,11 +82,11 @@ class PoolManager:
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'
                              f'\nTraceback: {traceback.format_exc()}')
+
     def _try_cancel_all_jobs(self, cluster_name: str):
         from sky import core  # pylint: disable=import-outside-toplevel
 
-        handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is None:
             return
         try:

@@ -30,6 +30,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -60,12 +61,14 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
-    def __init__(self, job_id: int, dag_yaml: str, pool_manager: Optional[str]) -> None:
+    def __init__(self, job_id: int, dag_yaml: str,
+                 pool_manager: Optional[str]) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert pool_manager is not None
         self._pool_manager = pool_manager
 
         # pylint: disable=line-too-long
@@ -197,7 +200,8 @@ class JobsController:
         # cluster_name = managed_job_utils.generate_managed_job_cluster_name(
         #     task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            '_dummy_name', self._backend, task, self._job_id, task_id, self._pool_manager)
+            '_dummy_name', self._backend, task, self._job_id, task_id,
+            self._pool_manager)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -224,10 +228,15 @@ class JobsController:
         # Only do the initial cluster launch if not resuming from a controller
         # failure. Otherwise, we will transit to recovering immediately.
         remote_job_submitted_at = time.time()
-        cluster_name = None
+        cluster_name = managed_job_state.get_current_cluster_name_from_job_id(
+            self._job_id)
         if not is_resume:
-            remote_job_submitted_at, cluster_name = self._strategy_executor.launch()
+            remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+            cluster_name = (
+                managed_job_state.get_current_cluster_name_from_job_id(
+                    self._job_id))
+        assert cluster_name is not None
 
         if not is_resume:
             managed_job_state.set_started(job_id=self._job_id,
@@ -318,7 +327,8 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                managed_job_utils.terminate_cluster(self._pool_manager)
+                serve_utils.release_cluster_name(self._pool_manager,
+                                                 cluster_name)
                 return True
 
             # For single-node jobs, non-terminated job_status indicates a
@@ -459,7 +469,8 @@ class JobsController:
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    managed_job_utils.terminate_cluster(cluster_name)
+                    serve_utils.release_cluster_name(self._pool_manager,
+                                                     cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
@@ -468,7 +479,11 @@ class JobsController:
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
-            recovered_time, cluster_name = self._strategy_executor.recover()
+            recovered_time = self._strategy_executor.recover()
+            cluster_name = (
+                managed_job_state.get_current_cluster_name_from_job_id(
+                    self._job_id))
+            assert cluster_name is not None
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
@@ -593,13 +608,15 @@ def _cleanup(job_id: int, dag_yaml: str, pool_manager: Optional[str]):
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
     # sky.exceptions.ResourcesUnavailableError).
+    assert pool_manager is not None
     managed_job_state.remove_ha_recovery_script(job_id)
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, job_id)
-        managed_job_utils.terminate_cluster(pool_manager)
+        cluster_name = managed_job_state.get_current_cluster_name_from_job_id(
+            job_id)
+        if cluster_name is not None:
+            serve_utils.release_cluster_name(pool_manager, cluster_name)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -645,7 +662,8 @@ def start(job_id, dag_yaml, pool_manager):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml, pool_manager))
+                                                     args=(job_id, dag_yaml,
+                                                           pool_manager))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
