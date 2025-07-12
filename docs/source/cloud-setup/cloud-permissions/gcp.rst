@@ -64,7 +64,7 @@ The easiest way to grant permissions to a user access your GCP project without t
   roles/compute.admin
   roles/iam.serviceAccountAdmin
   roles/iam.serviceAccountUser
-  roles/serviceusage.serviceUsageConsumer
+  roles/serviceusage.serviceUsageAdmin
   roles/storage.admin
   roles/iam.securityAdmin
 

@@ -73,6 +73,9 @@ class Cudo(clouds.Cloud):
         ),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Cudo.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on Cudo.'
+            ),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
@@ -298,7 +301,7 @@ class Cudo(clouds.Cloud):
         from cudo_compute import cudo_api
         from cudo_compute.rest import ApiException
         try:
-            _, error = cudo_api.client()
+            _, error = cudo_api.make_client()
         except FileNotFoundError as e:
             return False, (
                 'Cudo credentials are not set. '

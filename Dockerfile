@@ -54,17 +54,15 @@ RUN cd /skypilot && \
         npm --prefix sky/dashboard install && npm --prefix sky/dashboard run build; \
     else \
         echo "Installing from wheel file" && \
-        if [ ! -f /skypilot/dist/skypilot-*.whl ]; then \
+        WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
+        if [ -z "$WHEEL_FILE" ]; then \
             echo "Error: No wheel file found in /skypilot/dist/" && \
+            ls -la /skypilot/dist/ && \
             exit 1; \
         fi && \
-        WHEEL_FILE=$(ls dist/skypilot-*.whl) && \
         ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi
-
-RUN sky -v && \
-    sky api info
 
 # Cleanup all caches to reduce the image size
 RUN conda clean -afy && \

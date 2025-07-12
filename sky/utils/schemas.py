@@ -311,6 +311,9 @@ def _get_single_resources_schema():
                     }
                 }
             },
+            '_no_missing_accel_warnings': {
+                'type': 'boolean'
+            },
             'image_id': {
                 'anyOf': [{
                     'type': 'string',
@@ -867,6 +870,9 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
+            '_metadata': {
+                'type': 'object',
+            },
             **_experimental_task_schema(),
         }
     }
@@ -1081,6 +1087,28 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'dws': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'enabled': {
+                'type': 'boolean',
+            },
+            # Only used when Kueue is enabled.
+            'max_run_duration': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN,
+                }, {
+                    'type': 'integer',
+                }]
+            },
+        },
+    },
+    'remote_identity': {
+        'type': 'string',
+    }
 }
 
 
@@ -1426,6 +1454,9 @@ def get_config_schema():
                         'type': 'null',
                     }
                 ]
+            },
+            'requests_retention_hours': {
+                'type': 'integer',
             },
         }
     }

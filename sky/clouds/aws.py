@@ -174,6 +174,11 @@ class AWS(clouds.Cloud):
                 f'High availability controllers are not supported on {cls._REPR}.'
             )
 
+        unsupported_features[
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK] = (
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
+            )
+
         return unsupported_features
 
     @classmethod
@@ -734,7 +739,7 @@ class AWS(clouds.Cloud):
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+                              stderr=subprocess.DEVNULL)
         if proc.returncode != 0:
             return None
         return proc.stdout

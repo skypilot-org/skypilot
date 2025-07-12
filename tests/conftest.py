@@ -196,6 +196,18 @@ def pytest_configure(config):
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
+    # Validate incompatible option combinations
+    if config.getoption('--remote-server'):
+        if config.getoption('--jobs-consolidation'):
+            raise ValueError(
+                '--remote-server and --jobs-consolidation are not compatible. '
+                'Jobs consolidation mode is not supported with remote server testing.'
+            )
+        if config.getoption('--postgres'):
+            raise ValueError(
+                '--remote-server and --postgres are not compatible. '
+                'Postgres backend is not supported with remote server testing.')
+
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 
@@ -516,69 +528,4 @@ def setup_postgres_backend_env(request):
         yield
         return
     os.environ['PYTEST_SKYPILOT_POSTGRES_BACKEND'] = '1'
-    yield
-
-
-@pytest.fixture(autouse=True)
-def patch_db_create_for_parallel_tests(monkeypatch):
-    """Mock Base.metadata.create_all with file lock to prevent race conditions in parallel execution."""
-
-    # Store the original create_all method
-    original_create_all = global_user_state.Base.metadata.create_all
-
-    def create_all_with_lock(bind=None, **kwargs):
-        """Wrapper for Base.metadata.create_all with file lock to prevent race conditions."""
-        # Use file lock to ensure only one process creates tables at a time
-        # Use a constant path in ~/.sky so all test processes can see the same lock file
-        lock_file_path = os.path.expanduser('~/.sky/test_db_create_all.lock')
-
-        with open(lock_file_path, 'w') as lock_file:
-            try:
-                # Acquire exclusive lock - blocks other processes until we're done
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
-                # Create all tables - the lock prevents race conditions during table creation
-                # SQLAlchemy's create_all() handles existing tables gracefully with checkfirst=True
-                original_create_all(bind=bind, **kwargs)
-
-            finally:
-                # Lock is automatically released when file is closed
-                pass
-
-    # Patch the method
-    monkeypatch.setattr(global_user_state.Base.metadata, 'create_all',
-                        create_all_with_lock)
-
-    yield
-
-
-@pytest.fixture(autouse=True)
-def patch_casbin_adapter_for_parallel_tests(monkeypatch):
-    """Mock Casbin SQLAlchemy Adapter initialization with file lock to prevent race conditions in parallel execution."""
-
-    # Store the original Adapter class
-    original_adapter_init = sqlalchemy_adapter.Adapter.__init__
-
-    def adapter_init_with_lock(self, engine, *args, **kwargs):
-        """Wrapper for sqlalchemy_adapter.Adapter.__init__ with file lock to prevent race conditions."""
-        # Use file lock to ensure only one process creates casbin tables at a time
-        # Use a constant path in ~/.sky so all test processes can see the same lock file
-        lock_file_path = os.path.expanduser('~/.sky/test_casbin_adapter.lock')
-
-        with open(lock_file_path, 'w') as lock_file:
-            try:
-                # Acquire exclusive lock - blocks other processes until we're done
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
-                # Initialize the adapter - the lock prevents race conditions during table creation
-                original_adapter_init(self, engine, *args, **kwargs)
-
-            finally:
-                # Lock is automatically released when file is closed
-                pass
-
-    # Patch the method
-    monkeypatch.setattr(sqlalchemy_adapter.Adapter, '__init__',
-                        adapter_init_with_lock)
-
     yield

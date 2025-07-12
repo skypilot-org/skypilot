@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -38,6 +39,7 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -128,9 +130,15 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
-def _check_consolidation_mode_consistency(
+def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
-    """Check the consistency of the consolidation mode."""
+    """Validate the consolidation mode config."""
+    if (current_is_consolidation_mode and
+            not env_options.Options.IS_DEVELOPER.get() and
+            server_common.is_api_server_local()):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
@@ -176,7 +184,7 @@ def _check_consolidation_mode_consistency(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _check_consolidation_mode_consistency(consolidation_mode)
+    _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 
@@ -1249,7 +1257,14 @@ def format_job_table(
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
-        columns += ['STARTED', 'INFRA', 'RESOURCES', 'SCHED. STATE', 'DETAILS']
+        columns += [
+            'STARTED',
+            'INFRA',
+            'RESOURCES',
+            'SCHED. STATE',
+            'DETAILS',
+            'GIT_COMMIT',
+        ]
     if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -1362,6 +1377,7 @@ def format_job_table(
                     '-',
                     job_tasks[0]['schedule_state'],
                     generate_details(details, failure_reason),
+                    job_tasks[0].get('metadata', {}).get('git_commit', '-'),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1427,6 +1443,8 @@ def format_job_table(
                     generate_details(task.get('details'),
                                      task['failure_reason']),
                 ])
+
+                values.append(task.get('metadata', {}).get('git_commit', '-'))
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
@@ -1512,6 +1530,22 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_version_and_job_table(cls) -> str:
+        """Generate code to get controller version and raw job table."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
+
+        # Get and print raw job table (load_managed_job_queue can parse this directly)
+        job_table = utils.dump_managed_job_queue()
+        print(job_table, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
         from sky.utils import message_utils
@@ -1565,8 +1599,13 @@ class ManagedJobCodeGen:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r})
+                if managed_job_version < 7:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r})
+                else:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r},
+                                    {task.metadata_json!r})
                 """)
         return cls._build(code)
 

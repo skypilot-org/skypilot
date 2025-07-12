@@ -255,6 +255,7 @@ class Task:
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
         volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initializes a Task.
 
@@ -313,6 +314,7 @@ class Task:
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
           blocked_resources: A set of resources that this task cannot run on.
+          metadata: A dictionary of metadata to be added to the task.
         """
         self.name = name
         self.run = run
@@ -368,6 +370,8 @@ class Task:
         self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             volume_mounts)
+
+        self._metadata = metadata if metadata is not None else {}
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -503,6 +507,8 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
+        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+
     @staticmethod
     def from_yaml_config(
         config: Dict[str, Any],
@@ -599,6 +605,7 @@ class Task:
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
             volumes=config.pop('volumes', None),
+            metadata=config.pop('_metadata', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -871,6 +878,14 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        return self._metadata
+
+    @property
+    def metadata_json(self) -> str:
+        return json.dumps(self._metadata)
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -1512,7 +1527,7 @@ class Task:
                 d[k] = v
         return d
 
-    def to_yaml_config(self, redact_secrets: bool = True) -> Dict[str, Any]:
+    def to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 
         INTERNAL: this method is internal-facing.
@@ -1588,6 +1603,8 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
+        # we manually check if its empty to not clog up the generated yaml
+        add_if_not_none('_metadata', self._metadata if self._metadata else None)
         return config
 
     def get_required_cloud_features(
