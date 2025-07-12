@@ -13,11 +13,9 @@ Usage example:
 import json
 import logging
 import os
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import click
 import colorama
 
 from sky import exceptions
@@ -32,9 +30,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common
-from sky.utils import common_utils
 from sky.utils import context as sky_context
-from sky.utils import dag_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -69,15 +65,15 @@ def stream_response(request_id: Optional[str],
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
     """
+    # We import rich_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import rich_utils
 
     retry_context: Optional[rest.RetryContext] = None
     if resumable:
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
-        # We import rich_utils here to avoid expensive imports when not needed.
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import rich_utils
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 line_count += 1
@@ -113,13 +109,13 @@ def check(infra_list: Optional[Tuple[str, ...]],
     Request Returns:
         None
     """
+    # We import infra_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import infra_utils
     if infra_list is None:
         clouds = None
     else:
         specified_clouds = []
-        # We import infra_utils here to avoid expensive imports when not needed.
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import infra_utils
         for infra_str in infra_list:
             infra = infra_utils.InfraInfo.from_str(infra_str)
             if infra.cloud is None:
@@ -158,11 +154,11 @@ def enabled_clouds(workspace: Optional[str] = None,
     Request Returns:
         A list of enabled clouds in string format.
     """
+    # We import skypilot_config here to avoid
+    # expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky import skypilot_config
     if workspace is None:
-        # We import skypilot_config here to avoid
-        # expensive imports when not needed.
-        # pylint: disable=import-outside-toplevel
-        from sky import skypilot_config
         workspace = skypilot_config.get_active_workspace()
     response = server_common.make_authenticated_request(
         'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
@@ -287,6 +283,9 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -326,6 +325,9 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
     for task in dag.tasks:
         task.expand_and_validate_workdir()
         if not workdir_only:
@@ -346,13 +348,13 @@ def validate(
 @annotations.client_api
 def dashboard(starting_page: Optional[str] = None) -> None:
     """Starts the dashboard for SkyPilot."""
+    # We import webbrowser here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import webbrowser
     api_server_url = server_common.get_server_url()
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
     logger.info(f'Opening dashboard in browser: {url}')
-    # We import webbrowser here to avoid expensive imports when not needed.
-    # pylint: disable=import-outside-toplevel
-    import webbrowser
     webbrowser.open(url)
 
 
@@ -475,6 +477,7 @@ def launch(
     from sky import admin_policy
     from sky.utils import admin_policy_utils
     from sky.utils import cluster_utils
+    from sky.utils import dag_utils
 
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
@@ -545,6 +548,13 @@ def _launch(
     _disable_controller_check: bool = False,
 ) -> server_common.RequestId:
     """Auxiliary function for launch(), refer to launch() for details."""
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import click
+
+    from sky.utils import common_utils
+    from sky.utils import dag_utils
+    from sky.utils import status_lib
 
     validate(dag, admin_policy_request_options=request_options)
     # The flags have been applied to the task YAML and the backward
@@ -581,9 +591,6 @@ def _launch(
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
         prompt = None
-        # We import status_lib here to avoid expensive imports when not needed.
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import status_lib
         if cluster_status is None:
             prompt = (
                 f'Launching a new cluster {cluster_name!r}. '
@@ -699,6 +706,9 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    # We import dag_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
@@ -1489,15 +1499,15 @@ def _update_remote_ssh_node_pools(file: str,
         infra: The name of the cluster configuration in the local SSH node
             pools config file. If None, all clusters in the file are updated.
     """
+    # We import ssh_utils here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.kubernetes import ssh_utils
     file = os.path.expanduser(file)
     if not os.path.exists(file):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'SSH Node Pool config file {file} does not exist. '
                 'Please check if the file exists and the path is correct.')
-    # We import ssh_utils here to avoid expensive imports when not needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils.kubernetes import ssh_utils
     config = ssh_utils.load_ssh_targets(file)
     config = ssh_utils.get_cluster_config(config, infra)
     pools_config = {}
@@ -1709,6 +1719,9 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
+    # We import env_options here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import env_options
     response = server_common.make_authenticated_request(
         'GET',
         f'/api/get?request_id={request_id}',
@@ -1733,9 +1746,6 @@ def get(request_id: str) -> Any:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
-        # We import env_options here to avoid expensive imports when not needed.
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import env_options
         if env_options.Options.SHOW_DEBUG_INFO.get():
             stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
             logger.error('=== Traceback on SkyPilot API Server ===\n'
@@ -1831,6 +1841,11 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         click.BadParameter: If no request ID is specified and not all or
             all_users is not set.
     """
+    # We import common_utils here to avoid
+    # expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import common_utils
+
     echo = logger.info if not silent else logger.debug
     user_id = None
     if not all_users:
@@ -1990,6 +2005,11 @@ def api_stop() -> None:
     Returns:
         None
     """
+    # We import subprocess_utils here to avoid expensive imports when
+    # not needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import subprocess_utils
+
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
     if not server_common.is_api_server_local():
@@ -2002,10 +2022,6 @@ def api_stop() -> None:
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
-            # We import subprocess_utils here to avoid expensive imports when
-            # not needed.
-            # pylint: disable=import-outside-toplevel
-            from sky.utils import subprocess_utils
             subprocess_utils.kill_children_processes(parent_pids=[process.pid],
                                                      force=True)
             found = True
@@ -2034,6 +2050,9 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
     Returns:
         None
     """
+    # We import subprocess here to avoid expensive imports when not needed.
+    # pylint: disable=import-outside-toplevel
+    import subprocess
     if server_common.is_api_server_local():
         tail_args = ['-f'] if follow else []
         if tail is None:
@@ -2041,23 +2060,9 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         else:
             tail_args.extend(['-n', f'{tail}'])
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
-        # We import subprocess here to avoid expensive imports when not needed.
-        # pylint: disable=import-outside-toplevel
-        import subprocess
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
-
-
-def _validate_endpoint(endpoint: Optional[str]) -> str:
-    """Validate and normalize the endpoint URL."""
-    if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
-    # Check endpoint is a valid URL
-    if (endpoint is not None and not endpoint.startswith('http://') and
-            not endpoint.startswith('https://')):
-        raise click.BadParameter('Endpoint must be a valid URL.')
-    return endpoint.rstrip('/')
 
 
 @usage_lib.entrypoint
@@ -2089,13 +2094,26 @@ def api_login(endpoint: Optional[str] = None,
     import binascii
     from http import cookiejar
     import pathlib
+    import time
     from urllib import parse as urlparse
     import webbrowser
 
+    import click
     import filelock
 
     from sky import skypilot_config
     from sky.client import oauth as oauth_lib
+    from sky.utils import common_utils
+
+    def _validate_endpoint(endpoint: Optional[str]) -> str:
+        """Validate and normalize the endpoint URL."""
+        if endpoint is None:
+            endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+        # Check endpoint is a valid URL
+        if (endpoint is not None and not endpoint.startswith('http://') and
+                not endpoint.startswith('https://')):
+            raise click.BadParameter('Endpoint must be a valid URL.')
+        return endpoint.rstrip('/')
 
     def _save_config_updates(
             endpoint: Optional[str] = None,
