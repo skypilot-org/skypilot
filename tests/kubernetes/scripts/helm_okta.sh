@@ -5,9 +5,10 @@
 #
 # Key modifications for kind cluster compatibility:
 # 1. Disables ingress-nginx subchart to avoid conflicts with the existing nginx from 'sky local up'
-# 2. Patches OAuth2 proxy ingress annotations to use internal cluster service URLs
-# 3. Uses localhost with NodePort for accessing the API server
-# 4. Supports automated login for testing (when test credentials are provided)
+# 2. Disables nginx admission webhook to allow OAuth2 proxy snippet annotations
+# 3. Patches OAuth2 proxy ingress annotations to use internal cluster service URLs
+# 4. Uses localhost with NodePort for accessing the API server
+# 5. Supports automated login for testing (when test credentials are provided)
 #
 # Prerequisites:
 # - Run 'sky local up' first to create the kind cluster with nginx ingress
@@ -48,7 +49,7 @@ cleanup() {
 }
 
 # Set up trap to call cleanup function on script exit
-trap cleanup EXIT
+# trap cleanup EXIT
 
 # Assert all required environment variables are provided
 if [[ -z "$OKTA_CLIENT_ID" ]]; then
@@ -94,6 +95,15 @@ if ! kubectl get pods -n ingress-nginx -l app.kubernetes.io/component=controller
     exit 1
 fi
 echo "nginx ingress controller is running ✓"
+
+# Disable nginx ingress admission webhook to allow snippet annotations
+echo "Disabling nginx ingress admission webhook to allow OAuth2 proxy snippet annotations..."
+if kubectl get validatingwebhookconfigurations ingress-nginx-admission >/dev/null 2>&1; then
+    kubectl delete validatingwebhookconfigurations ingress-nginx-admission
+    echo "✅ nginx ingress admission webhook disabled"
+else
+    echo "nginx ingress admission webhook not found, skipping deletion"
+fi
 
 # Patch the nginx ingress controller service to use NodePort $NODEPORT
 echo "Configuring nginx ingress controller to use NodePort $NODEPORT..."
@@ -164,6 +174,12 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --set ingress.oauth2-proxy.client-secret="$OKTA_CLIENT_SECRET" \
     --set ingress-nginx.enabled=false
 
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to install Helm chart"
+    exit 1
+fi
+echo "✅ Helm chart installed successfully"
+
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."
 
@@ -180,9 +196,8 @@ fi
 
 # Fix OAuth2 proxy configuration for kind cluster environment
 echo "Fixing OAuth2 proxy ingress configuration for kind cluster..."
-# The Helm chart sets auth-url to use $host which becomes "localhost:30082" from the client side,
-# but the nginx ingress controller inside the cluster can't resolve "localhost" to reach the OAuth2 proxy.
-# We also need to remove risky annotations that nginx rejects and set the correct host.
+# Remove problematic snippet annotations that cause "risky annotation" warnings
+# and configure the ingresses properly for localhost access
 kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
@@ -212,8 +227,7 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
       "nginx.ingress.kubernetes.io/auth-url": "http://skypilot-oauth2-proxy.'$NAMESPACE'.svc.cluster.local:4180/oauth2/auth",
       "nginx.ingress.kubernetes.io/auth-signin": "http://localhost:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
       "nginx.ingress.kubernetes.io/auth-snippet": null,
-      "nginx.ingress.kubernetes.io/configuration-snippet": null,
-      "nginx.ingress.kubernetes.io/enable-external-auth": "true"
+      "nginx.ingress.kubernetes.io/configuration-snippet": null
     }
   }
 }'
