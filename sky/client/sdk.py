@@ -363,6 +363,7 @@ def dashboard(starting_page: Optional[str] = None) -> None:
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@rest.retry_on_server_unavailable()
 @annotations.client_api
 @sky_context.contextual
 def launch(

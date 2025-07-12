@@ -51,3 +51,107 @@ tests:
           content:
             name: KUBECONFIG
             value: /root/.kube/config:/var/skypilot/kubeconfig/config
+
+  # Test cases for upgradeStrategy configuration
+  - it: should use Recreate strategy by default
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: should use RollingUpdate strategy when configured with external database via secret
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_APISERVER_UUID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.uid
+
+  - it: should use RollingUpdate strategy when configured with external database via connection string
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionString: postgresql://user:pass@host:5432/db
+      storage.enabled: false
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_APISERVER_UUID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.uid
+
+  - it: should fail RollingUpdate strategy without external database
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+    asserts:
+      - failedTemplate:
+          errorMessage: "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy"
+
+  - it: should fail RollingUpdate strategy with local storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false."
+
+  # Test cases for dbConnectionSecretName configuration
+  - it: should set database connection environment variable from secret
+    set:
+      apiService.dbConnectionSecretName: my-db-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DB_CONNECTION_URI
+            valueFrom:
+              secretKeyRef:
+                name: my-db-secret
+                key: connection_string
+
+  # Test cases for dbConnectionString configuration
+  - it: should set database connection environment variable from connection string
+    set:
+      apiService.dbConnectionString: postgresql://user:pass@host:5432/db
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DB_CONNECTION_URI
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-db-connection
+                key: connection_string
+
+  - it: should not set database connection environment variables when neither secret nor string is configured
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DB_CONNECTION_URI
