@@ -2924,20 +2924,19 @@ def _down_or_stop_clusters(
                         click.echo(common_utils.format_exception(e))
                     else:
                         raise
-                if not no_confirm:
+                if not purge:
                     confirm_str = 'delete'
-                    input_prefix = (
-                        'Since --purge is set, errors will be ignored '
-                        'and controller will be removed from '
-                        'local state.\n') if purge else ''
                     user_input = click.prompt(
-                        f'{input_prefix}'
                         f'To proceed, please type {colorama.Style.BRIGHT}'
                         f'{confirm_str!r}{colorama.Style.RESET_ALL}',
                         type=str)
                     if user_input != confirm_str:
                         raise click.Abort()
-                    no_confirm = True
+                else:
+                    click.echo('Since --purge is set, errors will be ignored '
+                               'and controller will be removed from '
+                               'local state.\nSkipping confirmation...')
+                no_confirm = True
         names += controllers
 
     if apply_to_all or all_users:
