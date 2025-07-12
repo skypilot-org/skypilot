@@ -101,6 +101,9 @@ apiService:
       cpu: "4"
       memory: "8Gi"
 
+  # Enable debug logs for the API server
+  debug_logs: false
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 

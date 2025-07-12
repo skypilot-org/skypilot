@@ -47,6 +47,10 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
+        {{- if .Values.apiService.debug_logs }}
+        - name: SKYPILOT_DEBUG
+          value: "1"
+        {{- end }}
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
