@@ -176,6 +176,7 @@ This will produce a summary like:
 
   Checking credentials to enable clouds for SkyPilot.
     AWS: enabled
+    SageMaker: enabled
     GCP: enabled
     Azure: enabled
     OCI: enabled
@@ -338,6 +339,14 @@ Lambda Cloud
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+SageMaker
+~~~~~~~~~~~~~~~~~~
+
+`Amazon SageMaker <https://aws.amazon.com/sagemaker/>`_ is a fully managed
+service for training machine learning models. SkyPilot uses your existing
+AWS credentials. Ensure an IAM role with SageMaker permissions is available
+and specify it when launching jobs.
 
 Paperspace
 ~~~~~~~~~~~~~~~~~~
