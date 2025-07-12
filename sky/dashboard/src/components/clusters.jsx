@@ -1130,7 +1130,7 @@ const FilterDropdown = ({
 
   return (
     <>
-      <div className="flex flex-row ml-4 mr-2">
+      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-hidden">
         <div className="border-r border-gray-300">
           <Select
             onValueChange={(value) => setPropertValue(value)}
@@ -1138,7 +1138,7 @@ const FilterDropdown = ({
           >
             <SelectTrigger
               aria-label="Node"
-              className="focus:ring-0 focus:ring-offset-0 border border-gray-300 border-r-0 rounded-l-md w-36 h-8"
+              className="focus:ring-0 focus:ring-offset-0 border-none rounded-none w-32 h-8"
             >
               <SelectValue placeholder="Select Property" />
             </SelectTrigger>
@@ -1151,7 +1151,7 @@ const FilterDropdown = ({
             </SelectContent>
           </Select>
         </div>
-        <div className="relative">
+        <div className="relative flex-1">
           <input
             type="text"
             ref={inputRef}
@@ -1181,7 +1181,7 @@ const FilterDropdown = ({
                 inputRef.current.blur();
               }
             }}
-            className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border border-gray-300 border-l-0 rounded-r-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-none focus:ring-0 focus:outline-none"
             autoComplete="off"
           />
           {value && (
@@ -1298,7 +1298,7 @@ const FilterItem = ({ filter, onRemove }) => {
       <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
         <div className="flex items-center gap-1 px-2 rounded-l-lg">
           <span>{`${filter.property} `}</span>
-          <span>:</span>
+          <span>{`${filter.operator} `}</span>
           <span>{` ${filter.value}`}</span>
         </div>
 
