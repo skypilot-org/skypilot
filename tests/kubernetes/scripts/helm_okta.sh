@@ -90,7 +90,7 @@ echo "Building Docker image locally: $DOCKER_IMAGE"
 
 # Debug: Check if running inside Docker container
 if [ -f /.dockerenv ]; then
-    echo "ℹ️  Running inside Docker container - using enhanced image loading for kind cluster"
+    echo "ℹ️  Running inside Docker container"
 fi
 
 # Verify that nginx ingress controller is already running (installed by sky local up)
@@ -138,7 +138,7 @@ echo "nginx ingress controller configured for NodePort $NODEPORT ✓"
 # Build the Docker image locally
 echo "Building Docker image locally..."
 echo "docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile ."
-# docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile .
+docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile .
 if [ $? -ne 0 ]; then
     echo "❌ Failed to build Docker image"
     exit 1
@@ -148,53 +148,7 @@ echo "✅ Docker image built successfully"
 # Load the image into kind cluster
 echo "Loading image $DOCKER_IMAGE into kind cluster..."
 kind load docker-image $DOCKER_IMAGE --name skypilot
-
-# Verify the image was loaded successfully
-echo "Verifying image was loaded into kind cluster..."
-IMAGE_NAME=$(echo $DOCKER_IMAGE | sed 's|.*/||')
-
-# Check if image is available in kind cluster
-if docker exec skypilot-control-plane crictl images | grep -q "$IMAGE_NAME"; then
-    echo "✅ Docker image successfully loaded into kind cluster"
-else
-    echo "⚠️  Docker image not found in kind cluster. Attempting alternative loading method..."
-
-    # Check if we're in Docker-in-Docker environment
-    if [ -f /.dockerenv ]; then
-        echo "🔧 Docker-in-Docker environment detected, using direct image transfer method..."
-
-        # Save image to tar file
-        echo "Saving Docker image to tar file..."
-        docker save $DOCKER_IMAGE -o /tmp/skypilot-image.tar
-
-        # Copy tar file to kind cluster container
-        echo "Copying image tar file to kind cluster..."
-        docker cp /tmp/skypilot-image.tar skypilot-control-plane:/tmp/skypilot-image.tar
-
-        # Import image using containerd
-        echo "Importing image into kind cluster..."
-        docker exec skypilot-control-plane ctr -n k8s.io images import /tmp/skypilot-image.tar
-
-        # Clean up
-        rm -f /tmp/skypilot-image.tar
-        docker exec skypilot-control-plane rm -f /tmp/skypilot-image.tar
-
-        # Verify the image is now available
-        if docker exec skypilot-control-plane crictl images | grep -q "$IMAGE_NAME"; then
-            echo "✅ Docker image successfully loaded into kind cluster via direct transfer"
-        else
-            echo "❌ Failed to load Docker image into kind cluster after retry"
-            echo "Available images in kind cluster:"
-            docker exec skypilot-control-plane crictl images
-            exit 1
-        fi
-    else
-        echo "❌ Docker image not found in kind cluster and not in Docker-in-Docker environment"
-        echo "Available images in kind cluster:"
-        docker exec skypilot-control-plane crictl images
-        exit 1
-    fi
-fi
+echo "✅ Docker image loaded into kind cluster"
 
 # Add required Helm repositories for dependencies
 echo "Adding required Helm repositories..."
