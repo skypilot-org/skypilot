@@ -292,7 +292,7 @@ def status(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@rest.retry_on_server_unavailable()
+@rest.retry_transient_errors()
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
