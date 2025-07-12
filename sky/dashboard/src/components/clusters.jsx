@@ -363,7 +363,16 @@ export function Clusters() {
             Sky Clusters
           </Link>
 
-          <div className="flex items-center ml-6 space-x-3">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter clusters"
+          />
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
             <label className="flex items-center cursor-pointer">
               <input
                 type="checkbox"
@@ -387,30 +396,22 @@ export function Clusters() {
               </span>
             </label>
           </div>
-
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            updateURLParams={updateURLParams}
-            placeholder="Filter clusters"
-          />
-        </div>
-        <div className="flex items-center">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+          <div className="flex items-center">
+            {loading && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1294,8 +1295,8 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-2 rounded-full">
-        <div className="flex items-center gap-1 px-2 py-1 rounded-l-lg">
+      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-1 py-1 rounded-full">
+        <div className="flex items-center gap-1 px-2 rounded-l-lg">
           <span>{`${filter.property} `}</span>
           <span>{filter.operator}</span>
           <span className="font-bold">{` ${filter.value}`}</span>
@@ -1303,7 +1304,7 @@ const FilterItem = ({ filter, onRemove }) => {
 
         <button
           onClick={() => onRemove()}
-          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg
