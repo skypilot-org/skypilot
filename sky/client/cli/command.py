@@ -144,6 +144,8 @@ def _get_cluster_records_and_set_ssh_config(
             cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
             continue
 
+        cluster_ips = handle.cached_external_ips
+
         # During the failover, even though a cluster does not exist, the handle
         # can still exist in the record, and we check for credentials to avoid
         # updating the SSH config for non-existent clusters.
@@ -173,9 +175,16 @@ def _get_cluster_records_and_set_ssh_config(
                 f'{handle.cluster_name}\'')
             credentials['ssh_proxy_command'] = proxy_command
 
+            # For Kubernetes, the connection is always proxied. The HostName
+            # in the SSH config must be 127.0.0.1. Using the pod's real IP
+            # is incorrect, as the IP can become stale, which is especially
+            # true for High-Availability services where pods are recreated.
+            if cluster_ips is not None:
+                cluster_ips = ['127.0.0.1'] * len(cluster_ips)
+
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
-            handle.cached_external_ips,
+            cluster_ips,
             credentials,
             handle.cached_external_ssh_ports,
             handle.docker_user,

@@ -223,7 +223,7 @@ class TestHelperFunctions:
         mock_add_cluster.assert_called_once()
         added_cluster_args = mock_add_cluster.call_args
         assert added_cluster_args[0][0] == 'test-cluster'
-        assert added_cluster_args[0][1] == ['1.2.3.4']
+        assert added_cluster_args[0][1] == ['127.0.0.1']
         # proxy command should be set, but is dependent on the server url, so we don't check the exact value
         assert added_cluster_args[0][2].get('ssh_proxy_command') is not None
         assert server_url in added_cluster_args[0][2].get('ssh_proxy_command')
