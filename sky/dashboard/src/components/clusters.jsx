@@ -354,7 +354,7 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
           <Link
             href="/clusters"
@@ -1130,15 +1130,15 @@ const FilterDropdown = ({
 
   return (
     <>
-      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md">
-        <div className="border-r">
+      <div className="flex flex-row ml-4 mr-2">
+        <div className="border-r border-gray-300">
           <Select
             onValueChange={(value) => setPropertValue(value)}
             value={propertyValue}
           >
             <SelectTrigger
               aria-label="Node"
-              className="focus:ring-0 focus:ring-offset-0 border-none w-36"
+              className="focus:ring-0 focus:ring-offset-0 border border-gray-300 border-r-0 rounded-l-md w-36 h-8"
             >
               <SelectValue placeholder="Select Property" />
             </SelectTrigger>
@@ -1181,7 +1181,7 @@ const FilterDropdown = ({
                 inputRef.current.blur();
               }
             }}
-            className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
+            className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border border-gray-300 border-l-0 rounded-r-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
             autoComplete="off"
           />
           {value && (
@@ -1266,7 +1266,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
   return (
     <>
-      <div className="flex items-center gap-4 p-2">
+      <div className="flex items-center gap-4 py-1 px-2">
         <div className="flex flex-wrap items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem
@@ -1280,7 +1280,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
             <>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-gray-700 bg-gray-200 hover:bg-gray-300"
+                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
               >
                 Clear filters
               </button>
@@ -1295,11 +1295,11 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-1 py-1 rounded-full">
+      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
         <div className="flex items-center gap-1 px-2 rounded-l-lg">
           <span>{`${filter.property} `}</span>
-          <span>{filter.operator}</span>
-          <span className="font-bold">{` ${filter.value}`}</span>
+          <span>:</span>
+          <span>{` ${filter.value}`}</span>
         </div>
 
         <button
