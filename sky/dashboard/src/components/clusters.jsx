@@ -1126,8 +1126,9 @@ const FilterDropdown = ({
 
     // Filter options based on current input value
     if (value.trim() !== '') {
-      updatedValueOptions = updatedValueOptions.filter((item) =>
-        item && item.toString().toLowerCase().includes(value.toLowerCase())
+      updatedValueOptions = updatedValueOptions.filter(
+        (item) =>
+          item && item.toString().toLowerCase().includes(value.toLowerCase())
       );
     }
 
@@ -1261,7 +1262,9 @@ const FilterDropdown = ({
               <div
                 key={`${option}-${index}`}
                 className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
-                  index !== valueOptions.length - 1 ? 'border-b border-gray-100' : ''
+                  index !== valueOptions.length - 1
+                    ? 'border-b border-gray-100'
+                    : ''
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
