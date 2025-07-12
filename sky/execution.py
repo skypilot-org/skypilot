@@ -23,6 +23,7 @@ from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -476,6 +477,9 @@ def _execute_dag(
 
 @timeline.event
 @usage_lib.entrypoint
+# A launch routine will share tempfiles between steps, so we init a tempdir
+# for the launch routine and gc the entire dir after launch.
+@tempstore.with_tempdir
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
