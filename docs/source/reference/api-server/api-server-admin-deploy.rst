@@ -480,6 +480,30 @@ Following tabs describe how to configure credentials for different clouds on the
 
            SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
 
+    .. tab-item:: Cloudflare R2
+        :sync: r2-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`Cloudflare R2 installation <cloudflare-r2-installation>` to authenticate with Cloudflare R2.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic r2-credentials \
+              --namespace $NAMESPACE \
+              --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
+              --from-file=accountid=$HOME/.cloudflare/accountid
+        
+        When installing or upgrading the Helm chart, enable Cloudflare R2 credentials by setting :ref:`r2Credentials.enabled <helm-values-r2credentials-enabled>` and :ref:`r2Credentials.r2SecretName <helm-values-r2credentials-r2secretname>`:
+        
+        .. code-block:: bash
+        
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set r2Credentials.enabled=true \
+              --set r2Credentials.r2SecretName=r2-credentials
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
