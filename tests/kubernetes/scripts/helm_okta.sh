@@ -49,7 +49,7 @@ cleanup() {
 }
 
 # Set up trap to call cleanup function on script exit
-# trap cleanup EXIT
+trap cleanup EXIT
 
 # Assert all required environment variables are provided
 if [[ -z "$OKTA_CLIENT_ID" ]]; then
@@ -132,6 +132,7 @@ echo "nginx ingress controller configured for NodePort $NODEPORT ✓"
 
 # Build the Docker image locally
 echo "Building Docker image locally..."
+echo "docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile ."
 docker buildx build -t $DOCKER_IMAGE $BUILD_ARGS -f Dockerfile .
 if [ $? -ne 0 ]; then
     echo "❌ Failed to build Docker image"
