@@ -3,8 +3,8 @@ from unittest import mock
 
 import pytest
 
-from sky import exceptions
 from sky.utils import common_utils
+from sky.utils import exceptions
 
 MOCKED_USER_HASH = 'ab12cd34'
 

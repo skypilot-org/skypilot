@@ -438,8 +438,8 @@ class TestVolumeCommands:
     def test_volume_schema_validation_missing_required_fields(
             self, monkeypatch):
         """Test volume schema validation with missing required fields."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         # Test missing required fields
@@ -479,8 +479,8 @@ class TestVolumeCommands:
 
     def test_volume_schema_validation_invalid_type(self, monkeypatch):
         """Test volume schema validation with invalid volume type."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         invalid_configs = [
@@ -511,8 +511,8 @@ class TestVolumeCommands:
 
     def test_volume_schema_validation_invalid_infra(self, monkeypatch):
         """Test volume schema validation with invalid infra patterns."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         invalid_configs = [
@@ -560,8 +560,8 @@ class TestVolumeCommands:
 
     def test_volume_schema_validation_invalid_size_pattern(self, monkeypatch):
         """Test volume schema validation with invalid size patterns."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         invalid_configs = [
@@ -583,8 +583,8 @@ class TestVolumeCommands:
 
     def test_volume_schema_validation_invalid_config_object(self, monkeypatch):
         """Test volume schema validation with invalid config object."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         invalid_configs = [
@@ -622,8 +622,8 @@ class TestVolumeCommands:
 
     def test_volume_schema_validation_additional_properties(self, monkeypatch):
         """Test volume schema validation with additional properties."""
-        from sky import exceptions
         from sky.utils import common_utils
+        from sky.utils import exceptions
         from sky.utils import schemas
 
         config_with_extra = {

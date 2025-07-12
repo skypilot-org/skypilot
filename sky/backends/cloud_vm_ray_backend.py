@@ -29,7 +29,6 @@ from sky import catalog
 from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
 from sky import optimizer
@@ -64,6 +63,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import registry

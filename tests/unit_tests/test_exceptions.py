@@ -1,6 +1,6 @@
 """Test exception serialization and deserialization."""
 
-from sky import exceptions
+from sky.utils import exceptions
 from sky.utils import status_lib
 
 

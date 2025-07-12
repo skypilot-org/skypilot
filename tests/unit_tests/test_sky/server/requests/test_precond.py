@@ -2,9 +2,9 @@
 import unittest
 from unittest import mock
 
-from sky import exceptions
 from sky.server.requests import preconditions
 from sky.server.requests import requests as api_requests
+from sky.utils import exceptions
 from sky.utils import status_lib
 
 

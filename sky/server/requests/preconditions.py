@@ -11,12 +11,12 @@ import asyncio
 import time
 from typing import Callable, Optional, Tuple
 
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.server.requests import event_loop
 from sky.server.requests import requests as api_requests
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import status_lib
 
 # The default interval seconds to check the precondition.

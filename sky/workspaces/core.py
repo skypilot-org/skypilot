@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, List, Tuple
 import filelock
 
 from sky import check as sky_check
-from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -15,6 +14,7 @@ from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import exceptions
 from sky.utils import resource_checker
 from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils

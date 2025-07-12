@@ -16,13 +16,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import colorama
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 
 if typing.TYPE_CHECKING:
     import mypy_boto3_ec2

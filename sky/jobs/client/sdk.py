@@ -59,7 +59,7 @@ def launch(
     Request Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
           chain dag.
-        sky.exceptions.NotSupportedError: the feature is not supported.
+        sky.utils.exceptions.NotSupportedError: the feature is not supported.
     """
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
@@ -133,7 +133,7 @@ def queue(refresh: bool,
             ]
 
     Request Raises:
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up or
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
@@ -173,7 +173,7 @@ def cancel(
         The request ID of the cancel request.
 
     Request Raises:
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
     body = payloads.JobsCancelBody(
@@ -222,7 +222,7 @@ def tail_logs(name: Optional[str] = None,
 
     Request Raises:
         ValueError: invalid arguments.
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
     body = payloads.JobsLogsBody(
         name=name,
@@ -271,7 +271,7 @@ def download_logs(
 
     Request Raises:
         ValueError: invalid arguments.
-        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
 
     body = payloads.JobsDownloadLogsBody(

@@ -14,7 +14,6 @@ import colorama
 
 import sky
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import logs
 from sky import provision
@@ -30,6 +29,7 @@ from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils

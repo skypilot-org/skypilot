@@ -5,12 +5,12 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 import sky
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import exceptions
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 

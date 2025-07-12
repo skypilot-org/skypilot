@@ -6,11 +6,11 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
-from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.provision.nebius import constants as nebius_constants
 from sky.utils import annotations
+from sky.utils import exceptions
 from sky.utils import registry
 from sky.utils import resources_utils
 

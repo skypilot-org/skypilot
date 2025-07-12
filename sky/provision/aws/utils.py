@@ -1,8 +1,8 @@
 """Utils for AWS provisioner."""
 import colorama
 
-from sky import exceptions
 from sky import sky_logging
+from sky.utils import exceptions
 
 logger = sky_logging.init_logger(__name__)
 

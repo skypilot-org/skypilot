@@ -9,12 +9,12 @@ import time
 from typing import Any, Optional
 import uuid
 
-from sky import exceptions as sky_exceptions
 from sky import sky_logging
 from sky.adaptors import common
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions as sky_exceptions
 from sky.utils import ux_utils
 
 azure = common.LazyImport(

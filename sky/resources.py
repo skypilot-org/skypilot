@@ -12,7 +12,6 @@ import sky
 from sky import catalog
 from sky import check as sky_check
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
@@ -24,6 +23,7 @@ from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import exceptions
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry

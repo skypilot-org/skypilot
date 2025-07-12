@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 
 import sky
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -32,6 +31,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
 from sky.utils import status_lib

@@ -146,7 +146,7 @@ GCP, where it succeeded after one region:
   ...
   ⚙️ Launching on Azure eastus.
   E 10-11 18:24:59 instance.py:457] Failed to create instances: [azure.core.exceptions.HttpResponseError] (InvalidTemplateDeployment)
-  sky.exceptions.ResourcesUnavailableError: Failed to acquire resources in all zones in eastus
+  sky.utils.exceptions.ResourcesUnavailableError: Failed to acquire resources in all zones in eastus
   ...
 
   ⚙️ Launching on GCP us-central1 (us-central1-a).

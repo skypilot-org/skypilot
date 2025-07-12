@@ -6,7 +6,6 @@ import ssl
 import typing
 from typing import Any, Dict, List, Optional
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
@@ -28,6 +27,7 @@ from sky.provision.vsphere.common.vim_utils import create_spec_with_script
 from sky.provision.vsphere.common.vim_utils import poweron_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
+from sky.utils import exceptions
 
 if typing.TYPE_CHECKING:
     import yaml
