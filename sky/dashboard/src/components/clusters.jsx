@@ -354,7 +354,7 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
           <Link
             href="/clusters"
@@ -363,7 +363,16 @@ export function Clusters() {
             Sky Clusters
           </Link>
 
-          <div className="flex items-center ml-6 space-x-3">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter clusters"
+          />
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
             <label className="flex items-center cursor-pointer">
               <input
                 type="checkbox"
@@ -387,30 +396,22 @@ export function Clusters() {
               </span>
             </label>
           </div>
-
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            updateURLParams={updateURLParams}
-            placeholder="Filter clusters"
-          />
-        </div>
-        <div className="flex items-center">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+          <div className="flex items-center">
+            {loading && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1129,15 +1130,15 @@ const FilterDropdown = ({
 
   return (
     <>
-      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md">
-        <div className="border-r">
+      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-hidden">
+        <div className="border-r border-gray-300">
           <Select
             onValueChange={(value) => setPropertValue(value)}
             value={propertyValue}
           >
             <SelectTrigger
               aria-label="Node"
-              className="focus:ring-0 focus:ring-offset-0 border-none w-36"
+              className="focus:ring-0 focus:ring-offset-0 border-none rounded-none w-32 h-8"
             >
               <SelectValue placeholder="Select Property" />
             </SelectTrigger>
@@ -1150,7 +1151,7 @@ const FilterDropdown = ({
             </SelectContent>
           </Select>
         </div>
-        <div className="relative">
+        <div className="relative flex-1">
           <input
             type="text"
             ref={inputRef}
@@ -1180,7 +1181,7 @@ const FilterDropdown = ({
                 inputRef.current.blur();
               }
             }}
-            className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
+            className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-none focus:ring-0 focus:outline-none"
             autoComplete="off"
           />
           {value && (
@@ -1265,7 +1266,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
   return (
     <>
-      <div className="flex items-center gap-4 p-2">
+      <div className="flex items-center gap-4 py-1 px-2">
         <div className="flex flex-wrap items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem
@@ -1279,7 +1280,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
             <>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-gray-700 bg-gray-200 hover:bg-gray-300"
+                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
               >
                 Clear filters
               </button>
@@ -1294,16 +1295,16 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-2 rounded-full">
-        <div className="flex items-center gap-1 px-2 py-1 rounded-l-lg">
+      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+        <div className="flex items-center gap-1 px-2 rounded-l-lg">
           <span>{`${filter.property} `}</span>
-          <span>{filter.operator}</span>
-          <span className="font-bold">{` ${filter.value}`}</span>
+          <span>{`${filter.operator} `}</span>
+          <span>{` ${filter.value}`}</span>
         </div>
 
         <button
           onClick={() => onRemove()}
-          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

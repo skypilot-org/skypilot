@@ -853,7 +853,7 @@ export function ManagedJobsTable({
               <button
                 key={status}
                 onClick={() => handleStatusClick(status)}
-                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
                   isStatusHighlighted(status) ||
                   selectedStatuses.includes(status)
                     ? getBadgeStyle(status)
