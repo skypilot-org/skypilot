@@ -414,6 +414,16 @@ def cleanup_ports(
     raise NotImplementedError('cleanup_ports is not supported for Hyperbolic')
 
 
+def cleanup_custom_multi_network(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    failover: bool = False,
+) -> None:
+    """Cleanup custom multi-network. Not supported for Hyperbolic."""
+    raise NotImplementedError(
+        'cleanup_custom_multi_network is not supported for Hyperbolic')
+
+
 def open_ports(
     cluster_name_on_cloud: str,
     ports: list,
