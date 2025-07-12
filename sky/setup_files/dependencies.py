@@ -66,6 +66,7 @@ install_requires = [
     'prometheus_client>=0.8.0',
     'passlib',
     'pyjwt',
+    'alembic',
 ]
 
 server_dependencies = [

@@ -58,6 +58,7 @@ import threading
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from alembic import command as alembic_command
 import filelock
 import sqlalchemy
 from sqlalchemy import orm
@@ -70,6 +71,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.utils import alembic_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
@@ -572,10 +574,25 @@ def _reload_config_as_server() -> None:
 
     if db_url:
         with _DB_USE_LOCK:
+            # TODO(rsonecha): This is a temporary fix to ensure the parent 
+            # directory exists for SQLite databases. This should be removed
+            # once we have a better way to handle this.
+            # For SQLite databases, ensure parent directory exists
+            if db_url.startswith('sqlite:///'):
+                sqlite_path = db_url[len('sqlite:///'):]
+                if not os.path.isabs(sqlite_path):
+                    sqlite_path = os.path.abspath(sqlite_path)
+                pathlib.Path(sqlite_path).parents[0].mkdir(parents=True,
+                                                           exist_ok=True)
+
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
-            db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                 sqlalchemy_engine)
+
+            # Get alembic config for sky config db and run migrations
+            alembic_config = alembic_utils.get_alembic_config(
+                sqlalchemy_engine, 'sky_config_db')
+            alembic_config.config_ini_section = 'sky_config_db'
+            alembic_command.upgrade(alembic_config, 'head')
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
@@ -861,10 +878,23 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             if new_db_url and new_db_url != existing_db_url:
                 raise ValueError('Cannot change db url while server is running')
             with _DB_USE_LOCK:
+                # TODO(rsonecha): This is a temporary fix to ensure the parent directory exists for SQLite databases.
+                # This should be removed once we have a better way to handle this.
+                if existing_db_url.startswith('sqlite:///'):
+                    sqlite_path = existing_db_url[len('sqlite:///'):]
+                    if not os.path.isabs(sqlite_path):
+                        sqlite_path = os.path.abspath(sqlite_path)
+                    pathlib.Path(sqlite_path).parents[0].mkdir(parents=True,
+                                                               exist_ok=True)
+
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
                                                              poolclass=NullPool)
-                db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
-                                                     sqlalchemy_engine)
+
+                # Get alembic config for sky config db and run migrations
+                alembic_config = alembic_utils.get_alembic_config(
+                    sqlalchemy_engine, 'sky_config_db')
+                alembic_config.config_ini_section = 'sky_config_db'
+                alembic_command.upgrade(alembic_config, 'head')
 
                 def _set_config_yaml_to_db(key: str,
                                            config: config_utils.Config):
