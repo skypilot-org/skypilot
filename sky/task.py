@@ -1057,12 +1057,37 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+
+        has_docker_login_config = _check_docker_login_config(
+            self.envs, self.secrets)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
                                                    self.secrets)
         # Only have effect on RunPod.
         self.resources = _with_docker_username_for_runpod(
             self.resources, self.envs, self.secrets)
+
+        # If docker login config is not set in envs/secrets,
+        # but present in resources,
+        # safely update envs with docker login info if
+        # all fields are non-empty strings.
+        if not has_docker_login_config:
+            for r in self.resources:
+                docker_login = getattr(r, 'docker_login_config', None)
+                if docker_login is not None:
+                    username = getattr(docker_login, 'username', '')
+                    password = getattr(docker_login, 'password', '')
+                    server = getattr(docker_login, 'server', '')
+                    if all(
+                            isinstance(x, str) and x
+                            for x in [username, password, server]):
+                        self.update_envs(
+                            envs={
+                                'SKYPILOT_DOCKER_USERNAME': username,
+                                'SKYPILOT_DOCKER_PASSWORD': password,
+                                'SKYPILOT_DOCKER_SERVER': server
+                            })
+                        break
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
