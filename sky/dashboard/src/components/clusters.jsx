@@ -683,7 +683,7 @@ export function ClusterTable({
   return (
     <div>
       <Card>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
