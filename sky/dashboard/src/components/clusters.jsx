@@ -1200,10 +1200,10 @@ const FilterDropdown = ({
     <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-visible">
       <div className="border-r border-gray-300">
         <Select onValueChange={setPropertValue} value={propertyValue}>
-                  <SelectTrigger
-          aria-label="Filter Property"
-          className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-32 h-8"
-        >
+          <SelectTrigger
+            aria-label="Filter Property"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-32 h-8"
+          >
             <SelectValue placeholder="Select Property" />
           </SelectTrigger>
           <SelectContent>
