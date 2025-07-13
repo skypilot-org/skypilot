@@ -248,6 +248,8 @@ def get_cloud_config_value_from_dict(
     region_key = None
     if cloud == 'kubernetes':
         region_key = 'context_configs'
+    if cloud == 'nebius':
+        region_key = 'region_configs'
 
     per_context_config = None
     if region is not None and region_key is not None:

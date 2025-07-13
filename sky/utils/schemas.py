@@ -1342,39 +1342,44 @@ def get_config_schema():
                 'tenant_id': {
                     'type': 'string',
                 },
-            },
-            'additionalProperties': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'project_id': {
-                        'type': 'string',
-                    },
-                    'fabric': {
-                        'type': 'string',
-                    },
-                    'filesystems': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'object',
-                            'additionalProperties': False,
-                            'properties': {
-                                'filesystem_id': {
-                                    'type': 'string',
-                                },
-                                'attach_mode': {
-                                    'type': 'string',
-                                    'case_sensitive_enum': [
-                                        'READ_WRITE', 'READ_ONLY'
-                                    ]
-                                },
-                                'mount_path': {
-                                    'type': 'string',
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'project_id': {
+                                'type': 'string',
+                            },
+                            'fabric': {
+                                'type': 'string',
+                            },
+                            'filesystems': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'filesystem_id': {
+                                            'type': 'string',
+                                        },
+                                        'attach_mode': {
+                                            'type': 'string',
+                                            'case_sensitive_enum': [
+                                                'READ_WRITE', 'READ_ONLY'
+                                            ]
+                                        },
+                                        'mount_path': {
+                                            'type': 'string',
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                    },
+                            },
+                        },
+                    }
                 }
             },
         }

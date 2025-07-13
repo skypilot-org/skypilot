@@ -229,11 +229,8 @@ class Nebius(clouds.Cloud):
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',
-            region=None,
-            keys=(
-                region.name,
-                'filesystems',
-            ),
+            region=region.name,
+            keys=('filesystems',),
             default_value=[])
         resources_vars_fs = []
         for i, fs in enumerate(config_fs):
