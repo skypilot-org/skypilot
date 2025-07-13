@@ -51,6 +51,20 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
     # Memory: 1 GiB RAM per 1 vCPU;
     'n2-highcpu',
+    # This is the latest general-purpose instance family as of July 2025.
+    # CPU: Intel 5th Gen Xeon Scalable processor (Emerald Rapids).
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'n4-standard',
+    # This is the latest general-purpose instance family
+    # with a higher vCPU to memory ratio as of July 2025.
+    # CPU: Intel 5th Gen Xeon Scalable processor (Emerald Rapids).
+    # Memory: 2 GiB RAM per 1 vCPU;
+    'n4-highcpu',
+    # This is the latest general-purpose instance family
+    # with a lower vCPU to memory ratio as of July 2025.
+    # CPU: Intel 5th Gen Xeon Scalable processor (Emerald Rapids).
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'n4-highmem',
 ]
 # n2 is not allowed for launching GPUs for now.
 _DEFAULT_HOST_VM_FAMILY = (
