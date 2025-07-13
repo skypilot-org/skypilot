@@ -41,10 +41,7 @@ def get_project_by_region(region: str) -> str:
 
     #  Check is there project if in config
     project_id = skypilot_config.get_effective_region_config(
-        cloud='nebius',
-        region=region,
-        keys=('project_id',),
-        default_value=None)
+        cloud='nebius', region=region, keys=('project_id',), default_value=None)
     if project_id is not None:
         return project_id
     for project in projects.items:

@@ -1021,11 +1021,15 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
 
     # test filesystems
     no_filesystem = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-north1', keys=('filesystems',),
+        cloud='nebius',
+        region='eu-north1',
+        keys=('filesystems',),
         default_value=[])
     assert len(no_filesystem) == 0
 
     filesystems = skypilot_config.get_effective_region_config(
-        cloud='nebius', region='eu-west1', keys=('filesystems',),
+        cloud='nebius',
+        region='eu-west1',
+        keys=('filesystems',),
         default_value=[])
     assert len(filesystems) == 2
