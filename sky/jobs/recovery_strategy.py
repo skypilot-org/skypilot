@@ -72,6 +72,7 @@ class StrategyExecutor:
         self.restart_cnt_on_failure = 0
         assert pool_manager is not None
         self.pool_manager = pool_manager
+        self.job_id_on_pm: int = -1
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
@@ -213,7 +214,7 @@ class StrategyExecutor:
 
             try:
                 status = managed_job_utils.get_job_status(
-                    self.backend, self.cluster_name)
+                    self.backend, self.cluster_name, job_id=self.job_id_on_pm)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -306,16 +307,12 @@ class StrategyExecutor:
                         # Detach setup, so that the setup failure can be
                         # detected by the controller process (job_status ->
                         # FAILED_SETUP).
-                        # execution.launch(
-                        #     self.dag,
-                        #     cluster_name=self.cluster_name,
-                        #     # We expect to tear down the cluster as soon as the
-                        #     # job is finished. However, in case the controller
-                        #     # dies, set autodown to try and avoid a resource
-                        #     # leak.
-                        #     idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                        #     down=True,
-                        #     _is_launched_by_jobs_controller=True)
+                        job_id_on_pm, _ = execution.exec(
+                            self.dag, cluster_name=self.cluster_name)
+                        assert job_id_on_pm is not None, (self.cluster_name,
+                                                          self.job_id)
+                        self.job_id_on_pm = job_id_on_pm
+                        state.set_job_id_on_pm(self.job_id, job_id_on_pm)
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,

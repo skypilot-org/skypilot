@@ -230,12 +230,16 @@ class JobsController:
         remote_job_submitted_at = time.time()
         cluster_name = managed_job_state.get_current_cluster_name_from_job_id(
             self._job_id)
+        job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
+            self._job_id)
         if not is_resume:
             remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
             cluster_name = (
                 managed_job_state.get_current_cluster_name_from_job_id(
                     self._job_id))
+            job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
+                self._job_id)
         assert cluster_name is not None
 
         if not is_resume:
@@ -290,7 +294,7 @@ class JobsController:
             if not force_transit_to_recovering:
                 try:
                     job_status = managed_job_utils.get_job_status(
-                        self._backend, cluster_name)
+                        self._backend, cluster_name, job_id=job_id_on_pm)
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -483,6 +487,8 @@ class JobsController:
             cluster_name = (
                 managed_job_state.get_current_cluster_name_from_job_id(
                     self._job_id))
+            job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
+                self._job_id)
             assert cluster_name is not None
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
@@ -617,6 +623,12 @@ def _cleanup(job_id: int, dag_yaml: str, pool_manager: Optional[str]):
             job_id)
         if cluster_name is not None:
             serve_utils.release_cluster_name(pool_manager, cluster_name)
+            job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
+                job_id)
+            if job_id_on_pm is not None:
+                core.cancel(cluster_name=cluster_name,
+                            job_ids=[job_id_on_pm],
+                            _try_cancel_if_cluster_is_init=True)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.

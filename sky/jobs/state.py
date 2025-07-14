@@ -105,6 +105,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('current_cluster_name',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('job_id_on_pm', sqlalchemy.Integer, server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(
@@ -221,6 +222,12 @@ def create_table():
             'current_cluster_name',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'job_info',
+            'job_id_on_pm',
+            sqlalchemy.Integer(),
+            default_statement='DEFAULT NULL')
         session.commit()
 
 
@@ -304,6 +311,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'original_user_yaml_path': r['original_user_yaml_path'],
         'pool_manager': r['pool_manager'],
         'current_cluster_name': r['current_cluster_name'],
+        'job_id_on_pm': r['job_id_on_pm'],
     }
 
 
@@ -1374,6 +1382,28 @@ def get_current_cluster_name_from_job_id(job_id: int) -> Optional[str]:
             sqlalchemy.select(job_info_table.c.current_cluster_name).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()
         return current_cluster_name[0] if current_cluster_name else None
+
+
+@_init_db
+def set_job_id_on_pm(job_id: int, job_id_on_pm: int) -> None:
+    """Set the job id on the pool manager for the job id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update(
+                {job_info_table.c.job_id_on_pm: job_id_on_pm})
+        session.commit()
+
+
+@_init_db
+def get_job_id_on_pm_from_job_id(job_id: int) -> Optional[int]:
+    """Get the job id on the pool manager from the job id."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        job_id_on_pm = session.execute(
+            sqlalchemy.select(job_info_table.c.job_id_on_pm).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        return job_id_on_pm[0] if job_id_on_pm else None
 
 
 @_init_db

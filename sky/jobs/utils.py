@@ -228,8 +228,8 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-def get_job_status(backend: 'backends.CloudVmRayBackend',
-                   cluster_name: str) -> Optional['job_lib.JobStatus']:
+def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                   job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
@@ -243,9 +243,12 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
+    job_ids = None if job_id is None else [job_id]
     try:
         logger.info('=== Checking the job status... ===')
-        statuses = backend.get_job_status(handle, stream_logs=False)
+        statuses = backend.get_job_status(handle,
+                                          job_ids=job_ids,
+                                          stream_logs=False)
         status = list(statuses.values())[0]
         if status is None:
             logger.info('No job found.')
@@ -1247,6 +1250,9 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'WORKER_POOL',
+        'WORKER_CLUSTER',
+        'WORKER_JOB_ID',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
@@ -1353,6 +1359,9 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                job_tasks[0]['pool_manager'],
+                '-',
+                '-',
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
@@ -1392,6 +1401,9 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                task['pool_manager'],
+                task['current_cluster_name'],
+                task['job_id_on_pm'],
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have

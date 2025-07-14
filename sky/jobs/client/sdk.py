@@ -69,8 +69,8 @@ def launch(
             dag, at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
-            request_id = sdk.optimize(dag)
-            sdk.stream_and_get(request_id)
+            # request_id = sdk.optimize(dag)
+            # sdk.stream_and_get(request_id)
             prompt = f'Launching a managed job {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,

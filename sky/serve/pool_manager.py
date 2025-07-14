@@ -1,22 +1,14 @@
 """Pool manager for batch jobs submission."""
 import asyncio
-import dataclasses
-import io
 import traceback
-from typing import Dict, List, Tuple
-import uuid
+from typing import Dict
 
 import aiohttp
 import fastapi
 import uvicorn
 
-import sky
-from sky import global_user_state
 from sky import sky_logging
-from sky.client import sdk
 from sky.serve import constants
-from sky.usage import usage_lib
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -29,6 +21,7 @@ class PoolManager:
         self.load_balancer_port = load_balancer_port
         self.app = fastapi.FastAPI()
         self.cn2inproc: Dict[str, int] = {}
+        self.lock = asyncio.Lock()
 
     async def _sync_with_controller_once(self) -> None:
         async with aiohttp.ClientSession() as session:
@@ -83,82 +76,57 @@ class PoolManager:
                              f'the controller: {e}'
                              f'\nTraceback: {traceback.format_exc()}')
 
-    def _try_cancel_all_jobs(self, cluster_name: str):
-        from sky import core  # pylint: disable=import-outside-toplevel
-
-        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        if handle is None:
-            return
-        try:
-            usage_lib.messages.usage.set_internal()
-            # Note that `sky.cancel()` may not go through for a variety of
-            # reasons:
-            # (1) head node is preempted; or
-            # (2) somehow user programs escape the cancel codepath's kill.
-            # The latter is silent and is a TODO.
-            #
-            # For the former, an exception will be thrown, in which case we
-            # fallback to terminate_cluster() in the except block below. This
-            # is because in the event of recovery on the same set of remaining
-            # worker nodes, we don't want to leave some old job processes
-            # running.
-            # TODO(zhwu): This is non-ideal and we should figure out another way
-            # to reliably cancel those processes and not have to down the
-            # remaining nodes first.
-            #
-            # In the case where the worker node is preempted, the `sky.cancel()`
-            # should be functional with the `_try_cancel_if_cluster_is_init`
-            # flag, i.e. it sends the cancel signal to the head node, which will
-            # then kill the user process on remaining worker nodes.
-            core.cancel(cluster_name=cluster_name,
-                        all=True,
-                        _try_cancel_if_cluster_is_init=True)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.info('Failed to cancel the job on the cluster. The cluster '
-                        'might be already down or the head node is preempted.'
-                        '\n  Detailed exception: '
-                        f'{common_utils.format_exception(e)}\n'
-                        'Terminating the cluster explicitly to ensure no '
-                        'remaining job process interferes with recovery.')
-
     def run(self):
 
         @self.app.post('/acquire')
         async def acquire(request: fastapi.Request):
-            cn = None
-            for cn in self.cn2inproc:
-                if self.cn2inproc[cn] == 0:
-                    self.cn2inproc[cn] = 1
-                    break
-            return fastapi.responses.JSONResponse({
-                'cluster_name': cn,
-            })
+            async with self.lock:
+                selected_cn = None
+                for cn in self.cn2inproc:
+                    if self.cn2inproc[cn] == 0:
+                        self.cn2inproc[cn] = 1
+                        selected_cn = cn
+                        break
+                logger.info(f'Acquire cluster. Assigned cluster: {selected_cn}')
+                return fastapi.responses.JSONResponse({
+                    'cluster_name': selected_cn,
+                })
 
         @self.app.post('/release')
         async def release(request: fastapi.Request):
-            payload = await request.json()
-            cn = payload['cluster_name']
-            if cn not in self.cn2inproc:
+            async with self.lock:
+                payload = await request.json()
+                cn = payload['cluster_name']
+                logger.info(f'Release cluster: {cn}')
+                if cn not in self.cn2inproc:
+                    logger.info(f'Cluster {cn} not found.')
+                    return fastapi.responses.JSONResponse({
+                        'successful': False,
+                        'message': f'Cluster {cn} not found.',
+                    })
+                if self.cn2inproc[cn] == 0:
+                    logger.info(f'Cluster {cn} is not in use.')
+                    return fastapi.responses.JSONResponse({
+                        'successful': False,
+                        'message': f'Cluster {cn} is not in use.',
+                    })
+                self.cn2inproc[cn] = 0
+                logger.info(f'Cluster {cn} released.')
                 return fastapi.responses.JSONResponse({
-                    'successful': False,
-                    'message': f'Cluster {cn} not found.',
+                    'successful': True,
+                    'message': f'Cluster {cn} released.',
                 })
-            if self.cn2inproc[cn] == 0:
+
+        @self.app.get('/debug')
+        async def debug(request: fastapi.Request):
+            async with self.lock:
                 return fastapi.responses.JSONResponse({
-                    'successful': False,
-                    'message': f'Cluster {cn} is not in use.',
+                    'cn2inproc': self.cn2inproc,
                 })
-            self.cn2inproc[cn] = 0
-            self._try_cancel_all_jobs(cn)
-            return fastapi.responses.JSONResponse({
-                'successful': True,
-                'message': f'Cluster {cn} released.',
-            })
 
         @self.app.on_event('startup')
         async def startup():
             asyncio.create_task(self._sync_with_controller())
-            asyncio.create_task(self._process_request())
 
         uvicorn.run(self.app, host='0.0.0.0', port=self.load_balancer_port)
 

@@ -595,7 +595,7 @@ def get_next_cluster_name(service_name: str) -> Optional[str]:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist.')
     load_balancer_port = service_status['load_balancer_port']
-    resp = requests.get(
+    resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) + '/acquire')
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
