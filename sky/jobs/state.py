@@ -4,6 +4,7 @@
 import asyncio
 import enum
 import functools
+import ipaddress
 import json
 import os
 import pathlib
@@ -11,6 +12,7 @@ import threading
 import time
 import typing
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+import urllib.parse
 
 import colorama
 import sqlalchemy
@@ -262,6 +264,20 @@ def _initialize_and_get_db(
             conn_string = None
             if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
                 conn_string = skypilot_config.get_nested(('db',), None)
+            if conn_string:
+                # circular import if at top level
+                # pylint: disable=import-outside-toplevel
+                from sky.jobs import utils as job_utils
+
+                parsed = urllib.parse.urlparse(conn_string)
+                if (ipaddress.ip_address(parsed.hostname).is_loopback and
+                        parsed.port is None and
+                        not job_utils.is_consolidation_mode()):
+                    # In this case, we are not in consolidation mode, and the
+                    # db is localhost on the api server, so we can't connect
+                    # to it. Instead we will switch to using sqlite for the
+                    # jobs controller.
+                    conn_string = None
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
                 if async_override:
