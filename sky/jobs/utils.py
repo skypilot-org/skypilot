@@ -67,6 +67,8 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+_JOB_STATUS_FETCH_MAX_RETRIES = 3
+
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
     '{status_str}. It may take a few minutes.\n'
@@ -250,19 +252,23 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-    status = None
-    try:
-        logger.info('=== Checking the job status... ===')
-        statuses = backend.get_job_status(handle, stream_logs=False)
-        status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-    except exceptions.CommandError:
-        logger.info('Failed to connect to the cluster.')
-    logger.info('=' * 34)
-    return status
+    for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
+        try:
+            logger.info('=== Checking the job status... ===')
+            statuses = backend.get_job_status(handle, stream_logs=False)
+            status = list(statuses.values())[0]
+            if status is None:
+                logger.info('No job found.')
+            else:
+                logger.info(f'Job status: {status}')
+            logger.info('=' * 34)
+            return status
+        except exceptions.CommandError:
+            logger.info('Failed to connect to the cluster. Retrying '
+                        f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+            logger.info('=' * 34)
+            time.sleep(1)
+    return None
 
 
 def _controller_process_alive(pid: int, job_id: int) -> bool:
