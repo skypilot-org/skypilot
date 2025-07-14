@@ -171,7 +171,7 @@ def test_burstable_executor_pool_recovery():
         # behavior across all instances
         original_submit = PoolExecutor.submit
 
-        def mock_submit(self, *args, **kwargs):
+        def mock_submit(self, fn, *args, **kwargs):
             nonlocal submit_call_count
             submit_call_count += 1
             if submit_call_count == 1:
@@ -181,11 +181,11 @@ def test_burstable_executor_pool_recovery():
             else:
                 # Subsequent calls should work normally
                 # Call the original submit method
-                return original_submit(self, *args, **kwargs)
+                return original_submit(self, fn, *args, **kwargs)
 
         with unittest.mock.patch.object(PoolExecutor,
                                         'submit',
-                                        side_effect=mock_submit):
+                                        new=mock_submit):
             # This should trigger the pool recovery logic in
             # _submit_to_guaranteed_pool
             future = executor.submit_until_success(dummy_task)
