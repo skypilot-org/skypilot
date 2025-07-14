@@ -183,8 +183,7 @@ def test_burstable_executor_pool_recovery():
                 # Call the original submit method
                 return original_submit(self, fn, *args, **kwargs)
 
-        with unittest.mock.patch.object(PoolExecutor,
-                                        'submit',
+        with unittest.mock.patch.object(PoolExecutor, 'submit',
                                         new=mock_submit):
             # This should trigger the pool recovery logic in
             # _submit_to_guaranteed_pool
