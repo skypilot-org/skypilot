@@ -101,8 +101,11 @@ apiService:
       cpu: "4"
       memory: "8Gi"
 
-  # Enable debug logs for the API server
-  debug_logs: false
+  # Extra environment variables to set before starting the API server. Example:
+  # extraEnv:
+  #   - name: MY_ADDITIONAL_ENV_VAR
+  #     value: "my_value"
+  extraEnv: null
 
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
