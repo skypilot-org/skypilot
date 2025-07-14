@@ -440,6 +440,7 @@ class ReplicaInfo:
 
     @property
     def url(self) -> Optional[str]:
+        return None
         handle = self.handle()
         if handle is None:
             return None
