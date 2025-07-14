@@ -634,77 +634,6 @@ def release_cluster_name(service_name: str, cluster_name: str) -> str:
     return resp.json()['message']
 
 
-def submit_encoded(run_script: str, service_name: str, batch_size: int) -> str:
-    service_status = _get_service_status(service_name)
-    if service_status is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
-    load_balancer_port = service_status['load_balancer_port']
-    resp = requests.post(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) + '/submit',
-        json={
-            'run_script': run_script,
-            'num_reqs': batch_size,
-        })
-    if resp.status_code == 404:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'The service is up-ed in an old version and does not '
-                'support submit. Please `sky serve down` '
-                'it first and relaunch the service. ')
-    elif resp.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Client error during service submit: {resp.text}')
-    elif resp.status_code == 500:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Server error during service submit: {resp.text}')
-    elif resp.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to submit service: {resp.text}')
-
-    service_msg = resp.json()['message']
-    return message_utils.encode_payload(service_msg)
-
-
-def load_submit_result(payload: str) -> str:
-    return message_utils.decode_payload(payload)
-
-
-def query_encoded(service_name: str, batch_id: str) -> str:
-    service_status = _get_service_status(service_name)
-    if service_status is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
-    load_balancer_port = service_status['load_balancer_port']
-    resp = requests.get(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) +
-        f'/query?batch_id={batch_id}')
-    if resp.status_code == 404:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'The service is up-ed in an old version and does not '
-                'support query. Please `sky serve down` '
-                'it first and relaunch the service. ')
-    elif resp.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Client error during service query: {resp.text}')
-    elif resp.status_code == 500:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Server error during service query: {resp.text}')
-    elif resp.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to query service: {resp.text}')
-
-    service_msg = resp.json()['message']
-    return message_utils.encode_payload(service_msg)
-
-
-def load_query_result(payload: str) -> str:
-    return message_utils.decode_payload(payload)
-
-
 def _terminate_failed_services(
         service_name: str,
         service_status: Optional[serve_state.ServiceStatus]) -> Optional[str]:
@@ -1300,21 +1229,5 @@ class ServeCodeGen:
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
             f'{version}, mode={mode!r})',
             'print(msg, end="", flush=True)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def submit(cls, run_script: str, service_name: str, batch_size: int) -> str:
-        code = [
-            f'msg = serve_utils.submit_encoded({run_script!r}, {service_name!r}, '
-            f'{batch_size})', 'print(msg, end="", flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def query(cls, service_name: str, batch_id: str) -> str:
-        code = [
-            f'msg = serve_utils.query_encoded({service_name!r}, {batch_id!r})',
-            'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

@@ -218,7 +218,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                 original_user_yaml_path,
                                                 env_file_path,
                                                 common_utils.get_user_hash(),
-                                                priority, pool_manager)
+                                                priority)
     if is_resume:
         _start_controller(job_id, dag_yaml_path, env_file_path, pool_manager)
     else:

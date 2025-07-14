@@ -79,10 +79,11 @@ class PoolManager:
 
         @self.app.post('/acquire')
         async def acquire(request: fastapi.Request):
+            del request  # Unused.
             async with self.lock:
                 selected_cn = None
-                for cn in self.cn2inproc:
-                    if self.cn2inproc[cn] == 0:
+                for cn, inproc in self.cn2inproc.items():
+                    if inproc == 0:
                         self.cn2inproc[cn] = 1
                         selected_cn = cn
                         break
@@ -118,6 +119,7 @@ class PoolManager:
 
         @self.app.get('/debug')
         async def debug(request: fastapi.Request):
+            del request  # Unused.
             async with self.lock:
                 return fastapi.responses.JSONResponse({
                     'cn2inproc': self.cn2inproc,

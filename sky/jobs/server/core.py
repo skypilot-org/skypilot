@@ -110,7 +110,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 dag.name,
                 workspace=skypilot_config.get_active_workspace(
                     force_user_workspace=True),
-                entrypoint=common_utils.get_current_command()))
+                entrypoint=common_utils.get_current_command(),
+                pool_manager=pool_manager))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -389,8 +390,8 @@ def launch(
         ids = []
         all_handle = None
         for job_id in consolidation_mode_job_ids:
-            id, handle = _submit_one(job_id)
-            ids.append(id)
+            jid, handle = _submit_one(job_id)
+            ids.append(jid)
             all_handle = handle
         return ids, all_handle
 

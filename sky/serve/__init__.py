@@ -2,9 +2,7 @@
 import os
 
 from sky.serve.client.sdk import down
-from sky.serve.client.sdk import query
 from sky.serve.client.sdk import status
-from sky.serve.client.sdk import submit
 from sky.serve.client.sdk import sync_down_logs
 from sky.serve.client.sdk import tail_logs
 from sky.serve.client.sdk import terminate_replica

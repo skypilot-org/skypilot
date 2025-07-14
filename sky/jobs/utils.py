@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -300,23 +301,23 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         This function should not throw any exception. If it fails, it will
         capture the error message, and log/return it.
         """
-        return None
-        # error_msg = None
-        # tasks = managed_job_state.get_managed_jobs(job_id)
-        # for task in tasks:
-        #     task_name = task['job_name']
-        #     cluster_name = generate_managed_job_cluster_name(task_name, job_id)
-        #     handle = global_user_state.get_handle_from_cluster_name(
-        #         cluster_name)
-        #     if handle is not None:
-        #         try:
-        #             terminate_cluster(cluster_name)
-        #         except Exception as e:  # pylint: disable=broad-except
-        #             error_msg = (
-        #                 f'Failed to terminate cluster {cluster_name}: '
-        #                 f'{common_utils.format_exception(e, use_bracket=True)}')
-        #             logger.exception(error_msg, exc_info=e)
-        # return error_msg
+        error_msg = None
+        tasks = managed_job_state.get_managed_jobs(job_id)
+        for task in tasks:
+            cluster_name = (
+                managed_job_state.get_current_cluster_name_from_job_id(job_id))
+            pool_manager = task['pool_manager']
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is not None:
+                try:
+                    serve_utils.release_cluster_name(pool_manager, cluster_name)
+                except Exception as e:  # pylint: disable=broad-except
+                    error_msg = (
+                        f'Failed to terminate cluster {cluster_name}: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    logger.exception(error_msg, exc_info=e)
+        return error_msg
 
     # For backwards compatible jobs
     # TODO(cooperc): Remove before 0.11.0.
