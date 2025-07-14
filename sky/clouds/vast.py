@@ -260,7 +260,8 @@ class Vast(clouds.Cloud):
                     'error \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     '        $ pip install vastai\n'
-                    '        $ echo [key] > ~/.vast_api_key\n'
+                    '        $ mkdir -p ~/.config/vastai\n'
+                    '        $ echo [key] > ~/.config/vastai/vast_api_key\n'
                     '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
                 )
 
