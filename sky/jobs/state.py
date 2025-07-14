@@ -48,8 +48,6 @@ _DB_RETRY_TIMES = 10
 # File lock for database operations to prevent race conditions
 _DB_LOCK_PATH = os.path.expanduser('~/.sky/locks/managed_job_db.lock')
 
-FORCE_NO_POSTGRES: bool = False
-
 Base = declarative.declarative_base()
 
 # === Database schema ===
@@ -252,6 +250,30 @@ def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
     return _SQLALCHEMY_ENGINE
 
 
+def force_no_postgres() -> bool:
+    """Force no postgres.
+    
+    If the db is localhost on the api server, and we are not in consolidation
+    mode, we must force using sqlite and not using the api server on the jobs
+    controller.
+    """
+    conn_string = skypilot_config.get_nested(('db',), None)
+
+    if conn_string:
+        parsed = urllib.parse.urlparse(conn_string)
+        # it freezes if we use the normal get_consolidation_mode function
+        consolidation_mode = skypilot_config.get_nested(
+            ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+        if ((parsed.hostname == 'localhost' or
+                ipaddress.ip_address(parsed.hostname).is_loopback) and
+            not consolidation_mode):
+
+            logger.debug('force no postgres')
+
+            return True
+    return False
+
+
 def _initialize_and_get_db(
     create_engine_func: Any,
     get_engine: Callable[[bool], Any],
@@ -263,29 +285,9 @@ def _initialize_and_get_db(
         # it in a multithreadded setting.
         if get_engine(True) is None:
             conn_string = None
-            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+            if (os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
+                and not force_no_postgres()):
                 conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                # circular import if at top level
-                # pylint: disable=import-outside-toplevel
-                from sky.jobs import utils as job_utils
-
-                parsed = urllib.parse.urlparse(conn_string)
-                if ((parsed.hostname == 'localhost' or
-                     ipaddress.ip_address(parsed.hostname).is_loopback) and
-                    parsed.port is None and
-                    not job_utils.is_consolidation_mode()):
-                    # In this case, we are not in consolidation mode, and the
-                    # db is localhost on the api server, so we can't connect
-                    # to it. Instead we will switch to using sqlite for the
-                    # jobs controller.
-                    conn_string = None
-
-                    # set a global flag to prevent using the sdk to launch jobs
-                    # since the sdk will try to use the postgres db. instead
-                    # we will manually use execution instead of the sdk.
-                    global FORCE_NO_POSTGRES
-                    FORCE_NO_POSTGRES = True
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
                 if async_override:
@@ -303,6 +305,7 @@ def _initialize_and_get_db(
                 db_path = os.path.expanduser('~/.sky/spot_jobs.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
                                                        exist_ok=True)
+                logger.debug(f'using sqlite db at {db_path}')
                 if async_override:
                     engine = create_engine_func('sqlite+aiosqlite:///' +
                                                 db_path,

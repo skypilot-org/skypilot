@@ -301,11 +301,12 @@ class StrategyExecutor:
                         state.set_restarting(self.job_id, self.task_id,
                                              recovery)
                     try:
-                        if not state.FORCE_NO_POSTGRES:
+                        if not state.force_no_postgres():
                             usage_lib.messages.usage.set_internal()
                             # Detach setup, so that the setup failure can be
                             # detected by the controller process (job_status ->
                             # FAILED_SETUP).
+                            self._logger.info('Launching job with sdk')
                             request_id = sdk.launch(
                                 self.dag,
                                 cluster_name=self.cluster_name,
@@ -330,6 +331,7 @@ class StrategyExecutor:
                             self._logger.info('Managed job cluster launched.')
                         else:
                             # use the execution api to launch the job
+                            self._logger.info('Launching job with execution')
                             execution.launch(self.dag,
                                              cluster_name=self.cluster_name,
                                              idle_minutes_to_autostop=
