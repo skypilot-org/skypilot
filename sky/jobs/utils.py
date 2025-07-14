@@ -959,6 +959,7 @@ def stream_logs_by_id(job_id: int,
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
+    managed_job_status = managed_job_state.get_status(job_id)
     if not follow and not managed_job_status.is_terminal():
         # The job is not in terminal state and we are not following,
         # just return.

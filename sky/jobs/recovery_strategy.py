@@ -337,7 +337,8 @@ class StrategyExecutor:
                                              idle_minutes_to_autostop=
                                              _AUTODOWN_MINUTES,
                                              down=True,
-                                             _is_launched_by_jobs_controller=True)
+                                             _is_launched_by_jobs_controller=True,
+                                             job_logger=self._logger)
                             self._logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
