@@ -151,13 +151,17 @@ def _get_cluster_records_and_set_ssh_config(
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
-            key_path = (cluster_utils.SSHConfigHelper.generate_local_key_file(
-                handle.cluster_name, credentials))
+            escaped_key_path = shlex.quote(
+                (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                    handle.cluster_name, credentials)))
+            escaped_executable_path = shlex.quote(sys.executable)
+            escaped_websocket_proxy_path = shlex.quote(
+                f'{sky.__root_dir__}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
             proxy_command = (
-                f'ssh -tt -i {key_path} '
+                f'ssh -tt -i {escaped_key_path} '
                 '-o StrictHostKeyChecking=no '
                 '-o UserKnownHostsFile=/dev/null '
                 '-o IdentitiesOnly=yes '
@@ -167,10 +171,10 @@ def _get_cluster_records_and_set_ssh_config(
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\'{sys.executable} {sky.__root_dir__}/templates/'
-                f'websocket_proxy.py '
+                f'\"{escaped_executable_path} '
+                f'{escaped_websocket_proxy_path} '
                 f'{server_common.get_server_url()} '
-                f'{handle.cluster_name}\'')
+                f'{handle.cluster_name}\"')
             credentials['ssh_proxy_command'] = proxy_command
 
         cluster_utils.SSHConfigHelper.add_cluster(
