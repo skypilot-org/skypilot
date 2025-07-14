@@ -1641,17 +1641,16 @@ def check_network_connection():
     
     # Alternate between IPs on each retry
     max_retries = 3
-    for retry in range(max_retries):
+    for _ in range(max_retries):
         for ip in _TEST_IP_LIST:
             try:
                 http.head(ip, timeout=1)
                 return
             except (requests.Timeout, requests.exceptions.ConnectionError):
-                continue  # Try next IP
-        # If we get here, all IPs failed in this retry round
-        if retry == max_retries:
-            raise exceptions.NetworkError('Could not refresh the cluster. '
-                                          'Network seems down.')
+                continue
+    # If we get here, all IPs failed in this retry round
+    raise exceptions.NetworkError('Could not refresh the cluster. '
+                                    'Network seems down.')
 
 
 @timeline.event
