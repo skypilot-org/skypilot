@@ -161,6 +161,12 @@ its performance requirements and size of the data.
     the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
 
+.. note::
+    **Architecture compatibility**: S3 storage mounting (including S3-compatible services like 
+    Cloudflare R2 and Nebius) works on all architectures including ARM64 (e.g., Apple Silicon, 
+    AWS Graviton). SkyPilot automatically uses the optimal mounting tool for each architecture: 
+    goofys for x86_64 and rclone for ARM64.
+
 .. _mount_cached_mode_in_detail:
 
 MOUNT_CACHED mode in detail
