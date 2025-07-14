@@ -135,7 +135,15 @@ def create_table(engine: sqlalchemy.engine.Engine):
     # Get alembic config for spot jobs db and run migrations
     alembic_config = alembic_utils.get_alembic_config(engine, 'spot_jobs_db')
     alembic_config.config_ini_section = 'spot_jobs_db'
-    alembic_command.upgrade(alembic_config, '001')
+    try:
+        alembic_command.upgrade(alembic_config, '001')
+    except sqlalchemy_exc.IntegrityError as e:
+        # If the version already exists (due to concurrent initialization),
+        # we can safely ignore this error
+        if 'UNIQUE constraint failed: alembic_version_spot_jobs_db.version_num' in str(e):
+            pass
+        else:
+            raise
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:

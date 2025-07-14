@@ -61,6 +61,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from alembic import command as alembic_command
 import filelock
 import sqlalchemy
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
@@ -592,7 +593,11 @@ def _reload_config_as_server() -> None:
             alembic_config = alembic_utils.get_alembic_config(
                 sqlalchemy_engine, 'sky_config_db')
             alembic_config.config_ini_section = 'sky_config_db'
-            alembic_command.upgrade(alembic_config, '001')
+            try:
+                alembic_command.upgrade(alembic_config, '001')
+            except sqlalchemy_exc.IntegrityError:
+                logger.warning(
+                    'Alembic version 001 already exists, skipping upgrade.')
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
@@ -885,7 +890,15 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 alembic_config = alembic_utils.get_alembic_config(
                     sqlalchemy_engine, 'sky_config_db')
                 alembic_config.config_ini_section = 'sky_config_db'
-                alembic_command.upgrade(alembic_config, '001')
+                try:
+                    alembic_command.upgrade(alembic_config, '001')
+                except sqlalchemy_exc.IntegrityError as e:
+                    # If the version already exists (due to concurrent initialization),
+                    # we can safely ignore this error
+                    if 'UNIQUE constraint failed: alembic_version_sky_config_db.version_num' in str(e):
+                        pass
+                    else:
+                        raise
 
                 def _set_config_yaml_to_db(key: str,
                                            config: config_utils.Config):
