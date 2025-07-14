@@ -9,6 +9,9 @@ from typing import Any, Callable, Optional
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
@@ -157,7 +160,7 @@ def add_column_to_table_alembic(
     """Add a column to a table using Alembic operations.
 
     This provides the same interface as add_column_to_table_sqlalchemy but
-    uses Alembic's op.add_column() for proper migration support.
+    uses Alembic's connection context for proper migration support.
 
     Args:
         table_name: Name of the table to add column to
@@ -170,37 +173,36 @@ def add_column_to_table_alembic(
     """
     from alembic import op  # pylint: disable=import-outside-toplevel
 
-    # Try to add the column, ignoring duplicate column errors
     try:
-        kwargs = {}
-        if server_default is not None:
-            kwargs['server_default'] = server_default
-        op.add_column(table_name,
-                      sqlalchemy.Column(column_name, column_type, **kwargs))
-    except (sqlalchemy.exc.DuplicateColumnError,
-            sqlalchemy.exc.OperationalError,
-            sqlalchemy.exc.ProgrammingError) as e:
-        if any(phrase in str(e).lower()
-               for phrase in ['duplicate column', 'already exists']):
+        # Create the column with server_default if provided
+        column = sqlalchemy.Column(column_name,
+                                   column_type,
+                                   server_default=server_default)
+        op.add_column(table_name, column, if_not_exists=True)
+
+        # Handle data migration
+        if copy_from is not None:
+            op.execute(
+                sqlalchemy.text(
+                    f'UPDATE {table_name} SET {column_name} = {copy_from}'))
+
+        if value_to_replace_existing_entries is not None:
+            # Use parameterized query for safety
+            op.get_bind().execute(
+                sqlalchemy.text(f'UPDATE {table_name} '
+                                f'SET {column_name} = :replacement_value '
+                                f'WHERE {column_name} IS NULL'),
+                {'replacement_value': value_to_replace_existing_entries})
+    except sqlalchemy_exc.ProgrammingError as e:
+        if 'already exists' in str(e).lower():
             pass  # Column already exists, that's fine
         else:
             raise
-
-    # Handle data migration - always run these (matches original behavior)
-    conn = op.get_bind()
-
-    if copy_from is not None:
-        conn.execute(
-            sqlalchemy.text(
-                f'UPDATE {table_name} SET {column_name} = {copy_from} '
-                f'WHERE {column_name} IS NULL'))
-
-    if value_to_replace_existing_entries is not None:
-        conn.execute(
-            sqlalchemy.text(
-                f'UPDATE {table_name} SET {column_name} = :replacement_value '
-                f'WHERE {column_name} IS NULL'),
-            {'replacement_value': value_to_replace_existing_entries})
+    except sqlalchemy_exc.OperationalError as e:
+        if 'duplicate column name' in str(e).lower():
+            pass  # Column already exists, that's fine
+        else:
+            raise
 
 
 class SQLiteConn(threading.local):

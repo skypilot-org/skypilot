@@ -20,8 +20,9 @@ depends_on = None
 
 def upgrade():
     """Create initial schema for config_yaml table"""
-    # Create all tables with their current schema
-    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
+    with op.get_context().autocommit_block():
+        # Create all tables with their current schema
+        db_utils.add_tables_to_db_sqlalchemy(Base.metadata, op.get_bind())
 
 
 def downgrade():
