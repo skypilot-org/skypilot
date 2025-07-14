@@ -42,8 +42,6 @@ class PoolManager:
                              f'the controller: {e}'
                              f'\nTraceback: {traceback.format_exc()}')
             else:
-                logger.info('Available Replica clusters: '
-                            f'{ready_replica_cluster_names}')
                 for cn in ready_replica_cluster_names:
                     if cn not in self.cn2inproc:
                         self.cn2inproc[cn] = 0
@@ -53,6 +51,7 @@ class PoolManager:
                         cn_to_del.append(cn)
                 for cn in cn_to_del:
                     del self.cn2inproc[cn]
+                logger.info(f'Available Replica clusters: {self.cn2inproc}')
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
