@@ -178,7 +178,7 @@ def add_column_to_table_alembic(
         column = sqlalchemy.Column(column_name,
                                    column_type,
                                    server_default=server_default)
-        op.add_column(table_name, column, if_not_exists=True)
+        op.add_column(table_name, column)
 
         # Handle data migration
         if copy_from is not None:
