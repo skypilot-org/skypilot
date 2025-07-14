@@ -102,10 +102,10 @@ apiService:
       memory: "8Gi"
 
   # Extra environment variables to set before starting the API server. Example:
-  # extraEnv:
+  # extraEnvs:
   #   - name: MY_ADDITIONAL_ENV_VAR
   #     value: "my_value"
-  extraEnv: null
+  extraEnvs: null
 
   # Extra volumes to mount to the API server. Example:
   # extraVolumes:
