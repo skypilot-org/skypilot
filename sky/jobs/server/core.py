@@ -258,6 +258,8 @@ def launch(
     consolidation_mode_job_ids = _maybe_submit_job_locally(
         prefix, dag, pool_manager, batch_size)
 
+    file_mount_synced = False
+
     # pylint: disable=line-too-long
     def _submit_one(consolidation_mode_job_id: Optional[int]):
         # Has to use `\` to avoid yapf issue.
@@ -322,10 +324,12 @@ def launch(
 
             controller_task.managed_job_dag = dag
 
-            logger.info(
-                f'{colorama.Fore.YELLOW}'
-                f'Launching managed job {dag.name!r} from jobs controller...'
-                f'{colorama.Style.RESET_ALL}')
+            batch_identity = ''
+            if consolidation_mode_job_id is not None:
+                batch_identity = f' (Job ID: {consolidation_mode_job_id})'
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        f'Launching managed job {dag.name!r}{batch_identity} '
+                        f'from jobs controller...{colorama.Style.RESET_ALL}')
 
             # Launch with the api server's user hash, so that sky status does not
             # show the owner of the controller as whatever user launched it first.
@@ -351,10 +355,14 @@ def launch(
                     backend = backend_utils.get_backend_from_handle(
                         local_handle)
                     assert isinstance(backend, backends.CloudVmRayBackend)
-                    backend.sync_file_mounts(
-                        handle=local_handle,
-                        all_file_mounts=controller_task.file_mounts,
-                        storage_mounts=controller_task.storage_mounts)
+                    # Only sync once since they use the same file mounts.
+                    nonlocal file_mount_synced
+                    if not file_mount_synced:
+                        backend.sync_file_mounts(
+                            handle=local_handle,
+                            all_file_mounts=controller_task.file_mounts,
+                            storage_mounts=controller_task.storage_mounts)
+                        file_mount_synced = True
                     run_script = controller_task.run
                     assert isinstance(run_script, str)
                     # Manually add the env variables to the run script. Originally
