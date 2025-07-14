@@ -55,6 +55,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
+from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -467,20 +468,23 @@ def _add_click_options(options: List[click.Option]):
 
 
 def _parse_override_params(
-        cloud: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-        gpus: Optional[str] = None,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        instance_type: Optional[str] = None,
-        use_spot: Optional[bool] = None,
-        image_id: Optional[str] = None,
-        disk_size: Optional[int] = None,
-        disk_tier: Optional[str] = None,
-        network_tier: Optional[str] = None,
-        ports: Optional[Tuple[str, ...]] = None,
-        config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    cloud: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    gpus: Optional[str] = None,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    instance_type: Optional[str] = None,
+    use_spot: Optional[bool] = None,
+    image_id: Optional[str] = None,
+    disk_size: Optional[int] = None,
+    disk_tier: Optional[str] = None,
+    network_tier: Optional[str] = None,
+    ports: Optional[Tuple[str, ...]] = None,
+    config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
+) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -665,6 +669,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     # job launch specific
     job_recovery: Optional[str] = None,
     config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -672,6 +678,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         A dag iff the entrypoint is YAML and contains more than 1 task.
         Otherwise, a task.
     """
+    if git_url is not None and workdir is not None:
+        raise click.UsageError('Cannot specify both --git-url and --workdir')
+
     entrypoint = ' '.join(entrypoint)
     is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -734,6 +743,10 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     # Override.
     if workdir is not None:
         task.workdir = workdir
+    # Update the workdir config from the command line parameters.
+    # And update the envs and secrets from the workdir.
+    _update_task_workdir(task, git_url, git_ref)
+    _update_task_workdir_and_secrets_from_workdir(task)
 
     # job launch specific.
     if job_recovery is not None:
@@ -746,6 +759,67 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     return task
+
+
+def _update_task_workdir(task: sky.Task, git_url: Optional[str],
+                         git_ref: Optional[str]):
+    """Updates the task workdir.
+
+    Args:
+        task: The task to update.
+    """
+    if task.workdir is None:
+        if git_url is not None:
+            task.workdir = {
+                'url': git_url,
+                'ref': git_ref,
+            }
+            return
+        return
+    if not isinstance(task.workdir, dict):
+        return
+    if git_url is not None:
+        task.workdir['url'] = git_url
+    if git_ref is not None:
+        task.workdir['ref'] = git_ref
+    return
+
+
+def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
+    """Updates the task secrets from the workdir.
+
+    Args:
+        task: The task to update.
+    """
+    if task.workdir is None:
+        return
+    if not isinstance(task.workdir, dict):
+        return
+    url = task.workdir['url']
+    ref = task.workdir.get('ref') or ''
+    token = os.environ.get(git.GIT_TOKEN_ENV_VAR)
+    ssh_key_path = os.environ.get(git.GIT_SSH_KEY_PATH_ENV_VAR)
+    try:
+        git_repo = git.GitRepo(url, ref, token, ssh_key_path)
+        clone_info = git_repo.get_repo_clone_info()
+        if clone_info is None:
+            return
+        if clone_info.token is None and clone_info.ssh_key is None:
+            return
+        task.secrets[git.GIT_URL_ENV_VAR] = clone_info.url
+        if clone_info.token is not None:
+            task.secrets[git.GIT_TOKEN_ENV_VAR] = clone_info.token
+        if clone_info.ssh_key is not None:
+            task.secrets[git.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+
+        if ref:
+            if git_repo.is_commit_hash():
+                task.envs[git.GIT_COMMIT_HASH_ENV_VAR] = ref
+            else:
+                task.envs[git.GIT_BRANCH_ENV_VAR] = ref
+    except exceptions.GitError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{str(e)}') from None
 
 
 class _NaturalOrderGroup(click.Group):
@@ -927,40 +1001,43 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
           'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
-        entrypoint: Tuple[str, ...],
-        cluster: Optional[str],
-        dryrun: bool,
-        detach_run: bool,
-        backend_name: Optional[str],
-        name: Optional[str],
-        workdir: Optional[str],
-        infra: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        gpus: Optional[str],
-        cpus: Optional[str],
-        memory: Optional[str],
-        instance_type: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        secret: List[Tuple[str, str]],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        network_tier: Optional[str],
-        ports: Tuple[str, ...],
-        idle_minutes_to_autostop: Optional[int],
-        down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool,
-        yes: bool,
-        no_setup: bool,
-        clone_disk_from: Optional[str],
-        fast: bool,
-        async_call: bool,
-        config_override: Optional[Dict[str, Any]] = None):
+    entrypoint: Tuple[str, ...],
+    cluster: Optional[str],
+    dryrun: bool,
+    detach_run: bool,
+    backend_name: Optional[str],
+    name: Optional[str],
+    workdir: Optional[str],
+    infra: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    ports: Tuple[str, ...],
+    idle_minutes_to_autostop: Optional[int],
+    down: bool,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool,
+    yes: bool,
+    no_setup: bool,
+    clone_disk_from: Optional[str],
+    fast: bool,
+    async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
+):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1008,6 +1085,8 @@ def launch(
         network_tier=network_tier,
         ports=ports,
         config_override=config_override,
+        git_url=git_url,
+        git_ref=git_ref,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(

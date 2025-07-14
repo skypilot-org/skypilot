@@ -812,7 +812,7 @@ def translate_local_file_mounts_to_two_hop(
     file_mount_id = 0
 
     file_mounts_to_translate = task.file_mounts or {}
-    if task.workdir is not None:
+    if task.workdir is not None and isinstance(task.workdir, str):
         file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
         task.workdir = None
 
@@ -928,7 +928,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
-    if task.workdir is not None:
+    if task.workdir is not None and isinstance(task.workdir, str):
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or

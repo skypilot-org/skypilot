@@ -6,8 +6,10 @@ import pathlib
 import shlex
 import sys
 import time
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
+                    Union)
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -176,6 +178,20 @@ class CommandRunner:
     @property
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
+
+    def get_remote_home_dir(self) -> str:
+        # Use `echo ~` to get the remote home directory, instead of pwd or
+        # echo $HOME, because pwd can be `/` when the remote user is root
+        # and $HOME is not always set.
+        rc, remote_home_dir, stderr = self.run('echo ~',
+                                               require_outputs=True,
+                                               separate_stderr=True,
+                                               stream_logs=False)
+        if rc != 0:
+            raise ValueError('Failed to get remote home directory: '
+                             f'{remote_home_dir + stderr}')
+        remote_home_dir = remote_home_dir.strip()
+        return remote_home_dir
 
     def _get_command_to_run(
         self,
@@ -451,6 +467,80 @@ class CommandRunner:
         """
         raise NotImplementedError
 
+    @timeline.event
+    def git_clone(
+        self,
+        target_dir: str,
+        *,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        connect_timeout: Optional[int] = None,
+        envs_and_secrets: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Clones a Git repository on the remote machine using git_clone.sh.
+
+        Note: Git environment variables (GIT_URL, GIT_BRANCH, GIT_TOKEN, etc.)
+        must be set before calling this function.
+
+        Args:
+            target_dir: Target directory where the repository will be cloned.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            connect_timeout: timeout in seconds for the connection.
+            envs_and_secrets: Environment variables and secrets to be set before running the script.
+        Raises:
+            exceptions.CommandError: git clone command failed.
+        """
+        # Find the git_clone.sh script path
+        git_clone_script_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'git_clone.sh')
+
+        if not os.path.exists(git_clone_script_path):
+            error_msg = f'git_clone.sh script not found at {git_clone_script_path}'
+            logger.error(error_msg)
+            raise exceptions.CommandError(1, '', error_msg, None)
+
+        # Remote script path (use a unique name to avoid conflicts)
+        script_hash = hashlib.md5(
+            f'{self.node_id}_{target_dir}'.encode()).hexdigest()[:8]
+        remote_script_path = f'/tmp/sky_git_clone_{script_hash}.sh'
+
+        # Step 1: Transfer the script to remote machine using rsync
+        logger.debug(
+            f'Transferring git_clone.sh to {self.node_id}:{remote_script_path}')
+        self.rsync(
+            source=git_clone_script_path,
+            target=remote_script_path,
+            up=True,
+            log_path=log_path,
+            stream_logs=False  # Don't spam logs for script transfer
+        )
+
+        # Step 2: Execute the script on remote machine
+        if target_dir.startswith('~'):
+            target_dir = target_dir.replace('~', self.get_remote_home_dir())
+        quoted_target_dir = shlex.quote(target_dir)
+        quoted_script_path = shlex.quote(remote_script_path)
+        cmd = ''
+        if envs_and_secrets:
+            for key, value in envs_and_secrets.items():
+                cmd += f'export {key}={value} && '
+        cmd += f'bash {quoted_script_path} {quoted_target_dir} && rm -f {quoted_script_path}'
+
+        logger.debug(f'Running git clone script on {self.node_id}: {cmd}')
+
+        returncode = self.run(cmd,
+                              log_path=log_path,
+                              stream_logs=stream_logs,
+                              connect_timeout=connect_timeout,
+                              require_outputs=False)
+
+        if returncode != 0:
+            error_msg = f'Git clone failed on {self.node_id}: {target_dir}'
+            logger.error(error_msg)
+            raise exceptions.CommandError(returncode, cmd, error_msg, None)
+
 
 class SSHCommandRunner(CommandRunner):
     """Runner for SSH commands."""
@@ -670,6 +760,8 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        command_str = ' '.join(command)
+        logger.info(f'Running command: {command_str}')
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -941,20 +1033,6 @@ class KubernetesCommandRunner(CommandRunner):
             exceptions.CommandError: rsync command failed.
         """
 
-        def get_remote_home_dir() -> str:
-            # Use `echo ~` to get the remote home directory, instead of pwd or
-            # echo $HOME, because pwd can be `/` when the remote user is root
-            # and $HOME is not always set.
-            rc, remote_home_dir, stderr = self.run('echo ~',
-                                                   require_outputs=True,
-                                                   separate_stderr=True,
-                                                   stream_logs=False)
-            if rc != 0:
-                raise ValueError('Failed to get remote home directory: '
-                                 f'{remote_home_dir + stderr}')
-            remote_home_dir = remote_home_dir.strip()
-            return remote_home_dir
-
         # Build command.
         helper_path = shlex.quote(
             os.path.join(os.path.abspath(os.path.dirname(__file__)),
@@ -980,7 +1058,7 @@ class KubernetesCommandRunner(CommandRunner):
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
-            get_remote_home_dir=get_remote_home_dir)
+            get_remote_home_dir=self.get_remote_home_dir)
 
 
 class LocalProcessCommandRunner(CommandRunner):

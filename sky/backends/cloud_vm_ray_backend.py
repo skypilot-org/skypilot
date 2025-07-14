@@ -3240,10 +3240,54 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             common_utils.remove_file_if_exists(lock_path)
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
-                      workdir: Path) -> None:
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
+        if isinstance(workdir, dict):
+            self._sync_git_workdir(handle, envs_and_secrets)
+        else:
+            self._sync_path_workdir(handle, workdir)
+
+    def _sync_git_workdir(self, handle: CloudVmRayResourceHandle,
+                          envs_and_secrets: Dict[str, str]) -> None:
+        fore = colorama.Fore
+        style = colorama.Style
+        ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
+
+        log_path = os.path.join(self.log_dir, 'workdir_sync.log')
+
+        # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
+        runners = handle.get_command_runners()
+
+        def _sync_git_workdir_node(
+                runner: command_runner.CommandRunner) -> None:
+            runner.git_clone(
+                target_dir=SKY_REMOTE_WORKDIR,
+                log_path=log_path,
+                stream_logs=False,
+                envs_and_secrets=envs_and_secrets,
+            )
+
+        num_nodes = handle.launched_nodes
+        plural = 's' if num_nodes > 1 else ''
+        logger.info(
+            f'  {style.DIM}Syncing workdir (to {num_nodes} node{plural}): '
+            f'{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+        os.system(f'touch {log_path}')
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Syncing workdir', log_path)):
+            subprocess_utils.run_in_parallel(_sync_git_workdir_node, runners,
+                                             num_threads)
+        logger.info(ux_utils.finishing_message('Synced workdir.', log_path))
+
+    def _sync_path_workdir(self, handle: CloudVmRayResourceHandle,
+                           workdir: Path) -> None:
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
