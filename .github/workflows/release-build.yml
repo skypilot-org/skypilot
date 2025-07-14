@@ -214,6 +214,8 @@ jobs:
 
       - name: Create release branch
         id: create_release_branch
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         run: |
           RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
           BRANCH_NAME="releases/${RELEASE_VERSION}"
@@ -222,10 +224,11 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Check if branch already exists
+          # Check if branch already exists and delete it
           if git ls-remote --exit-code --heads origin ${BRANCH_NAME} > /dev/null 2>&1; then
-            echo "Error: Release branch ${BRANCH_NAME} already exists. Please manually delete the branch first and then rerun the workflow."
-            exit 1
+            echo "Release branch ${BRANCH_NAME} already exists. Deleting it..."
+            git push origin --delete ${BRANCH_NAME}
+            echo "Deleted existing release branch: ${BRANCH_NAME}"
           fi
 
           # Create release branch
