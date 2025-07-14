@@ -238,6 +238,8 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
 
     The job could be in any terminal ManagedJobStatus. However, once DONE, it
     should never transition back to another state.
+
+    This is only called by utils.update_managed_jobs_statuses which is sync.
     """
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
@@ -262,13 +264,14 @@ async def job_done_async(job_id: int, idempotent: bool = False) -> None:
 
     The job could be in any terminal ManagedJobStatus. However, once DONE, it
     should never transition back to another state.
+
+    This is called by controller.py.
     """
     if idempotent and (await state.get_job_schedule_state_async(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    async with filelock.AsyncFileLock(_get_lock_path()):
-        await state.scheduler_set_done_async(job_id, idempotent)
+    await state.scheduler_set_done_async(job_id, idempotent)
 
 
 if __name__ == '__main__':

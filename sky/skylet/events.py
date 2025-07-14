@@ -12,7 +12,7 @@ import yaml
 from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
-from sky.jobs import state as managed_job_state
+from sky.jobs import scheduler, state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
@@ -75,10 +75,8 @@ class ManagedJobEvent(SkyletEvent):
 
     def _run(self):
         managed_job_utils.update_managed_jobs_statuses()
-        # TODO(luca) try to start a controller in case it crashed, safe since
-        # its idempotent
-
-        # managed_job_scheduler._start_controller()
+        managed_job_utils.maybe_scale()
+        scheduler.maybe_start_controller()
 
 
 class ServiceUpdateEvent(SkyletEvent):

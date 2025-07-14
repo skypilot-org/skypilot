@@ -9,6 +9,7 @@ import os
 import shutil
 import time
 import traceback
+import filelock
 import typing
 from typing import Dict, Optional, Set, Tuple
 
@@ -909,27 +910,12 @@ async def monitor_loop():
 
     global starting
 
-    scaled_already = False
+    tries = 5
     while True:
         async with _job_tasks_lock:
             running_tasks = [
                 task for task in job_tasks.values() if not task.done()
             ]
-
-        if len(running_tasks) >= scheduler.JOBS_PER_WORKER:
-            # we are at maximum capacity, so we want to spawn a new worker,
-            # only do this once. the new worker will scale again if needed.
-            if not scaled_already:
-                # run in a different thread since this might be expensive
-                if await managed_job_utils.to_thread(can_scale)[0]:
-                    await managed_job_utils.to_thread(scheduler.start_controller
-                                                     )
-                scaled_already = True
-
-            # most likely a job will take a while to finish,
-            # so lets wait a bit longer
-            await asyncio.sleep(120)
-            continue
 
         async with _job_tasks_lock:
             starting_count = len(starting)
@@ -950,8 +936,25 @@ async def monitor_loop():
             continue
 
         if waiting_job is None:
-            await asyncio.sleep(5)
+            if len(running_tasks) == 0:
+                tries -= 1
+                if tries <= 0:
+                    # do none blocking attempt first
+                    if can_scale()[1]:
+                        # There is another job controller running, so we can
+                        # scale down by killing ourselves. There is a possible
+                        # race condition here, so we use a file lock to
+                        # prevent it.
+                        with filelock.FileLock(
+                            scheduler._JOB_CONTROLLER_PID_LOCK, timeout=0):
+                            if can_scale()[1]:
+                                os._exit(0)
+
+            await asyncio.sleep(10)
             continue
+
+        # we found a new job to run so we can reset the tries
+        tries = 5
 
         if (waiting_job['schedule_state'] !=
                 managed_job_state.ManagedJobScheduleState.WAITING):

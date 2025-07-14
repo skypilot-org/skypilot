@@ -283,6 +283,24 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
         return False
 
 
+def maybe_scale() -> None:
+    """Maybe scale the controller.
+    
+    We only scale up if there are more pending jobs than
+    JOBS_PER_WORKER * WORKER_COUNT jobs that are able to be scheduled.
+    """
+    pending_jobs = managed_job_state.get_pending_jobs_count()
+    try:
+        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
+            # there is always a newline at the end of the file
+            pids = max(len(f.read().split('\n')) - 1, 0)
+    except FileNotFoundError:
+        # this might happen, no worries
+        pids = 0
+
+    if pending_jobs > scheduler.JOBS_PER_WORKER * pids:
+        scheduler.start_controller()
+
 def update_managed_jobs_statuses(job_id: Optional[int] = None):
     """Update managed job status if the controller process failed abnormally.
 

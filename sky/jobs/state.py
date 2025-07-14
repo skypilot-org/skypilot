@@ -48,6 +48,8 @@ _DB_RETRY_TIMES = 10
 # File lock for database operations to prevent race conditions
 _DB_LOCK_PATH = os.path.expanduser('~/.sky/locks/managed_job_db.lock')
 
+FORCE_NO_POSTGRES: bool = False
+
 Base = declarative.declarative_base()
 
 # === Database schema ===
@@ -278,6 +280,12 @@ def _initialize_and_get_db(
                     # to it. Instead we will switch to using sqlite for the
                     # jobs controller.
                     conn_string = None
+
+                    # set a global flag to prevent using the sdk to launch jobs
+                    # since the sdk will try to use the postgres db. instead
+                    # we will manually use execution instead of the sdk.
+                    global FORCE_NO_POSTGRES
+                    FORCE_NO_POSTGRES = True
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
                 if async_override:
@@ -643,6 +651,18 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
             entrypoint=entrypoint)
         session.execute(insert_stmt)
         session.commit()
+
+
+
+@_init_db
+def get_pending_jobs_count() -> int:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        return session.query(spot_table).filter(
+            job_info_table.c.schedule_state.in_([
+                ManagedJobScheduleState.WAITING.value,
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+            ])).count()
 
 
 @_init_db
