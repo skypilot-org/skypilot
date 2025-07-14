@@ -246,9 +246,10 @@ def create_table(engine: sqlalchemy.engine.Engine):
     try:
         alembic_command.upgrade(alembic_config, '001')
     except sqlalchemy_exc.IntegrityError as e:
-        # If the version already exists (due to concurrent initialization),
-        # we can safely ignore this error
-        if 'UNIQUE constraint failed: alembic_version_state_db.version_num' in str(e):
+        # If the version already exists (due to concurrent
+        # initialization), we can safely ignore this error
+        if ('UNIQUE constraint failed: '
+                'alembic_version_state_db.version_num' in str(e)):
             pass
         else:
             raise
