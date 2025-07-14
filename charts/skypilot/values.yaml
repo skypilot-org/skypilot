@@ -1,7 +1,6 @@
 apiService:
   image: berkeleyskypilot/skypilot:0.9.2
-  # Number of replicas to deploy - replicas > 1 is not well tested, and requires
-  # a PVC that supports ReadWriteMany (see accessMode in storage section below).
+  # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-
     # Run commands before deploying the API server, e.g. installing an admin
@@ -13,6 +12,11 @@ apiService:
     # echo "Installing admin policy"
     # pip install git+https://github.com/michaelvll/admin-policy-examples
 
+  # Upgrade strategy for the API server, available options are:
+  # - Recreate: delete the old pod first and create a new one (has downtime).
+  # - RollingUpdate: create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
+  # Default to Recreate. When set to RollingUpdate, an external database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString.
+  upgradeStrategy: Recreate
   # Enable basic auth and user management in the API server
   # If enabled, the user can be created, updated, and deleted in the Dashboard,
   # and the basic auth will be done in the API server instead of the ingress.
@@ -61,9 +65,12 @@ apiService:
   #     - aws
   #     - kubernetes
 
-  # Set the DB connection string for the API server.
-  # If this field is set, config must be null.
+  # Use a secret to set the DB connection string for the API server.
+  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-back-the-api-server-with-a-persistent-database for more details.
+  # If either this field or dbConnectionString is set, config must be null.
   dbConnectionSecretName: null
+  # Set the DB connection string directly. This is a shortcut for setting the DB connection string in a secret.
+  dbConnectionString: null
 
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.

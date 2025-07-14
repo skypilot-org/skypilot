@@ -85,6 +85,9 @@ def retry_on_server_unavailable(max_wait_seconds: int = 600,
                     attempt += 1
                     try:
                         return func(*args, **kwargs)
+                    except exceptions.RequestInterruptedError:
+                        logger.debug('Request interrupted. Retry immediately.')
+                        continue
                     except exceptions.ServerTemporarilyUnavailableError as e:
                         # This will cause the status spinner being stopped and
                         # restarted in every retry loop. But it is necessary to
