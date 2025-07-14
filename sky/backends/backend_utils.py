@@ -1648,7 +1648,8 @@ def check_network_connection():
                 return
             except (requests.Timeout, requests.exceptions.ConnectionError):
                 continue
-    # If we get here, all IPs failed in this retry round
+    # If we get here, all IPs failed
+    # Assume network connection is down
     raise exceptions.NetworkError('Could not refresh the cluster. '
                                     'Network seems down.')
 
