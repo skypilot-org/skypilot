@@ -114,6 +114,8 @@ jobs:
           fetch-depth: 0
 
       - name: Create and push tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
@@ -128,6 +130,7 @@ jobs:
           tag_name: "v${{ needs.extract-version.outputs.version }}"
           generate_release_notes: true
           draft: true
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
   cleanup-branches:
     needs: extract-version
@@ -138,9 +141,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
       - name: Delete branches
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
@@ -153,4 +158,13 @@ jobs:
             git push origin --delete ${TEST_BRANCH}
           else
             echo "Test branch ${TEST_BRANCH} does not exist, skipping"
+          fi
+
+          # Check if release branch exists and delete it
+          RELEASE_BRANCH="releases/${VERSION}"
+          if git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
+            echo "Deleting release branch: ${RELEASE_BRANCH}"
+            git push origin --delete ${RELEASE_BRANCH}
+          else
+            echo "Release branch ${RELEASE_BRANCH} does not exist, skipping"
           fi
