@@ -424,3 +424,6 @@ spec:
           secretName: {{ .Values.apiService.sshKeySecret }}
           defaultMode: 0600 
       {{- end }}
+      {{- if .Values.apiService.extraVolumes }}
+      {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}
+      {{- end }}

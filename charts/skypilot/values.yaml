@@ -107,6 +107,13 @@ apiService:
   #     value: "my_value"
   extraEnv: null
 
+  # Extra volumes to mount to the API server. Example:
+  # extraVolumes:
+  #   - name: my-volume
+  #     secret:
+  #       secretName: my-secret
+  extraVolumes: null
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
