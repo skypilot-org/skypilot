@@ -84,8 +84,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
     sqlalchemy.Column('spot_job_id',
                       sqlalchemy.Integer,
-                      index=True,
-                      unique=True),
+                      index=True),
     sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('task_name', sqlalchemy.Text),
     sqlalchemy.Column('specs', sqlalchemy.Text),
@@ -270,9 +269,10 @@ def _initialize_and_get_db(
                 from sky.jobs import utils as job_utils
 
                 parsed = urllib.parse.urlparse(conn_string)
-                if (ipaddress.ip_address(parsed.hostname).is_loopback and
-                        parsed.port is None and
-                        not job_utils.is_consolidation_mode()):
+                if ((parsed.hostname == 'localhost' or
+                     ipaddress.ip_address(parsed.hostname).is_loopback) and
+                    parsed.port is None and
+                    not job_utils.is_consolidation_mode()):
                     # In this case, we are not in consolidation mode, and the
                     # db is localhost on the api server, so we can't connect
                     # to it. Instead we will switch to using sqlite for the
