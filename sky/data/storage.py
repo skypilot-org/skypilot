@@ -886,7 +886,8 @@ class S3CompatibleStore(AbstractStore):
                 cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
             if self.config.aws_profile:
                 cmd_parts.append(f'--profile={self.config.aws_profile}')
-            cmd_parts.extend(self.config.extra_cli_args)
+            if self.config.extra_cli_args:
+                cmd_parts.extend(self.config.extra_cli_args)
 
             # Handle credentials file via environment
             cmd = ' '.join(cmd_parts)
@@ -913,7 +914,8 @@ class S3CompatibleStore(AbstractStore):
                 cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
             if self.config.aws_profile:
                 cmd_parts.append(f'--profile={self.config.aws_profile}')
-            cmd_parts.extend(self.config.extra_cli_args)
+            if self.config.extra_cli_args:
+                cmd_parts.extend(self.config.extra_cli_args)
 
             cmd = ' '.join(cmd_parts)
             if self.config.credentials_file:
@@ -1291,13 +1293,15 @@ class Storage(object):
                     else:
                         new_store_type = store_type
                 with ux_utils.print_exception_no_traceback():
+                    prev_type_str = previous_store_type.value.lower() if previous_store_type else "unknown"
+                    new_type_str = new_store_type.value.lower() if new_store_type else "unknown"
                     raise exceptions.StorageBucketCreateError(
                         f'Bucket {self.name} was previously created for '
-                        f'{previous_store_type.value.lower()!r}, but a new '
-                        f'store type {new_store_type.value.lower()!r} is '
+                        f'{prev_type_str!r}, but a new '
+                        f'store type {new_type_str!r} is '
                         'requested. This is not supported yet. Please specify '
                         'the same store type: '
-                        f'{previous_store_type.value.lower()!r}.')
+                        f'{prev_type_str!r}.')
 
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
