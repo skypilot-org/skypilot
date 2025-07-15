@@ -68,7 +68,7 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 # maybe_schedule_next_jobs.
 _MANAGED_JOB_SCHEDULER_LOCK = os.path.expanduser(
     '~/.sky/locks/managed_job_scheduler.lock')
-_JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
+JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
     '~/.sky/locks/job_controller_pid.lock')
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
@@ -101,7 +101,7 @@ def _get_lock_path() -> str:
 
 def start_controller() -> None:
     """Start the job controller process.
-    
+
     This is a wrapper around _start_controller that adds the job_id to the
     controllers list of processes.
     """
@@ -119,7 +119,7 @@ def start_controller() -> None:
         f.write(str(pid) + '\n')
 
 
-def maybe_start_controller(env_file_path: str) -> None:
+def maybe_start_controller(env_file_path: typing.Optional[str] = None) -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
@@ -129,7 +129,7 @@ def maybe_start_controller(env_file_path: str) -> None:
     to_start = False
     # TODO(luca): add an unlocked path first as a short circuit to ignore this
     try:
-        with filelock.FileLock(_JOB_CONTROLLER_PID_LOCK,
+        with filelock.FileLock(JOB_CONTROLLER_PID_LOCK,
                                blocking=False,
                                timeout=1):
             try:
@@ -150,7 +150,7 @@ def maybe_start_controller(env_file_path: str) -> None:
         # should launch any pending jobs.
         pass
 
-    if to_start:
+    if to_start and env_file_path:
         activate_python_env_cmd = (
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
         source_environment_cmd = (f'source {env_file_path};'
@@ -165,6 +165,8 @@ def maybe_start_controller(env_file_path: str) -> None:
         with open(JOB_CONTROLLER_ENV_PATH, 'w', encoding='utf-8') as f:
             f.write(run_cmd)
 
+        start_controller()
+    elif to_start:
         start_controller()
 
 

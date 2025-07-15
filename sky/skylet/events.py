@@ -12,7 +12,8 @@ import yaml
 from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
-from sky.jobs import scheduler, state as managed_job_state
+from sky.jobs import scheduler
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib

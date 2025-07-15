@@ -35,7 +35,10 @@ if typing.TYPE_CHECKING:
 
     import sky
 
-CallbackType = Union[Callable[[str], None], Callable[[str], 'Awaitable[Any]']]
+# Separate callback types for sync and async contexts
+SyncCallbackType = Callable[[str], None]
+AsyncCallbackType = Callable[[str], Awaitable[Any]]
+CallbackType = Union[SyncCallbackType, AsyncCallbackType]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -82,9 +85,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
-    sqlalchemy.Column('spot_job_id',
-                      sqlalchemy.Integer,
-                      index=True),
+    sqlalchemy.Column('spot_job_id', sqlalchemy.Integer, index=True),
     sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('task_name', sqlalchemy.Text),
     sqlalchemy.Column('specs', sqlalchemy.Text),
@@ -252,7 +253,7 @@ def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
 
 def force_no_postgres() -> bool:
     """Force no postgres.
-    
+
     If the db is localhost on the api server, and we are not in consolidation
     mode, we must force using sqlite and not using the api server on the jobs
     controller.
@@ -265,8 +266,8 @@ def force_no_postgres() -> bool:
         consolidation_mode = skypilot_config.get_nested(
             ('jobs', 'controller', 'consolidation_mode'), default_value=False)
         if ((parsed.hostname == 'localhost' or
-                ipaddress.ip_address(parsed.hostname).is_loopback) and
-            not consolidation_mode):
+             ipaddress.ip_address(parsed.hostname).is_loopback) and
+                not consolidation_mode):
 
             logger.debug('force no postgres')
 
@@ -286,7 +287,7 @@ def _initialize_and_get_db(
         if get_engine(True) is None:
             conn_string = None
             if (os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
-                and not force_no_postgres()):
+                    and not force_no_postgres()):
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
@@ -326,6 +327,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
+            # pylint: disable=import-outside-toplevel
             from sky.jobs import utils as job_utils
             await job_utils.to_thread(initialize_and_get_db_async)
 
@@ -654,7 +656,6 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
             entrypoint=entrypoint)
         session.execute(insert_stmt)
         session.commit()
-
 
 
 @_init_db
@@ -1830,7 +1831,7 @@ async def get_latest_task_id_status_async(
 async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
                              submit_time: float, resources_str: str,
                              specs: Dict[str, Union[str, int]],
-                             callback_func: CallbackType):
+                             callback_func: AsyncCallbackType):
     """Set the task to starting state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Launching the spot cluster...')
@@ -1861,7 +1862,7 @@ async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
 
 @_init_db_async
 async def set_started_async(job_id: int, task_id: int, start_time: float,
-                            callback_func: CallbackType):
+                            callback_func: AsyncCallbackType):
     """Set the task to started state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Job started.')
@@ -1906,7 +1907,7 @@ async def get_job_status_with_task_id_async(
 @_init_db_async
 async def set_recovering_async(job_id: int, task_id: int,
                                force_transit_to_recovering: bool,
-                               callback_func: CallbackType):
+                               callback_func: AsyncCallbackType):
     """Set the task to recovering state, and update the job duration."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('=== Recovering... ===')
@@ -1949,7 +1950,7 @@ async def set_recovering_async(job_id: int, task_id: int,
 
 @_init_db_async
 async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
-                              callback_func: CallbackType):
+                              callback_func: AsyncCallbackType):
     """Set the task to recovered."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
@@ -1978,7 +1979,7 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
 
 @_init_db_async
 async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
-                              callback_func: CallbackType):
+                              callback_func: AsyncCallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
@@ -2009,7 +2010,7 @@ async def set_failed_async(
     task_id: Optional[int],
     failure_type: ManagedJobStatus,
     failure_reason: str,
-    callback_func: Optional[CallbackType] = None,
+    callback_func: Optional[AsyncCallbackType] = None,
     end_time: Optional[float] = None,
     override_terminal: bool = False,
 ):
@@ -2052,7 +2053,7 @@ async def set_failed_async(
 
 
 @_init_db_async
-async def set_cancelling_async(job_id: int, callback_func: CallbackType):
+async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
     states."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
@@ -2075,7 +2076,7 @@ async def set_cancelling_async(job_id: int, callback_func: CallbackType):
 
 
 @_init_db_async
-async def set_cancelled_async(job_id: int, callback_func: CallbackType):
+async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:

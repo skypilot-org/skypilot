@@ -4,18 +4,13 @@ import asyncio
 import logging
 import os
 import resource
-
-from fastapi import FastAPI
-import uvicorn
+import sys
 
 from sky.jobs import constants
 from sky.jobs import controller
-from sky.jobs import scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-app = FastAPI()
 
 
 async def main():
@@ -37,9 +32,9 @@ async def main():
 
     try:
         await asyncio.gather(cancel_job_task, monitor_loop_task)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Controller server crashed: {e}')
-        os._exit(1)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -3,11 +3,11 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
+import logging
 import typing
 from typing import List, Optional, Tuple, Union
 
 import colorama
-import logging
 
 from sky import admin_policy
 from sky import backends
@@ -332,9 +332,9 @@ def _execute_dag(
                 # process, before the task is submitted in the EXEC stage.
                 verb = 'torn down' if down else 'stopped'
                 job_logger.info(f'{colorama.Style.DIM}The cluster will '
-                            f'be {verb} after 1 minutes of idleness '
-                            '(after all jobs finish).'
-                            f'{colorama.Style.RESET_ALL}')
+                                f'be {verb} after 1 minutes of idleness '
+                                '(after all jobs finish).'
+                                f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
@@ -445,7 +445,7 @@ def _execute_dag(
         elif Stage.SETUP in stages and not dryrun:
             if skip_unnecessary_provisioning and provisioning_skipped:
                 job_logger.debug('Unnecessary provisioning was skipped, so '
-                             'skipping setup as well.')
+                                 'skipping setup as well.')
             else:
                 backend.setup(handle, task, detach_setup=detach_setup)
 
@@ -741,17 +741,16 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    return _execute(
-        entrypoint=entrypoint,
-        dryrun=dryrun,
-        down=down,
-        stream_logs=stream_logs,
-        handle=handle,
-        backend=backend,
-        stages=[
-            Stage.SYNC_WORKDIR,
-            Stage.EXEC,
-        ],
-        cluster_name=cluster_name,
-        detach_run=True,
-        job_logger=job_logger)
+    return _execute(entrypoint=entrypoint,
+                    dryrun=dryrun,
+                    down=down,
+                    stream_logs=stream_logs,
+                    handle=handle,
+                    backend=backend,
+                    stages=[
+                        Stage.SYNC_WORKDIR,
+                        Stage.EXEC,
+                    ],
+                    cluster_name=cluster_name,
+                    detach_run=True,
+                    job_logger=job_logger)

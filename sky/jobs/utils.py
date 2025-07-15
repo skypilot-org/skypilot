@@ -87,7 +87,7 @@ _JOB_CANCELLED_MESSAGE = (
 # blocking for a long time. This should be significantly longer than the
 # JOB_STATUS_CHECK_GAP_SECONDS to avoid timing out before the controller can
 # update the state.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
 
 class UserSignal(enum.Enum):
@@ -285,13 +285,14 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
 
 def maybe_scale() -> None:
     """Maybe scale the controller.
-    
+
     We only scale up if there are more pending jobs than
     JOBS_PER_WORKER * WORKER_COUNT jobs that are able to be scheduled.
     """
     pending_jobs = managed_job_state.get_pending_jobs_count()
     try:
-        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
+        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
+                  encoding='utf-8') as f:
             # there is always a newline at the end of the file
             pids = max(len(f.read().split('\n')) - 1, 0)
     except FileNotFoundError:
@@ -300,6 +301,7 @@ def maybe_scale() -> None:
 
     if pending_jobs > scheduler.JOBS_PER_WORKER * pids:
         scheduler.start_controller()
+
 
 def update_managed_jobs_statuses(job_id: Optional[int] = None):
     """Update managed job status if the controller process failed abnormally.
@@ -959,7 +961,6 @@ def stream_logs_by_id(job_id: int,
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
-    managed_job_status = managed_job_state.get_status(job_id)
     if not follow and not managed_job_status.is_terminal():
         # The job is not in terminal state and we are not following,
         # just return.

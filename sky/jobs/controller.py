@@ -7,12 +7,13 @@ import asyncio
 import logging
 import os
 import shutil
+import sys
 import time
 import traceback
-import filelock
 import typing
 from typing import Dict, Optional, Set, Tuple
 
+import filelock
 import psutil
 
 # This import ensures backward compatibility. Controller processes may not have
@@ -908,8 +909,6 @@ async def monitor_loop():
     """Monitor the job loop."""
     logger.info('Starting monitor loop...')
 
-    global starting
-
     tries = 5
     while True:
         async with _job_tasks_lock:
@@ -946,15 +945,18 @@ async def monitor_loop():
                         # race condition here, so we use a file lock to
                         # prevent it.
                         with filelock.FileLock(
-                            scheduler._JOB_CONTROLLER_PID_LOCK, timeout=0):
+                                scheduler.JOB_CONTROLLER_PID_LOCK, timeout=0):
                             if can_scale()[1]:
-                                os._exit(0)
+                                sys.exit(0)
+                    else:
+                        # will try again in 60 seconds
+                        tries = 6
 
             await asyncio.sleep(10)
             continue
 
         # we found a new job to run so we can reset the tries
-        tries = 5
+        tries = 6
 
         if (waiting_job['schedule_state'] !=
                 managed_job_state.ManagedJobScheduleState.WAITING):
@@ -966,7 +968,7 @@ async def monitor_loop():
             # consolidated controller, in which case we can take it over if
             # the controller managing it is dead. if it is not dead, the other
             # process will handle restarting it.
-            if (waiting_job['old_pid'] < 0):
+            if waiting_job['old_pid'] < 0:
                 try:
                     process = psutil.Process(-waiting_job['old_pid'])
                     if process.is_running():
@@ -986,25 +988,44 @@ async def monitor_loop():
 
 def can_scale() -> Tuple[bool, bool]:
     """Check if we can scale.
-    
+
     We can scale if the amount of running jobs controllers in the PID file
     is less than the amount of memory our system has divided by the amount of
     memory each job controller uses.
 
     We can scale down if the amount of running controllers is greater than 1.
-    
+
     Returns:
         Tuple[bool, bool]: Whether we can scale up, and whether we can scale
             down.
     """
     try:
-        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
-                  encoding='utf-8') as f:
+        # Read the PID file, filter out non-alive PIDs, and clean up the file
+        # only if needed.
+        with open(
+            scheduler.JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
             pids = f.read().split('\n')[:-1]
-            running_controllers = [
-                pid for pid in pids
-                if subprocess_utils.is_process_alive(int(pid.strip()))
-            ]
+        alive_pids = []
+        dead_found = False
+        for pid in pids:
+            pid_stripped = pid.strip()
+            if not pid_stripped:
+                continue
+            try:
+                pid_int = int(pid_stripped)
+            except ValueError:
+                continue
+            if subprocess_utils.is_process_alive(pid_int):
+                alive_pids.append(pid_stripped)
+            else:
+                dead_found = True
+        # Only rewrite the PID file if a dead controller was found
+        if dead_found:
+            with open(
+                scheduler.JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
+                for pid in alive_pids:
+                    f.write(f'{pid}\n')
+        running_controllers = alive_pids
     except OSError as e:
         logger.error(f'Failed to get running controllers file: {e}')
         # return conservative values
