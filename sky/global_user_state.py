@@ -397,6 +397,7 @@ def get_user(user_id: str) -> Optional[models.User]:
                        created_at=row.created_at)
 
 
+@_init_db
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -410,6 +411,7 @@ def get_user_by_name(username: str) -> List[models.User]:
     ]
 
 
+@_init_db
 def delete_user(user_id: str) -> None:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(user_table).filter_by(id=user_id).delete()
