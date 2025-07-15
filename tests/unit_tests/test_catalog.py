@@ -12,6 +12,9 @@ from sky.utils import annotations
 
 @mock.patch('sky.catalog.common.requests.get')
 def test_read_catalog_triggers_update_on_stale_file(mock_get):
+    """Test that read_catalog (and the LazyDataFrame it returns)
+    does an update when the catalog file is stale, and that
+    it's cached for the duration of the request."""
     DUMMY_CSV = 'col1,col2\n1,2\n3,4\n'
     NEW_DUMMY_CSV = 'col1,col2\n5,6\n7,8\n'
 
