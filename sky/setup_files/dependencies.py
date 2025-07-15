@@ -130,6 +130,7 @@ extras_require: Dict[str, List[str]] = {
         'azure-mgmt-compute>=33.0.0',
         'azure-storage-blob>=12.23.1',
         'msgraph-sdk',
+        'msrestazure',
     ] + local_ray,
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances. Reference:

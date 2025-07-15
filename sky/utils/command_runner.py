@@ -956,8 +956,9 @@ class KubernetesCommandRunner(CommandRunner):
             return remote_home_dir
 
         # Build command.
-        helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                                   'kubernetes', 'rsync_helper.sh')
+        helper_path = shlex.quote(
+            os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                         'kubernetes', 'rsync_helper.sh'))
         namespace_context = f'{self.namespace}+{self.context}'
         # Avoid rsync interpreting :, /, and + in namespace_context as the
         # default delimiter for options and arguments.
