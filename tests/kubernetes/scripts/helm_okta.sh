@@ -191,6 +191,12 @@ if [ $? -ne 0 ]; then
 fi
 echo "✅ Helm chart installed successfully"
 
+# Fix imagePullPolicy for Docker-in-Docker environments
+# The Helm chart hardcodes imagePullPolicy: Always, but we need Never for local images
+echo "Fixing imagePullPolicy for local Docker image..."
+kubectl patch deployment skypilot-api-server -n $NAMESPACE -p '{"spec":{"template":{"spec":{"containers":[{"name":"skypilot-api","imagePullPolicy":"Never"}]}}}}'
+echo "✅ imagePullPolicy patched to Never"
+
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."
 
