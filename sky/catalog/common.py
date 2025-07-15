@@ -135,11 +135,11 @@ class LazyDataFrame:
     def __init__(self, filename: str, update_if_stale_func: Callable[[], bool]):
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
-        self.update_if_stale_func = update_if_stale_func
+        self._update_if_stale_func = update_if_stale_func
 
     @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
-        if self.update_if_stale_func() or self._df is None:
+        if self._update_if_stale_func() or self._df is None:
             try:
                 self._df = pd.read_csv(self._filename)
             except Exception as e:  # pylint: disable=broad-except
