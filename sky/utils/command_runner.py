@@ -179,7 +179,7 @@ class CommandRunner:
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
 
-    def get_remote_home_dir(self) -> str:
+    def _get_remote_home_dir(self) -> str:
         # Use `echo ~` to get the remote home directory, instead of pwd or
         # echo $HOME, because pwd can be `/` when the remote user is root
         # and $HOME is not always set.
@@ -244,6 +244,27 @@ class CommandRunner:
         command_str = ' '.join(command)
         return command_str
 
+    def _get_remote_home_dir_with_retry(
+        self,
+        max_retry: int,
+        get_remote_home_dir: Callable[[], str],
+    ) -> str:
+        """Returns the remote home directory with retry."""
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
+        retries_left = max_retry
+        assert retries_left > 0, f'max_retry {max_retry} must be positive.'
+        while retries_left >= 0:
+            try:
+                return get_remote_home_dir()
+            except Exception:  # pylint: disable=broad-except
+                if retries_left == 0:
+                    raise
+                sleep_time = backoff.current_backoff()
+                logger.warning(f'Failed to get remote home dir '
+                               f'- retrying in {sleep_time} seconds.')
+                retries_left -= 1
+                time.sleep(sleep_time)
+
     def _rsync(
             self,
             source: str,
@@ -263,23 +284,6 @@ class CommandRunner:
         if prefix_command is not None:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
-
-        def _get_remote_home_dir_with_retry():
-            backoff = common_utils.Backoff(initial_backoff=1,
-                                           max_backoff_factor=5)
-            retries_left = max_retry
-            assert retries_left > 0, f'max_retry {max_retry} must be positive.'
-            while retries_left >= 0:
-                try:
-                    return get_remote_home_dir()
-                except Exception:  # pylint: disable=broad-except
-                    if retries_left == 0:
-                        raise
-                    sleep_time = backoff.current_backoff()
-                    logger.warning(f'Failed to get remote home dir '
-                                   f'- retrying in {sleep_time} seconds.')
-                    retries_left -= 1
-                    time.sleep(sleep_time)
 
         # --filter
         # The source is a local path, so we need to resolve it.
@@ -313,7 +317,9 @@ class CommandRunner:
                     pathlib.Path(target).expanduser().resolve())
             else:
                 if target.startswith('~'):
-                    remote_home_dir = _get_remote_home_dir_with_retry()
+                    remote_home_dir = self._get_remote_home_dir_with_retry(
+                        max_retry=max_retry,
+                        get_remote_home_dir=get_remote_home_dir)
                     resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -332,7 +338,9 @@ class CommandRunner:
             else:
                 resolved_target = os.path.expanduser(target)
                 if source.startswith('~'):
-                    remote_home_dir = _get_remote_home_dir_with_retry()
+                    remote_home_dir = self._get_remote_home_dir_with_retry(
+                        max_retry=max_retry,
+                        get_remote_home_dir=get_remote_home_dir)
                     resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{maybe_dest_prefix}{resolved_source!r}',
@@ -476,6 +484,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         connect_timeout: Optional[int] = None,
+        max_retry: int = 1,
         envs_and_secrets: Optional[Dict[str, str]] = None,
     ) -> None:
         """Clones a Git repository on the remote machine using git_clone.sh.
@@ -488,6 +497,8 @@ class CommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             connect_timeout: timeout in seconds for the connection.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
             envs_and_secrets: Environment variables and secrets to be set
               before running the script.
         Raises:
@@ -520,7 +531,10 @@ class CommandRunner:
 
         # Step 2: Execute the script on remote machine
         if target_dir.startswith('~'):
-            target_dir = target_dir.replace('~', self.get_remote_home_dir())
+            remote_home_dir = self._get_remote_home_dir_with_retry(
+                max_retry=max_retry,
+                get_remote_home_dir=self._get_remote_home_dir)
+            target_dir = target_dir.replace('~', remote_home_dir)
         quoted_target_dir = shlex.quote(target_dir)
         quoted_script_path = shlex.quote(remote_script_path)
         cmd = ''
@@ -532,11 +546,18 @@ class CommandRunner:
 
         logger.debug(f'Running git clone script on {self.node_id}: {cmd}')
 
-        returncode = self.run(cmd,
-                              log_path=log_path,
-                              stream_logs=stream_logs,
-                              connect_timeout=connect_timeout,
-                              require_outputs=False)
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        assert max_retry > 0, f'max_retry {max_retry} must be positive.'
+        while max_retry >= 0:
+            returncode = self.run(cmd,
+                                  log_path=log_path,
+                                  stream_logs=stream_logs,
+                                  connect_timeout=connect_timeout,
+                                  require_outputs=False)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
 
         if returncode != 0:
             error_msg = f'Git clone failed on {self.node_id}: {target_dir}'
@@ -1060,7 +1081,7 @@ class KubernetesCommandRunner(CommandRunner):
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
-            get_remote_home_dir=self.get_remote_home_dir)
+            get_remote_home_dir=self._get_remote_home_dir)
 
 
 class LocalProcessCommandRunner(CommandRunner):

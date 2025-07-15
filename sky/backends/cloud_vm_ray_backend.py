@@ -3272,6 +3272,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 target_dir=SKY_REMOTE_WORKDIR,
                 log_path=log_path,
                 stream_logs=False,
+                max_retry=3,
                 envs_and_secrets=envs_and_secrets,
             )
 
