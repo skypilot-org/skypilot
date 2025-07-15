@@ -799,7 +799,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           <Button
                             onClick={handleSave}
                             disabled={saving || yamlError || loading}
-                            className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
+                            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
                           >
                             <SaveIcon className="w-4 h-4 mr-1.5" />
                             {saving ? 'Applying...' : 'Apply'}

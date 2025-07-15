@@ -50,6 +50,7 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
+import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
 import Link from 'next/link';
 
 // Workspace configuration description component
@@ -136,13 +137,13 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 const WorkspaceBadge = ({ isPrivate }) => {
   if (isPrivate) {
     return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
         Private
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
       Public
     </span>
   );
@@ -470,10 +471,12 @@ export function Workspaces() {
           return true;
         }
         
-        // Check infrastructure clouds
-        if (workspace.clouds.some((cloud) => 
-          cloud.toLowerCase().includes(searchLower)
-        )) {
+        // Check infrastructure clouds (both original and canonical names)
+        if (workspace.clouds.some((cloud) => {
+          const canonicalCloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud;
+          return cloud.toLowerCase().includes(searchLower) || 
+                 canonicalCloudName.toLowerCase().includes(searchLower);
+        })) {
           return true;
         }
         
@@ -674,7 +677,7 @@ export function Workspaces() {
         <div className="relative flex-1 max-w-md">
           <input
             type="text"
-            placeholder="Search workspaces by name, infra, or visibility (public/private)"
+            placeholder="Filter workspaces"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
@@ -804,7 +807,7 @@ export function Workspaces() {
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
                           >
-                            {workspace.runningClusterCount} running out of {workspace.totalClusterCount}
+                            {workspace.runningClusterCount} running, {workspace.totalClusterCount} total
                           </button>
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
@@ -822,17 +825,20 @@ export function Workspaces() {
                         </TableCell>
                         <TableCell className="hidden lg:table-cell">
                           {workspace.clouds.length > 0 ? (
-                            workspace.clouds.sort().map((cloud, index) => (
-                              <span key={cloud}>
-                                <Link
-                                  href="/infra"
-                                  className="inline-flex items-center px-2 py-1 rounded text-sm bg-sky-100 text-sky-800 hover:bg-sky-200 hover:text-sky-900 transition-colors duration-200"
-                                >
-                                  {cloud}
-                                </Link>
-                                {index < workspace.clouds.length - 1 && ' '}
-                              </span>
-                            ))
+                            workspace.clouds.sort().map((cloud, index) => {
+                              const canonicalCloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud;
+                              return (
+                                <span key={cloud}>
+                                  <Link
+                                    href="/infra"
+                                    className="inline-flex items-center px-2 py-1 rounded text-sm bg-sky-100 text-sky-800 hover:bg-sky-200 hover:text-sky-900 transition-colors duration-200"
+                                  >
+                                    {canonicalCloudName}
+                                  </Link>
+                                  {index < workspace.clouds.length - 1 && ' '}
+                                </span>
+                              );
+                            })
                           ) : (
                             <span className="text-gray-500 text-sm">-</span>
                           )}
