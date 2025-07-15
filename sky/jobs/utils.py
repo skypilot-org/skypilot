@@ -273,9 +273,10 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 logger.info('=' * 34)
                 time.sleep(1)
-            logger.info(f'Failed to get job status: {e.detailed_reason}')
-            logger.info('=' * 34)
-            return None
+            else:
+                logger.info(f'Failed to get job status: {e.detailed_reason}')
+                logger.info('=' * 34)
+                return None
     return None
 
 
