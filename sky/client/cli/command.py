@@ -72,6 +72,7 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import git as git_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -795,8 +796,8 @@ def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
         return
     url = task.workdir['url']
     ref = task.workdir.get('ref') or ''
-    token = os.environ.get(git.GIT_TOKEN_ENV_VAR)
-    ssh_key_path = os.environ.get(git.GIT_SSH_KEY_PATH_ENV_VAR)
+    token = os.environ.get(git_utils.GIT_TOKEN_ENV_VAR)
+    ssh_key_path = os.environ.get(git_utils.GIT_SSH_KEY_PATH_ENV_VAR)
     try:
         git_repo = git.GitRepo(url, ref, token, ssh_key_path)
         clone_info = git_repo.get_repo_clone_info()
@@ -804,17 +805,17 @@ def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
             return
         if clone_info.token is None and clone_info.ssh_key is None:
             return
-        task.secrets[git.GIT_URL_ENV_VAR] = clone_info.url
+        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
         if clone_info.token is not None:
-            task.secrets[git.GIT_TOKEN_ENV_VAR] = clone_info.token
+            task.secrets[git_utils.GIT_TOKEN_ENV_VAR] = clone_info.token
         if clone_info.ssh_key is not None:
-            task.secrets[git.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+            task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
 
         if ref:
             if git_repo.is_commit_hash():
-                task.envs[git.GIT_COMMIT_HASH_ENV_VAR] = ref
+                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
             else:
-                task.envs[git.GIT_BRANCH_ENV_VAR] = ref
+                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
     except exceptions.GitError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{str(e)}') from None
@@ -997,6 +998,10 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1176,34 +1181,42 @@ def launch(
           'and do not stream execution logs.'))
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
                     flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(cluster: Optional[str],
-         cluster_option: Optional[str],
-         entrypoint: Tuple[str, ...],
-         detach_run: bool,
-         name: Optional[str],
-         infra: Optional[str],
-         cloud: Optional[str],
-         region: Optional[str],
-         zone: Optional[str],
-         workdir: Optional[str],
-         gpus: Optional[str],
-         ports: Tuple[str],
-         instance_type: Optional[str],
-         num_nodes: Optional[int],
-         use_spot: Optional[bool],
-         image_id: Optional[str],
-         env_file: Optional[Dict[str, str]],
-         env: List[Tuple[str, str]],
-         secret: List[Tuple[str, str]],
-         cpus: Optional[str],
-         memory: Optional[str],
-         disk_size: Optional[int],
-         disk_tier: Optional[str],
-         network_tier: Optional[str],
-         async_call: bool,
-         config_override: Optional[Dict[str, Any]] = None):
+def exec(
+    cluster: Optional[str],
+    cluster_option: Optional[str],
+    entrypoint: Tuple[str, ...],
+    detach_run: bool,
+    name: Optional[str],
+    infra: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    workdir: Optional[str],
+    gpus: Optional[str],
+    ports: Tuple[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
+):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1302,6 +1315,8 @@ def exec(cluster: Optional[str],
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
         config_override=config_override,
+        git_url=git_url,
+        git_ref=git_ref,
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -4141,6 +4156,10 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -4172,6 +4191,8 @@ def jobs_launch(
     yes: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -4217,6 +4238,8 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
         config_override=config_override,
+        git_url=git_url,
+        git_ref=git_ref,
     )
 
     if not isinstance(task_or_dag, sky.Dag):

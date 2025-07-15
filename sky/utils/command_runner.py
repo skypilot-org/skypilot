@@ -16,6 +16,7 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
+from sky.utils import git as git_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -538,13 +539,22 @@ class CommandRunner:
         quoted_target_dir = shlex.quote(target_dir)
         quoted_script_path = shlex.quote(remote_script_path)
         cmd = ''
+        log_cmd = ''
         if envs_and_secrets:
             for key, value in envs_and_secrets.items():
+                value = shlex.quote(value)
                 cmd += f'export {key}={value} && '
-        cmd += (f'bash {quoted_script_path} {quoted_target_dir} '
-                f'&& rm -f {quoted_script_path}')
+                if (key == git_utils.GIT_TOKEN_ENV_VAR or
+                        key == git_utils.GIT_SSH_KEY_ENV_VAR):
+                    log_cmd += f'export {key}=******** && '
+                else:
+                    log_cmd += f'export {key}={value} && '
+        exec_cmd = (f'bash {quoted_script_path} {quoted_target_dir} '
+                    f'&& rm -f {quoted_script_path}')
+        cmd += exec_cmd
+        log_cmd += exec_cmd
 
-        logger.debug(f'Running git clone script on {self.node_id}: {cmd}')
+        logger.debug(f'Running git clone script on {self.node_id}: {log_cmd}')
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
@@ -562,7 +572,7 @@ class CommandRunner:
         if returncode != 0:
             error_msg = f'Git clone failed on {self.node_id}: {target_dir}'
             logger.error(error_msg)
-            raise exceptions.CommandError(returncode, cmd, error_msg, None)
+            raise exceptions.CommandError(returncode, log_cmd, error_msg, None)
 
 
 class SSHCommandRunner(CommandRunner):

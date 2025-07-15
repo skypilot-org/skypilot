@@ -191,11 +191,7 @@ TASK_OPTIONS = [
 
         2. ``--secret JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be
         the same value of ``$JWT_SECRET`` in the local environment.""",
-    ),
-    click.option('--git-url', type=str, help='Git repository URL.'),
-    click.option('--git-ref',
-                 type=str,
-                 help='Git reference (branch, tag, or commit hash) to use.')
+    )
 ]
 
 TASK_OPTIONS_WITH_NAME = [

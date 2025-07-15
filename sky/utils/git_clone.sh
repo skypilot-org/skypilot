@@ -175,8 +175,17 @@ if [ -d "$TARGET_DIR" ]; then
                 mkdir -p "$TARGET_DIR"
                 cd "$TARGET_DIR"
                 NEED_CLONE=true
+            elif [ "$CURRENT_REMOTE" != "$GIT_URL" ]; then
+                # Same repository but different URL format (HTTPS vs SSH)
+                log "Repository matches but URL format differs"
+                log "Current: $CURRENT_REMOTE"
+                log "Target: $GIT_URL"
+                log "Updating remote URL to match authentication method"
+                git remote set-url origin "$GIT_URL"
+                log "Remote URL updated successfully"
+                NEED_CLONE=false
             else
-                log "Repository remote URL matches, fetching updates"
+                log "Repository remote URL matches exactly, fetching updates"
                 NEED_CLONE=false
             fi
         else

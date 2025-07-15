@@ -11,13 +11,6 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-GIT_TOKEN_ENV_VAR = 'GIT_TOKEN'
-GIT_SSH_KEY_PATH_ENV_VAR = 'GIT_SSH_KEY_PATH'
-GIT_SSH_KEY_ENV_VAR = 'GIT_SSH_KEY'
-GIT_URL_ENV_VAR = 'GIT_URL'
-GIT_COMMIT_HASH_ENV_VAR = 'GIT_COMMIT_HASH'
-GIT_BRANCH_ENV_VAR = 'GIT_BRANCH'
-
 
 class GitUrlInfo:
     """Information extracted from a git URL."""
@@ -73,7 +66,6 @@ class GitRepo:
         self.ref = ref
         self.git_token = git_token
         self.git_ssh_key_path = git_ssh_key_path
-        self._discovered_ssh_key_path: Optional[str] = None
 
         # Parse URL during initialization to catch format errors early
         self._parsed_url = self._parse_git_url(self.repo_url)
@@ -259,94 +251,45 @@ class GitRepo:
                 raise exceptions.GitError(
                     f'Failed to access repository {self.repo_url} using token '
                     'authentication. Please verify your token and repository '
-                    'access permissions.\nOriginal error: {str(e)}') from e
+                    'access permissions. Original error: {str(e)}') from e
 
-        # Step 3: Try with SSH key if provided
-        if self.git_ssh_key_path:
-            try:
-                ssh_url = self.get_ssh_url()
-                key_path = os.path.expanduser(self.git_ssh_key_path)
-
-                # Validate SSH key before using it
-                if not os.path.exists(key_path):
-                    raise exceptions.GitError(
-                        f'SSH key not found at path: {self.git_ssh_key_path}')
-
-                # Check key permissions
-                key_stat = os.stat(key_path)
-                if key_stat.st_mode & 0o077:
-                    logger.warning(
-                        f'SSH key {key_path} has too open permissions. '
-                        f'Recommended: chmod 600 {key_path}')
-
-                # Check if it's a valid private key
-                try:
-                    with open(key_path, 'r') as f:
-                        key_content = f.read()
-                        if not (key_content.startswith('-----BEGIN') and
-                                'PRIVATE KEY' in key_content):
-                            logger.warning(
-                                f'SSH key {key_path} may not be a valid'
-                                'private key format')
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        f'Could not validate SSH key format: {str(e)}')
-
-                git_ssh_command = f'ssh -F none -i {key_path} ' \
-                    '-o StrictHostKeyChecking=no ' \
-                    '-o UserKnownHostsFile=/dev/null ' \
-                    '-o IdentitiesOnly=yes'
-                ssh_env = {'GIT_SSH_COMMAND': git_ssh_command}
-
-                logger.debug(f'Trying SSH key authentication to {ssh_url}')
-                git_cmd = git.cmd.Git()
-                git_cmd.update_environment(**ssh_env)
-                git_cmd.ls_remote(ssh_url)
-                logger.info(
-                    f'Successfully validated repository {ssh_url} access '
-                    'using SSH key authentication')
-                return GitCloneInfo(url=ssh_url, ssh_key=key_path, envs=ssh_env)
-
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'SSH key access failed: {str(e)}')
-                raise exceptions.GitError(
-                    f'Failed to access repository {self.repo_url} using '
-                    'SSH key authentication. Please verify your SSH key and '
-                    'repository access permissions.'
-                    f'\nOriginal error: {str(e)}') from e
-
-        # Step 4: Try SSH with discovered/system default keys
-        # if original URL was SSH.
+        # Step 3: Try SSH access with available keys
         if self._parsed_url.protocol == 'ssh':
             try:
                 ssh_url = self.get_ssh_url()
 
-                # Try to discover SSH key from user's configuration and defaults
-                discovered_key = self._discover_ssh_key()
-                if discovered_key:
-                    ssh_env = {
-                        'GIT_SSH_COMMAND': f'ssh -F none -i {discovered_key} ' \
-                            '-o StrictHostKeyChecking=no ' \
-                            '-o UserKnownHostsFile=/dev/null ' \
-                            '-o IdentitiesOnly=yes'
-                    }
+                # Get SSH key info using the combined method
+                ssh_key_info = self._get_ssh_key_info()
 
-                    logger.debug(f'Trying {ssh_url} with {discovered_key}')
+                if ssh_key_info:
+                    key_path, key_content = ssh_key_info
+
+                    git_ssh_command = f'ssh -F none -i {key_path} ' \
+                        '-o StrictHostKeyChecking=no ' \
+                        '-o UserKnownHostsFile=/dev/null ' \
+                        '-o IdentitiesOnly=yes'
+                    ssh_env = {'GIT_SSH_COMMAND': git_ssh_command}
+
+                    logger.debug(f'Trying SSH authentication to {ssh_url} '
+                                 f'with {key_path}')
                     git_cmd = git.cmd.Git()
                     git_cmd.update_environment(**ssh_env)
                     git_cmd.ls_remote(ssh_url)
                     logger.info(
                         f'Successfully validated repository {ssh_url} access '
-                        f'using {discovered_key}')
-                    # Store the discovered key for later use
-                    self._discovered_ssh_key_path = discovered_key
+                        f'using SSH key: {key_path}')
                     return GitCloneInfo(url=ssh_url,
-                                        ssh_key=discovered_key,
+                                        ssh_key=key_content,
                                         envs=ssh_env)
+                else:
+                    raise exceptions.GitError(
+                        f'No SSH keys found for {self.repo_url}.')
 
             except Exception as e:  # pylint: disable=broad-except
                 raise exceptions.GitError(
-                    f'Failed to access repository {self.repo_url}. '
+                    f'Failed to access repository {self.repo_url} using '
+                    'SSH key authentication. Please verify your SSH key and '
+                    'repository access permissions. '
                     f'Original error: {str(e)}') from e
 
         # If we get here, no authentication methods are available
@@ -405,23 +348,60 @@ class GitRepo:
             logger.debug(f'Error parsing SSH config: {str(e)}')
             return None
 
-    def _discover_ssh_key(self) -> Optional[str]:
-        """Discover SSH private key using comprehensive strategy.
+    def _get_ssh_key_info(self) -> Optional[tuple]:
+        """Get SSH key path and content using comprehensive strategy.
 
         Strategy:
-        1. Check SSH config for host-specific IdentityFile
-        2. Search for common SSH key types in ~/.ssh/ directory
+        1. Check provided git_ssh_key_path if given
+        2. Check SSH config for host-specific IdentityFile
+        3. Search for common SSH key types in ~/.ssh/ directory
 
         Returns:
-            Path to discovered SSH private key, or None if not found.
+            Tuple of (key_path, key_content) if found, None otherwise.
         """
-        # Step 1: Check SSH config for host-specific configuration
-        config_key = self._parse_ssh_config()
-        if config_key:
-            logger.debug(f'Using SSH key from config: {config_key}')
-            return config_key
+        # Step 1: Check provided SSH key path first
+        if self.git_ssh_key_path:
+            try:
+                key_path = os.path.expanduser(self.git_ssh_key_path)
 
-        # Step 2: Search for default SSH keys
+                # Validate SSH key before using it
+                if not os.path.exists(key_path):
+                    raise exceptions.GitError(
+                        f'SSH key not found at path: {self.git_ssh_key_path}')
+
+                # Check key permissions
+                key_stat = os.stat(key_path)
+                if key_stat.st_mode & 0o077:
+                    logger.warning(
+                        f'SSH key {key_path} has too open permissions. '
+                        f'Recommended: chmod 600 {key_path}')
+
+                # Check if it's a valid private key and read content
+                with open(key_path, 'r') as f:
+                    key_content = f.read()
+                    if not (key_content.startswith('-----BEGIN') and
+                            'PRIVATE KEY' in key_content):
+                        raise exceptions.GitError(
+                            f'SSH key {key_path} is invalid.')
+
+                logger.debug(f'Using provided SSH key: {key_path}')
+                return (key_path, key_content)
+            except Exception as e:  # pylint: disable=broad-except
+                raise exceptions.GitError(
+                    f'Validate provided SSH key error: {str(e)}') from e
+
+        # Step 2: Check SSH config for host-specific configuration
+        config_key_path = self._parse_ssh_config()
+        if config_key_path:
+            try:
+                with open(config_key_path, 'r') as f:
+                    key_content = f.read()
+                logger.debug(f'Using SSH key from config: {config_key_path}')
+                return (config_key_path, key_content)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Could not read SSH key from config: {str(e)}')
+
+        # Step 3: Search for default SSH keys
         ssh_dir = os.path.expanduser('~/.ssh')
         if not os.path.exists(ssh_dir):
             logger.debug('SSH directory ~/.ssh does not exist')
@@ -455,7 +435,7 @@ class GitRepo:
                         f'SSH key {private_key_path} has too open permissions. '
                         f'Consider: chmod 600 {private_key_path}')
 
-                # Validate private key format
+                # Validate private key format and read content
                 with open(private_key_path, 'r') as f:
                     key_content = f.read()
                     if not (key_content.startswith('-----BEGIN') and
@@ -466,14 +446,14 @@ class GitRepo:
                         continue
 
                 logger.debug(f'Discovered default SSH key: {private_key_path}')
-                return private_key_path
+                return (private_key_path, key_content)
 
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(
                     f'Error checking SSH key {private_key_path}: {str(e)}')
                 continue
 
-        logger.debug('No suitable SSH keys found in ~/.ssh/')
+        logger.debug('No suitable SSH keys found')
         return None
 
     def is_commit_hash(self) -> bool:
