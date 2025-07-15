@@ -1,4 +1,4 @@
-"""User interfaces with managed jobs.
+c """User interfaces with managed jobs.
 
 NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
@@ -263,11 +263,17 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                 logger.info(f'Job status: {status}')
             logger.info('=' * 34)
             return status
-        except exceptions.CommandError:
-            logger.info('Failed to connect to the cluster. Retrying '
-                        f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+        except exceptions.CommandError as e:
+            # Retry on k8s transient network errors. This is useful when using
+            # coreweave which may have transient network issue sometimes.
+            if 'Unable to connect to the server: dial tcp' in e.detailed_reason:
+                logger.info('Failed to connect to the cluster. Retrying '
+                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                logger.info('=' * 34)
+                time.sleep(1)
+            logger.info(f'Failed to get job status: {e.detailed_reason}')
             logger.info('=' * 34)
-            time.sleep(1)
+            return None
     return None
 
 
