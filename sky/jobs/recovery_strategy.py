@@ -297,7 +297,7 @@ class StrategyExecutor:
                     try:
                         usage_lib.messages.usage.set_internal()
                         cluster_name = serve_utils.get_next_cluster_name(
-                            self.pool_manager)
+                            self.pool_manager, self.job_id)
                         if cluster_name is None:
                             raise exceptions.NoClusterLaunchedError(
                                 'No cluster name found in the pool manager.')
@@ -410,6 +410,9 @@ class StrategyExecutor:
                 state.set_backoff_pending(self.job_id, self.task_id)
                 # Calculate the backoff time and sleep.
                 gap_seconds = backoff.current_backoff()
+                # Retry immediately for worker pool, since no sky.launch() is
+                # called and the overhead is minimal.
+                gap_seconds = 0
                 logger.info('Retrying to launch the cluster in '
                             f'{gap_seconds:.1f} seconds.')
                 time.sleep(gap_seconds)

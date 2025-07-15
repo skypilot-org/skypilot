@@ -1530,19 +1530,27 @@ def get_num_launching_jobs() -> int:
 
 
 @_init_db
-def get_num_alive_jobs() -> int:
+def get_num_alive_jobs(pool_manager: Optional[str] = None) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        where_conditions = [
+            job_info_table.c.schedule_state.in_([
+                ManagedJobScheduleState.ALIVE_WAITING.value,
+                ManagedJobScheduleState.LAUNCHING.value,
+                ManagedJobScheduleState.ALIVE.value,
+                ManagedJobScheduleState.ALIVE_BACKOFF.value,
+            ])
+        ]
+
+        if pool_manager is not None:
+            where_conditions.append(
+                job_info_table.c.pool_manager == pool_manager)
+
         return session.execute(
             sqlalchemy.select(
                 sqlalchemy.func.count()  # pylint: disable=not-callable
             ).select_from(job_info_table).where(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.ALIVE_WAITING.value,
-                    ManagedJobScheduleState.LAUNCHING.value,
-                    ManagedJobScheduleState.ALIVE.value,
-                    ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                ]))).fetchone()[0]
+                sqlalchemy.and_(*where_conditions))).fetchone()[0]
 
 
 @_init_db
@@ -1584,6 +1592,7 @@ def get_waiting_job(pool_manager: Optional[str]) -> Optional[Dict[str, Any]]:
             job_info_table.c.schedule_state,
             job_info_table.c.dag_yaml_path,
             job_info_table.c.env_file_path,
+            job_info_table.c.pool_manager,
         ).where(sqlalchemy.and_(*select_conds)).order_by(
             job_info_table.c.priority.desc(),
             job_info_table.c.spot_job_id.asc(),
@@ -1597,6 +1606,7 @@ def get_waiting_job(pool_manager: Optional[str]) -> Optional[Dict[str, Any]]:
             'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
             'dag_yaml_path': waiting_job_row[2],
             'env_file_path': waiting_job_row[3],
+            'pool_manager': waiting_job_row[4],
         }
 
 

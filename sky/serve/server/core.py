@@ -148,7 +148,7 @@ def up(
     dag, mutated_user_config = admin_policy_utils.apply(dag)
     dag.pre_mount_volumes()
     task = dag.tasks[0]
-    task.run = 'python3 -m http.server 8000'
+    task.run = 'echo "setup done"'
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
@@ -686,6 +686,7 @@ def status(
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
             'endpoint': (str) endpoint of the replica,
+            'used_by': (int) managed job id of the replica,
         }
 
     For possible service statuses and replica statuses, please refer to

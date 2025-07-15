@@ -440,7 +440,6 @@ class ReplicaInfo:
 
     @property
     def url(self) -> Optional[str]:
-        return None
         handle = self.handle()
         if handle is None:
             return None
@@ -475,7 +474,8 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
-            'endpoint': self.url,
+            # 'endpoint': self.url,
+            'endpoint': None,
             'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
@@ -499,6 +499,33 @@ class ReplicaInfo:
                 f'status={self.status}, '
                 f'launched_at={info_dict["launched_at"]}{handle_str})')
         return info
+
+    def probe_pool(self) -> Tuple['ReplicaInfo', bool, float]:
+        """Probe the replica for pool management.
+
+        This function will check the first job status of the cluster, which is a
+        dummy job that only echoes "setup done". The success of this job means
+        the setup command is done and the replica is ready to be used. Check
+        sky/serve/server/core.py::up for more details.
+
+        Returns:
+            Tuple of (self, is_ready, probe_time).
+        """
+        probe_time = time.time()
+        try:
+            handle = backend_utils.check_cluster_available(
+                self.cluster_name, operation='probing pool')
+            if handle is None:
+                return self, False, probe_time
+            backend = backend_utils.get_backend_from_handle(handle)
+            statuses = backend.get_job_status(handle, [1], stream_logs=False)
+            if statuses[1] == job_lib.JobStatus.SUCCEEDED:
+                return self, True, probe_time
+            return self, False, probe_time
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error when probing pool of {self.cluster_name}: '
+                         f'{common_utils.format_exception(e)}.')
+            return self, False, probe_time
 
     def probe(
         self,
@@ -1102,8 +1129,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert handle is not None, info
             # Use None to fetch latest job, which stands for user task job
             try:
-                job_statuses = backend.get_job_status(handle,
-                                                      None,
+                job_statuses = backend.get_job_status(handle, [1],
                                                       stream_logs=False)
             except exceptions.CommandError:
                 # If the job status fetch failed, it is likely that the
@@ -1113,7 +1139,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     continue
                 # Re-raise the exception if it is not preempted.
                 raise
-            job_status = list(job_statuses.values())[0]
+            # job_status = list(job_statuses.values())[0]
+            job_status = job_statuses[1]
             if job_status in job_lib.JobStatus.user_code_failure_states():
                 info.status_property.user_app_failed = True
                 serve_state.add_or_update_replica(self._service_name,
@@ -1157,18 +1184,21 @@ class SkyPilotReplicaManager(ReplicaManager):
             for info in infos:
                 if not info.status_property.should_track_service_status():
                     continue
-                replica_to_probe.append(
-                    f'replica_{info.replica_id}(url={info.url})')
-                probe_futures.append(
-                    pool.apply_async(
-                        info.probe,
-                        (
-                            self._get_readiness_path(info.version),
-                            self._get_post_data(info.version),
-                            self._get_readiness_timeout_seconds(info.version),
-                            self._get_readiness_headers(info.version),
-                        ),
-                    ),)
+                # replica_to_probe.append(
+                #     f'replica_{info.replica_id}(url={info.url})')
+                # probe_futures.append(
+                #     pool.apply_async(
+                #         info.probe,
+                #         (
+                #             self._get_readiness_path(info.version),
+                #             self._get_post_data(info.version),
+                #             self._get_readiness_timeout_seconds(info.version),
+                #             self._get_readiness_headers(info.version),
+                #         ),
+                #     ),)
+                replica_to_probe.append(f'replica_{info.replica_id}'
+                                        f'(cluster_name={info.cluster_name})')
+                probe_futures.append(pool.apply_async(info.probe_pool))
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
             # Since futures.as_completed will return futures in the order of

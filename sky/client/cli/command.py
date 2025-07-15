@@ -4205,9 +4205,8 @@ def jobs_launch(
     else:
         # TODO(tian): Add a batch ID.
         batch_ids = job_id_handle[0]
-        ranges_raw = resources_utils.port_set_to_ranges(set(batch_ids))
-        ranges = ', '.join(ranges_raw)
-        click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{ranges}'
+        bids = ','.join(map(str, batch_ids))
+        click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
                     f'{colorama.Style.RESET_ALL}.')
 
 

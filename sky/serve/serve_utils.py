@@ -22,6 +22,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.serve import constants
@@ -47,6 +48,18 @@ if typing.TYPE_CHECKING:
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
+
+logger = sky_logging.init_logger(__name__)
+
+
+def _get_pm_filelock_path(pool_manager: Optional[str]) -> str:
+    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR)
+    if pool_manager is not None:
+        path = path / pool_manager
+    path = path / 'pm.lock'
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
 
 
 @annotations.lru_cache(scope='request')
@@ -531,10 +544,11 @@ def _get_service_status(
     if record is None:
         return None
     if with_replica_info:
-        record['replica_info'] = [
-            info.to_info_dict(with_handle=True)
-            for info in serve_state.get_replica_infos(service_name)
-        ]
+        record['replica_info'] = [{
+            'used_by': jid,
+            **info.to_info_dict(with_handle=True)
+        } for info, jid in serve_state.get_replica_infos_and_job_ids(
+            service_name)]
     return record
 
 
@@ -589,49 +603,84 @@ def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
 
 
-def get_next_cluster_name(service_name: str) -> Optional[str]:
-    service_status = _get_service_status(service_name)
-    if service_status is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
-    load_balancer_port = service_status['load_balancer_port']
-    resp = requests.post(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) + '/acquire')
-    if resp.status_code == 404:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'The service is up-ed in an old version and does not '
-                'support acquire. Please `sky serve down` '
-                'it first and relaunch the service. ')
-    elif resp.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Client error during service acquire: {resp.text}')
-    elif resp.status_code == 500:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Server error during service acquire: {resp.text}')
-    elif resp.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to acquire cluster: {resp.text}')
-    return resp.json()['cluster_name']
+def num_replicas(service_name: str) -> int:
+    logger.info(f'Get number of replicas for pool {service_name!r}')
+    return len(serve_state.get_replica_infos(service_name))
 
 
-def release_cluster_name(service_name: str, cluster_name: str) -> str:
-    service_status = _get_service_status(service_name)
-    if service_status is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
-    load_balancer_port = service_status['load_balancer_port']
-    resp = requests.post(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=load_balancer_port) + '/release',
-        json={
-            'cluster_name': cluster_name,
-        })
-    if resp.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to release cluster: {resp.text}')
-    return resp.json()['message']
+def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
+    """Get the next available cluster name from idle replicas.
+
+    Args:
+        service_name: The name of the service.
+        job_id: Optional job ID to associate with the acquired cluster.
+                If None, a placeholder will be used.
+
+    Returns:
+        The cluster name if an idle replica is found, None otherwise.
+    """
+    with filelock.FileLock(_get_pm_filelock_path(service_name)):
+        logger.info(f'Get next cluster name for pool {service_name!r}')
+        # Check if service exists
+        service_status = _get_service_status(service_name,
+                                             with_replica_info=False)
+        if service_status is None:
+            logger.error(f'Service {service_name!r} does not exist.')
+            return None
+
+        # Get idle replicas using database
+        idle_replicas = [
+            (info, jid)
+            for info, jid in serve_state.get_replica_infos_and_job_ids(
+                service_name)
+            if info.status == serve_state.ReplicaStatus.READY and jid is None
+        ]
+        if not idle_replicas:
+            logger.info(f'No idle replicas found for pool {service_name!r}')
+            return None
+
+        # Select the first idle replica
+        # TODO(tian): "Load balancing" policy.
+        ri = idle_replicas[0][0]
+        logger.info(f'Selected replica {ri.replica_id} with cluster '
+                    f'{ri.cluster_name!r} for job {job_id!r} in pool '
+                    f'{service_name!r}')
+        serve_state.set_replica_job_id(service_name, ri.replica_id, job_id)
+        return ri.cluster_name
+
+
+def release_cluster_name(service_name: str, cluster_name: str) -> None:
+    """Release a cluster back to the pool by setting job id to NULL.
+
+    Args:
+        service_name: The name of the service.
+        cluster_name: The name of the cluster to release.
+
+    Returns:
+        A success message.
+    """
+    with filelock.FileLock(_get_pm_filelock_path(service_name)):
+        logger.info(
+            f'Release cluster {cluster_name!r} for pool {service_name!r}')
+        if not cluster_name:
+            logger.info('Skip clean up dummy cluster.')
+            return
+        # Check if service exists
+        service_status = _get_service_status(service_name,
+                                             with_replica_info=False)
+        if service_status is None:
+            logger.error(f'Service {service_name!r} does not exist.')
+            return
+
+        # Release the cluster using database
+        rid = int(cluster_name.split('-')[-1])
+        current_jid = serve_state.get_replica_job_id(service_name, rid)
+        if current_jid is None:
+            logger.error(f'Failed to release cluster {cluster_name!r} - '
+                         f'cluster not in use.')
+            return
+        serve_state.set_replica_job_id(service_name, rid, None)
+        logger.info(f'Cluster {cluster_name!r} released successfully.')
 
 
 def _terminate_failed_services(
@@ -1083,7 +1132,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
 
     replica_columns = [
         'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'INFRA',
-        'RESOURCES', 'STATUS'
+        'RESOURCES', 'STATUS', 'USED_BY'
     ]
     replica_table = log_utils.create_table(replica_columns)
 
@@ -1104,6 +1153,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         resources_str = '-'
         replica_status = record['status']
         status_str = replica_status.colored_str()
+        used_by = record['used_by']
+        used_by_str = str(used_by) if used_by is not None else '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
@@ -1121,6 +1172,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             infra,
             resources_str,
             status_str,
+            used_by_str,
         ]
         replica_table.add_row(replica_values)
 

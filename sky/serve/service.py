@@ -21,7 +21,6 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
 from sky.serve import controller
-from sky.serve import pool_manager
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -258,27 +257,28 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 serve_state.set_service_controller_port(service_name,
                                                         controller_port)
 
-            controller_addr = f'http://{controller_host}:{controller_port}'
+            # controller_addr = f'http://{controller_host}:{controller_port}'
 
             # Start the load balancer.
             load_balancer_port = (
                 common_utils.find_free_port(constants.LOAD_BALANCER_PORT_START)
                 if not is_recovery else
                 serve_state.get_service_load_balancer_port(service_name))
-            load_balancer_log_file = os.path.expanduser(
-                serve_utils.generate_remote_load_balancer_log_file_name(
-                    service_name))
+            # load_balancer_log_file = os.path.expanduser(
+            #     serve_utils.generate_remote_load_balancer_log_file_name(
+            #         service_name))
 
             # TODO(tian): Probably we could enable multiple ports specified in
             # service spec and we could start multiple load balancers.
             # After that, we will have a mapping from replica port to endpoint.
-            load_balancer_process = multiprocessing.Process(
-                target=ux_utils.RedirectOutputForProcess(
-                    pool_manager.run_pool_manager, load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port,
-                      service_spec.load_balancing_policy,
-                      service_spec.tls_credential))
-            load_balancer_process.start()
+            # load_balancer_process = multiprocessing.Process(
+            #     target=ux_utils.RedirectOutputForProcess(
+            #         pool_manager.run_pool_manager,
+            #         load_balancer_log_file).run,
+            #     args=(controller_addr, load_balancer_port,
+            #           service_spec.load_balancing_policy,
+            #           service_spec.tls_credential))
+            # load_balancer_process.start()
 
             if not is_recovery:
                 serve_state.set_service_load_balancer_port(

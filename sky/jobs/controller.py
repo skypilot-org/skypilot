@@ -200,8 +200,7 @@ class JobsController:
         # cluster_name = managed_job_utils.generate_managed_job_cluster_name(
         #     task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            '_dummy_name', self._backend, task, self._job_id, task_id,
-            self._pool_manager)
+            '', self._backend, task, self._job_id, task_id, self._pool_manager)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:

@@ -52,6 +52,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -116,7 +117,7 @@ def _start_controller(job_id: int, dag_yaml_path: str, env_file_path: str,
     logger.debug(f'Job {job_id} started with pid {pid}')
 
 
-def maybe_schedule_next_jobs(pool_manager: Optional[str]) -> None:
+def maybe_schedule_next_jobs(pool_manager: Optional[str] = None) -> None:
     """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
     Here, "schedule" means to select job that is waiting, and allow it to
@@ -147,6 +148,7 @@ def maybe_schedule_next_jobs(pool_manager: Optional[str]) -> None:
     from the current process and there will not be a parent/child relationship.
     See launch_new_process_tree for more.
     """
+    logger.debug(f'maybe_schedule_next_jobs: {pool_manager=}')
     try:
         # We must use a global lock rather than a per-job lock to ensure correct
         # parallelism control. If we cannot obtain the lock, exit immediately.
@@ -158,6 +160,8 @@ def maybe_schedule_next_jobs(pool_manager: Optional[str]) -> None:
                 if maybe_next_job is None:
                     # Nothing left to start, break from scheduling loop
                     break
+                logger.debug(f'maybe_next_job: {maybe_next_job}')
+                pm = maybe_next_job['pool_manager']
 
                 current_state = maybe_next_job['schedule_state']
 
@@ -176,11 +180,11 @@ def maybe_schedule_next_jobs(pool_manager: Optional[str]) -> None:
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
-                    if not _can_start_new_job():
+                    if not _can_start_new_job(pm):
                         # Can't schedule anything, break from scheduling loop.
                         break
 
-                logger.debug(f'Scheduling job {maybe_next_job["job_id"]}')
+                logger.info(f'Scheduling job {maybe_next_job["job_id"]}')
                 state.scheduler_set_launching(maybe_next_job['job_id'],
                                               current_state)
 
@@ -192,8 +196,7 @@ def maybe_schedule_next_jobs(pool_manager: Optional[str]) -> None:
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
                     env_file_path = maybe_next_job['env_file_path']
 
-                    _start_controller(job_id, dag_yaml_path, env_file_path,
-                                      pool_manager)
+                    _start_controller(job_id, dag_yaml_path, env_file_path, pm)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -315,11 +318,23 @@ def _get_launch_parallelism() -> int:
     return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
 
 
-def _can_start_new_job() -> bool:
+def _can_start_new_job(pool_manager: Optional[str]) -> bool:
     launching_jobs = state.get_num_launching_jobs()
     alive_jobs = state.get_num_alive_jobs()
-    return launching_jobs < _get_launch_parallelism(
-    ) and alive_jobs < _get_job_parallelism()
+
+    # Check basic resource limits
+    if not (launching_jobs < _get_launch_parallelism() and
+            alive_jobs < _get_job_parallelism()):
+        return False
+
+    # Check if there are available replicas in the pool
+    if pool_manager is not None:
+        alive_jobs_in_pool = state.get_num_alive_jobs(pool_manager)
+        if alive_jobs_in_pool >= serve_utils.num_replicas(pool_manager):
+            logger.debug(f'No replicas available in pool {pool_manager}')
+            return False
+
+    return True
 
 
 def _can_lauch_in_alive_job() -> bool:
