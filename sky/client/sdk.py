@@ -76,6 +76,7 @@ _LINE_PROCESSED_KEY = 'line_processed'
 def reload_config() -> None:
     skypilot_config.safe_reload_config()
 
+
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
