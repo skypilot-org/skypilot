@@ -11,6 +11,130 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >&2
 }
 
+# Function to check and install Git if not present
+check_and_install_git() {
+    # Check if git is already installed
+    if command -v git >/dev/null 2>&1; then
+        log "Git is already installed: $(git --version)"
+        return 0
+    fi
+    
+    log "Git not found, attempting to install..."
+    
+    # Function to try installing with error handling
+    install_with_error_handling() {
+        local cmd_with_sudo="$1"
+        local cmd_without_sudo="$2"
+        local pkg_manager="$3"
+        
+        log "Trying to install Git using $pkg_manager..."
+        
+        # First, try with sudo
+        log "Attempting with sudo..."
+        if eval "$cmd_with_sudo" 2>&1 >/tmp/git_install.log; then
+            log "Installation with sudo completed successfully"
+            rm -f /tmp/git_install.log
+            return 0
+        else
+            log "Installation with sudo failed, trying without sudo..."
+            rm -f /tmp/git_install.log
+        fi
+        
+        # If sudo failed, try without sudo
+        log "Attempting without sudo..."
+        if eval "$cmd_without_sudo" 2>&1 >/tmp/git_install.log; then
+            log "Installation without sudo completed successfully"
+            rm -f /tmp/git_install.log
+            return 0
+        else
+            log "Installation failed. Error output:"
+            cat /tmp/git_install.log >&2
+            
+            # Check for common error patterns
+            if grep -q -i "permission\|denied\|unauthorized" /tmp/git_install.log; then
+                log "ERROR: Installation failed due to permission issues"
+                log "Current user: $(whoami), UID: $(id -u)"
+                log "Try running this script as root or with appropriate permissions"
+            elif grep -q -i "command not found\|not found" /tmp/git_install.log; then
+                log "ERROR: Package manager command not found"
+                log "Please install Git manually using your system's package manager"
+            fi
+            
+            rm -f /tmp/git_install.log
+            return 1
+        fi
+    }
+    
+    # Detect the operating system and package manager
+    if [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu
+        log "Detected Debian/Ubuntu system"
+        if command -v apt-get >/dev/null 2>&1; then
+            install_with_error_handling "sudo apt-get update -y && sudo apt-get install -y git" "apt-get update -y && apt-get install -y git" "apt-get"
+        elif command -v apt >/dev/null 2>&1; then
+            install_with_error_handling "sudo apt update -y && sudo apt install -y git" "apt update -y && apt install -y git" "apt"
+        else
+            log "ERROR: Neither apt-get nor apt found on Debian/Ubuntu system"
+            return 1
+        fi
+    elif [ -f /etc/redhat-release ] || [ -f /etc/centos-release ]; then
+        # Red Hat/CentOS/Fedora
+        log "Detected Red Hat/CentOS/Fedora system"
+        if command -v dnf >/dev/null 2>&1; then
+            install_with_error_handling "sudo dnf install -y git" "dnf install -y git" "dnf"
+        elif command -v yum >/dev/null 2>&1; then
+            install_with_error_handling "sudo yum install -y git" "yum install -y git" "yum"
+        else
+            log "ERROR: Neither dnf nor yum found on Red Hat/CentOS/Fedora system"
+            return 1
+        fi
+    elif [ -f /etc/arch-release ]; then
+        # Arch Linux
+        log "Detected Arch Linux system"
+        if command -v pacman >/dev/null 2>&1; then
+            install_with_error_handling "sudo pacman -S --noconfirm git" "pacman -S --noconfirm git" "pacman"
+        else
+            log "ERROR: pacman not found on Arch Linux system"
+            return 1
+        fi
+    elif [ -f /etc/alpine-release ]; then
+        # Alpine Linux
+        log "Detected Alpine Linux system"
+        if command -v apk >/dev/null 2>&1; then
+            install_with_error_handling "sudo apk add --no-cache git" "apk add --no-cache git" "apk"
+        else
+            log "ERROR: apk not found on Alpine Linux system"
+            return 1
+        fi
+    elif [ "$(uname)" = "Darwin" ]; then
+        # macOS
+        log "Detected macOS system"
+        if command -v brew >/dev/null 2>&1; then
+            install_with_error_handling "brew install git" "brew install git" "Homebrew"
+        elif command -v port >/dev/null 2>&1; then
+            install_with_error_handling "sudo port install git" "port install git" "MacPorts"
+        else
+            log "ERROR: Neither Homebrew nor MacPorts found on macOS"
+            log "Please install Git manually: https://git-scm.com/download/mac"
+            return 1
+        fi
+    else
+        log "ERROR: Unsupported operating system: $(uname -s)"
+        log "Please install Git manually: https://git-scm.com/downloads"
+        return 1
+    fi
+    
+    # Verify installation
+    if command -v git >/dev/null 2>&1; then
+        log "Git successfully installed: $(git --version)"
+        return 0
+    else
+        log "ERROR: Git installation failed or Git is not in PATH"
+        log "Please install Git manually and ensure it's in your PATH"
+        return 1
+    fi
+}
+
 # Function to cleanup temporary files
 cleanup() {
     if [ -n "$SSH_KEY_FILE" ] && [ -f "$SSH_KEY_FILE" ]; then
@@ -65,6 +189,12 @@ fi
 
 log "Git URL: $GIT_URL"
 
+# Check and install Git if not present
+if ! check_and_install_git; then
+    log "ERROR: Failed to ensure Git is installed"
+    exit 1
+fi
+
 # Setup SSH key if provided
 SSH_KEY_FILE=""
 if [ -n "$GIT_SSH_KEY" ]; then
@@ -83,46 +213,10 @@ CLONE_URL="$GIT_URL"
 if [ -n "$GIT_TOKEN" ]; then
     log "Setting up token authentication"
     if [[ "$GIT_URL" =~ ^https://(.*)$ ]]; then
-        CLONE_URL="$GIT_URL"  # Keep original URL, don't embed token
-        
-        # Use git credential helper for secure token authentication
-        # GitHub requires personal access token, not password authentication
-        
-        # Create a temporary credential helper script
-        CRED_HELPER_SCRIPT=$(mktemp)
-        cat > "$CRED_HELPER_SCRIPT" << EOF
-#!/bin/bash
-# Temporary credential helper for GitHub token authentication
-case "\$1" in
-    get)
-        echo "username=token"
-        echo "password=${GIT_TOKEN}"
-        ;;
-    store|erase)
-        # Do nothing for store/erase operations
-        ;;
-esac
-EOF
-        chmod +x "$CRED_HELPER_SCRIPT"
-        
-        # Configure git to use our credential helper for this session
-        export GIT_CONFIG_GLOBAL=/dev/null
-        export GIT_CONFIG_SYSTEM=/dev/null
-        git config --global credential.helper "!$CRED_HELPER_SCRIPT"
-        
-        # Clean up function for credential helper
-        cleanup_cred_helper() {
-            if [ -f "$CRED_HELPER_SCRIPT" ]; then
-                rm -f "$CRED_HELPER_SCRIPT"
-            fi
-            # Reset git config
-            git config --global --unset credential.helper 2>/dev/null || true
-        }
-        
-        # Add to cleanup trap
-        trap 'cleanup_cred_helper; cleanup' EXIT
-        
-        log "Token authentication configured via Git credential helper"
+        # For container environments, directly embed token in URL for reliability
+        # This is simpler and more reliable than credential helper in containers
+        CLONE_URL="https://${GIT_TOKEN}@${BASH_REMATCH[1]}"
+        log "Token authentication configured via URL embedding"
     else
         log "WARNING: GIT_TOKEN provided but URL is not HTTPS, ignoring token"
     fi

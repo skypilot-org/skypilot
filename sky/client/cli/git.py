@@ -315,7 +315,7 @@ class GitRepo:
             try:
                 import paramiko  # pylint: disable=import-outside-toplevel
                 ssh_config = paramiko.SSHConfig()
-                with open(ssh_config_path, 'r') as f:
+                with open(ssh_config_path, 'r', encoding='utf-8') as f:
                     ssh_config.parse(f)
 
                 # Get config for the target host
@@ -377,7 +377,7 @@ class GitRepo:
                         f'Recommended: chmod 600 {key_path}')
 
                 # Check if it's a valid private key and read content
-                with open(key_path, 'r') as f:
+                with open(key_path, 'r', encoding='utf-8') as f:
                     key_content = f.read()
                     if not (key_content.startswith('-----BEGIN') and
                             'PRIVATE KEY' in key_content):
@@ -394,7 +394,7 @@ class GitRepo:
         config_key_path = self._parse_ssh_config()
         if config_key_path:
             try:
-                with open(config_key_path, 'r') as f:
+                with open(config_key_path, 'r', encoding='utf-8') as f:
                     key_content = f.read()
                 logger.debug(f'Using SSH key from config: {config_key_path}')
                 return (config_key_path, key_content)
@@ -436,7 +436,7 @@ class GitRepo:
                         f'Consider: chmod 600 {private_key_path}')
 
                 # Validate private key format and read content
-                with open(private_key_path, 'r') as f:
+                with open(private_key_path, 'r', encoding='utf-8') as f:
                     key_content = f.read()
                     if not (key_content.startswith('-----BEGIN') and
                             'PRIVATE KEY' in key_content):
