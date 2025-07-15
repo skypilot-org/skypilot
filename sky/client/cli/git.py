@@ -196,9 +196,9 @@ class GitRepo:
 
         This method implements a sequential validation approach:
         1. Try public access (no authentication)
-        2. If has token, try token access
-        3. If has ssh_key_path, try ssh access
-        4. Find default ssh credential and try ssh access
+        2. If has token and URL is https, try token access
+        3. If URL is ssh, try ssh access with user provided ssh key or
+           default ssh credential
 
         Returns:
             GitCloneInfo instance with successful access method.
@@ -207,17 +207,17 @@ class GitRepo:
             exceptions.GitError: If the git URL format is invalid or
               the repository cannot be accessed.
         """
-        logger.info(f'Validating access to {self._parsed_url.host}'
-                    f'/{self._parsed_url.path}')
+        logger.debug(f'Validating access to {self._parsed_url.host}'
+                     f'/{self._parsed_url.path}')
 
         # Step 1: Try public access first (most common case)
         try:
             https_url = self.get_https_url()
             logger.debug(f'Trying public HTTPS access to {https_url}')
 
-            # Use /info/refs endpoint to check public access
+            # Use /info/refs endpoint to check public access.
             # This is more reliable than git ls-remote as it doesn't
-            # use local git config
+            # use local git config.
             stripped_url = https_url.rstrip('/')
             info_refs_url = f'{stripped_url}/info/refs?service=git-upload-pack'
 
@@ -247,7 +247,7 @@ class GitRepo:
                     'using token authentication')
                 return GitCloneInfo(url=https_url, token=self.git_token)
             except Exception as e:
-                logger.debug(f'Token access failed: {str(e)}')
+                logger.info(f'Token access failed: {str(e)}')
                 raise exceptions.GitError(
                     f'Failed to access repository {self.repo_url} using token '
                     'authentication. Please verify your token and repository '
@@ -263,7 +263,6 @@ class GitRepo:
 
                 if ssh_key_info:
                     key_path, key_content = ssh_key_info
-
                     git_ssh_command = f'ssh -F none -i {key_path} ' \
                         '-o StrictHostKeyChecking=no ' \
                         '-o UserKnownHostsFile=/dev/null ' \
@@ -284,7 +283,6 @@ class GitRepo:
                 else:
                     raise exceptions.GitError(
                         f'No SSH keys found for {self.repo_url}.')
-
             except Exception as e:  # pylint: disable=broad-except
                 raise exceptions.GitError(
                     f'Failed to access repository {self.repo_url} using '
@@ -317,7 +315,6 @@ class GitRepo:
                 ssh_config = paramiko.SSHConfig()
                 with open(ssh_config_path, 'r', encoding='utf-8') as f:
                     ssh_config.parse(f)
-
                 # Get config for the target host
                 host_config = ssh_config.lookup(self._parsed_url.host)
 
@@ -340,7 +337,6 @@ class GitRepo:
                 return None
 
             except ImportError:
-                # Fall back to manual parsing if paramiko is not available
                 logger.debug('paramiko not available')
                 return None
 
@@ -399,7 +395,7 @@ class GitRepo:
                 logger.debug(f'Using SSH key from config: {config_key_path}')
                 return (config_key_path, key_content)
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Could not read SSH key from config: {str(e)}')
+                logger.debug(f'Could not read SSH key: {str(e)}')
 
         # Step 3: Search for default SSH keys
         ssh_dir = os.path.expanduser('~/.ssh')
@@ -415,16 +411,9 @@ class GitRepo:
 
         for key_name in key_candidates:
             private_key_path = os.path.join(ssh_dir, key_name)
-            public_key_path = f'{private_key_path}.pub'
 
             # Check if both private and public keys exist
             if not os.path.exists(private_key_path):
-                continue
-
-            if not os.path.exists(public_key_path):
-                logger.debug(
-                    f'Private key {private_key_path} exists but public key '
-                    f'{public_key_path} is missing')
                 continue
 
             # Check private key permissions
@@ -440,9 +429,7 @@ class GitRepo:
                     key_content = f.read()
                     if not (key_content.startswith('-----BEGIN') and
                             'PRIVATE KEY' in key_content):
-                        logger.debug(
-                            f'SSH key {private_key_path} may not be a valid '
-                            'private key format')
+                        logger.debug(f'SSH key {private_key_path} is invalid.')
                         continue
 
                 logger.debug(f'Discovered default SSH key: {private_key_path}')
@@ -543,6 +530,6 @@ class GitRepo:
                 raise exceptions.GitError(
                     'Failed to check repository. If this is a private '
                     'repository, please provide authentication using either '
-                    '--git-token or --git-ssh-key-path.') from e
+                    'GIT_TOKEN or GIT_SSH_KEY_PATH.') from e
             raise exceptions.GitError(
                 f'Failed to check git reference: {str(e)}') from e

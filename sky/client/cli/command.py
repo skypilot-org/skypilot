@@ -795,7 +795,7 @@ def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
     if not isinstance(task.workdir, dict):
         return
     url = task.workdir['url']
-    ref = task.workdir.get('ref') or ''
+    ref = task.workdir.get('ref', '')
     token = os.environ.get(git_utils.GIT_TOKEN_ENV_VAR)
     ssh_key_path = os.environ.get(git_utils.GIT_SSH_KEY_PATH_ENV_VAR)
     try:

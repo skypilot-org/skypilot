@@ -37,6 +37,7 @@ check_and_install_git() {
             return 0
         else
             log "Installation with sudo failed, trying without sudo..."
+            cat /tmp/git_install.log >&2
             rm -f /tmp/git_install.log
         fi
         
@@ -263,12 +264,8 @@ if [ -d "$TARGET_DIR" ]; then
                 log "WARNING: Existing repository has different remote URL"
                 log "Current: $CURRENT_REMOTE -> $CURRENT_CLEAN"
                 log "Target: $GIT_URL -> $TARGET_CLEAN"
-                log "Removing existing directory and re-cloning"
-                cd ..
-                rm -rf "$TARGET_DIR"
-                mkdir -p "$TARGET_DIR"
-                cd "$TARGET_DIR"
-                NEED_CLONE=true
+                log "Please manually remove the directory or use a different target directory."
+                exit 1
             elif [ "$CURRENT_REMOTE" != "$GIT_URL" ]; then
                 # Same repository but different URL format (HTTPS vs SSH)
                 log "Repository matches but URL format differs"
@@ -287,9 +284,7 @@ if [ -d "$TARGET_DIR" ]; then
             NEED_CLONE=false
         fi
     else
-        log "Directory exists but is not a git repository, cleaning up"
-        rm -rf "$TARGET_DIR"
-        mkdir -p "$TARGET_DIR"
+        log "Directory exists but is not a git repository"
         cd "$TARGET_DIR"
         NEED_CLONE=true
     fi

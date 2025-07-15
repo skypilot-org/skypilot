@@ -793,8 +793,6 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-        command_str = ' '.join(command)
-        logger.info(f'Running command: {command_str}')
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
