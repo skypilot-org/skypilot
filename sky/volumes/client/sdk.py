@@ -4,6 +4,7 @@ import typing
 from typing import List
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -24,9 +25,12 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def apply(volume: volume_lib.Volume) -> server_common.RequestId:
+def apply(volume: volume_lib.Volume,
+          reload_config: bool = True) -> server_common.RequestId:
     """Creates or registers a volume.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.VolumeApplyBody(name=volume.name,
                                     volume_type=volume.type,
                                     cloud=volume.cloud,
@@ -44,8 +48,10 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId:
+def ls(reload_config: bool = True) -> server_common.RequestId:
     """Lists all volumes."""
+    if reload_config:
+        skypilot_config.safe_reload_config()
     response = requests.get(f'{server_common.get_server_url()}/volumes',
                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
@@ -55,8 +61,11 @@ def ls() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def delete(names: List[str]) -> server_common.RequestId:
+def delete(names: List[str],
+           reload_config: bool = True) -> server_common.RequestId:
     """Deletes a volume."""
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.VolumeDeleteBody(names=names)
     response = requests.post(f'{server_common.get_server_url()}/volumes/delete',
                              json=json.loads(body.model_dump_json()),

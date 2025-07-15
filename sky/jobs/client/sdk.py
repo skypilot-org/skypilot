@@ -7,6 +7,7 @@ import webbrowser
 import click
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
@@ -31,12 +32,12 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    name: Optional[str] = None,
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False,
-) -> server_common.RequestId:
+        task: Union['sky.Task', 'sky.Dag'],
+        name: Optional[str] = None,
+        # Internal only:
+        # pylint: disable=invalid-name
+        _need_confirmation: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Launches a managed job.
 
     Please refer to sky.cli.job_launch for documentation.
@@ -61,14 +62,15 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
-
+    if reload_config:
+        skypilot_config.safe_reload_config()
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, at_client_side=True) as dag:
-        sdk.validate(dag)
+        sdk.validate(dag, reload_config=False)
         if _need_confirmation:
-            request_id = sdk.optimize(dag)
-            sdk.stream_and_get(request_id)
+            request_id = sdk.optimize(dag, reload_config=False)
+            sdk.stream_and_get(request_id, reload_config=False)
             prompt = f'Launching a managed job {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
@@ -95,7 +97,8 @@ def launch(
 def queue(refresh: bool,
           skip_finished: bool = False,
           all_users: bool = False,
-          job_ids: Optional[List[int]] = None) -> server_common.RequestId:
+          job_ids: Optional[List[int]] = None,
+          reload_config: bool = True) -> server_common.RequestId:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -137,6 +140,8 @@ def queue(refresh: bool,
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.JobsQueueBody(
         refresh=refresh,
         skip_finished=skip_finished,
@@ -154,11 +159,11 @@ def queue(refresh: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def cancel(
-    name: Optional[str] = None,
-    job_ids: Optional[List[int]] = None,
-    all: bool = False,  # pylint: disable=redefined-builtin
-    all_users: bool = False,
-) -> server_common.RequestId:
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
@@ -176,6 +181,8 @@ def cancel(
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
@@ -199,7 +206,8 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> int:
+              output_stream: Optional['io.TextIOBase'] = None,
+              reload_config: bool = True) -> int:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -224,6 +232,8 @@ def tail_logs(name: Optional[str] = None,
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
@@ -244,17 +254,18 @@ def tail_logs(name: Optional[str] = None,
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=(tail == 0))
+                               resumable=(tail == 0),
+                               reload_config=False)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+def download_logs(name: Optional[str],
+                  job_id: Optional[int],
+                  refresh: bool,
+                  controller: bool,
+                  local_dir: str = constants.SKY_LOGS_DIRECTORY,
+                  reload_config: bool = True) -> Dict[int, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -273,7 +284,8 @@ def download_logs(
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
-
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.JobsDownloadLogsBody(
         name=name,
         job_id=job_id,
@@ -287,7 +299,7 @@ def download_logs(
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     job_id_remote_path_dict = sdk.stream_and_get(
-        server_common.get_request_id(response))
+        server_common.get_request_id(response), reload_config=False)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
     return {
@@ -319,8 +331,10 @@ spot_tail_logs = common_utils.deprecated_function(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def dashboard() -> None:
+def dashboard(reload_config: bool = True) -> None:
     """Starts a dashboard for managed jobs."""
+    if reload_config:
+        skypilot_config.safe_reload_config()
     user_hash = common_utils.get_user_hash()
     api_server_url = server_common.get_server_url()
     params = f'user_hash={user_hash}'

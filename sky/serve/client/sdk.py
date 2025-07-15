@@ -5,6 +5,7 @@ from typing import List, Optional, Union
 
 import click
 
+from sky import skypilot_config
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server import rest
@@ -25,12 +26,12 @@ if typing.TYPE_CHECKING:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def up(
-    task: Union['sky.Task', 'sky.Dag'],
-    service_name: str,
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False
-) -> server_common.RequestId:
+        task: Union['sky.Task', 'sky.Dag'],
+        service_name: str,
+        # Internal only:
+        # pylint: disable=invalid-name
+        _need_confirmation: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
@@ -49,16 +50,17 @@ def up(
             argument.
         endpoint (str): The service endpoint.
     """
-
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
+        sdk.validate(dag, reload_config=False)
+        request_id = sdk.optimize(dag, reload_config=False)
+        sdk.stream_and_get(request_id, reload_config=False)
         if _need_confirmation:
             prompt = f'Launching a new service {service_name!r}. Proceed?'
             if prompt is not None:
@@ -86,13 +88,13 @@ def up(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def update(
-    task: Union['sky.Task', 'sky.Dag'],
-    service_name: str,
-    mode: 'serve_utils.UpdateMode',
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False
-) -> server_common.RequestId:
+        task: Union['sky.Task', 'sky.Dag'],
+        service_name: str,
+        mode: 'serve_utils.UpdateMode',
+        # Internal only:
+        # pylint: disable=invalid-name
+        _need_confirmation: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -112,15 +114,17 @@ def update(
     Request Returns:
         None
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
+        sdk.validate(dag, reload_config=False)
+        request_id = sdk.optimize(dag, reload_config=False)
+        sdk.stream_and_get(request_id, reload_config=False)
         if _need_confirmation:
             click.confirm(f'Updating service {service_name!r}. Proceed?',
                           default=True,
@@ -146,10 +150,10 @@ def update(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def down(
-    service_names: Optional[Union[str, List[str]]],
-    all: bool = False,  # pylint: disable=redefined-builtin
-    purge: bool = False
-) -> server_common.RequestId:
+        service_names: Optional[Union[str, List[str]]],
+        all: bool = False,  # pylint: disable=redefined-builtin
+        purge: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Tears down a service.
 
     Please refer to the sky.cli.serve_down for the docs.
@@ -171,6 +175,8 @@ def down(
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ServeDownBody(
         service_names=service_names,
         all=all,
@@ -186,8 +192,10 @@ def down(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def terminate_replica(service_name: str, replica_id: int,
-                      purge: bool) -> server_common.RequestId:
+def terminate_replica(service_name: str,
+                      replica_id: int,
+                      purge: bool,
+                      reload_config: bool = True) -> server_common.RequestId:
     """Tears down a specific replica for the given service.
 
     Args:
@@ -205,6 +213,8 @@ def terminate_replica(service_name: str, replica_id: int,
         sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
         RuntimeError: if failed to terminate the replica.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ServeTerminateReplicaBody(
         service_name=service_name,
         replica_id=replica_id,
@@ -220,9 +230,8 @@ def terminate_replica(service_name: str, replica_id: int,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def status(
-        service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+def status(service_names: Optional[Union[str, List[str]]],
+           reload_config: bool = True) -> server_common.RequestId:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -281,6 +290,8 @@ def status(
         RuntimeError: if failed to get the service status.
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ServeStatusBody(service_names=service_names,)
     response = server_common.make_authenticated_request(
         'POST',
@@ -297,7 +308,8 @@ def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
               follow: bool = True,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None,
+              reload_config: bool = True) -> None:
     """Tails logs for a service.
 
     Usage:
@@ -359,6 +371,8 @@ def tail_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
@@ -378,7 +392,8 @@ def tail_logs(service_name: str,
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=True)
+                               resumable=True,
+                               reload_config=False)
 
 
 @usage_lib.entrypoint
@@ -390,7 +405,8 @@ def sync_down_logs(service_name: str,
                        str, 'serve_utils.ServiceComponent',
                        List[Union[str,
                                   'serve_utils.ServiceComponent']]]] = None,
-                   replica_ids: Optional[List[int]] = None) -> None:
+                   replica_ids: Optional[List[int]] = None,
+                   reload_config: bool = True) -> None:
     """Sync down logs from the service components to a local directory.
 
     This function syncs logs from the specified service components (controller,
@@ -419,6 +435,8 @@ def sync_down_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
@@ -435,7 +453,8 @@ def sync_down_logs(service_name: str,
         '/serve/sync-down-logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
-    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
+    remote_dir = sdk.stream_and_get(server_common.get_request_id(response),
+                                    reload_config=False)
 
     # Download from API server paths to the client's local_dir
     client_common.download_logs_from_api_server([remote_dir], remote_dir,

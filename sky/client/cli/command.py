@@ -131,8 +131,11 @@ def _get_cluster_records_and_set_ssh_config(
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     if clusters is not None:
         all_users = True
-    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
-    cluster_records = sdk.stream_and_get(request_id)
+    request_id = sdk.status(clusters,
+                            refresh=refresh,
+                            all_users=all_users,
+                            reload_config=False)
+    cluster_records = sdk.stream_and_get(request_id, reload_config=False)
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
@@ -225,7 +228,7 @@ def _async_call_or_wait(request_id: str, async_call: bool,
     short_request_id = request_id[:8]
     if not async_call:
         try:
-            return sdk.stream_and_get(request_id)
+            return sdk.stream_and_get(request_id, reload_config=False)
         except KeyboardInterrupt:
             logger.info(
                 ux_utils.starting_message('Request will continue running '
@@ -1048,6 +1051,7 @@ def launch(
         clone_disk_from=clone_disk_from,
         fast=fast,
         _need_confirmation=not yes,
+        reload_config=False,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:
@@ -1064,7 +1068,8 @@ def launch(
         if not detach_run and job_id is not None:
             returncode = sdk.tail_logs(handle.get_cluster_name(),
                                        job_id,
-                                       follow=True)
+                                       follow=True,
+                                       reload_config=False)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
@@ -1234,11 +1239,14 @@ def exec(cluster: Optional[str],
 
     click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
     click.secho(cluster)
-    request_id = sdk.exec(task, cluster_name=cluster)
+    request_id = sdk.exec(task, cluster_name=cluster, reload_config=False)
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        returncode = sdk.tail_logs(cluster, job_id, follow=True)
+        returncode = sdk.tail_logs(cluster,
+                                   job_id,
+                                   follow=True,
+                                   reload_config=False)
         sys.exit(returncode)
 
 
@@ -1271,7 +1279,7 @@ def _handle_jobs_queue_request(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.stream_and_get(request_id)
+        managed_jobs_ = sdk.stream_and_get(request_id, reload_config=False)
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1290,9 +1298,11 @@ def _handle_jobs_queue_request(
             # Since we are client-side, we may not know the exact name of the
             # controller, so use the prefix with a wildcard.
             # Query status of the controller cluster.
-            records = sdk.get(
-                sdk.status(cluster_names=[common.JOB_CONTROLLER_PREFIX + '*'],
-                           all_users=True))
+            records = sdk.get(sdk.status(
+                cluster_names=[common.JOB_CONTROLLER_PREFIX + '*'],
+                all_users=True,
+                reload_config=False),
+                              reload_config=False)
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 controller = controller_utils.Controllers.JOBS_CONTROLLER.value
@@ -1347,7 +1357,7 @@ def _handle_services_request(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        service_records = sdk.get(request_id)
+        service_records = sdk.get(request_id, reload_config=False)
         num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1364,10 +1374,11 @@ def _handle_services_request(
             # Since we are client-side, we may not know the exact name of the
             # controller, so use the prefix with a wildcard.
             # Query status of the controller cluster.
-            records = sdk.get(
-                sdk.status(
-                    cluster_names=[common.SKY_SERVE_CONTROLLER_PREFIX + '*'],
-                    all_users=True))
+            records = sdk.get(sdk.status(
+                cluster_names=[common.SKY_SERVE_CONTROLLER_PREFIX + '*'],
+                all_users=True,
+                reload_config=False),
+                              reload_config=False)
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 controller = (
@@ -1418,7 +1429,7 @@ def _status_kubernetes(show_all: bool):
         show_all (bool): Show all job information (e.g., start time, failures).
     """
     all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
-        sdk.status_kubernetes()))
+        sdk.status_kubernetes(reload_config=False), reload_config=False))
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
@@ -1483,16 +1494,21 @@ def _show_endpoint(query_clusters: Optional[List[str]],
     # for keyboard interrupt and abort the request to avoid additional latency.
     if show_endpoints:
         if endpoint:
-            request_id = sdk.endpoints(cluster_record['name'], endpoint)
-            cluster_endpoints = sdk.stream_and_get(request_id)
+            request_id = sdk.endpoints(cluster_record['name'],
+                                       endpoint,
+                                       reload_config=False)
+            cluster_endpoints = sdk.stream_and_get(request_id,
+                                                   reload_config=False)
             cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
             if not cluster_endpoint:
                 raise click.Abort(f'Endpoint {endpoint} not found for cluster '
                                   f'{cluster_record["name"]!r}.')
             click.echo(cluster_endpoint)
         else:
-            request_id = sdk.endpoints(cluster_record['name'])
-            cluster_endpoints = sdk.stream_and_get(request_id)
+            request_id = sdk.endpoints(cluster_record['name'],
+                                       reload_config=False)
+            cluster_endpoints = sdk.stream_and_get(request_id,
+                                                   reload_config=False)
             assert isinstance(cluster_endpoints, dict)
             if not cluster_endpoints:
                 raise click.Abort(f'No endpoint found for cluster '
@@ -1515,8 +1531,10 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
              f'{colorama.Style.RESET_ALL} ')
-    all_infras = sdk.get(
-        sdk.enabled_clouds(workspace=active_workspace, expand=True))
+    all_infras = sdk.get(sdk.enabled_clouds(workspace=active_workspace,
+                                            expand=True,
+                                            reload_config=False),
+                         reload_config=False)
     click.echo(f'{title}{", ".join(all_infras)}\n')
 
 
@@ -1653,14 +1671,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if show_managed_jobs:
         managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
                                                            skip_finished=True,
-                                                           all_users=all_users)
+                                                           all_users=all_users,
+                                                           reload_config=False)
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
     if show_services:
         # Run the sky serve service query in parallel to speed up the
         # status query.
-        service_status_request_id = serve_lib.status(service_names=None)
+        service_status_request_id = serve_lib.status(service_names=None,
+                                                     reload_config=False)
 
     workspace_request_id = None
     if ip or show_endpoints:
@@ -1698,7 +1718,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                          if show_single_endpoint else 'endpoints')))
     else:
         try:
-            workspace_request_id = sdk.workspaces()
+            workspace_request_id = sdk.workspaces(reload_config=False)
         except RuntimeError:
             # Backward compatibility for API server before #5660.
             # TODO(zhwu): remove this after 0.10.0.
@@ -1732,7 +1752,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             normal_clusters.append(cluster_record)
 
     if workspace_request_id is not None:
-        all_workspaces = sdk.get(workspace_request_id)
+        all_workspaces = sdk.get(workspace_request_id, reload_config=False)
     else:
         all_workspaces = [constants.SKYPILOT_DEFAULT_WORKSPACE]
     active_workspace = skypilot_config.get_active_workspace()
@@ -1759,7 +1779,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False)
             except KeyboardInterrupt:
-                sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
+                sdk.api_cancel(managed_jobs_queue_request_id,
+                               silent=True,
+                               reload_config=False)
                 managed_jobs_query_interrupted = True
                 # Set to -1, so that the controller is not considered
                 # down, and the hint for showing sky jobs queue
@@ -1803,7 +1825,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         show_endpoint=False,
                         is_called_by_user=False)
                 except KeyboardInterrupt:
-                    sdk.api_cancel(service_status_request_id, silent=True)
+                    sdk.api_cancel(service_status_request_id,
+                                   silent=True,
+                                   reload_config=False)
                     num_services = -1
                     msg = 'KeyboardInterrupt'
         click.echo(msg)
@@ -1856,7 +1880,9 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
     days_to_query: Optional[int] = days
     if days == 0:
         days_to_query = None
-    cluster_records = sdk.get(sdk.cost_report(days=days_to_query))
+    cluster_records = sdk.get(sdk.cost_report(days=days_to_query,
+                                              reload_config=False),
+                              reload_config=False)
 
     normal_cluster_records = []
     controllers = dict()
@@ -1939,8 +1965,11 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
     def _get_job_queue(cluster):
         try:
-            job_table = sdk.stream_and_get(
-                sdk.queue(cluster, skip_finished, all_users))
+            job_table = sdk.stream_and_get(sdk.queue(cluster,
+                                                     skip_finished,
+                                                     all_users,
+                                                     reload_config=False),
+                                           reload_config=False)
         except (RuntimeError, exceptions.CommandError, ValueError,
                 exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                 exceptions.CloudUserIdentityError,
@@ -2048,7 +2077,9 @@ def logs(
     if sync_down:
         with rich_utils.client_status(
                 ux_utils.spinner_message('Downloading logs')):
-            log_local_path_dict = sdk.download_logs(cluster, job_ids)
+            log_local_path_dict = sdk.download_logs(cluster,
+                                                    job_ids,
+                                                    reload_config=False)
         style = colorama.Style
         fore = colorama.Fore
         for job, log_local_path in log_local_path_dict.items():
@@ -2072,8 +2103,10 @@ def logs(
         # job_ids is either None or empty list, so it is safe to cast it here.
         job_ids_to_query = typing.cast(Optional[List[int]], job_ids)
     if status:
-        job_statuses = sdk.stream_and_get(
-            sdk.job_status(cluster, job_ids_to_query))
+        job_statuses = sdk.stream_and_get(sdk.job_status(cluster,
+                                                         job_ids_to_query,
+                                                         reload_config=False),
+                                          reload_config=False)
         job_id = list(job_statuses.keys())[0]
         # If job_ids is None and no job has been submitted to the cluster,
         # it will return {None: None}.
@@ -2100,7 +2133,11 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    returncode = sdk.tail_logs(cluster, job_id, follow, tail=tail)
+    returncode = sdk.tail_logs(cluster,
+                               job_id,
+                               follow,
+                               tail=tail,
+                               reload_config=False)
     sys.exit(returncode)
 
 
@@ -2162,7 +2199,9 @@ def cancel(
         try:
             # Get list of all available clusters
             all_records = sdk.get(sdk.status(cluster_names=None,
-                                             all_users=True))
+                                             all_users=True,
+                                             reload_config=False),
+                                  reload_config=False)
             all_clusters = [record['name'] for record in all_records]
             matching_clusters = [
                 c for c in all_clusters if fnmatch.fnmatch(c, cluster)
@@ -2217,7 +2256,8 @@ def cancel(
             request_id = sdk.cancel(cluster,
                                     all=all,
                                     all_users=all_users,
-                                    job_ids=job_ids_to_cancel)
+                                    job_ids=job_ids_to_cancel,
+                                    reload_config=False)
             _async_call_or_wait(request_id, async_call, 'sky.cancel')
         except exceptions.NotSupportedError as e:
             controller = controller_utils.Controllers.from_name(cluster)
@@ -2607,7 +2647,8 @@ def start(
                                idle_minutes_to_autostop,
                                retry_until_up,
                                down=down,
-                               force=force), to_start)
+                               force=force,
+                               reload_config=False), to_start)
 
     for name, request_id in zip(to_start, request_ids):
         try:
@@ -2712,8 +2753,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
         try:
             request_id = managed_jobs.queue(refresh=False,
                                             skip_finished=True,
-                                            all_users=True)
-            managed_jobs_ = sdk.stream_and_get(request_id)
+                                            all_users=True,
+                                            reload_config=False)
+            managed_jobs_ = sdk.stream_and_get(request_id, reload_config=False)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2743,8 +2785,10 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
                 # make sure there is no in-progress managed jobs.
                 request_id = managed_jobs.queue(refresh=False,
                                                 skip_finished=True,
-                                                all_users=True)
-                managed_jobs_ = sdk.stream_and_get(request_id)
+                                                all_users=True,
+                                                reload_config=False)
+                managed_jobs_ = sdk.stream_and_get(request_id,
+                                                   reload_config=False)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -2788,8 +2832,9 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
-            request_id = serve_lib.status(service_names=None)
-            services = sdk.stream_and_get(request_id)
+            request_id = serve_lib.status(service_names=None,
+                                          reload_config=False)
+            services = sdk.stream_and_get(request_id, reload_config=False)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2993,7 +3038,10 @@ def _down_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                request_id = sdk.autostop(name, idle_minutes_to_autostop, down)
+                request_id = sdk.autostop(name,
+                                          idle_minutes_to_autostop,
+                                          down,
+                                          reload_config=False)
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,
@@ -3020,9 +3068,13 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    request_id = sdk.down(name, purge=purge)
+                    request_id = sdk.down(name,
+                                          purge=purge,
+                                          reload_config=False)
                 else:
-                    request_id = sdk.stop(name, purge=purge)
+                    request_id = sdk.stop(name,
+                                          purge=purge,
+                                          reload_config=False)
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,
@@ -3104,8 +3156,9 @@ def check(infra_list: Tuple[str],
     infra_arg = infra_list if len(infra_list) > 0 else None
     request_id = sdk.check(infra_list=infra_arg,
                            verbose=verbose,
-                           workspace=workspace)
-    sdk.stream_and_get(request_id)
+                           workspace=workspace,
+                           reload_config=False)
+    sdk.stream_and_get(request_id, reload_config=False)
     api_server_url = server_common.get_server_url()
     click.echo()
     click.echo(
@@ -3214,7 +3267,8 @@ def show_gpus(
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     # Kubernetes specific bools
-    enabled_clouds = sdk.get(sdk.enabled_clouds())
+    enabled_clouds = sdk.get(sdk.enabled_clouds(reload_config=False),
+                             reload_config=False)
     cloud_is_kubernetes = isinstance(
         cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
@@ -3254,7 +3308,9 @@ def show_gpus(
                 context=context,
                 name_filter=name_filter,
                 quantity_filter=quantity_filter,
-                is_ssh=is_ssh))
+                is_ssh=is_ssh,
+                reload_config=False),
+            reload_config=False)
         if not realtime_gpu_availability_lists:
             # Customize message based on context
             identity = ('SSH Node Pool'
@@ -3328,8 +3384,9 @@ def show_gpus(
                         total_gpu_info[gpu][1] += available
                 realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
                 # Collect node info for this context
-                nodes_info = sdk.stream_and_get(
-                    sdk.kubernetes_node_info(context=ctx))
+                nodes_info = sdk.stream_and_get(sdk.kubernetes_node_info(
+                    context=ctx, reload_config=False),
+                                                reload_config=False)
                 all_nodes_info.append((display_ctx, nodes_info))
         if num_filtered_contexts > 1:
             total_realtime_gpu_table = log_utils.create_table(
@@ -3554,12 +3611,12 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
-            result = sdk.stream_and_get(
-                sdk.list_accelerator_counts(
-                    gpus_only=True,
-                    clouds=clouds_to_list,
-                    region_filter=region,
-                ))
+            result = sdk.stream_and_get(sdk.list_accelerator_counts(
+                gpus_only=True,
+                clouds=clouds_to_list,
+                region_filter=region,
+                reload_config=False),
+                                        reload_config=False)
             # TODO(zhwu): handle the case where no accelerators are found,
             # especially when --region specified a non-existent region.
 
@@ -3637,14 +3694,16 @@ def show_gpus(
 
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
-        result = sdk.stream_and_get(
-            sdk.list_accelerators(gpus_only=True,
-                                  name_filter=name,
-                                  quantity_filter=quantity,
-                                  region_filter=region,
-                                  clouds=clouds_to_list,
-                                  case_sensitive=False,
-                                  all_regions=all_regions))
+        result = sdk.stream_and_get(sdk.list_accelerators(
+            gpus_only=True,
+            name_filter=name,
+            quantity_filter=quantity,
+            region_filter=region,
+            clouds=clouds_to_list,
+            case_sensitive=False,
+            all_regions=all_regions,
+            reload_config=False),
+                                    reload_config=False)
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
         from sky.catalog import common as catalog_common
@@ -3765,8 +3824,8 @@ def storage():
 # pylint: disable=redefined-builtin
 def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
-    request_id = sdk.storage_ls()
-    storages = sdk.stream_and_get(request_id)
+    request_id = sdk.storage_ls(reload_config=False)
+    storages = sdk.stream_and_get(request_id, reload_config=False)
     storage_table = storage_utils.format_storage_table(storages,
                                                        show_all=verbose)
     click.echo(storage_table)
@@ -3807,13 +3866,15 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        storages = sdk.get(sdk.storage_ls())
+        storages = sdk.get(sdk.storage_ls(reload_config=False),
+                           reload_config=False)
         if not storages:
             click.echo('No storage(s) to delete.')
             return
         names = [storage['name'] for storage in storages]
     else:
-        storages = sdk.get(sdk.storage_ls())
+        storages = sdk.get(sdk.storage_ls(reload_config=False),
+                           reload_config=False)
         existing_storage_names = [storage['name'] for storage in storages]
         names = _get_glob_matches(existing_storage_names, names)
     if names:
@@ -3831,7 +3892,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     # TODO(zhwu): Support all flag for the underlying SDK and API server to
     # avoid multiple requests.
     for name in names:
-        request_ids[name] = sdk.storage_delete(name)
+        request_ids[name] = sdk.storage_delete(name, reload_config=False)
 
     for name, request_id in request_ids.items():
         try:
@@ -3936,7 +3997,7 @@ def volumes_apply(
 
     # Call SDK to create volume
     try:
-        request_id = volumes_sdk.apply(volume)
+        request_id = volumes_sdk.apply(volume, reload_config=False)
         _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
     except RuntimeError as e:
         logger.error(f'{colorama.Fore.RED}Error applying volume: '
@@ -3955,8 +4016,8 @@ def volumes_apply(
 @usage_lib.entrypoint
 def volumes_ls(verbose: bool):
     """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls()
-    all_volumes = sdk.stream_and_get(request_id)
+    request_id = volumes_sdk.ls(reload_config=False)
+    all_volumes = sdk.stream_and_get(request_id, reload_config=False)
     volume_table = volumes_utils.format_volume_table(all_volumes,
                                                      show_all=verbose)
     click.echo(volume_table)
@@ -4001,7 +4062,8 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
-    all_volumes = sdk.get(volumes_sdk.ls())
+    all_volumes = sdk.get(volumes_sdk.ls(reload_config=False),
+                          reload_config=False)
     if all:
         if not all_volumes:
             click.echo('No volumes to delete.')
@@ -4024,8 +4086,8 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                 show_default=True)
 
         try:
-            _async_call_or_wait(volumes_sdk.delete(names), async_call,
-                                'sky.volumes.delete')
+            _async_call_or_wait(volumes_sdk.delete(names, reload_config=False),
+                                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
@@ -4164,7 +4226,10 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    request_id = managed_jobs.launch(dag,
+                                     name,
+                                     _need_confirmation=not yes,
+                                     reload_config=False)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
@@ -4172,7 +4237,8 @@ def jobs_launch(
         returncode = managed_jobs.tail_logs(name=None,
                                             job_id=job_id,
                                             follow=True,
-                                            controller=False)
+                                            controller=False,
+                                            reload_config=False)
         sys.exit(returncode)
 
 
@@ -4253,7 +4319,10 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
     click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         managed_jobs_request_id = managed_jobs.queue(
-            refresh=refresh, skip_finished=skip_finished, all_users=all_users)
+            refresh=refresh,
+            skip_finished=skip_finished,
+            all_users=all_users,
+            reload_config=False)
         max_num_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW if not all else None)
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
@@ -4330,11 +4399,12 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
                       abort=True,
                       show_default=True)
 
-    sdk.stream_and_get(
-        managed_jobs.cancel(job_ids=job_ids,
-                            name=name,
-                            all=all,
-                            all_users=all_users))
+    sdk.stream_and_get(managed_jobs.cancel(job_ids=job_ids,
+                                           name=name,
+                                           all=all,
+                                           all_users=all_users,
+                                           reload_config=False),
+                       reload_config=False)
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
@@ -4383,7 +4453,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                     name=name,
                     job_id=job_id,
                     controller=controller,
-                    refresh=refresh)
+                    refresh=refresh,
+                    reload_config=False)
             style = colorama.Style
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''
@@ -4395,7 +4466,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
-                                                refresh=refresh)
+                                                refresh=refresh,
+                                                reload_config=False)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
@@ -4407,7 +4479,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
-    sdk.dashboard(starting_page='jobs')
+    sdk.dashboard(starting_page='jobs', reload_config=False)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4415,7 +4487,7 @@ def jobs_dashboard():
 @usage_lib.entrypoint
 def dashboard() -> None:
     """Starts the dashboard for skypilot."""
-    sdk.dashboard()
+    sdk.dashboard(reload_config=False)
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -4652,7 +4724,10 @@ def serve_up(
     with sky.Dag() as dag:
         dag.add(task)
 
-    request_id = serve_lib.up(task, service_name, _need_confirmation=not yes)
+    request_id = serve_lib.up(task,
+                              service_name,
+                              _need_confirmation=not yes,
+                              reload_config=False)
     _async_call_or_wait(request_id, async_call, 'sky.serve.up')
 
 
@@ -4757,7 +4832,8 @@ def serve_update(
     request_id = serve_lib.update(task,
                                   service_name,
                                   mode=serve_lib.UpdateMode(mode),
-                                  _need_confirmation=not yes)
+                                  _need_confirmation=not yes,
+                                  reload_config=False)
     _async_call_or_wait(request_id, async_call, 'sky.serve.update')
 
 
@@ -4869,7 +4945,8 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
         service_names_to_query = None
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
-        service_status_request_id = serve_lib.status(service_names_to_query)
+        service_status_request_id = serve_lib.status(service_names_to_query,
+                                                     reload_config=False)
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
                                           show_all=verbose,
@@ -4978,12 +5055,15 @@ def serve_down(
                           show_default=True)
 
     if replica_id_is_defined:
-        request_id = serve_lib.terminate_replica(service_names[0], replica_id,
-                                                 purge)
+        request_id = serve_lib.terminate_replica(service_names[0],
+                                                 replica_id,
+                                                 purge,
+                                                 reload_config=False)
     else:
         request_id = serve_lib.down(service_names=service_names,
                                     all=all,
-                                    purge=purge)
+                                    purge=purge,
+                                    reload_config=False)
     _async_call_or_wait(request_id, async_call, 'sky.serve.down')
 
 
@@ -5082,7 +5162,8 @@ def serve_logs(
             serve_lib.sync_down_logs(service_name,
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
-                                     replica_ids=list(replica_ids))
+                                     replica_ids=list(replica_ids),
+                                     reload_config=False)
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Service {service_name} logs: '
@@ -5124,7 +5205,8 @@ def serve_logs(
         serve_lib.tail_logs(service_name,
                             target=target_component,
                             replica_id=target_replica_id,
-                            follow=follow)
+                            follow=follow,
+                            reload_config=False)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
@@ -5218,8 +5300,14 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
             raise click.BadParameter(
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password)
+    request_id = sdk.local_up(gpus,
+                              ip_list,
+                              ssh_user,
+                              ssh_key,
+                              cleanup,
+                              context_name,
+                              password,
+                              reload_config=False)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -5229,7 +5317,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 @usage_lib.entrypoint
 def local_down(async_call: bool):
     """Deletes a local cluster."""
-    request_id = sdk.local_down()
+    request_id = sdk.local_down(reload_config=False)
     _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
 
@@ -5277,14 +5365,15 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool,
     sdk.api_start(deploy=deploy,
                   host=host,
                   foreground=foreground,
-                  enable_basic_auth=enable_basic_auth)
+                  enable_basic_auth=enable_basic_auth,
+                  reload_config=False)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
-    sdk.api_stop()
+    sdk.api_stop(reload_config=False)
 
 
 @api.command('logs', cls=_DocumentedCodeCommand)
@@ -5318,13 +5407,13 @@ def api_logs(request_id: Optional[str], server_logs: bool,
         # TODO(zhwu): get the latest request ID.
         raise click.BadParameter('Please provide the request ID or log path.')
     if server_logs:
-        sdk.api_server_logs(follow=follow, tail=tail)
+        sdk.api_server_logs(follow=follow, tail=tail, reload_config=False)
         return
 
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(request_id, log_path, tail)
+    sdk.stream_and_get(request_id, log_path, tail, reload_config=False)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
@@ -5347,8 +5436,10 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
             raise click.Abort()
     if all:
         request_ids = None
-    cancelled_request_ids = sdk.get(
-        sdk.api_cancel(request_ids=request_ids, all_users=all_users))
+    cancelled_request_ids = sdk.get(sdk.api_cancel(request_ids=request_ids,
+                                                   all_users=all_users,
+                                                   reload_config=False),
+                                    reload_config=False)
     if not cancelled_request_ids:
         click.secho('No requests need to be cancelled.', fg='green')
     elif len(cancelled_request_ids) == 1:
@@ -5376,7 +5467,7 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
     """List requests on SkyPilot API server."""
     if not request_ids:
         request_ids = None
-    request_list = sdk.api_status(request_ids, all_status)
+    request_list = sdk.api_status(request_ids, all_status, reload_config=False)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
@@ -5439,7 +5530,7 @@ def api_login(endpoint: Optional[str], relogin: bool,
       sky api login -e https://api.example.com --token sky_abc123...
 
     """
-    sdk.api_login(endpoint, relogin, service_account_token)
+    sdk.api_login(endpoint, relogin, service_account_token, reload_config=False)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -5448,7 +5539,7 @@ def api_login(endpoint: Optional[str], relogin: bool,
 def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
-    api_server_info = sdk.api_info()
+    api_server_info = sdk.api_info(reload_config=False)
     api_server_user = api_server_info.get('user')
     if api_server_user is not None:
         user = models.User(id=api_server_user['id'],
@@ -5489,11 +5580,11 @@ def ssh_up(infra: Optional[str], async_call: bool, file: Optional[str]):
     This command sets up a Kubernetes cluster on the machines specified in the
     config file and configures SkyPilot to use it.
     """
-    request_id = sdk.ssh_up(infra=infra, file=file)
+    request_id = sdk.ssh_up(infra=infra, file=file, reload_config=False)
     if async_call:
         print(f'Request submitted with ID: {request_id}')
     else:
-        sdk.stream_and_get(request_id)
+        sdk.stream_and_get(request_id, reload_config=False)
 
 
 @ssh.command('down', cls=_DocumentedCodeCommand)
@@ -5512,11 +5603,11 @@ def ssh_down(infra, async_call):
     This command removes the Kubernetes installation from the machines specified
     in ~/.sky/ssh_node_pools.yaml.
     """
-    request_id = sdk.ssh_down(infra=infra)
+    request_id = sdk.ssh_down(infra=infra, reload_config=False)
     if async_call:
         print(f'Request submitted with ID: {request_id}')
     else:
-        sdk.stream_and_get(request_id)
+        sdk.stream_and_get(request_id, reload_config=False)
 
 
 def main():

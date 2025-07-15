@@ -76,7 +76,8 @@ _LINE_PROCESSED_KEY = 'line_processed'
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
-                    resumable: bool = False) -> Any:
+                    resumable: bool = False,
+                    reload_config: bool = True) -> Any:
     """Streams the response to the console.
 
     Args:
@@ -87,7 +88,8 @@ def stream_response(request_id: Optional[str],
         resumable: Whether the response is resumable on retry. If True, the
             streaming will start from the previous failure point on retry.
     """
-
+    if reload_config:
+        skypilot_config.safe_reload_config()
     retry_context: Optional[rest.RetryContext] = None
     if resumable:
         retry_context = rest.get_retry_context()
@@ -102,7 +104,7 @@ def stream_response(request_id: Optional[str],
                     print(line, flush=True, end='', file=output_stream)
                     retry_context.line_processed = line_count
         if request_id is not None:
-            return get(request_id)
+            return get(request_id, reload_config=False)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -113,7 +115,8 @@ def stream_response(request_id: Optional[str],
 @annotations.client_api
 def check(infra_list: Optional[Tuple[str, ...]],
           verbose: bool,
-          workspace: Optional[str] = None) -> server_common.RequestId:
+          workspace: Optional[str] = None,
+          reload_config: bool = True) -> server_common.RequestId:
     """Checks the credentials to enable clouds.
 
     Args:
@@ -128,6 +131,8 @@ def check(infra_list: Optional[Tuple[str, ...]],
     Request Returns:
         None
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     if infra_list is None:
         clouds = None
     else:
@@ -156,7 +161,8 @@ def check(infra_list: Optional[Tuple[str, ...]],
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def enabled_clouds(workspace: Optional[str] = None,
-                   expand: bool = False) -> server_common.RequestId:
+                   expand: bool = False,
+                   reload_config: bool = True) -> server_common.RequestId:
     """Gets the enabled clouds.
 
     Args:
@@ -170,6 +176,8 @@ def enabled_clouds(workspace: Optional[str] = None,
     Request Returns:
         A list of enabled clouds in string format.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     response = server_common.make_authenticated_request(
@@ -187,7 +195,8 @@ def list_accelerators(gpus_only: bool = True,
                       clouds: Optional[Union[List[str], str]] = None,
                       all_regions: bool = False,
                       require_price: bool = True,
-                      case_sensitive: bool = True) -> server_common.RequestId:
+                      case_sensitive: bool = True,
+                      reload_config: bool = True) -> server_common.RequestId:
     """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
@@ -211,6 +220,8 @@ def list_accelerators(gpus_only: bool = True,
             dictionary of canonical accelerator names mapped to a list of
             instance type offerings. See usage in cli.py.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ListAcceleratorsBody(
         gpus_only=gpus_only,
         name_filter=name_filter,
@@ -234,8 +245,8 @@ def list_accelerator_counts(
         name_filter: Optional[str] = None,
         region_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None,
-        clouds: Optional[Union[List[str],
-                               str]] = None) -> server_common.RequestId:
+        clouds: Optional[Union[List[str], str]] = None,
+        reload_config: bool = True) -> server_common.RequestId:
     """Lists all accelerators offered by Sky and available counts.
 
     Args:
@@ -253,6 +264,8 @@ def list_accelerator_counts(
             accelerator names mapped to a list of available counts. See usage
             in cli.py.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ListAcceleratorCountsBody(
         gpus_only=gpus_only,
         name_filter=name_filter,
@@ -270,11 +283,11 @@ def list_accelerator_counts(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def optimize(
-    dag: 'sky.Dag',
-    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
-) -> server_common.RequestId:
+def optimize(dag: 'sky.Dag',
+             minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+             admin_policy_request_options: Optional[
+                 admin_policy.RequestOptions] = None,
+             reload_config: bool = True) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -295,6 +308,8 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -305,8 +320,10 @@ def optimize(
     return server_common.get_request_id(response)
 
 
-def workspaces() -> server_common.RequestId:
+def workspaces(reload_config: bool = True) -> server_common.RequestId:
     """Gets the workspaces."""
+    if reload_config:
+        skypilot_config.safe_reload_config()
     response = server_common.make_authenticated_request('GET', '/workspaces')
     return server_common.get_request_id(response)
 
@@ -314,11 +331,11 @@ def workspaces() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def validate(
-    dag: 'sky.Dag',
-    workdir_only: bool = False,
-    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
-) -> None:
+def validate(dag: 'sky.Dag',
+             workdir_only: bool = False,
+             admin_policy_request_options: Optional[
+                 admin_policy.RequestOptions] = None,
+             reload_config: bool = True) -> None:
     """Validates the tasks.
 
     The file paths (workdir and file_mounts) are validated on the client side
@@ -334,6 +351,8 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     for task in dag.tasks:
         task.expand_and_validate_workdir()
         if not workdir_only:
@@ -352,8 +371,11 @@ def validate(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def dashboard(starting_page: Optional[str] = None) -> None:
+def dashboard(starting_page: Optional[str] = None,
+              reload_config: bool = True) -> None:
     """Starts the dashboard for SkyPilot."""
+    if reload_config:
+        skypilot_config.safe_reload_config()
     api_server_url = server_common.get_server_url()
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
@@ -366,24 +388,24 @@ def dashboard(starting_page: Optional[str] = None) -> None:
 @annotations.client_api
 @sky_context.contextual
 def launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    cluster_name: Optional[str] = None,
-    retry_until_up: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-    dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
-    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
-    no_setup: bool = False,
-    clone_disk_from: Optional[str] = None,
-    fast: bool = False,
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False,
-    _is_launched_by_jobs_controller: bool = False,
-    _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
-) -> server_common.RequestId:
+        task: Union['sky.Task', 'sky.Dag'],
+        cluster_name: Optional[str] = None,
+        retry_until_up: bool = False,
+        idle_minutes_to_autostop: Optional[int] = None,
+        dryrun: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+        backend: Optional[backends.Backend] = None,
+        optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
+        no_setup: bool = False,
+        clone_disk_from: Optional[str] = None,
+        fast: bool = False,
+        # Internal only:
+        # pylint: disable=invalid-name
+        _need_confirmation: bool = False,
+        _is_launched_by_jobs_controller: bool = False,
+        _is_launched_by_sky_serve_controller: bool = False,
+        _disable_controller_check: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Launches a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
@@ -474,6 +496,8 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -544,7 +568,9 @@ def _launch(
 ) -> server_common.RequestId:
     """Auxiliary function for launch(), refer to launch() for details."""
 
-    validate(dag, admin_policy_request_options=request_options)
+    validate(dag,
+             admin_policy_request_options=request_options,
+             reload_config=False)
     # The flags have been applied to the task YAML and the backward
     # compatibility of admin policy has been handled. We should no longer use
     # these flags.
@@ -554,8 +580,8 @@ def _launch(
     if _need_confirmation:
         cluster_status = None
         # TODO(SKY-998): we should reduce RTTs before launching the cluster.
-        request_id = status([cluster_name], all_users=True)
-        clusters = get(request_id)
+        request_id = status([cluster_name], all_users=True, reload_config=False)
+        clusters = get(request_id, reload_config=False)
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''
         current_user = common_utils.get_current_user_name()
@@ -564,8 +590,9 @@ def _launch(
             # Show the optimize log before the prompt if the cluster does not
             # exist.
             request_id = optimize(dag,
-                                  admin_policy_request_options=request_options)
-            stream_and_get(request_id)
+                                  admin_policy_request_options=request_options,
+                                  reload_config=False)
+            stream_and_get(request_id, reload_config=False)
         else:
             cluster_record = clusters[0]
             cluster_status = cluster_record['status']
@@ -635,12 +662,12 @@ def _launch(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def exec(  # pylint: disable=redefined-builtin
-    task: Union['sky.Task', 'sky.Dag'],
-    cluster_name: Optional[str] = None,
-    dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
-) -> server_common.RequestId:
+        task: Union['sky.Task', 'sky.Dag'],
+        cluster_name: Optional[str] = None,
+        dryrun: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+        backend: Optional[backends.Backend] = None,
+        reload_config: bool = True) -> server_common.RequestId:
     """Executes a task on an existing cluster.
 
     This function performs two actions:
@@ -694,8 +721,10 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    validate(dag, workdir_only=True)
+    validate(dag, workdir_only=True, reload_config=False)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
@@ -721,7 +750,8 @@ def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
               tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None) -> int:
+              output_stream: Optional['io.TextIOBase'] = None,
+              reload_config: bool = True) -> int:
     """Tails the logs of a job.
 
     Args:
@@ -749,6 +779,8 @@ def tail_logs(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ClusterJobBody(
         cluster_name=cluster_name,
         job_id=job_id,
@@ -768,14 +800,16 @@ def tail_logs(cluster_name: str,
     return stream_response(request_id=request_id,
                            response=response,
                            output_stream=output_stream,
-                           resumable=(tail == 0))
+                           resumable=(tail == 0),
+                           reload_config=False)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def download_logs(cluster_name: str,
-                  job_ids: Optional[List[str]]) -> Dict[str, str]:
+                  job_ids: Optional[List[str]],
+                  reload_config: bool = True) -> Dict[str, str]:
     """Downloads the logs of jobs.
 
     Args:
@@ -798,6 +832,8 @@ def download_logs(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.ClusterJobsDownloadLogsBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
@@ -805,7 +841,7 @@ def download_logs(cluster_name: str,
     response = server_common.make_authenticated_request(
         'POST', '/download_logs', json=json.loads(body.model_dump_json()))
     job_id_remote_path_dict = stream_and_get(
-        server_common.get_request_id(response))
+        server_common.get_request_id(response), reload_config=False)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
     return {
@@ -818,12 +854,12 @@ def download_logs(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def start(
-    cluster_name: str,
-    idle_minutes_to_autostop: Optional[int] = None,
-    retry_until_up: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
-    force: bool = False,
-) -> server_common.RequestId:
+        cluster_name: str,
+        idle_minutes_to_autostop: Optional[int] = None,
+        retry_until_up: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+        force: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Restart a cluster.
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -874,6 +910,8 @@ def start(
         sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
             restart was launched by a different user.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.StartBody(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -889,7 +927,9 @@ def start(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
+def down(cluster_name: str,
+         purge: bool = False,
+         reload_config: bool = True) -> server_common.RequestId:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -919,6 +959,8 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
             jobs controller.
 
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
@@ -931,7 +973,9 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
+def stop(cluster_name: str,
+         purge: bool = False,
+         reload_config: bool = True) -> server_common.RequestId:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -964,6 +1008,8 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
             cluster, or a TPU VM Pod cluster, or the managed jobs controller.
 
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
@@ -979,7 +1025,8 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 def autostop(
     cluster_name: str,
     idle_minutes: int,
-    down: bool = False  # pylint: disable=redefined-outer-name
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    reload_config: bool = True
 ) -> server_common.RequestId:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1029,6 +1076,8 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
@@ -1044,7 +1093,8 @@ def autostop(
 @annotations.client_api
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId:
+          all_users: bool = False,
+          reload_config: bool = True) -> server_common.RequestId:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1088,6 +1138,8 @@ def queue(cluster_name: str,
             user identity.
         sky.exceptions.CommandError: if failed to get the job queue with ssh.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.QueueBody(
         cluster_name=cluster_name,
         skip_finished=skip_finished,
@@ -1102,7 +1154,8 @@ def queue(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def job_status(cluster_name: str,
-               job_ids: Optional[List[int]] = None) -> server_common.RequestId:
+               job_ids: Optional[List[int]] = None,
+               reload_config: bool = True) -> server_common.RequestId:
     """Gets the status of jobs on a cluster.
 
     Args:
@@ -1128,6 +1181,8 @@ def job_status(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # TODO: merge this into the queue endpoint, i.e., let the queue endpoint
     # take job_ids to filter the returned jobs.
     body = payloads.JobStatusBody(
@@ -1143,13 +1198,13 @@ def job_status(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def cancel(
-    cluster_name: str,
-    all: bool = False,  # pylint: disable=redefined-builtin
-    all_users: bool = False,
-    job_ids: Optional[List[int]] = None,
-    # pylint: disable=invalid-name
-    _try_cancel_if_cluster_is_init: bool = False
-) -> server_common.RequestId:
+        cluster_name: str,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        job_ids: Optional[List[int]] = None,
+        # pylint: disable=invalid-name
+        _try_cancel_if_cluster_is_init: bool = False,
+        reload_config: bool = True) -> server_common.RequestId:
     """Cancels jobs on a cluster.
 
     Args:
@@ -1180,6 +1235,8 @@ def cancel(
             user identity.
 
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.CancelBody(
         cluster_name=cluster_name,
         all=all,
@@ -1195,11 +1252,10 @@ def cancel(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status(
-    cluster_names: Optional[List[str]] = None,
-    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
-    all_users: bool = False,
-) -> server_common.RequestId:
+def status(cluster_names: Optional[List[str]] = None,
+           refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
+           all_users: bool = False,
+           reload_config: bool = True) -> server_common.RequestId:
     """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
@@ -1275,6 +1331,8 @@ def status(
             }
 
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # TODO(zhwu): this does not stream the logs output by logger back to the
     # user, due to the rich progress implementation.
     body = payloads.StatusBody(
@@ -1290,9 +1348,9 @@ def status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def endpoints(
-        cluster: str,
-        port: Optional[Union[int, str]] = None) -> server_common.RequestId:
+def endpoints(cluster: str,
+              port: Optional[Union[int, str]] = None,
+              reload_config: bool = True) -> server_common.RequestId:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -1312,6 +1370,8 @@ def endpoints(
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.EndpointsBody(
         cluster=cluster,
         port=port,
@@ -1324,7 +1384,10 @@ def endpoints(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylint: disable=redefined-builtin
+def cost_report(
+    days: Optional[int] = None,
+    reload_config: bool = True
+) -> server_common.RequestId:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 
     The estimated cost column indicates price for the cluster based on the type
@@ -1359,6 +1422,8 @@ def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylin
               'total_cost': (float) cost given resources and usage intervals,
             }
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.CostReportBody(days=days)
     response = server_common.make_authenticated_request(
         'POST', '/cost_report', json=json.loads(body.model_dump_json()))
@@ -1369,7 +1434,7 @@ def cost_report(days: Optional[int] = None) -> server_common.RequestId:  # pylin
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_ls() -> server_common.RequestId:
+def storage_ls(reload_config: bool = True) -> server_common.RequestId:
     """Gets the storages.
 
     Returns:
@@ -1390,6 +1455,8 @@ def storage_ls() -> server_common.RequestId:
                 }
         ]
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     response = server_common.make_authenticated_request('GET', '/storage/ls')
     return server_common.get_request_id(response)
 
@@ -1397,7 +1464,8 @@ def storage_ls() -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def storage_delete(name: str) -> server_common.RequestId:
+def storage_delete(name: str,
+                   reload_config: bool = True) -> server_common.RequestId:
     """Deletes a storage.
 
     Args:
@@ -1412,7 +1480,9 @@ def storage_delete(name: str) -> server_common.RequestId:
     Request Raises:
         ValueError: If the storage does not exist.
     """
-    body = payloads.StorageBody(name=name)
+    if reload_config:
+        skypilot_config.safe_reload_config()
+        body = payloads.StorageBody(name=name)
     response = server_common.make_authenticated_request(
         'POST', '/storage/delete', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1430,12 +1500,16 @@ def local_up(gpus: bool,
              ssh_key: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None,
-             password: Optional[str] = None) -> server_common.RequestId:
+             password: Optional[str] = None,
+             reload_config: bool = True) -> server_common.RequestId:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
         request_id: The request ID of the local up request.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
+
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
     # TODO: move this check to server.
@@ -1459,8 +1533,10 @@ def local_up(gpus: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_down() -> server_common.RequestId:
+def local_down(reload_config: bool = True) -> server_common.RequestId:
     """Tears down the Kubernetes cluster started by local_up."""
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # We do not allow local up when the API server is running remotely since it
     # will modify the kubeconfig.
     # TODO: move this check to remote server.
@@ -1534,7 +1610,8 @@ def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def ssh_up(infra: Optional[str] = None,
-           file: Optional[str] = None) -> server_common.RequestId:
+           file: Optional[str] = None,
+           reload_config: bool = True) -> server_common.RequestId:
     """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
 
     Args:
@@ -1546,6 +1623,8 @@ def ssh_up(infra: Optional[str] = None,
     Returns:
         request_id: The request ID of the SSH cluster deployment request.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     if file is not None:
         _update_remote_ssh_node_pools(file, infra)
 
@@ -1567,7 +1646,8 @@ def ssh_up(infra: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
+def ssh_down(infra: Optional[str] = None,
+             reload_config: bool = True) -> server_common.RequestId:
     """Tears down a Kubernetes cluster on SSH targets.
 
     Args:
@@ -1577,6 +1657,8 @@ def ssh_down(infra: Optional[str] = None) -> server_common.RequestId:
     Returns:
         request_id: The request ID of the SSH cluster teardown request.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Use SSH node pools router endpoint
     body = payloads.SSHUpBody(infra=infra, cleanup=True)
     if infra is not None:
@@ -1599,12 +1681,15 @@ def realtime_kubernetes_gpu_availability(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None,
-        is_ssh: Optional[bool] = None) -> server_common.RequestId:
+        is_ssh: Optional[bool] = None,
+        reload_config: bool = True) -> server_common.RequestId:
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
         The request ID of the real-time Kubernetes GPU availability request.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.RealtimeGpuAvailabilityRequestBody(
         context=context,
         name_filter=name_filter,
@@ -1621,8 +1706,8 @@ def realtime_kubernetes_gpu_availability(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def kubernetes_node_info(
-        context: Optional[str] = None) -> server_common.RequestId:
+def kubernetes_node_info(context: Optional[str] = None,
+                         reload_config: bool = True) -> server_common.RequestId:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1642,6 +1727,8 @@ def kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = server_common.make_authenticated_request(
         'POST',
@@ -1653,7 +1740,7 @@ def kubernetes_node_info(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def status_kubernetes() -> server_common.RequestId:
+def status_kubernetes(reload_config: bool = True) -> server_common.RequestId:
     """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -1674,6 +1761,8 @@ def status_kubernetes() -> server_common.RequestId:
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     response = server_common.make_authenticated_request('GET',
                                                         '/status_kubernetes')
     return server_common.get_request_id(response)
@@ -1682,7 +1771,7 @@ def status_kubernetes() -> server_common.RequestId:
 # === API request APIs ===
 @usage_lib.entrypoint
 @annotations.client_api
-def get(request_id: str) -> Any:
+def get(request_id: str, reload_config: bool = True) -> Any:
     """Waits for and gets the result of a request.
 
     This function will not check the server health since /api/get is typically
@@ -1701,6 +1790,8 @@ def get(request_id: str) -> Any:
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     response = server_common.make_authenticated_request(
         'GET',
         f'/api/get?request_id={request_id}',
@@ -1743,13 +1834,12 @@ def get(request_id: str) -> Any:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stream_and_get(
-    request_id: Optional[str] = None,
-    log_path: Optional[str] = None,
-    tail: Optional[int] = None,
-    follow: bool = True,
-    output_stream: Optional['io.TextIOBase'] = None,
-) -> Any:
+def stream_and_get(request_id: Optional[str] = None,
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None,
+                   reload_config: bool = True) -> Any:
     """Streams the logs of a request or a log file and gets the final result.
 
     This will block until the request is finished. The request id can be a
@@ -1773,6 +1863,8 @@ def stream_and_get(
             see ``Request Raises`` in the documentation of the specific requests
             above.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     params = {
         'request_id': request_id,
         'log_path': log_path,
@@ -1793,15 +1885,19 @@ def stream_and_get(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
-        return get(request_id)
-    return stream_response(request_id, response, output_stream)
+        return get(request_id, reload_config=False)
+    return stream_response(request_id,
+                           response,
+                           output_stream,
+                           reload_config=False)
 
 
 @usage_lib.entrypoint
 @annotations.client_api
 def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
                all_users: bool = False,
-               silent: bool = False) -> server_common.RequestId:
+               silent: bool = False,
+               reload_config: bool = True) -> server_common.RequestId:
     """Aborts a request or all requests.
 
     Args:
@@ -1820,6 +1916,8 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         click.BadParameter: If no request ID is specified and not all or
             all_users is not set.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     echo = logger.info if not silent else logger.debug
     user_id = None
     if not all_users:
@@ -1852,10 +1950,10 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
-    request_ids: Optional[List[str]] = None,
-    # pylint: disable=redefined-builtin
-    all_status: bool = False
-) -> List[payloads.RequestPayload]:
+        request_ids: Optional[List[str]] = None,
+        # pylint: disable=redefined-builtin
+        all_status: bool = False,
+        reload_config: bool = True) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
     Args:
@@ -1867,6 +1965,8 @@ def api_status(
     Returns:
         A list of request payloads.
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
     response = server_common.make_authenticated_request(
@@ -1883,7 +1983,7 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def api_info() -> Dict[str, Any]:
+def api_info(reload_config: bool = True) -> Dict[str, Any]:
     """Gets the server's status, commit and version.
 
     Returns:
@@ -1906,6 +2006,8 @@ def api_info() -> Dict[str, Any]:
         Note that user may be None if we are not using an auth proxy.
 
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
     return response.json()
@@ -1913,15 +2015,14 @@ def api_info() -> Dict[str, Any]:
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_start(
-    *,
-    deploy: bool = False,
-    host: str = '127.0.0.1',
-    foreground: bool = False,
-    metrics: bool = False,
-    metrics_port: Optional[int] = None,
-    enable_basic_auth: bool = False,
-) -> None:
+def api_start(*,
+              deploy: bool = False,
+              host: str = '127.0.0.1',
+              foreground: bool = False,
+              metrics: bool = False,
+              metrics_port: Optional[int] = None,
+              enable_basic_auth: bool = False,
+              reload_config: bool = True) -> None:
     """Starts the API server.
 
     It checks the existence of the API server and starts it if it does not
@@ -1941,6 +2042,8 @@ def api_start(
     Returns:
         None
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     if deploy:
         host = '0.0.0.0'
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
@@ -1971,7 +2074,7 @@ def api_start(
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_stop() -> None:
+def api_stop(reload_config: bool = True) -> None:
     """Stops the API server.
 
     It will do nothing if the API server is remotely hosted.
@@ -1979,6 +2082,8 @@ def api_stop() -> None:
     Returns:
         None
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
     if not server_common.is_api_server_local():
@@ -2008,7 +2113,9 @@ def api_stop() -> None:
 # Use the same args as `docker logs`
 @usage_lib.entrypoint
 @annotations.client_api
-def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
+def api_server_logs(follow: bool = True,
+                    tail: Optional[int] = None,
+                    reload_config: bool = True) -> None:
     """Streams the API server logs.
 
     Args:
@@ -2019,6 +2126,8 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
     Returns:
         None
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     if server_common.is_api_server_local():
         tail_args = ['-f'] if follow else []
         if tail is None:
@@ -2028,7 +2137,9 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
-        stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
+        stream_and_get(log_path=constants.API_SERVER_LOGS,
+                       tail=tail,
+                       reload_config=False)
 
 
 def _save_config_updates(endpoint: Optional[str] = None,
@@ -2077,7 +2188,8 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
               relogin: bool = False,
-              service_account_token: Optional[str] = None) -> None:
+              service_account_token: Optional[str] = None,
+              reload_config: bool = True) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -2095,6 +2207,8 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    if reload_config:
+        skypilot_config.safe_reload_config()
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
