@@ -3252,7 +3252,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _sync_git_workdir(self, handle: CloudVmRayResourceHandle,
                           envs_and_secrets: Dict[str, str]) -> None:
-        fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
         assert ip_list is not None, 'external_ips is not cached in handle'
@@ -3264,6 +3263,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         def _sync_git_workdir_node(
                 runner: command_runner.CommandRunner) -> None:
+            # Type assertion to help mypy understand the type
+            assert hasattr(
+                runner, 'git_clone'
+            ), f'CommandRunner should have git_clone method, ' \
+                f'got {type(runner)}'
             runner.git_clone(
                 target_dir=SKY_REMOTE_WORKDIR,
                 log_path=log_path,

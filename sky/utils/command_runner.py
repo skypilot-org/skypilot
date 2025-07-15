@@ -488,7 +488,8 @@ class CommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             connect_timeout: timeout in seconds for the connection.
-            envs_and_secrets: Environment variables and secrets to be set before running the script.
+            envs_and_secrets: Environment variables and secrets to be set
+              before running the script.
         Raises:
             exceptions.CommandError: git clone command failed.
         """
@@ -497,7 +498,7 @@ class CommandRunner:
             os.path.dirname(os.path.abspath(__file__)), 'git_clone.sh')
 
         if not os.path.exists(git_clone_script_path):
-            error_msg = f'git_clone.sh script not found at {git_clone_script_path}'
+            error_msg = f'git_clone.sh {git_clone_script_path} not found'
             logger.error(error_msg)
             raise exceptions.CommandError(1, '', error_msg, None)
 
@@ -526,7 +527,8 @@ class CommandRunner:
         if envs_and_secrets:
             for key, value in envs_and_secrets.items():
                 cmd += f'export {key}={value} && '
-        cmd += f'bash {quoted_script_path} {quoted_target_dir} && rm -f {quoted_script_path}'
+        cmd += (f'bash {quoted_script_path} {quoted_target_dir} '
+                f'&& rm -f {quoted_script_path}')
 
         logger.debug(f'Running git clone script on {self.node_id}: {cmd}')
 

@@ -482,8 +482,6 @@ def _parse_override_params(
     network_tier: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     config_override: Optional[Dict[str, Any]] = None,
-    git_url: Optional[str] = None,
-    git_ref: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
