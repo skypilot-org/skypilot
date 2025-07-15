@@ -706,9 +706,10 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             continue
         if 'workdir' in task_config:
             workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
+            if isinstance(workdir, str):
+                task_config['workdir'] = str(
+                    client_file_mounts_dir /
+                    file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

@@ -880,7 +880,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         copy_mounts = {}
 
     has_local_source_paths_file_mounts = bool(copy_mounts)
-    has_local_source_paths_workdir = task.workdir is not None
+    has_local_source_paths_workdir = (task.workdir is not None and
+                                      isinstance(task.workdir, str))
 
     msg = None
     if has_local_source_paths_workdir and has_local_source_paths_file_mounts:

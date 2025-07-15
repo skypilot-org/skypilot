@@ -235,7 +235,7 @@ class GitRepo:
             logger.debug(f'Public access failed: {str(e)}')
 
         # Step 2: Try with token if provided
-        if self.git_token:
+        if self.git_token and self._parsed_url.protocol == 'https':
             try:
                 https_url = self.get_https_url()
                 auth_url = self.get_https_url(with_token=True)
