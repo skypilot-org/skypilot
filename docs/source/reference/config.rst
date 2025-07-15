@@ -28,6 +28,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
+    :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -207,7 +208,23 @@ Example:
 
 Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
 
+.. _config-yaml-api-server-requests-gc-retention-hours:
 
+``api_server.requests_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for finished requests in hours (optional). Set to a negative value to disable requests GC.
+
+Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
+
+Default: ``24`` (1 day).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    requests_retention_hours: -1 # Disable requests GC
 
 .. _config-yaml-jobs:
 
@@ -1264,10 +1281,11 @@ Example:
 .. code-block:: yaml
 
     nebius:
-        :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-        :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+        use_internal_ips: true
+        ssh_proxy_command:
           eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
           eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+        tenant_id: tenant-1234567890
         # Region-specific configuration
         eu-north1:
             # Project identifier for this region
@@ -1330,6 +1348,21 @@ Example:
     ssh_proxy_command:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
+.. _config-yaml-nebius-tenant-id:
+
+``nebius.tenant_id``
+~~~~~~~~~~~~~~~~~~~~
+
+Nebius tenant ID (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    tenant_id: tenant-1234567890
+
 
 .. _config-yaml-rbac:
 

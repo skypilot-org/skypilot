@@ -870,6 +870,9 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
+            '_metadata': {
+                'type': 'object',
+            },
             **_experimental_task_schema(),
         }
     }
@@ -1103,6 +1106,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'remote_identity': {
+        'type': 'string',
+    }
 }
 
 
@@ -1448,6 +1454,9 @@ def get_config_schema():
                         'type': 'null',
                     }
                 ]
+            },
+            'requests_retention_hours': {
+                'type': 'integer',
             },
         }
     }

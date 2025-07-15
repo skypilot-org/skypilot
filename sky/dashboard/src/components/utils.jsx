@@ -455,7 +455,7 @@ export function TimestampWithTooltip({ date }) {
     hour12: true,
     timeZoneName: 'short',
   });
-  const fullLocalTimestamp = dateStr + ', ' + timeStr;
+  const fullLocalTimestamp = dateStr + ' ' + timeStr;
 
   let displayText;
   // Always show relative time with shortened format
@@ -493,5 +493,5 @@ export function formatFullTimestamp(date) {
     hour12: true,
     timeZoneName: 'short',
   });
-  return dateStr + ', ' + timeStr;
+  return dateStr + ' ' + timeStr;
 }

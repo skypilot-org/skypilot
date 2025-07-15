@@ -1730,6 +1730,8 @@ class Resources:
         if (blocked.accelerators is not None and
                 self.accelerators != blocked.accelerators):
             is_matched = False
+        if blocked.use_spot is not None and self.use_spot != blocked.use_spot:
+            is_matched = False
         return is_matched
 
     def is_empty(self) -> bool:
