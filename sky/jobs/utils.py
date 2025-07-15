@@ -68,6 +68,7 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_STATUS_FETCH_MAX_RETRIES = 3
+_JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -266,7 +267,8 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         except exceptions.CommandError as e:
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
-            if 'Unable to connect to the server: dial tcp' in e.detailed_reason:
+            if (e.detailed_reason is not None and
+                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
                 logger.info('Failed to connect to the cluster. Retrying '
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 logger.info('=' * 34)
