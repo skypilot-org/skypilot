@@ -127,19 +127,19 @@ class LazyDataFrame:
     We don't need to load the catalog for every SkyPilot call, and this class
     allows us to load the catalog only when needed.
 
-    Use update_func to pass in a function that decides whether to update the
-    catalog on disk, updates it if needed, and returns a bool indicating
-    whether the update was done.
+    Use update_if_stale_func to pass in a function that decides whether to
+    update the catalog on disk, updates it if needed, and returns
+    a bool indicating whether the update was done.
     """
 
-    def __init__(self, filename: str, update_func: Callable[[], bool]):
+    def __init__(self, filename: str, update_if_stale_func: Callable[[], bool]):
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
-        self._update_func = update_func
+        self.update_if_stale_func = update_if_stale_func
 
     @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
-        if self._update_func() or self._df is None:
+        if self.update_if_stale_func() or self._df is None:
             try:
                 self._df = pd.read_csv(self._filename)
             except Exception as e:  # pylint: disable=broad-except
@@ -251,7 +251,7 @@ def read_catalog(filename: str,
             logger.debug(f'Updated {cloud} catalog {filename}.')
         return True
 
-    return LazyDataFrame(catalog_path, update_func=_update_catalog)
+    return LazyDataFrame(catalog_path, update_if_stale_func=_update_catalog)
 
 
 def _get_instance_type(

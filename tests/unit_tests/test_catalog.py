@@ -55,7 +55,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         mock_get.return_value = DummyResponse(NEW_DUMMY_CSV)
 
         # We haven't cleared annotations.FUNCTIONS_NEED_RELOAD_CACHE,
-        # so _load_df should still be cached and update_func
+        # so _load_df should still be cached and update_if_stale_func
         # should not be called, i.e. the file on disk and
         # DataFrame should not be updated.
         df.head()
@@ -65,7 +65,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
         for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
             func.cache_clear()
 
-        # Now update_func should be called and should trigger a new fetch.
+        # Now update_if_stale_func should be called and should trigger a new fetch.
         df.head()
         # The file and DataFrame should match NEW_DUMMY_CSV.
         with open(abs_catalog_path) as f:
