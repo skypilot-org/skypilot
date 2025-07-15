@@ -101,7 +101,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('original_user_yaml_path',
                       sqlalchemy.Text,
                       server_default=None),
-    sqlalchemy.Column('pool_manager', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('pool', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('current_cluster_name',
                       sqlalchemy.Text,
                       server_default=None),
@@ -213,7 +213,7 @@ def create_table():
         db_utils.add_column_to_table_sqlalchemy(
             session,
             'job_info',
-            'pool_manager',
+            'pool',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
         db_utils.add_column_to_table_sqlalchemy(
@@ -309,7 +309,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'priority': r['priority'],
         'entrypoint': r['entrypoint'],
         'original_user_yaml_path': r['original_user_yaml_path'],
-        'pool_manager': r['pool_manager'],
+        'pool': r['pool'],
         'current_cluster_name': r['current_cluster_name'],
         'job_id_on_pm': r['job_id_on_pm'],
     }
@@ -549,7 +549,7 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
 
 @_init_db
 def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
-                                pool_manager: Optional[str]) -> int:
+                                pool: Optional[str]) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -566,7 +566,7 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
             schedule_state=ManagedJobScheduleState.INACTIVE.value,
             workspace=workspace,
             entrypoint=entrypoint,
-            pool_manager=pool_manager,
+            pool=pool,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -1351,14 +1351,14 @@ def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
 
 
 @_init_db
-def get_pool_manager_from_job_id(job_id: int) -> Optional[str]:
-    """Get the pool manager from the job id."""
+def get_pool_from_job_id(job_id: int) -> Optional[str]:
+    """Get the pool from the job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        pool_manager = session.execute(
-            sqlalchemy.select(job_info_table.c.pool_manager).where(
+        pool = session.execute(
+            sqlalchemy.select(job_info_table.c.pool).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()
-        return pool_manager[0] if pool_manager else None
+        return pool[0] if pool else None
 
 
 @_init_db
@@ -1385,7 +1385,7 @@ def get_current_cluster_name_from_job_id(job_id: int) -> Optional[str]:
 
 @_init_db
 def set_job_id_on_pm(job_id: int, job_id_on_pm: int) -> None:
-    """Set the job id on the pool manager for the job id."""
+    """Set the job id on the pool for the job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(job_info_table).filter(
@@ -1396,7 +1396,7 @@ def set_job_id_on_pm(job_id: int, job_id_on_pm: int) -> None:
 
 @_init_db
 def get_job_id_on_pm_from_job_id(job_id: int) -> Optional[int]:
-    """Get the job id on the pool manager from the job id."""
+    """Get the job id on the pool from the job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         job_id_on_pm = session.execute(
@@ -1530,7 +1530,7 @@ def get_num_launching_jobs() -> int:
 
 
 @_init_db
-def get_num_alive_jobs(pool_manager: Optional[str] = None) -> int:
+def get_num_alive_jobs(pool: Optional[str] = None) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         where_conditions = [
@@ -1542,9 +1542,8 @@ def get_num_alive_jobs(pool_manager: Optional[str] = None) -> int:
             ])
         ]
 
-        if pool_manager is not None:
-            where_conditions.append(
-                job_info_table.c.pool_manager == pool_manager)
+        if pool is not None:
+            where_conditions.append(job_info_table.c.pool == pool)
 
         return session.execute(
             sqlalchemy.select(
@@ -1554,7 +1553,7 @@ def get_num_alive_jobs(pool_manager: Optional[str] = None) -> int:
 
 
 @_init_db
-def get_waiting_job(pool_manager: Optional[str]) -> Optional[Dict[str, Any]]:
+def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job, provided its
@@ -1585,14 +1584,14 @@ def get_waiting_job(pool_manager: Optional[str]) -> Optional[Dict[str, Any]]:
             job_info_table.c.priority >= sqlalchemy.func.coalesce(
                 max_priority_subquery, 0),
         ]
-        if pool_manager is not None:
-            select_conds.append(job_info_table.c.pool_manager == pool_manager)
+        if pool is not None:
+            select_conds.append(job_info_table.c.pool == pool)
         query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
             job_info_table.c.dag_yaml_path,
             job_info_table.c.env_file_path,
-            job_info_table.c.pool_manager,
+            job_info_table.c.pool,
         ).where(sqlalchemy.and_(*select_conds)).order_by(
             job_info_table.c.priority.desc(),
             job_info_table.c.spot_job_id.asc(),
@@ -1606,7 +1605,7 @@ def get_waiting_job(pool_manager: Optional[str]) -> Optional[Dict[str, Any]]:
             'schedule_state': ManagedJobScheduleState(waiting_job_row[1]),
             'dag_yaml_path': waiting_job_row[2],
             'env_file_path': waiting_job_row[3],
-            'pool_manager': waiting_job_row[4],
+            'pool': waiting_job_row[4],
         }
 
 

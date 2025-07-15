@@ -273,7 +273,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # After that, we will have a mapping from replica port to endpoint.
             # load_balancer_process = multiprocessing.Process(
             #     target=ux_utils.RedirectOutputForProcess(
-            #         pool_manager.run_pool_manager,
+            #         pool.run_pool,
             #         load_balancer_log_file).run,
             #     args=(controller_addr, load_balancer_port,
             #           service_spec.load_balancing_policy,

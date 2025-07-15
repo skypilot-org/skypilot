@@ -87,8 +87,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
-def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
-                              pool_manager: Optional[str],
+def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
                               batch_size: Optional[int]) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
@@ -111,7 +110,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 workspace=skypilot_config.get_active_workspace(
                     force_user_workspace=True),
                 entrypoint=common_utils.get_current_command(),
-                pool_manager=pool_manager))
+                pool=pool))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
@@ -126,7 +125,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
-    pool_manager: Optional[str] = None,
+    pool: Optional[str] = None,
     batch_size: Optional[int] = None,
     stream_logs: bool = True,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
@@ -257,7 +256,7 @@ def launch(
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
     consolidation_mode_job_ids = _maybe_submit_job_locally(
-        prefix, dag, pool_manager, batch_size)
+        prefix, dag, pool, batch_size)
 
     file_mount_synced = False
 
@@ -302,7 +301,7 @@ def launch(
                 'modified_catalogs': modified_catalogs,
                 'priority': priority,
                 'consolidation_mode_job_id': consolidation_mode_job_id,
-                'pool_manager': pool_manager,
+                'pool': pool,
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,

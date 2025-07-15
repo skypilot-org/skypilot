@@ -52,10 +52,10 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_pm_filelock_path(pool_manager: Optional[str]) -> str:
+def _get_pm_filelock_path(pool: Optional[str]) -> str:
     path = pathlib.Path(constants.SKYSERVE_METADATA_DIR)
-    if pool_manager is not None:
-        path = path / pool_manager
+    if pool is not None:
+        path = path / pool
     path = path / 'pm.lock'
     path = path.expanduser().absolute()
     path.parents[0].mkdir(parents=True, exist_ok=True)
@@ -676,7 +676,7 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
         rid = int(cluster_name.split('-')[-1])
         current_jid = serve_state.get_replica_job_id(service_name, rid)
         if current_jid is None:
-            logger.error(f'Failed to release cluster {cluster_name!r} - '
+            logger.info(f'Skip releasing cluster {cluster_name!r}: '
                          f'cluster not in use.')
             return
         serve_state.set_replica_job_id(service_name, rid, None)

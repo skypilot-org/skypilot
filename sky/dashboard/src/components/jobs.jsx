@@ -997,9 +997,9 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('pool_manager')}
+                onClick={() => requestSort('pool')}
               >
-                Worker Pool{getSortDirection('pool_manager')}
+                Worker Pool{getSortDirection('pool')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -1111,7 +1111,7 @@ export function ManagedJobsTable({
                         </NonCapitalizedTooltip>
                       </TableCell>
                       <TableCell>{item.recoveries}</TableCell>
-                      <TableCell>{item.pool_manager || '-'}</TableCell>
+                      <TableCell>{item.pool || '-'}</TableCell>
                       <TableCell>{item.current_cluster_name || '-'}</TableCell>
                       <TableCell>{item.job_id_on_pm || '-'}</TableCell>
                       <TableCell>

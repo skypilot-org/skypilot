@@ -4060,12 +4060,12 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@click.option('--pool-manager',
+@click.option('--pool',
               '-p',
               default=None,
               type=str,
               required=False,
-              help='Which pool manager to use for batch jobs submission.')
+              help='Which pool to use for batch jobs submission.')
 @click.option('--batch-size',
               '-b',
               default=None,
@@ -4101,7 +4101,7 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
-    pool_manager: Optional[str],
+    pool: Optional[str],
     batch_size: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
@@ -4120,12 +4120,10 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
-    if pool_manager is None and batch_size is not None:
-        raise click.UsageError(
-            'Cannot specify --batch-size without --pool-manager.')
-    if pool_manager is not None and batch_size is None:
-        raise click.UsageError(
-            'Cannot specify --pool-manager without --batch-size.')
+    if pool is None and batch_size is not None:
+        raise click.UsageError('Cannot specify --batch-size without --pool.')
+    if pool is not None and batch_size is None:
+        raise click.UsageError('Cannot specify --pool without --batch-size.')
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -4175,9 +4173,9 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    if pool_manager is not None:
+    if pool is not None:
         click.secho(
-            f'Submitting to pool {colorama.Fore.CYAN}{pool_manager!r}'
+            f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
             f'{colorama.Style.RESET_ALL} with batch size '
             f'{colorama.Fore.CYAN}{batch_size}{colorama.Style.RESET_ALL}.')
 
@@ -4189,12 +4187,12 @@ def jobs_launch(
 
     request_id = managed_jobs.launch(dag,
                                      name,
-                                     pool_manager,
+                                     pool,
                                      batch_size,
                                      _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
-    if pool_manager is None:
+    if pool is None:
         if not async_call and not detach_run:
             job_id = job_id_handle[0]
             returncode = managed_jobs.tail_logs(name=None,

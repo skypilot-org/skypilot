@@ -149,7 +149,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         events: events,
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
-        pool_manager: job.pool_manager,
+        pool: job.pool,
         current_cluster_name: job.current_cluster_name,
         job_id_on_pm: job.job_id_on_pm,
       };

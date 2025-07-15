@@ -51,8 +51,7 @@ class StrategyExecutor:
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int, task_id: int,
-                 pool_manager: Optional[str]) -> None:
+                 job_id: int, task_id: int, pool: Optional[str]) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -70,14 +69,14 @@ class StrategyExecutor:
         self.job_id = job_id
         self.task_id = task_id
         self.restart_cnt_on_failure = 0
-        assert pool_manager is not None
-        self.pool_manager = pool_manager
+        assert pool is not None
+        self.pool = pool
         self.job_id_on_pm: int = -1
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
              task: 'task_lib.Task', job_id: int, task_id: int,
-             pool_manager: Optional[str]) -> 'StrategyExecutor':
+             pool: Optional[str]) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
@@ -109,7 +108,7 @@ class StrategyExecutor:
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
                                      max_restarts_on_errors, job_id, task_id,
-                                     pool_manager)
+                                     pool)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -297,10 +296,10 @@ class StrategyExecutor:
                     try:
                         usage_lib.messages.usage.set_internal()
                         cluster_name = serve_utils.get_next_cluster_name(
-                            self.pool_manager, self.job_id)
+                            self.pool, self.job_id)
                         if cluster_name is None:
                             raise exceptions.NoClusterLaunchedError(
-                                'No cluster name found in the pool manager.')
+                                'No cluster name found in the pool.')
                         self.cluster_name = cluster_name
                         state.set_current_cluster_name(self.job_id,
                                                        self.cluster_name)
@@ -383,7 +382,7 @@ class StrategyExecutor:
 
                     # If we get here, the launch did not succeed. Tear down the
                     # cluster and retry.
-                    serve_utils.release_cluster_name(self.pool_manager,
+                    serve_utils.release_cluster_name(self.pool,
                                                      self.cluster_name)
                     if max_retry is not None and retry_cnt >= max_retry:
                         # Retry forever if max_retry is None.
@@ -443,10 +442,9 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
-                 job_id: int, task_id: int,
-                 pool_manager: Optional[str]) -> None:
+                 job_id: int, task_id: int, pool: Optional[str]) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
-                         job_id, task_id, pool_manager)
+                         job_id, task_id, pool)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
@@ -503,8 +501,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
             # Step 2
             logger.debug('Terminating unhealthy cluster and reset cloud '
                          'region.')
-            serve_utils.release_cluster_name(self.pool_manager,
-                                             self.cluster_name)
+            serve_utils.release_cluster_name(self.pool, self.cluster_name)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
@@ -563,7 +560,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
 
         # Step 1
         logger.debug('Terminating unhealthy cluster and reset cloud region.')
-        serve_utils.release_cluster_name(self.pool_manager, self.cluster_name)
+        serve_utils.release_cluster_name(self.pool, self.cluster_name)
 
         # Step 2
         logger.debug('Relaunch the cluster skipping the previously launched '

@@ -57,8 +57,8 @@ run: |
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
     {%- endif %}
     --env-file {{remote_env_file_path}} \
-    {%- if pool_manager is not none %}
-    --pool-manager {{pool_manager}} \
+    {%- if pool is not none %}
+    --pool {{pool}} \
     {%- endif %}
     --priority {{priority}}
 
