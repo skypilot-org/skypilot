@@ -104,7 +104,7 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # Fixed IP addresses are used to avoid DNS lookup blocking the check, for
 # machine with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
+_TEST_IP_LIST = ['https://8.8.8.8', 'https://1.1.1.1']
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -1638,11 +1638,11 @@ def check_network_connection():
     http = requests.Session()
     http.mount('https://', adapters.HTTPAdapter())
     http.mount('http://', adapters.HTTPAdapter())
-    
+
     # Alternate between IPs on each retry
     max_retries = 3
     timeout = 0.5
-    
+
     for _ in range(max_retries):
         for ip in _TEST_IP_LIST:
             try:
@@ -1650,9 +1650,9 @@ def check_network_connection():
                 return
             except (requests.Timeout, requests.exceptions.ConnectionError):
                 continue
-        
+
         timeout *= 2  # Double the timeout for next retry
-    
+
     # If we get here, all IPs failed
     # Assume network connection is down
     raise exceptions.NetworkError('Could not refresh the cluster. '
