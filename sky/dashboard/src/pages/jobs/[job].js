@@ -1014,6 +1014,37 @@ function JobDetailsContent({
           {jobData.resources_str_full || jobData.resources_str || '-'}
         </div>
       </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Git Commit</div>
+        <div className="text-base mt-1 flex items-center">
+          {jobData.git_commit && jobData.git_commit !== '-' ? (
+            <span className="flex items-center mr-2">
+              {jobData.git_commit}
+              <Tooltip
+                content={isCopied ? 'Copied!' : 'Copy commit'}
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(jobData.git_commit);
+                    setIsCopied(true);
+                    setTimeout(() => setIsCopied(false), 2000);
+                  }}
+                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                >
+                  {isCopied ? (
+                    <CheckIcon className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <CopyIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </Tooltip>
+            </span>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
 
       {/* Entrypoint section - spans both columns */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
