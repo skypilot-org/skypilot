@@ -111,7 +111,7 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
 )
 
 # Image ID tags
-_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
+_DEFAULT_CPU_IMAGE_ID = 'skypilot-gcp-cpu-ubuntu-250715'
 # For GPU-related package version, see sky/clouds/catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
