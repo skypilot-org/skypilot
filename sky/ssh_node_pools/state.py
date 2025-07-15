@@ -10,13 +10,12 @@ from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 
 from sky import sky_logging
+from sky import skypilot_config
+from sky.skylet import constants as sky_constants
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import models
 from sky.utils import common_utils
 from sky.utils import db_utils
-
-# TODO(kyuds): we need to support Postgres in the future.
-# currently, only using sqlite3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -41,7 +40,8 @@ def _create_table():
                 raise
 
     # create table if they don't exist
-    models.SSHBase.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+    db_utils.add_tables_to_db_sqlalchemy(models.SSHBase.metadata,
+                                         _SQLALCHEMY_ENGINE)
 
 
 def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
@@ -51,10 +51,19 @@ def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
 
     with _DB_INIT_LOCK:
         if _SQLALCHEMY_ENGINE is None:
-            db_path = os.path.expanduser(constants.SKYSSH_DB_PATH)
-            Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
-            _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
-                                                          db_path)
+            conn_string = None
+            if os.environ.get(
+                    sky_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+                conn_string = skypilot_config.get_nested(('db',), None)
+            if conn_string:
+                logger.debug(f'using db URI from {conn_string}')
+                engine = sqlalchemy.create_engine(conn_string,
+                                                  poolclass=sqlalchemy.NullPool)
+            else:
+                db_path = os.path.expanduser(constants.SKYSSH_DB_PATH)
+                Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+            _SQLALCHEMY_ENGINE = engine
             _create_table()
 
     return _SQLALCHEMY_ENGINE
