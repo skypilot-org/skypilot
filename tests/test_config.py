@@ -1034,6 +1034,7 @@ def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
         default_value=[])
     assert len(filesystems) == 2
 
+
 def test_nebius_region_configs_back_compat(monkeypatch, tmp_path) -> None:
     """Test that nested per-region nebius config works with legacy yaml"""
     from sky.provision.kubernetes import utils as kubernetes_utils
