@@ -50,7 +50,7 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
-import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
+import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import Link from 'next/link';
 
 // Workspace configuration description component
@@ -460,7 +460,7 @@ export function Workspaces() {
 
   const sortedWorkspaces = React.useMemo(() => {
     if (!workspaceDetails) return [];
-    
+
     // First apply search filter
     let filtered = workspaceDetails;
     if (searchQuery && searchQuery.trim() !== '') {
@@ -470,16 +470,21 @@ export function Workspaces() {
         if (workspace.name.toLowerCase().includes(searchLower)) {
           return true;
         }
-        
+
         // Check infrastructure clouds (both original and canonical names)
-        if (workspace.clouds.some((cloud) => {
-          const canonicalCloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud;
-          return cloud.toLowerCase().includes(searchLower) || 
-                 canonicalCloudName.toLowerCase().includes(searchLower);
-        })) {
+        if (
+          workspace.clouds.some((cloud) => {
+            const canonicalCloudName =
+              CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud;
+            return (
+              cloud.toLowerCase().includes(searchLower) ||
+              canonicalCloudName.toLowerCase().includes(searchLower)
+            );
+          })
+        ) {
           return true;
         }
-        
+
         // Check public/private status
         const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
         const isPrivate = workspaceConfig.private === true;
@@ -487,11 +492,11 @@ export function Workspaces() {
         if (status.includes(searchLower)) {
           return true;
         }
-        
+
         return false;
       });
     }
-    
+
     // Then apply sorting
     return sortData(filtered, sortConfig.key, sortConfig.direction);
   }, [workspaceDetails, sortConfig, searchQuery, rawWorkspacesData]);
@@ -648,7 +653,7 @@ export function Workspaces() {
           onDismiss={() => setTopLevelError(null)}
         />
       </div>
-      
+
       {/* Header */}
       <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
@@ -780,11 +785,15 @@ export function Workspaces() {
                 ) : sortedWorkspaces.length > 0 ? (
                   sortedWorkspaces.map((workspace) => {
                     // Get the workspace configuration to check if it's private
-                    const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
+                    const workspaceConfig =
+                      rawWorkspacesData?.[workspace.name] || {};
                     const isPrivate = workspaceConfig.private === true;
 
                     return (
-                      <TableRow key={workspace.name} className="hover:bg-gray-50">
+                      <TableRow
+                        key={workspace.name}
+                        className="hover:bg-gray-50"
+                      >
                         <TableCell className="">
                           <button
                             onClick={() => handleEditWorkspace(workspace.name)}
@@ -807,7 +816,8 @@ export function Workspaces() {
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
                           >
-                            {workspace.runningClusterCount} running, {workspace.totalClusterCount} total
+                            {workspace.runningClusterCount} running,{' '}
+                            {workspace.totalClusterCount} total
                           </button>
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
@@ -825,8 +835,10 @@ export function Workspaces() {
                         </TableCell>
                         <TableCell className="hidden lg:table-cell">
                           {workspace.clouds.length > 0 ? (
-                            workspace.clouds.sort().map((cloud, index) => {
-                              const canonicalCloudName = CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud;
+                            [...workspace.clouds].sort().map((cloud, index) => {
+                              const canonicalCloudName =
+                                CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] ||
+                                cloud;
                               return (
                                 <span key={cloud}>
                                   <Link
@@ -856,8 +868,12 @@ export function Workspaces() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDeleteWorkspace(workspace.name)}
-                            disabled={workspace.name === 'default' || roleLoading}
+                            onClick={() =>
+                              handleDeleteWorkspace(workspace.name)
+                            }
+                            disabled={
+                              workspace.name === 'default' || roleLoading
+                            }
                             title={
                               workspace.name === 'default'
                                 ? 'Cannot delete default workspace'

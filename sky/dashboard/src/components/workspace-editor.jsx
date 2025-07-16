@@ -43,7 +43,7 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
-import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
+import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUsers } from '@/data/connectors/users';
 
 // Success display component
@@ -93,7 +93,7 @@ const WorkspaceConfigDescription = ({
     }
 
     const cloudName =
-      CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
+      CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
     const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
 
     if (cloudConfig?.disabled === true) {
