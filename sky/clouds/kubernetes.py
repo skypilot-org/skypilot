@@ -614,12 +614,9 @@ class Kubernetes(clouds.Cloud):
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
                     not in unsupported_features:
                 # Add high-performance networking environment variables for
-                # Nebius (GCP environment variables are handled directly in
-                # the template)
-                if (network_type == KubernetesHighPerformanceNetworkType.NEBIUS
-                   ):
-                    network_env_vars = network_type.get_network_env_vars()
-                    k8s_env_vars.update(network_env_vars)
+                # clusters with high performance networking
+                network_env_vars = network_type.get_network_env_vars()
+                k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -741,6 +738,7 @@ class Kubernetes(clouds.Cloud):
             'avoid_label_keys': avoid_label_keys,
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
+            'k8s_network_type': network_type.value,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -1089,6 +1087,9 @@ class Kubernetes(clouds.Cloud):
                     for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
+                                    '')
+                        if label_key.startswith('ib.coreweave.cloud/'):
+                            return (KubernetesHighPerformanceNetworkType.COREWEAVE,
                                     '')
 
                     # Check for GKE clusters with specific GPUDirect variants
