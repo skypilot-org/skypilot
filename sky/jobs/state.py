@@ -8,6 +8,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import sqlite3
 import threading
 import time
 import typing
@@ -46,7 +47,7 @@ _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_ASYNC: Optional[sql_async.AsyncEngine] = None
 _DB_INIT_LOCK = threading.Lock()
 
-_DB_RETRY_TIMES = 10
+_DB_RETRY_TIMES = 30
 
 # File lock for database operations to prevent race conditions
 _DB_LOCK_PATH = os.path.expanduser('~/.sky/locks/managed_job_db.lock')
@@ -297,8 +298,7 @@ def _initialize_and_get_db(
                     conn_string = conn_string.replace('postgresql://',
                                                       'postgresql+asyncpg://')
                     engine = create_engine_func(conn_string,
-                                                pool_size=3,
-                                                max_overflow=2)
+                                                poolclass=sqlalchemy.NullPool)
                 else:
                     engine = create_engine_func(conn_string,
                                                 poolclass=sqlalchemy.NullPool)
@@ -342,6 +342,10 @@ def _init_db_async(func):
                 last_exc = e
             except OSError as e:
                 last_exc = e
+            except sqlalchemy.exc.TimeoutError as e:
+                last_exc = e
+            except sqlite3.OperationalError as e:
+                last_exc = e
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
         raise last_exc
@@ -360,7 +364,7 @@ def _init_db(func):
             # common case.
             initialize_and_get_db()
 
-        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=10)
         last_exc = None
         for _ in range(_DB_RETRY_TIMES):
             try:
@@ -370,6 +374,8 @@ def _init_db(func):
             except asyncio.exceptions.TimeoutError as e:
                 last_exc = e
             except OSError as e:
+                last_exc = e
+            except sqlalchemy.exc.TimeoutError as e:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())

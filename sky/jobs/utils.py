@@ -139,12 +139,12 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
 def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
     """Validate the consolidation mode config."""
-    if (current_is_consolidation_mode and
-            not env_options.Options.IS_DEVELOPER.get() and
-            server_common.is_api_server_local()):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Consolidation mode is not supported when running locally.')
+    # if (current_is_consolidation_mode and
+    #         not env_options.Options.IS_DEVELOPER.get() and
+    #         server_common.is_api_server_local()):
+    #     with ux_utils.print_exception_no_traceback():
+    #         raise exceptions.NotSupportedError(
+    #             'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
@@ -274,11 +274,14 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
 def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
+        new = False
         if pid < 0:
+            # new job controller process will always be negative
+            new = True
             pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and f'--job-id {job_id}' in cmd_str
+        return process.is_running() and (f'--job-id {job_id}' in cmd_str or new)
     except psutil.NoSuchProcess:
         return False
 
@@ -463,9 +466,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Expected to find a controller pid for state '
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
-        elif pid < 0:
-            logger.debug('Controller pid is -1 for consolidated job controller')
-            continue
         else:
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):

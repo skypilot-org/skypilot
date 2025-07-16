@@ -753,12 +753,12 @@ async def _cleanup(job_id: int, dag_yaml: str, job_logger: logging.Logger):
 
 async def run_job_loop(job_id: int, dag_yaml: str, job_logger: logging.Logger):
     """Background task that runs the job loop."""
-    # we wait for 1 second to put this to the back of the queue
-    await asyncio.sleep(1)
-    job_logger.info(f'Starting job loop for {job_id}')
-    cancelling = False
-
     try:
+        # we wait for 1 second to put this to the back of the queue
+        await asyncio.sleep(1)
+        job_logger.info(f'Starting job loop for {job_id}')
+        cancelling = False
+
         controller = JobsController(job_id, dag_yaml, job_logger)
         await controller.run()
     except asyncio.CancelledError:
@@ -925,6 +925,10 @@ async def monitor_loop():
             await asyncio.sleep(30)
             continue
 
+        if len(running_tasks) >= scheduler.JOBS_PER_WORKER:
+            await asyncio.sleep(60)
+            continue
+
         # Check if there are any jobs that are waiting to launch
         try:
             waiting_job = await managed_job_state.get_waiting_job(
@@ -978,6 +982,20 @@ async def monitor_loop():
 
         job_id = waiting_job['job_id']
         dag_yaml_path = waiting_job['dag_yaml_path']
+
+        cancels = os.listdir(jobs_constants.SIGNAL_PATH)
+        if str(job_id) in cancels:
+            logger.info(f'Job {job_id} cancelled')
+            os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
+            await managed_job_state.set_cancelling_async(
+                job_id=job_id,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=None, task=None))
+            await managed_job_state.set_cancelled_async(
+                job_id=job_id,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=None, task=None))
+            continue
 
         # here we need to sync, because we are modifying it
         async with _job_tasks_lock:
