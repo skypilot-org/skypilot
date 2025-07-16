@@ -111,8 +111,8 @@ class SkyServeController:
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
             return responses.JSONResponse(content={
-                'ready_replica_cluster_names':
-                    self._replica_manager.get_active_replica_cluster_names()
+                'ready_replica_urls':
+                    self._replica_manager.ready_replica_urls()
             },
                                           status_code=200)
 

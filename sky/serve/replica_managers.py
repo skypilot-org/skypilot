@@ -466,7 +466,9 @@ class ReplicaInfo:
                          f'replica {self.replica_id}.')
         return replica_status
 
-    def to_info_dict(self, with_handle: bool) -> Dict[str, Any]:
+    def to_info_dict(self,
+                     with_handle: bool,
+                     with_url: bool = True) -> Dict[str, Any]:
         cluster_record = global_user_state.get_cluster_from_name(
             self.cluster_name)
         info_dict = {
@@ -474,8 +476,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
-            # 'endpoint': self.url,
-            'endpoint': None,
+            'endpoint': self.url if with_url else None,
             'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
@@ -485,8 +486,9 @@ class ReplicaInfo:
         return info_dict
 
     def __repr__(self) -> str:
-        info_dict = self.to_info_dict(
-            with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+        show_details = env_options.Options.SHOW_DEBUG_INFO.get()
+        info_dict = self.to_info_dict(with_handle=show_details,
+                                      with_url=show_details)
         handle_str = ''
         if 'handle' in info_dict:
             handle_str = f', handle={info_dict["handle"]}'
@@ -645,7 +647,7 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def get_active_replica_cluster_names(self) -> List[str]:
+    def ready_replica_urls(self) -> List[str]:
         """Get the urls of the active replicas."""
         raise NotImplementedError
 
@@ -1128,8 +1130,11 @@ class SkyPilotReplicaManager(ReplicaManager):
             handle = info.handle()
             assert handle is not None, info
             # Use None to fetch latest job, which stands for user task job
+            use_pool = self._get_version_spec(info.version).pool
+            job_ids = [1] if use_pool else None
             try:
-                job_statuses = backend.get_job_status(handle, [1],
+                job_statuses = backend.get_job_status(handle,
+                                                      job_ids,
                                                       stream_logs=False)
             except exceptions.CommandError:
                 # If the job status fetch failed, it is likely that the
@@ -1139,8 +1144,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     continue
                 # Re-raise the exception if it is not preempted.
                 raise
-            # job_status = list(job_statuses.values())[0]
-            job_status = job_statuses[1]
+            job_status = job_statuses[1] if use_pool else list(
+                job_statuses.values())[0]
             if job_status in job_lib.JobStatus.user_code_failure_states():
                 info.status_property.user_app_failed = True
                 serve_state.add_or_update_replica(self._service_name,
@@ -1184,21 +1189,24 @@ class SkyPilotReplicaManager(ReplicaManager):
             for info in infos:
                 if not info.status_property.should_track_service_status():
                     continue
-                # replica_to_probe.append(
-                #     f'replica_{info.replica_id}(url={info.url})')
-                # probe_futures.append(
-                #     pool.apply_async(
-                #         info.probe,
-                #         (
-                #             self._get_readiness_path(info.version),
-                #             self._get_post_data(info.version),
-                #             self._get_readiness_timeout_seconds(info.version),
-                #             self._get_readiness_headers(info.version),
-                #         ),
-                #     ),)
-                replica_to_probe.append(f'replica_{info.replica_id}'
-                                        f'(cluster_name={info.cluster_name})')
-                probe_futures.append(pool.apply_async(info.probe_pool))
+                if self._get_version_spec(info.version).pool:
+                    replica_to_probe.append(f'replica_{info.replica_id}(cluster'
+                                            f'_name={info.cluster_name})')
+                    probe_futures.append(pool.apply_async(info.probe_pool))
+                else:
+                    replica_to_probe.append(
+                        f'replica_{info.replica_id}(url={info.url})')
+                    probe_futures.append(
+                        pool.apply_async(
+                            info.probe,
+                            (
+                                self._get_readiness_path(info.version),
+                                self._get_post_data(info.version),
+                                self._get_readiness_timeout_seconds(
+                                    info.version),
+                                self._get_readiness_headers(info.version),
+                            ),
+                        ),)
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
             # Since futures.as_completed will return futures in the order of
@@ -1299,7 +1307,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
-    def get_active_replica_cluster_names(self) -> List[str]:
+    def ready_replica_urls(self) -> List[str]:
         """Get the urls of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
@@ -1309,8 +1317,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
-                assert info.cluster_name is not None, info
-                ready_replica_urls.append(info.cluster_name)
+                assert info.url is not None, info
+                ready_replica_urls.append(info.url)
         return ready_replica_urls
 
     ###########################################

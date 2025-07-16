@@ -34,7 +34,8 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
         auto_restart INTEGER DEFAULT NULL,
-        requested_resources BLOB DEFAULT NULL)""")
+        requested_resources BLOB DEFAULT NULL,
+        pool INTEGER DEFAULT 0)""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS replicas (
         service_name TEXT,
@@ -73,6 +74,9 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
                                  'load_balancing_policy', 'TEXT DEFAULT NULL')
     # Whether the service's load balancer is encrypted with TLS.
     db_utils.add_column_to_table(cursor, conn, 'services', 'tls_encrypted',
+                                 'INTEGER DEFAULT 0')
+    # Whether the service is a cluster pool.
+    db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
                                  'INTEGER DEFAULT 0')
     conn.commit()
 
@@ -275,7 +279,7 @@ _SERVICE_STATUS_TO_COLOR = {
 @init_db
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus, tls_encrypted: bool) -> bool:
+                status: ServiceStatus, tls_encrypted: bool, pool: bool) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -289,11 +293,12 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 """\
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
-                requested_resources_str, load_balancing_policy, tls_encrypted)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                requested_resources_str, load_balancing_policy, tls_encrypted,
+                pool)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted)))
+                 int(tls_encrypted), int(pool)))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -370,7 +375,7 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
+     _, active_versions, load_balancing_policy, tls_encrypted, pool) = row[:16]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -389,6 +394,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'requested_resources_str': requested_resources_str,
         'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
+        'pool': bool(pool),
     }
 
 

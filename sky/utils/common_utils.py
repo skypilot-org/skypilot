@@ -701,7 +701,27 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
     try:
         validator.get_schema_validator()(schema).validate(obj)
     except jsonschema.ValidationError as e:
-        if e.validator == 'additionalProperties':
+        if e.validator == 'oneOf':
+            # Special handling for oneOf validation errors
+            if 'service' in err_msg_prefix.lower():
+                # This is likely a service schema validation error
+                if ('readiness_probe' not in obj and 'pool' not in obj):
+                    err_msg = (f'{err_msg_prefix}Service must have either '
+                               '"readiness_probe" or "pool: true" specified.')
+                elif obj.get('pool') is not True:
+                    err_msg = (f'{err_msg_prefix}The "pool" field must be '
+                               'set to true for cluster pool.')
+                else:
+                    err_msg = (
+                        f'{err_msg_prefix}Service configuration is invalid. '
+                        'Please check that either "readiness_probe" or '
+                        '"pool: true" is correctly specified.')
+            else:
+                # Generic oneOf error
+                err_msg = (f'{err_msg_prefix}Configuration does not match '
+                           f'any of the required formats. {e.message}. '
+                           f'Check problematic field(s): {e.json_path}')
+        elif e.validator == 'additionalProperties':
             if tuple(e.schema_path) == ('properties', 'envs',
                                         'additionalProperties'):
                 # Hack. Here the error is Task.envs having some invalid keys. So

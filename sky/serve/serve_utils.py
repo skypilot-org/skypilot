@@ -546,11 +546,17 @@ def _get_service_status(
     if record is None:
         return None
     if with_replica_info:
-        record['replica_info'] = [{
-            'used_by': jid,
-            **info.to_info_dict(with_handle=True)
-        } for info, jid in serve_state.get_replica_infos_and_job_ids(
-            service_name)]
+        if record['pool']:
+            record['replica_info'] = [{
+                'used_by': jid,
+                **info.to_info_dict(with_handle=True, with_url=False)
+            } for info, jid in serve_state.get_replica_infos_and_job_ids(
+                service_name)]
+        else:
+            record['replica_info'] = [
+                info.to_info_dict(with_handle=True)
+                for info in serve_state.get_replica_infos(service_name)
+            ]
     return record
 
 
@@ -629,6 +635,9 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         if service_status is None:
             logger.error(f'Service {service_name!r} does not exist.')
             return None
+        if not service_status['pool']:
+            logger.error(f'Service {service_name!r} is not a cluster pool.')
+            return None
 
         # Get idle replicas using database
         idle_replicas = [
@@ -672,6 +681,9 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
                                              with_replica_info=False)
         if service_status is None:
             logger.error(f'Service {service_name!r} does not exist.')
+            return
+        if not service_status['pool']:
+            logger.error(f'Service {service_name!r} is not a cluster pool.')
             return
 
         # Release the cluster using database
@@ -1080,7 +1092,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT', 'IS_POOL'
     ]
     if show_all:
         service_columns.extend([
@@ -1117,6 +1129,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             status_str,
             replicas,
             endpoint,
+            'Yes' if record['pool'] else 'No',
         ]
         if show_all:
             service_values.extend(

@@ -605,7 +605,17 @@ def get_service_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        # 'required': ['readiness_probe'],
+        'oneOf': [{
+            'required': ['readiness_probe'],
+        }, {
+            'required': ['pool'],
+            'properties': {
+                'pool': {
+                    'type': 'boolean',
+                    'const': True
+                }
+            }
+        }],
         'additionalProperties': False,
         'properties': {
             'readiness_probe': {
@@ -640,6 +650,10 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'pool': {
+                'type': 'boolean',
+                'const': True
             },
             'replica_policy': {
                 'type': 'object',
