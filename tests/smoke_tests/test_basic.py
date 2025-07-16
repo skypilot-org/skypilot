@@ -95,6 +95,7 @@ def test_minimal(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
+
 # ---------- A minimal task with git repository workdir ----------
 def test_minimal_with_git_workdir(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -128,6 +129,7 @@ def test_minimal_with_git_workdir(generic_cloud: str):
         smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
 
 # ---------- Test fast launch ----------
 def test_launch_fast(generic_cloud: str):
