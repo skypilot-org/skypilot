@@ -149,11 +149,11 @@ class StoreType(enum.Enum):
 
     @classmethod
     def find_s3_compatible_config_by_prefix(cls,
-                                            url_prefix: str) -> Optional[str]:
+                                            source: str) -> Optional[str]:
         """Get S3-compatible store type by URL prefix."""
         for store_type, store_class in _S3_COMPATIBLE_STORES.items():
             config = store_class.get_config()
-            if config.url_prefix == url_prefix:
+            if source.startswith(config.url_prefix):
                 return store_type
         return None
 
