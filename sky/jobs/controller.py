@@ -753,11 +753,11 @@ async def _cleanup(job_id: int, dag_yaml: str, job_logger: logging.Logger):
 
 async def run_job_loop(job_id: int, dag_yaml: str, job_logger: logging.Logger):
     """Background task that runs the job loop."""
+    cancelling = False
     try:
         # we wait for 1 second to put this to the back of the queue
         await asyncio.sleep(1)
         job_logger.info(f'Starting job loop for {job_id}')
-        cancelling = False
 
         controller = JobsController(job_id, dag_yaml, job_logger)
         await controller.run()
@@ -1020,8 +1020,8 @@ def can_scale() -> Tuple[bool, bool]:
     try:
         # Read the PID file, filter out non-alive PIDs, and clean up the file
         # only if needed.
-        with open(
-            scheduler.JOB_CONTROLLER_PID_PATH, 'r', encoding='utf-8') as f:
+        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
+                  encoding='utf-8') as f:
             pids = f.read().split('\n')[:-1]
         alive_pids = []
         dead_found = False
@@ -1039,8 +1039,8 @@ def can_scale() -> Tuple[bool, bool]:
                 dead_found = True
         # Only rewrite the PID file if a dead controller was found
         if dead_found:
-            with open(
-                scheduler.JOB_CONTROLLER_PID_PATH, 'w', encoding='utf-8') as f:
+            with open(scheduler.JOB_CONTROLLER_PID_PATH, 'w',
+                      encoding='utf-8') as f:
                 for pid in alive_pids:
                     f.write(f'{pid}\n')
         running_controllers = alive_pids
