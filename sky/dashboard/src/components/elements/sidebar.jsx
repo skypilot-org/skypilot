@@ -83,7 +83,14 @@ export function SidebarProvider({ children }) {
 
   return (
     <SidebarContext.Provider
-      value={{ isSidebarOpen, toggleSidebar, isMobileSidebarOpen, toggleMobileSidebar, userEmail, userRole }}
+      value={{
+        isSidebarOpen,
+        toggleSidebar,
+        isMobileSidebarOpen,
+        toggleMobileSidebar,
+        userEmail,
+        userRole,
+      }}
     >
       {children}
     </SidebarContext.Provider>
@@ -151,7 +158,8 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
-  const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } = useSidebar();
+  const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
+    useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const dropdownRef = useRef(null);
@@ -162,7 +170,11 @@ export function TopBar() {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsDropdownOpen(false);
       }
-      if (mobileNavRef.current && !mobileNavRef.current.contains(event.target) && !event.target.closest('.mobile-menu-button')) {
+      if (
+        mobileNavRef.current &&
+        !mobileNavRef.current.contains(event.target) &&
+        !event.target.closest('.mobile-menu-button')
+      ) {
         // Close mobile sidebar if clicking outside and not on the hamburger button
         if (isMobileSidebarOpen) {
           toggleMobileSidebar();
@@ -237,7 +249,11 @@ export function TopBar() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={2}
-                    d={isMobileSidebarOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"}
+                    d={
+                      isMobileSidebarOpen
+                        ? 'M6 18L18 6M6 6l12 12'
+                        : 'M4 6h16M4 12h16M4 18h16'
+                    }
                   />
                 </svg>
               </button>
@@ -324,157 +340,157 @@ export function TopBar() {
 
           {/* External links and user profile - only show on desktop, mobile uses sidebar */}
           <div className="flex items-center space-x-1 ml-auto">
-          {!isMobile && (
-            <>
-              <CustomTooltip
-                content="Documentation"
-                className="text-sm text-muted-foreground"
-              >
-                <a
-                  href="https://skypilot.readthedocs.io/en/latest/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
-                  title="Docs"
+            {!isMobile && (
+              <>
+                <CustomTooltip
+                  content="Documentation"
+                  className="text-sm text-muted-foreground"
                 >
-                  <span className="mr-1">Docs</span>
-                  <ExternalLinkIcon className="w-3.5 h-3.5" />
-                </a>
-              </CustomTooltip>
+                  <a
+                    href="https://skypilot.readthedocs.io/en/latest/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+                    title="Docs"
+                  >
+                    <span className="mr-1">Docs</span>
+                    <ExternalLinkIcon className="w-3.5 h-3.5" />
+                  </a>
+                </CustomTooltip>
 
-              <CustomTooltip
-                content="GitHub Repository"
-                className="text-sm text-muted-foreground"
-              >
-                <a
-                  href="https://github.com/skypilot-org/skypilot"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                  title="GitHub"
+                <CustomTooltip
+                  content="GitHub Repository"
+                  className="text-sm text-muted-foreground"
                 >
-                  <GitHubIcon className="w-5 h-5" />
-                </a>
-              </CustomTooltip>
+                  <a
+                    href="https://github.com/skypilot-org/skypilot"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    title="GitHub"
+                  >
+                    <GitHubIcon className="w-5 h-5" />
+                  </a>
+                </CustomTooltip>
 
-              <CustomTooltip
-                content="Join Slack"
-                className="text-sm text-muted-foreground"
-              >
-                <a
-                  href="https://slack.skypilot.co/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                  title="Slack"
+                <CustomTooltip
+                  content="Join Slack"
+                  className="text-sm text-muted-foreground"
                 >
-                  <SlackIcon className="w-5 h-5" />
-                </a>
-              </CustomTooltip>
+                  <a
+                    href="https://slack.skypilot.co/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    title="Slack"
+                  >
+                    <SlackIcon className="w-5 h-5" />
+                  </a>
+                </CustomTooltip>
 
-              <CustomTooltip
-                content="Leave Feedback"
-                className="text-sm text-muted-foreground"
-              >
-                <a
-                  href="https://github.com/skypilot-org/skypilot/issues/new"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
-                  title="Leave Feedback"
+                <CustomTooltip
+                  content="Leave Feedback"
+                  className="text-sm text-muted-foreground"
                 >
-                  <CommentFeedbackIcon className="w-5 h-5" />
-                </a>
-              </CustomTooltip>
+                  <a
+                    href="https://github.com/skypilot-org/skypilot/issues/new"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    title="Leave Feedback"
+                  >
+                    <CommentFeedbackIcon className="w-5 h-5" />
+                  </a>
+                </CustomTooltip>
 
-              <div className="border-l border-gray-200 h-6"></div>
+                <div className="border-l border-gray-200 h-6"></div>
 
-              {/* Config Button */}
-              <CustomTooltip
-                content="Configuration"
-                className="text-sm text-muted-foreground"
-              >
-                <Link
-                  href="/config"
-                  className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
-                    isActivePath('/config')
-                      ? 'text-blue-600 hover:bg-gray-100'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                  title="Configuration"
-                  prefetch={false}
+                {/* Config Button */}
+                <CustomTooltip
+                  content="Configuration"
+                  className="text-sm text-muted-foreground"
                 >
-                  <Settings className="w-5 h-5" />
-                </Link>
-              </CustomTooltip>
-            </>
-          )}
-
-          {/* User Profile Icon and Dropdown */}
-          {userEmail && (
-            <div className="relative" ref={dropdownRef}>
-              <button
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="inline-flex items-center justify-center rounded-full transition-colors duration-150 cursor-pointer hover:ring-2 hover:ring-blue-200"
-                title="User Profile"
-              >
-                <div
-                  className={`${isMobile ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium hover:bg-blue-700 transition-colors`}
-                >
-                  {getUserInitial(userEmail)}
-                </div>
-              </button>
-
-              {isDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
-                  {(() => {
-                    let displayName = userEmail;
-                    let emailToDisplay = null;
-                    if (userEmail && userEmail.includes('@')) {
-                      displayName = userEmail.split('@')[0];
-                      emailToDisplay = userEmail;
-                    }
-                    return (
-                      <>
-                        <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
-                          {displayName}
-                        </div>
-                        {emailToDisplay && (
-                          <div className="px-4 pt-0 pb-1 text-xs text-gray-500">
-                            {emailToDisplay}
-                          </div>
-                        )}
-                        {userRole && (
-                          <div className="px-4 pt-0 pb-2 text-xs">
-                            {userRole === 'admin' ? (
-                              <span className="inline-flex items-center text-blue-600">
-                                <StarIcon className="w-3 h-3 mr-1" />
-                                Admin
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center text-gray-600">
-                                <User className="w-3 h-3 mr-1" />
-                                User
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                  <div className="border-t border-gray-200 mx-1 my-1"></div>
                   <Link
-                    href="/users"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
-                    onClick={() => setIsDropdownOpen(false)}
+                    href="/config"
+                    className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
+                      isActivePath('/config')
+                        ? 'text-blue-600 hover:bg-gray-100'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                    title="Configuration"
                     prefetch={false}
                   >
-                    See all users
+                    <Settings className="w-5 h-5" />
                   </Link>
-                </div>
-              )}
-            </div>
-          )}
+                </CustomTooltip>
+              </>
+            )}
+
+            {/* User Profile Icon and Dropdown */}
+            {userEmail && (
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="inline-flex items-center justify-center rounded-full transition-colors duration-150 cursor-pointer hover:ring-2 hover:ring-blue-200"
+                  title="User Profile"
+                >
+                  <div
+                    className={`${isMobile ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'} bg-blue-600 text-white rounded-full flex items-center justify-center font-medium hover:bg-blue-700 transition-colors`}
+                  >
+                    {getUserInitial(userEmail)}
+                  </div>
+                </button>
+
+                {isDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                    {(() => {
+                      let displayName = userEmail;
+                      let emailToDisplay = null;
+                      if (userEmail && userEmail.includes('@')) {
+                        displayName = userEmail.split('@')[0];
+                        emailToDisplay = userEmail;
+                      }
+                      return (
+                        <>
+                          <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
+                            {displayName}
+                          </div>
+                          {emailToDisplay && (
+                            <div className="px-4 pt-0 pb-1 text-xs text-gray-500">
+                              {emailToDisplay}
+                            </div>
+                          )}
+                          {userRole && (
+                            <div className="px-4 pt-0 pb-2 text-xs">
+                              {userRole === 'admin' ? (
+                                <span className="inline-flex items-center text-blue-600">
+                                  <StarIcon className="w-3 h-3 mr-1" />
+                                  Admin
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center text-gray-600">
+                                  <User className="w-3 h-3 mr-1" />
+                                  User
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                    <div className="border-t border-gray-200 mx-1 my-1"></div>
+                    <Link
+                      href="/users"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                      onClick={() => setIsDropdownOpen(false)}
+                      prefetch={false}
+                    >
+                      See all users
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -484,12 +500,12 @@ export function TopBar() {
         <>
           {/* Backdrop */}
           {isMobileSidebarOpen && (
-            <div 
+            <div
               className="fixed top-14 left-0 right-0 bottom-0 bg-black bg-opacity-50 z-40"
               onClick={toggleMobileSidebar}
             />
           )}
-          
+
           {/* Mobile Sidebar */}
           <div
             ref={mobileNavRef}

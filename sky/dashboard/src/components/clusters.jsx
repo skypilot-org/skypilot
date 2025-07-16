@@ -354,7 +354,7 @@ export function Clusters() {
 
   return (
     <>
-            <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
+      <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
         <div className="flex items-center gap-2">
           <Link
             href="/clusters"
@@ -823,9 +823,7 @@ export function ClusterTable({
                         <TimestampWithTooltip date={item.time} />
                       </TableCell>
                       {showHistory && (
-                        <TableCell>
-                          {formatDuration(item.duration)}
-                        </TableCell>
+                        <TableCell>{formatDuration(item.duration)}</TableCell>
                       )}
                       <TableCell>
                         {item.isHistorical
