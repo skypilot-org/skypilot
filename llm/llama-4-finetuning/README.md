@@ -14,7 +14,7 @@ This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot)
 ## Finetune Llama 4 with SkyPilot
 We will use [torchtune](https://pytorch.org/torchtune/stable/index.html) to finetune Llama 4 Maverick.
 
-This model requires at least 2 nodes with 8x H200 GPUs each.
+This model requires at least 4 nodes with 8x H200 GPUs each.
 
 To set up the environment for launching the finetuning job, finish the [Appendix: Preparation](#appendix-preparation) section first.
 
@@ -22,7 +22,7 @@ The finetuning job is packaged in a SkyPilot YAML. It can be launched on any of 
 
 <details>
     <summary>
-        SkyPilot YAML for finetuning Llama 4: <code>llama-4-maverick.yaml</code>
+        SkyPilot YAML for finetuning Llama 4: <code>llama-4-maverick-sft.yaml</code>
     </summary>
     
 ```yaml
@@ -30,9 +30,9 @@ The finetuning job is packaged in a SkyPilot YAML. It can be launched on any of 
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick.yaml -c maverick --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
 #
-# This config requires at least 2 nodes with 8x H200 GPUs each.
+# This config requires at least 4 nodes with 8x H200 GPUs each.
 
 envs:
   HF_TOKEN: 
@@ -43,7 +43,7 @@ resources:
   accelerators: H200:8
   disk_tier: best
 
-num_nodes: 2
+num_nodes: 4
 
 # Optional: configure buckets for dataset and checkpoints. You can then use the /outputs directory to write checkpoints.
 # file_mounts:
@@ -75,7 +75,21 @@ run: |
   --rdzv_endpoint=$MASTER_ADDR:29500 \
   full_finetune_distributed \
   --config llama4/maverick_17B_128E_full \
-  model_dir=/tmp/Llama-4-Maverick-17B-128E-Instruct
+  model_dir=/tmp/Llama-4-Maverick-17B-128E-Instruct \
+  dataset.packed=True tokenizer.max_seq_len=4096 \
+  gradient_accumulation_steps=1 \
+  enable_activation_offloading=True \
+  activation_offloading_use_streams=False \
+  optimizer_in_bwd=True \
+  optimizer=torch.optim.AdamW \
+  optimizer_kwargs.fused=True \
+  max_steps_per_epoch=1 \
+  epochs=10 \
+  enable_dcp=True \
+  enable_async_checkpointing=True \
+  resume_from_checkpoint=False \
+  keep_last_n_checkpoints=1 \
+  fsdp_cpu_offload=True
 ```
     
 </details>
@@ -90,8 +104,8 @@ cd skypilot/llm/llama-4-finetuning
 export HF_TOKEN=xxxx
 
 # Full finetuning of Llama 4 Maverick 17B MoE
-# Requires 2+ nodes with H200 GPUs for distributed training
-sky launch -c maverick llama-4-maverick.yaml \
+# Requires 4+ nodes with H200 GPUs for distributed training
+sky launch -c maverick llama-4-maverick-sft.yaml \
   --env HF_TOKEN
 ```
 
