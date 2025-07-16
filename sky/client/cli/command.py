@@ -803,19 +803,21 @@ def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
         clone_info = git_repo.get_repo_clone_info()
         if clone_info is None:
             return
+        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
+        if ref:
+            ref_type = git_repo.get_ref_type()
+            if ref_type == git.GitRefType.COMMIT:
+                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
+            elif ref_type == git.GitRefType.BRANCH:
+                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
+            elif ref_type == git.GitRefType.TAG:
+                task.envs[git_utils.GIT_TAG_ENV_VAR] = ref
         if clone_info.token is None and clone_info.ssh_key is None:
             return
-        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
         if clone_info.token is not None:
             task.secrets[git_utils.GIT_TOKEN_ENV_VAR] = clone_info.token
         if clone_info.ssh_key is not None:
             task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
-
-        if ref:
-            if git_repo.is_commit_hash():
-                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
-            else:
-                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
     except exceptions.GitError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{str(e)}') from None

@@ -1,4 +1,5 @@
 """Git utilities for SkyPilot."""
+import enum
 import os
 import re
 from typing import List, Optional, Union
@@ -10,6 +11,14 @@ from sky import exceptions
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+
+class GitRefType(enum.Enum):
+    """Type of git reference."""
+
+    BRANCH = 'branch'
+    TAG = 'tag'
+    COMMIT = 'commit'
 
 
 class GitUrlInfo:
@@ -443,11 +452,13 @@ class GitRepo:
         logger.debug('No suitable SSH keys found')
         return None
 
-    def is_commit_hash(self) -> bool:
-        """Check if the reference is a commit hash.
+    def get_ref_type(self) -> GitRefType:
+        """Get the type of the reference.
 
         Returns:
-            True if it's a commit hash, False if it's a branch/tag.
+            GitRefType.COMMIT if it's a commit hash,
+            GitRefType.BRANCH if it's a branch,
+            GitRefType.TAG if it's a tag.
 
         Raises:
             exceptions.GitError: If the reference is invalid.
@@ -476,12 +487,12 @@ class GitRepo:
                 # Check if it's a branch
                 if ref_name.startswith(
                         'refs/heads/') and ref_name[11:] == self.ref:
-                    return False
+                    return GitRefType.BRANCH
 
                 # Check if it's a tag
                 if ref_name.startswith(
                         'refs/tags/') and ref_name[10:] == self.ref:
-                    return False
+                    return GitRefType.TAG
 
             # If we get here, it's not a branch or tag name
             # Check if it looks like a commit hash (hex string)
@@ -490,7 +501,7 @@ class GitRepo:
                 # First check if it's a complete match with any known commit
                 if self.ref in all_commit_hashes:
                     logger.debug(f'Found exact commit hash match: {self.ref}')
-                    return True
+                    return GitRefType.COMMIT
 
                 # Check if it's a prefix match with any known commit
                 matching_commits = [
@@ -500,7 +511,7 @@ class GitRepo:
                     logger.debug(
                         f'Found commit hash prefix match: {self.ref} -> '
                         f'{matching_commits[0]}')
-                    return True
+                    return GitRefType.COMMIT
                 elif len(matching_commits) > 1:
                     # Multiple matches - ambiguous
                     raise exceptions.GitError(
@@ -518,7 +529,7 @@ class GitRepo:
                 logger.warning(
                     f'Cannot verify commit {self.ref} exists - it may be a '
                     'commit in history not at any branch/tag tip')
-                return True
+                return GitRefType.COMMIT
 
             # If it's not a branch, tag, or hex string, it's invalid
             raise exceptions.GitError(

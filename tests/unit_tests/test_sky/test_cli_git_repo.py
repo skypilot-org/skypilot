@@ -171,7 +171,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         mock_repo_instance = MagicMock()
         mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
-        mock_repo_instance.is_commit_hash.return_value = False
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -209,7 +209,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         mock_repo_instance = MagicMock()
         mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
-        mock_repo_instance.is_commit_hash.return_value = False
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -249,7 +249,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         mock_repo_instance = MagicMock()
         mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
-        mock_repo_instance.is_commit_hash.return_value = True
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.COMMIT
         mock_git_repo.return_value = mock_repo_instance
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -258,6 +258,39 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         assert task.envs[
             git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
         assert task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] == 'a1b2c3d4e5f6'
+        assert git_utils.GIT_BRANCH_ENV_VAR not in task.envs
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch('sky.client.cli.git.GitRepo')
+    def test_update_task_workdir_and_secrets_with_tag(self, mock_git_repo):
+        """Test updating task secrets when ref is a tag."""
+        # Set up environment
+        os.environ[git_utils.GIT_TOKEN_ENV_VAR] = 'test_token'
+
+        # Set up task
+        task = sky.Task(name='test', run='echo hello')
+        task.workdir = {
+            'url': 'https://github.com/test/repo.git',
+            'ref': 'v1.0.0'
+        }
+
+        # Mock GitRepo and clone info
+        mock_clone_info = MagicMock()
+        mock_clone_info.url = 'https://github.com/test/repo.git'
+        mock_clone_info.token = 'test_token'
+        mock_clone_info.ssh_key = None
+
+        mock_repo_instance = MagicMock()
+        mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.TAG
+        mock_git_repo.return_value = mock_repo_instance
+
+        command._update_task_workdir_and_secrets_from_workdir(task)
+
+        # Verify task envs were updated with tag
+        assert task.envs[
+            git_utils.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
+        assert task.envs[git_utils.GIT_TAG_ENV_VAR] == 'v1.0.0'
         assert git_utils.GIT_BRANCH_ENV_VAR not in task.envs
 
     @patch.dict(os.environ, {}, clear=True)
@@ -279,7 +312,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         mock_repo_instance = MagicMock()
         mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
-        mock_repo_instance.is_commit_hash.return_value = False
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -338,10 +371,14 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
         mock_git_repo.return_value = mock_repo_instance
 
+        # Mock get_ref_type to return branch
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
+
         command._update_task_workdir_and_secrets_from_workdir(task)
 
         # Verify task was not modified (no auth available)
-        assert git_utils.GIT_URL_ENV_VAR not in task.envs
+        assert git_utils.GIT_URL_ENV_VAR in task.envs
+        assert git_utils.GIT_BRANCH_ENV_VAR in task.envs
         assert git_utils.GIT_TOKEN_ENV_VAR not in task.secrets
         assert git_utils.GIT_SSH_KEY_ENV_VAR not in task.secrets
 
@@ -395,7 +432,7 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
 
         mock_repo_instance = MagicMock()
         mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
-        mock_repo_instance.is_commit_hash.return_value = False
+        mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
         mock_git_repo.return_value = mock_repo_instance
 
         command._update_task_workdir_and_secrets_from_workdir(task)
@@ -1139,9 +1176,8 @@ class TestGitRepo:
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_branch(self, mock_git_cmd,
-                                   mock_get_repo_clone_info):
-        """Test is_commit_hash returns False for branch."""
+    def test_get_ref_type_branch(self, mock_git_cmd, mock_get_repo_clone_info):
+        """Test get_ref_type returns git.GitRefType.BRANCH for branch."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1153,14 +1189,14 @@ class TestGitRepo:
 
         repo = git.GitRepo(repo_url='https://github.com/user/repo.git',
                            ref='main')
-        result = repo.is_commit_hash()
+        result = repo.get_ref_type()
 
-        assert result is False
+        assert result == git.GitRefType.BRANCH
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_tag(self, mock_git_cmd, mock_get_repo_clone_info):
-        """Test is_commit_hash returns False for tag."""
+    def test_get_ref_type_tag(self, mock_git_cmd, mock_get_repo_clone_info):
+        """Test get_ref_type returns git.GitRefType.TAG for tag."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1172,15 +1208,15 @@ class TestGitRepo:
 
         repo = git.GitRepo(repo_url='https://github.com/user/repo.git',
                            ref='v1.0.0')
-        result = repo.is_commit_hash()
+        result = repo.get_ref_type()
 
-        assert result is False
+        assert result == git.GitRefType.TAG
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_commit_exact_match(self, mock_git_cmd,
-                                               mock_get_repo_clone_info):
-        """Test is_commit_hash returns True for exact commit hash match."""
+    def test_get_ref_type_commit_exact_match(self, mock_git_cmd,
+                                             mock_get_repo_clone_info):
+        """Test get_ref_type returns git.GitRefType.COMMIT for exact commit hash match."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1192,15 +1228,15 @@ class TestGitRepo:
 
         repo = git.GitRepo(repo_url='https://github.com/user/repo.git',
                            ref='abcdef123456')
-        result = repo.is_commit_hash()
+        result = repo.get_ref_type()
 
-        assert result is True
+        assert result == git.GitRefType.COMMIT
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_commit_prefix_match(self, mock_git_cmd,
-                                                mock_get_repo_clone_info):
-        """Test is_commit_hash returns True for commit hash prefix match."""
+    def test_get_ref_type_commit_prefix_match(self, mock_git_cmd,
+                                              mock_get_repo_clone_info):
+        """Test get_ref_type returns git.GitRefType.COMMIT for commit hash prefix match."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1212,15 +1248,15 @@ class TestGitRepo:
 
         repo = git.GitRepo(repo_url='https://github.com/user/repo.git',
                            ref='abcdef')
-        result = repo.is_commit_hash()
+        result = repo.get_ref_type()
 
-        assert result is True
+        assert result == git.GitRefType.COMMIT
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_ambiguous_prefix(self, mock_git_cmd,
-                                             mock_get_repo_clone_info):
-        """Test is_commit_hash raises error for ambiguous commit hash prefix."""
+    def test_get_ref_type_ambiguous_prefix(self, mock_git_cmd,
+                                           mock_get_repo_clone_info):
+        """Test get_ref_type raises error for ambiguous commit hash prefix."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1234,13 +1270,13 @@ class TestGitRepo:
                            ref='abcdef')
 
         with pytest.raises(exceptions.GitError, match='Ambiguous commit hash'):
-            repo.is_commit_hash()
+            repo.get_ref_type()
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_invalid_ref(self, mock_git_cmd,
-                                        mock_get_repo_clone_info):
-        """Test is_commit_hash raises error for invalid reference."""
+    def test_get_ref_type_invalid_ref(self, mock_git_cmd,
+                                      mock_get_repo_clone_info):
+        """Test get_ref_type raises error for invalid reference."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1255,13 +1291,13 @@ class TestGitRepo:
 
         with pytest.raises(exceptions.GitError,
                            match='Git reference.*not found'):
-            repo.is_commit_hash()
+            repo.get_ref_type()
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_git_command_error(self, mock_git_cmd,
-                                              mock_get_repo_clone_info):
-        """Test is_commit_hash handles git command errors."""
+    def test_get_ref_type_git_command_error(self, mock_git_cmd,
+                                            mock_get_repo_clone_info):
+        """Test get_ref_type handles git command errors."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1280,13 +1316,13 @@ class TestGitRepo:
 
         with pytest.raises(exceptions.GitError,
                            match='Failed to check repository'):
-            repo.is_commit_hash()
+            repo.get_ref_type()
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_with_envs(self, mock_git_cmd,
-                                      mock_get_repo_clone_info):
-        """Test is_commit_hash updates environment variables correctly."""
+    def test_get_ref_type_with_envs(self, mock_git_cmd,
+                                    mock_get_repo_clone_info):
+        """Test get_ref_type updates environment variables correctly."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = {'GIT_SSH_COMMAND': 'ssh -i key'}
@@ -1298,18 +1334,18 @@ class TestGitRepo:
 
         repo = git.GitRepo(repo_url='https://github.com/user/repo.git',
                            ref='main')
-        result = repo.is_commit_hash()
+        result = repo.get_ref_type()
 
-        assert result is False
+        assert result == git.GitRefType.BRANCH
         # Verify environment variables were updated
         mock_git_instance.update_environment.assert_called_once_with(
             **mock_clone_info.envs)
 
     @patch.object(git.GitRepo, 'get_repo_clone_info')
     @patch('git.cmd.Git')
-    def test_is_commit_hash_commit_not_in_refs(self, mock_git_cmd,
-                                               mock_get_repo_clone_info):
-        """Test is_commit_hash handles commit not found in refs."""
+    def test_get_ref_type_commit_not_in_refs(self, mock_git_cmd,
+                                             mock_get_repo_clone_info):
+        """Test get_ref_type handles commit not found in refs."""
         mock_clone_info = MagicMock()
         mock_clone_info.url = 'https://github.com/user/repo.git'
         mock_clone_info.envs = None
@@ -1323,7 +1359,7 @@ class TestGitRepo:
         # Test with a hex-like string that's not in refs
         repo = git.GitRepo(repo_url='https://github.com/user/repo.git',
                            ref='cccc333333')
-        result = repo.is_commit_hash()
+        result = repo.get_ref_type()
 
-        # Should return True and log warning
-        assert result is True
+        # Should return git.GitRefType.COMMIT and log warning
+        assert result == git.GitRefType.COMMIT

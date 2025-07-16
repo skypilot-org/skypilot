@@ -144,28 +144,33 @@ cleanup() {
     fi
 }
 
-# Function to normalize Git URL for comparison
+# Function to normalize Git URL for comparison and extract schema
 # Note: URLs from GitRepo are already standardized as HTTPS or SSH format
+# Returns: "normalized_url schema"
 normalize_git_url() {
     local url="$1"
+    local schema=""
     
     # Remove trailing .git and /
     url=$(echo "$url" | sed 's|\.git/*$||' | sed 's|/*$||')
     
-    # Convert standardized formats to host/path for comparison
+    # Convert standardized formats to host/path for comparison and extract schema
     if [[ "$url" =~ ^ssh://([^@]+@)?([^:/]+)(:([0-9]+))?/(.+)$ ]]; then
         # SSH standard format: ssh://user@host:port/path -> host/path
         local host="${BASH_REMATCH[2]}"
         local path="${BASH_REMATCH[5]}"
-        echo "$host/$path"
+        schema="ssh"
+        echo "$host/$path $schema"
     elif [[ "$url" =~ ^https?://([^@]*@)?([^:/]+)(:([0-9]+))?/(.+)$ ]]; then
         # HTTPS format: https://token@host:port/path -> host/path
         local host="${BASH_REMATCH[2]}"
         local path="${BASH_REMATCH[5]}"
-        echo "$host/$path"
+        schema="https"
+        echo "$host/$path $schema"
     else
         # Fallback: return as-is (shouldn't happen with standardized URLs)
-        echo "$url"
+        schema="unknown"
+        echo "$url $schema"
     fi
 }
 
@@ -233,6 +238,11 @@ if [ -n "$GIT_BRANCH" ]; then
     REF_VALUE="$GIT_BRANCH"
     CLONE_ARGS="--depth 1 --branch $GIT_BRANCH"
     log "Using branch: $GIT_BRANCH (shallow clone)"
+elif [ -n "$GIT_TAG" ]; then
+    REF_TYPE="tag"
+    REF_VALUE="$GIT_TAG"
+    CLONE_ARGS="--depth 1 --branch $GIT_TAG"
+    log "Using tag: $GIT_TAG (shallow clone)"
 elif [ -n "$GIT_COMMIT_HASH" ]; then
     REF_TYPE="commit"
     REF_VALUE="$GIT_COMMIT_HASH"
@@ -257,20 +267,26 @@ if [ -d "$TARGET_DIR" ]; then
         CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
         if [ -n "$CURRENT_REMOTE" ]; then
             # Normalize URLs for comparison (handles HTTPS, SSH formats)
-            CURRENT_CLEAN=$(normalize_git_url "$CURRENT_REMOTE")
-            TARGET_CLEAN=$(normalize_git_url "$GIT_URL")
+            CURRENT_RESULT=$(normalize_git_url "$CURRENT_REMOTE")
+            TARGET_RESULT=$(normalize_git_url "$GIT_URL")
+            
+            # Extract normalized URL and schema
+            CURRENT_CLEAN=$(echo "$CURRENT_RESULT" | cut -d' ' -f1)
+            CURRENT_SCHEMA=$(echo "$CURRENT_RESULT" | cut -d' ' -f2)
+            TARGET_CLEAN=$(echo "$TARGET_RESULT" | cut -d' ' -f1)
+            TARGET_SCHEMA=$(echo "$TARGET_RESULT" | cut -d' ' -f2)
             
             if [ "$CURRENT_CLEAN" != "$TARGET_CLEAN" ]; then
                 log "WARNING: Existing repository has different remote URL"
-                log "Current: $CURRENT_REMOTE -> $CURRENT_CLEAN"
-                log "Target: $GIT_URL -> $TARGET_CLEAN"
+                log "Current: $CURRENT_REMOTE -> $CURRENT_CLEAN ($CURRENT_SCHEMA)"
+                log "Target: $GIT_URL -> $TARGET_CLEAN ($TARGET_SCHEMA)"
                 log "Please manually remove the directory or use a different target directory."
                 exit 1
-            elif [ "$CURRENT_REMOTE" != "$GIT_URL" ]; then
-                # Same repository but different URL format (HTTPS vs SSH)
-                log "Repository matches but URL format differs"
-                log "Current: $CURRENT_REMOTE"
-                log "Target: $GIT_URL"
+            elif [ "$CURRENT_SCHEMA" != "$TARGET_SCHEMA" ]; then
+                # Same repository but different schema (HTTPS vs SSH)
+                log "Repository matches but schema differs"
+                log "Current: $CURRENT_REMOTE ($CURRENT_SCHEMA)"
+                log "Target: $GIT_URL ($TARGET_SCHEMA)"
                 log "Updating remote URL to match authentication method"
                 git remote set-url origin "$GIT_URL"
                 log "Remote URL updated successfully"
@@ -303,10 +319,12 @@ if [ "$NEED_CLONE" = true ]; then
         git clone "$CLONE_URL" .
         log "Successfully cloned repository"
     else
-        # Clone with appropriate arguments (branch-specific or default)
+        # Clone with appropriate arguments (branch-specific, tag-specific, or default)
         git clone $CLONE_ARGS "$CLONE_URL" .
         if [ "$REF_TYPE" = "branch" ]; then
             log "Successfully cloned branch: $REF_VALUE"
+        elif [ "$REF_TYPE" = "tag" ]; then
+            log "Successfully cloned tag: $REF_VALUE"
         else
             # Determine the actual default branch name
             REF_VALUE=$(git branch --show-current)
@@ -325,6 +343,18 @@ else
             git fetch --unshallow
         else
             git fetch origin
+        fi
+    elif [ "$REF_TYPE" = "tag" ]; then
+        # For specific tag, fetch that tag
+        if ! git fetch origin "+refs/tags/$REF_VALUE:refs/tags/$REF_VALUE"; then
+            log "ERROR: Failed to fetch tag '$REF_VALUE' from remote"
+            log "This could mean:"
+            log "  1. Remote tag '$REF_VALUE' does not exist"
+            log "  2. Network connectivity issues"
+            log "  3. Authentication problems"
+            log "Checking available remote tags..."
+            git ls-remote --tags origin | sed 's/.*refs\/tags\//  - /' || true
+            exit 1
         fi
     elif [ "$REF_TYPE" = "default" ]; then
         # For default branch, get current branch and fetch it
@@ -365,6 +395,18 @@ if [ "$REF_TYPE" = "commit" ]; then
         exit 1
     fi
     log "Successfully checked out commit: $REF_VALUE"
+elif [ "$REF_TYPE" = "tag" ]; then
+    # Checkout specific tag
+    log "Checking out tag: $REF_VALUE"
+    if ! git checkout "$REF_VALUE"; then
+        log "ERROR: Failed to checkout tag '$REF_VALUE'"
+        log "This could mean:"
+        log "  1. The tag '$REF_VALUE' does not exist in the repository"
+        log "  2. The tag name is invalid"
+        log "  3. Local repository is in an inconsistent state"
+        exit 1
+    fi
+    log "Successfully checked out tag: $REF_VALUE"
 elif [ "$REF_TYPE" = "default" ]; then
     # For default branch, we're already on the correct branch
     log "Using default branch: $REF_VALUE"
@@ -402,6 +444,9 @@ log "Repository is now at commit: $CURRENT_REF"
 if [ "$REF_TYPE" = "branch" ] || [ "$REF_TYPE" = "default" ]; then
     CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "detached")
     log "Current branch: $CURRENT_BRANCH"
+elif [ "$REF_TYPE" = "tag" ]; then
+    CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "unknown")
+    log "Current tag: $CURRENT_TAG"
 fi
 
 log "Git clone/update completed successfully"
