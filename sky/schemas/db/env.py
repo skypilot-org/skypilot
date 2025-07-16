@@ -13,10 +13,10 @@ config = context.config
 # it from overriding SkyPilot's logging setup. Alembic's fileConfig() call
 # globally reconfigures Python's logging system, which can suppress SkyPilot's
 # output messages that tests expect to see.
-# 
+#
 # Original code (now disabled):
-# if config.config_file_name is not None:
-#     fileConfig(config.config_file_name)
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

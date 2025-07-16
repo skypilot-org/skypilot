@@ -575,17 +575,6 @@ def _reload_config_as_server() -> None:
 
     if db_url:
         with _DB_USE_LOCK:
-            # TODO(rsonecha): This is a temporary fix to ensure the parent
-            # directory exists for SQLite databases. This should be removed
-            # once we have a better way to handle this.
-            # For SQLite databases, ensure parent directory exists
-            if db_url.startswith('sqlite:///'):
-                sqlite_path = db_url[len('sqlite:///'):]
-                if not os.path.isabs(sqlite_path):
-                    sqlite_path = os.path.abspath(sqlite_path)
-                pathlib.Path(sqlite_path).parents[0].mkdir(parents=True,
-                                                           exist_ok=True)
-
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
 
@@ -595,12 +584,14 @@ def _reload_config_as_server() -> None:
             alembic_config.config_ini_section = 'sky_config_db'
             try:
                 alembic_command.upgrade(alembic_config, '001')
-            except (sqlalchemy_exc.IntegrityError, sqlalchemy_exc.OperationalError) as e:
+            except (sqlalchemy_exc.IntegrityError,
+                    sqlalchemy_exc.OperationalError) as e:
                 # If the version already exists (due to concurrent
                 # initialization), we can safely ignore this error
                 if ('UNIQUE constraint failed: '
-                    'alembic_version_sky_config_db.version_num' in str(e) or
-                    'table alembic_version_sky_config_db already exists' in str(e)):
+                        'alembic_version_sky_config_db.version_num' in str(e) or
+                        'table alembic_version_sky_config_db already exists'
+                        in str(e)):
                     pass
                 else:
                     raise
@@ -898,12 +889,15 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 alembic_config.config_ini_section = 'sky_config_db'
                 try:
                     alembic_command.upgrade(alembic_config, '001')
-                except (sqlalchemy_exc.IntegrityError, sqlalchemy_exc.OperationalError) as e:
+                except (sqlalchemy_exc.IntegrityError,
+                        sqlalchemy_exc.OperationalError) as e:
                     # If the version already exists (due to concurrent
                     # initialization), we can safely ignore this error
                     if ('UNIQUE constraint failed: '
-                        'alembic_version_sky_config_db.version_num' in str(e) or
-                        'table alembic_version_sky_config_db already exists' in str(e)):
+                            'alembic_version_sky_config_db.version_num'
+                            in str(e) or
+                            'table alembic_version_sky_config_db already exists'
+                            in str(e)):
                         pass
                     else:
                         raise
