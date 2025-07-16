@@ -128,57 +128,66 @@ class StoreType(enum.Enum):
     NEBIUS = 'NEBIUS'
     VOLUME = 'VOLUME'
 
-    # Dynamically add S3-compatible stores
     @classmethod
-    def _missing_(cls, value):
-        """Automatically handle S3-compatible stores not in the enum."""
-        if isinstance(value, str) and value.upper() in _S3_COMPATIBLE_STORES:
-            # Create a new enum member dynamically
-            new_member = object.__new__(cls)
-            new_member._name_ = value.upper()
-            new_member._value_ = value.upper()
-            return new_member
+    def _get_s3_compatible_store_by_cloud(cls, cloud_name: str) -> Optional[str]:
+        """Get S3-compatible store type by cloud name."""
+        for store_type, store_class in _S3_COMPATIBLE_STORES.items():
+            config = store_class.get_config()
+            if config.cloud_name.lower() == cloud_name:
+                return store_type
         return None
 
     @classmethod
-    def get_s3_compatible_stores(cls) -> Dict[str, Type]:
-        """Get all registered S3-compatible stores."""
-        return _S3_COMPATIBLE_STORES.copy()
+    def _get_s3_compatible_config(cls, store_type: str) -> Optional['S3CompatibleConfig']:
+        """Get S3-compatible store configuration by store type."""
+        store_class = _S3_COMPATIBLE_STORES.get(store_type)
+        if store_class:
+            return store_class.get_config()
+        return None
 
     @classmethod
-    def is_s3_compatible(cls, store_type: str) -> bool:
-        """Check if a store type is S3-compatible."""
-        return store_type.upper() in _S3_COMPATIBLE_STORES
+    def find_s3_compatible_config_by_prefix(cls, url_prefix: str) -> Optional[str]:
+        """Get S3-compatible store type by URL prefix."""
+        for store_type, store_class in _S3_COMPATIBLE_STORES.items():
+            config = store_class.get_config()
+            if config.url_prefix == url_prefix:
+                return store_type
+        return None
 
     @classmethod
     def from_cloud(cls, cloud: str) -> 'StoreType':
-        if cloud.lower() == str(clouds.AWS()).lower():
-            return StoreType.S3
-        elif cloud.lower() == str(clouds.GCP()).lower():
+        cloud_lower = cloud.lower()
+        if cloud_lower == str(clouds.GCP()).lower():
             return StoreType.GCS
-        elif cloud.lower() == str(clouds.IBM()).lower():
+        elif cloud_lower == str(clouds.IBM()).lower():
             return StoreType.IBM
-        elif cloud.lower() == cloudflare.NAME.lower():
+        elif cloud_lower == cloudflare.NAME.lower():
             return StoreType.R2
-        elif cloud.lower() == str(clouds.Azure()).lower():
+        elif cloud_lower == str(clouds.Azure()).lower():
             return StoreType.AZURE
-        elif cloud.lower() == str(clouds.OCI()).lower():
+        elif cloud_lower == str(clouds.OCI()).lower():
             return StoreType.OCI
-        elif cloud.lower() == str(clouds.Nebius()).lower():
+        elif cloud_lower == str(clouds.Nebius()).lower():
             return StoreType.NEBIUS
-        elif cloud.lower() == str(clouds.Lambda()).lower():
+        elif cloud_lower == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Lambda Cloud does not provide cloud storage.')
-        elif cloud.lower() == str(clouds.SCP()).lower():
+        elif cloud_lower == str(clouds.SCP()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('SCP does not provide cloud storage.')
+        else:
+            s3_store_type = cls._get_s3_compatible_store_by_cloud(cloud_lower)
+            if s3_store_type:
+                return cls(s3_store_type)
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
     def to_cloud(self) -> str:
-        if self == StoreType.S3:
-            return str(clouds.AWS())
-        elif self == StoreType.GCS:
+        config = self._get_s3_compatible_config(self.value)
+        if config:
+            return config.cloud_name
+        
+        if self == StoreType.GCS:
             return str(clouds.GCP())
         elif self == StoreType.AZURE:
             return str(clouds.Azure())
@@ -191,22 +200,14 @@ class StoreType(enum.Enum):
         elif self == StoreType.NEBIUS:
             return str(clouds.Nebius())
         else:
-            # For S3-compatible stores, return a generic cloud name
-            if self.value in _S3_COMPATIBLE_STORES:
-                store_class = _S3_COMPATIBLE_STORES[self.value]
-                # Get the cloud name from the store's config
-                dummy_store = store_class.__new__(store_class)
-                if hasattr(dummy_store, '_get_config'):
-                    config = dummy_store._get_config()  # pylint: disable=protected-access
-                    return config.cloud_name
             raise ValueError(f'Unknown store type: {self}')
 
     @classmethod
     def from_store(cls, store: 'AbstractStore') -> 'StoreType':
-        # First check traditional stores
-        if isinstance(store, S3Store):
-            return StoreType.S3
-        elif isinstance(store, GcsStore):
+        if isinstance(store, S3CompatibleStore):
+            return cls(store.get_store_type())
+        
+        if isinstance(store, GcsStore):
             return StoreType.GCS
         elif isinstance(store, AzureBlobStore):
             return StoreType.AZURE
@@ -218,20 +219,16 @@ class StoreType(enum.Enum):
             return StoreType.OCI
         elif isinstance(store, NebiusStore):
             return StoreType.NEBIUS
-
-        # Check S3-compatible stores
-        for store_type_name, store_class in _S3_COMPATIBLE_STORES.items():
-            if isinstance(store, store_class):
-                return cls(store_type_name)
-
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {store}')
-        return StoreType.S3
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {store}')
 
     def store_prefix(self) -> str:
-        if self == StoreType.S3:
-            return 's3://'
-        elif self == StoreType.GCS:
+        config = self._get_s3_compatible_config(self.value)
+        if config:
+            return config.url_prefix
+        
+        if self == StoreType.GCS:
             return 'gs://'
         elif self == StoreType.AZURE:
             return 'https://'
@@ -246,13 +243,6 @@ class StoreType(enum.Enum):
         elif self == StoreType.NEBIUS:
             return 'nebius://'
         else:
-            # For S3-compatible stores, get prefix from their config
-            if self.value in _S3_COMPATIBLE_STORES:
-                store_class = _S3_COMPATIBLE_STORES[self.value]
-                dummy_store = store_class.__new__(store_class)
-                if hasattr(dummy_store, '_get_config'):
-                    config = dummy_store._get_config()  # pylint: disable=protected-access
-                    return config.url_prefix
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
 
@@ -304,12 +294,13 @@ class StoreType(enum.Enum):
                     bucket_name, sub_path = data_utils.split_r2_path(store_url)
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
+                elif store_type == StoreType.NEBIUS:
+                    bucket_name, sub_path = data_utils.split_nebius_path(store_url)
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
                 return store_type, bucket_name, \
                     sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
-
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -565,535 +556,6 @@ class AbstractStore:
                         f'`source: {source_endpoint}`.')
 
 
-# Registry for S3-compatible stores
-_S3_COMPATIBLE_STORES = {}
-
-
-def register_s3_compatible_store(store_class):
-    """Decorator to automatically register S3-compatible stores."""
-    store_type = store_class.get_store_type()
-    _S3_COMPATIBLE_STORES[store_type] = store_class
-    return store_class
-
-
-@dataclass
-class S3CompatibleConfig:
-    """Configuration for S3-compatible storage providers."""
-    # Provider identification
-    provider_name: str  # Human-readable name (e.g., "S3", "R2", "MinIO")
-    store_type: str  # Store type identifier (e.g., "S3", "R2", "MINIO")
-    url_prefix: str  # URL prefix (e.g., "s3://", "r2://", "minio://")
-
-    # Client creation
-    client_factory: Callable[[Optional[str]], Any]
-    resource_factory: Callable[[str], StorageHandle]
-
-    # CLI configuration
-    aws_profile: Optional[str] = None
-    endpoint_url: Optional[str] = None
-    credentials_file: Optional[str] = None
-    extra_cli_args: Optional[List[str]] = None
-
-    # Provider-specific settings
-    cloud_name: str = ''
-    default_region: Optional[str] = None
-    access_denied_message: str = 'Access Denied'
-
-    # Mounting
-    mount_cmd_factory: Optional[Callable] = None
-    mount_cached_cmd_factory: Optional[Callable] = None
-
-    def __post_init__(self):
-        if self.extra_cli_args is None:
-            self.extra_cli_args = []
-
-
-class S3CompatibleStore(AbstractStore):
-    """Base class for S3-compatible object storage providers.
-
-    This class implements all common S3 operations.
-    To add a new S3-compatible store:
-
-    @register_s3_compatible_store
-    class MyStore(S3CompatibleStore):
-        @classmethod
-        def get_store_type(cls) -> str:
-            return "MYSTORE"
-
-        def _get_config(self) -> S3CompatibleConfig:
-            return S3CompatibleConfig(
-                provider_name="MyStore",
-                store_type="MYSTORE",
-                url_prefix="mystore://",
-                client_factory=my_create_client,
-                resource_factory=lambda name: my_resource('s3').Bucket(name),
-                endpoint_url='https://my-endpoint.com',
-                cloud_name='MyCloud'
-            )
-    """
-
-    def __init__(self,
-                 name: str,
-                 source: str,
-                 region: Optional[str] = None,
-                 is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
-        # Initialize configuration first to get defaults
-        self.config = self._get_config()
-
-        # Use provider's default region if not specified
-        if region is None:
-            region = self.config.default_region
-
-        # Initialize S3CompatibleStore specific attributes
-        self.client: 'mypy_boto3_s3.Client'
-        self.bucket: 'StorageHandle'
-
-        # Call parent constructor
-        super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path)
-
-    @abstractmethod
-    def _get_config(self) -> S3CompatibleConfig:
-        """Return the configuration for this S3-compatible provider."""
-        pass
-
-    @classmethod
-    @abstractmethod
-    def get_store_type(cls) -> str:
-        """Return the store type identifier (e.g., 'S3', 'R2', 'MINIO')."""
-        pass
-
-    def _validate(self):
-        """Validate the S3-compatible store configuration."""
-        if self.source is not None and isinstance(self.source, str):
-            # Validate cross-provider sources
-            if self.source.startswith('s3://'):
-                assert self.name == data_utils.split_s3_path(self.source)[0], (
-                    'S3 Bucket is specified as path, the name should be the'
-                    ' same as S3 bucket.')
-                assert data_utils.verify_s3_bucket(self.name), (
-                    f'Source specified as {self.source}, an S3 bucket. '
-                    'S3 Bucket should exist.')
-            elif self.source.startswith('gs://'):
-                assert self.name == data_utils.split_gcs_path(self.source)[0], (
-                    'GCS Bucket is specified as path, the name should be '
-                    'the same as GCS bucket.')
-                assert data_utils.verify_gcs_bucket(self.name), (
-                    f'Source specified as {self.source}, a GCS bucket. '
-                    'GCS Bucket should exist.')
-            elif self.source.startswith('r2://'):
-                assert self.name == data_utils.split_r2_path(self.source)[0], (
-                    'R2 Bucket is specified as path, the name should be '
-                    'the same as R2 bucket.')
-                assert data_utils.verify_r2_bucket(self.name), (
-                    f'Source specified as {self.source}, a R2 bucket. '
-                    'R2 Bucket should exist.')
-            elif self.source.startswith('nebius://'):
-                assert self.name == data_utils.split_nebius_path(
-                    self.source)[0], (
-                        'Nebius Object Storage is specified as path, the name '
-                        'should be the same as Nebius bucket.')
-                assert data_utils.verify_nebius_bucket(self.name), (
-                    f'Source specified as {self.source}, a Nebius Object '
-                    f'Storage bucket. Nebius Object Storage Bucket should '
-                    f'exist.')
-            elif self.source.startswith('cos://'):
-                assert self.name == data_utils.split_cos_path(self.source)[0], (
-                    'COS Bucket is specified as path, the name should be '
-                    'the same as COS bucket.')
-                assert data_utils.verify_ibm_cos_bucket(self.name), (
-                    f'Source specified as {self.source}, a COS bucket. '
-                    'COS Bucket should exist.')
-            elif self.source.startswith('oci://'):
-                assert self.name == data_utils.split_oci_path(self.source)[0], (
-                    'OCI Bucket is specified as path, the name should be '
-                    'the same as OCI bucket.')
-                assert data_utils.verify_oci_bucket(self.name), (
-                    f'Source specified as {self.source}, an OCI bucket. '
-                    'OCI Bucket should exist.')
-            elif data_utils.is_az_container_endpoint(self.source):
-                storage_account_name, container_name, _ = (
-                    data_utils.split_az_path(self.source))
-                assert self.name == container_name, (
-                    'Azure bucket is specified as path, the name should be '
-                    'the same as Azure bucket.')
-                assert data_utils.verify_az_bucket(
-                    storage_account_name, self.name), (
-                        f'Source specified as {self.source}, an Azure bucket. '
-                        'Azure bucket should exist.')
-            elif self.source.startswith(self.config.url_prefix):
-                # Source is from the same provider
-                pass
-
-        # Validate name for S3-compatible stores (basic validation)
-        self.name = self._validate_name(self.name)
-
-        # Check if the storage cloud is enabled
-        if not _is_storage_cloud_enabled(self.config.cloud_name):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesUnavailableError(
-                    f'Storage "store: {self.config.store_type.lower()}" '
-                    f'specified, but '
-                    f'{self.config.cloud_name} access is disabled. '
-                    'To fix, enable '
-                    f'{self.config.cloud_name} by running `sky check`.')
-
-    def _validate_name(self, name: str) -> str:
-        """Basic name validation for S3-compatible stores. Can be overridden."""
-        if name is None:
-            raise exceptions.StorageNameError('Store name must be specified.')
-        return name
-
-    def initialize(self):
-        """Initialize the S3-compatible store."""
-        self.client = self.config.client_factory(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            self.is_sky_managed = is_new_bucket
-
-    def upload(self):
-        """Upload source to store bucket."""
-        try:
-            if isinstance(self.source, list):
-                self.batch_aws_rsync(self.source, create_dirs=True)
-            elif self.source is not None:
-                if self._is_same_provider_source():
-                    pass  # No transfer needed
-                elif self._needs_cross_provider_transfer():
-                    self._transfer_from_other_provider()
-                else:
-                    self.batch_aws_rsync([self.source])
-        except exceptions.StorageUploadError:
-            raise
-        except Exception as e:
-            raise exceptions.StorageUploadError(
-                f'Upload failed for store {self.name}') from e
-
-    def _is_same_provider_source(self) -> bool:
-        """Check if source is from the same provider."""
-        return isinstance(self.source, str) and self.source.startswith(
-            self.config.url_prefix)
-
-    def _needs_cross_provider_transfer(self) -> bool:
-        """Check if source needs cross-provider transfer."""
-        if not isinstance(self.source, str):
-            return False
-        cross_provider_prefixes = [
-            's3://', 'gs://', 'r2://', 'oci://', 'nebius://', 'cos://'
-        ]
-        return any(
-            self.source.startswith(prefix)
-            for prefix in cross_provider_prefixes)
-
-    def _transfer_from_other_provider(self):
-        """Transfer data from another cloud provider."""
-        source_type = self._detect_source_type()
-        target_type = self.config.store_type.lower()
-
-        if hasattr(data_transfer, f'{source_type}_to_{target_type}'):
-            transfer_func = getattr(data_transfer,
-                                    f'{source_type}_to_{target_type}')
-            transfer_func(self.name, self.name)
-
-    def _detect_source_type(self) -> str:
-        """Detect the source provider type from URL."""
-        if not isinstance(self.source, str):
-            return 'unknown'
-
-        if self.source.startswith('s3://'):
-            return 's3'
-        elif self.source.startswith('gs://'):
-            return 'gcs'
-        elif self.source.startswith('r2://'):
-            return 'r2'
-        elif self.source.startswith('nebius://'):
-            return 'nebius'
-        elif self.source.startswith('oci://'):
-            return 'oci'
-        elif self.source.startswith('cos://'):
-            return 'cos'
-        return 'unknown'
-
-    def delete(self) -> None:
-        """Delete the bucket or sub-path."""
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
-            return self._delete_sub_path()
-
-        deleted_by_skypilot = self._delete_bucket(self.name)
-        provider = self.config.provider_name
-        if deleted_by_skypilot:
-            msg_str = f'Deleted {provider} bucket {self.name}.'
-        else:
-            msg_str = f'{provider} bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
-        logger.info(f'{colorama.Fore.GREEN}{msg_str}{colorama.Style.RESET_ALL}')
-
-    def get_handle(self) -> StorageHandle:
-        """Get storage handle using provider's resource factory."""
-        return self.config.resource_factory(self.name)
-
-    def _download_file(self, remote_path: str, local_path: str) -> None:
-        """Download file using S3 API."""
-        self.bucket.download_file(remote_path, local_path)
-
-    def mount_command(self, mount_path: str) -> str:
-        """Get mount command using provider's mount factory."""
-        if self.config.mount_cmd_factory is None:
-            raise exceptions.NotSupportedError(
-                f'Mounting not supported for {self.config.provider_name}')
-
-        install_cmd = mounting_utils.get_s3_mount_install_cmd()
-        mount_cmd = self.config.mount_cmd_factory(self.bucket.name, mount_path,
-                                                  self._bucket_sub_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
-
-    def mount_cached_command(self, mount_path: str) -> str:
-        """Get cached mount command. Can be overridden by subclasses."""
-        if self.config.mount_cached_cmd_factory is None:
-            raise exceptions.NotSupportedError(
-                f'Cached mounting not supported for {self.config.provider_name}'
-            )
-
-        install_cmd = mounting_utils.get_rclone_install_cmd()
-        mount_cmd = self.config.mount_cached_cmd_factory(
-            self.bucket.name, mount_path, self._bucket_sub_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
-
-    def batch_aws_rsync(self,
-                        source_path_list: List[Path],
-                        create_dirs: bool = False) -> None:
-        """Generic S3-compatible rsync using AWS CLI."""
-        sub_path = f'/{self._bucket_sub_path}' if self._bucket_sub_path else ''
-
-        def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join([
-                f'--include {shlex.quote(file_name)}'
-                for file_name in file_names
-            ])
-            base_dir_path = shlex.quote(base_dir_path)
-
-            # Build AWS CLI command with provider-specific configuration
-            cmd_parts = ['aws s3 sync --no-follow-symlinks --exclude="*"']
-            cmd_parts.append(f'{includes} {base_dir_path}')
-            cmd_parts.append(f's3://{self.name}{sub_path}')
-
-            # Add provider-specific arguments
-            if self.config.endpoint_url:
-                cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
-            if self.config.aws_profile:
-                cmd_parts.append(f'--profile={self.config.aws_profile}')
-            if self.config.extra_cli_args:
-                cmd_parts.extend(self.config.extra_cli_args)
-
-            # Handle credentials file via environment
-            cmd = ' '.join(cmd_parts)
-            if self.config.credentials_file:
-                cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
-                {self.config.credentials_file} {cmd}'
-
-            return cmd
-
-        def get_dir_sync_command(src_dir_path, dest_dir_name):
-            excluded_list = storage_utils.get_excluded_files(src_dir_path)
-            excluded_list.append('.git/*')
-            excludes = ' '.join([
-                f'--exclude {shlex.quote(file_name)}'
-                for file_name in excluded_list
-            ])
-            src_dir_path = shlex.quote(src_dir_path)
-
-            cmd_parts = ['aws s3 sync --no-follow-symlinks']
-            cmd_parts.append(f'{excludes} {src_dir_path}')
-            cmd_parts.append(f's3://{self.name}{sub_path}/{dest_dir_name}')
-
-            if self.config.endpoint_url:
-                cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
-            if self.config.aws_profile:
-                cmd_parts.append(f'--profile={self.config.aws_profile}')
-            if self.config.extra_cli_args:
-                cmd_parts.extend(self.config.extra_cli_args)
-
-            cmd = ' '.join(cmd_parts)
-            if self.config.credentials_file:
-                cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
-                    {self.config.credentials_file} {cmd}'
-
-            return cmd
-
-        # Generate message for upload
-        if len(source_path_list) > 1:
-            source_message = f'{len(source_path_list)} paths'
-        else:
-            source_message = source_path_list[0]
-
-        provider_prefix = self.config.url_prefix
-        log_path = sky_logging.generate_tmp_logging_file_path(
-            _STORAGE_LOG_FILE_NAME)
-        sync_path = (f'{source_message} -> '
-                     f'{provider_prefix}{self.name}{sub_path}/')
-
-        with rich_utils.safe_status(
-                ux_utils.spinner_message(f'Syncing {sync_path}',
-                                         log_path=log_path)):
-            data_utils.parallel_upload(
-                source_path_list,
-                get_file_sync_command,
-                get_dir_sync_command,
-                log_path,
-                self.name,
-                self.config.access_denied_message,
-                create_dirs=create_dirs,
-                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
-
-        logger.info(
-            ux_utils.finishing_message(f'Storage synced: {sync_path}',
-                                       log_path))
-
-    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Get or create bucket using S3 API."""
-        bucket = self.config.resource_factory(self.name)
-
-        try:
-            # Try Public bucket case.
-            self.client.head_bucket(Bucket=self.name)
-            self._validate_existing_bucket()
-            return bucket, False
-        except aws.botocore_exceptions().ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == '403':
-                command = f'aws s3 ls s3://{self.name}'
-                if self.config.aws_profile:
-                    command += f' --profile={self.config.aws_profile}'
-                if self.config.endpoint_url:
-                    command += f' --endpoint-url {self.config.endpoint_url}'
-                if self.config.credentials_file:
-                    command = (f'AWS_SHARED_CREDENTIALS_FILE='
-                               f'{self.config.credentials_file} {command}')
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
-                        f' To debug, consider running `{command}`.') from e
-
-        if isinstance(self.source, str) and self.source.startswith(
-                self.config.url_prefix):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketGetError(
-                    'Attempted to use a non-existent bucket as a source: '
-                    f'{self.source}.')
-
-        # If bucket cannot be found, create it if needed
-        if self.sync_on_reconstruction:
-            bucket = self._create_bucket(self.name)
-            return bucket, True
-        else:
-            raise exceptions.StorageExternalDeletionError(
-                'Attempted to fetch a non-existent bucket: '
-                f'{self.name}')
-
-    def _create_bucket(self, bucket_name: str) -> StorageHandle:
-        """Create bucket using S3 API."""
-        try:
-            create_bucket_config: Dict[str, Any] = {'Bucket': bucket_name}
-            if self.region is not None and self.region != 'us-east-1':
-                create_bucket_config['CreateBucketConfiguration'] = {
-                    'LocationConstraint': self.region
-                }
-            self.client.create_bucket(**create_bucket_config)
-            logger.info(
-                f'  {colorama.Style.DIM}Created S3 bucket {bucket_name!r} in '
-                f'{self.region or "us-east-1"}{colorama.Style.RESET_ALL}')
-        except aws.botocore_exceptions().ClientError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'Attempted to create a bucket {self.name} but failed.'
-                ) from e
-        return self.config.resource_factory(bucket_name)
-
-    def _delete_bucket(self, bucket_name: str) -> bool:
-        """Delete bucket using AWS CLI."""
-        cmd_parts = [f'aws s3 rb s3://{bucket_name} --force']
-
-        if self.config.aws_profile:
-            cmd_parts.append(f'--profile={self.config.aws_profile}')
-        if self.config.endpoint_url:
-            cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
-
-        remove_command = ' '.join(cmd_parts)
-
-        if self.config.credentials_file:
-            remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
-                              f'{self.config.credentials_file} '
-                              f'{remove_command}')
-
-        return self._execute_remove_command(
-            remove_command, bucket_name,
-            f'Deleting {self.config.provider_name} bucket {bucket_name}',
-            (f'Failed to delete {self.config.provider_name} bucket '
-             f'{bucket_name}.'))
-
-    def _execute_remove_command(self, command: str, bucket_name: str,
-                                hint_operating: str, hint_failed: str) -> bool:
-        """Execute bucket removal command."""
-        try:
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message(hint_operating)):
-                subprocess.check_output(command.split(' '),
-                                        stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(
-                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name=bucket_name))
-                return False
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketDeleteError(
-                        f'{hint_failed}'
-                        f'Detailed error: {e.output}')
-        return True
-
-    def _delete_sub_path(self) -> None:
-        """Remove objects from the sub path in the bucket."""
-        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
-        deleted_by_skypilot = self._delete_bucket_sub_path(
-            self.name, self._bucket_sub_path)
-        provider = self.config.provider_name
-        if deleted_by_skypilot:
-            msg_str = (f'Removed objects from {provider} bucket '
-                       f'{self.name}/{self._bucket_sub_path}.')
-        else:
-            msg_str = (f'Failed to remove objects from {provider} bucket '
-                       f'{self.name}/{self._bucket_sub_path}.')
-        logger.info(f'{colorama.Fore.GREEN}{msg_str}{colorama.Style.RESET_ALL}')
-
-    def _delete_bucket_sub_path(self, bucket_name: str, sub_path: str) -> bool:
-        """Delete objects in the sub path from the bucket."""
-        cmd_parts = [f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive']
-
-        if self.config.aws_profile:
-            cmd_parts.append(f'--profile={self.config.aws_profile}')
-        if self.config.endpoint_url:
-            cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
-
-        remove_command = ' '.join(cmd_parts)
-
-        if self.config.credentials_file:
-            remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
-                              f'{self.config.credentials_file} '
-                              f'{remove_command}')
-
-        return self._execute_remove_command(
-            remove_command, bucket_name,
-            (f'Removing objects from {self.config.provider_name} bucket '
-             f'{bucket_name}/{sub_path}'),
-            (f'Failed to remove objects from {self.config.provider_name} '
-             f'bucket {bucket_name}/{sub_path}.'))
-
-
 class Storage(object):
     """Storage objects handle persistent and large volume storage in the sky.
 
@@ -1293,15 +755,13 @@ class Storage(object):
                     else:
                         new_store_type = store_type
                 with ux_utils.print_exception_no_traceback():
-                    prev_type_str = previous_store_type.value.lower() if previous_store_type else "unknown"
-                    new_type_str = new_store_type.value.lower() if new_store_type else "unknown"
                     raise exceptions.StorageBucketCreateError(
                         f'Bucket {self.name} was previously created for '
-                        f'{prev_type_str!r}, but a new '
-                        f'store type {new_type_str!r} is '
+                        f'{previous_store_type.value.lower()!r}, but a new '
+                        f'store type {new_store_type.value.lower()!r} is '
                         'requested. This is not supported yet. Please specify '
                         'the same store type: '
-                        f'{prev_type_str!r}.')
+                        f'{previous_store_type.value.lower()!r}.')
 
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
@@ -1331,20 +791,20 @@ class Storage(object):
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
                 if isinstance(self.source, str):
-                    if self.source.startswith('s3://'):
-                        self.add_store(StoreType.S3)
-                    elif self.source.startswith('gs://'):
+                    if self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
                     elif data_utils.is_az_container_endpoint(self.source):
                         self.add_store(StoreType.AZURE)
-                    elif self.source.startswith('r2://'):
-                        self.add_store(StoreType.R2)
                     elif self.source.startswith('cos://'):
                         self.add_store(StoreType.IBM)
                     elif self.source.startswith('oci://'):
                         self.add_store(StoreType.OCI)
                     elif self.source.startswith('nebius://'):
                         self.add_store(StoreType.NEBIUS)
+                    
+                    store_type = StoreType.find_s3_compatible_config_by_prefix(self.source)
+                    if store_type:
+                        self.add_store(StoreType(store_type))
 
     def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
         """Adds the bucket sub path prefix to the blob path."""
@@ -1560,8 +1020,9 @@ class Storage(object):
             # When initializing from global_user_state, we override the
             # source from the YAML
             try:
-                if s_type == StoreType.S3:
-                    store = S3Store.from_metadata(
+                if s_type.value in _S3_COMPATIBLE_STORES:
+                    store_class = _S3_COMPATIBLE_STORES[s_type.value]
+                    store = store_class.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
@@ -1580,12 +1041,6 @@ class Storage(object):
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
                         _bucket_sub_path=self._bucket_sub_path)
-                elif s_type == StoreType.R2:
-                    store = R2Store.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction,
-                        _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.IBM:
                     store = IBMCosStore.from_metadata(
                         s_metadata,
@@ -1600,13 +1055,6 @@ class Storage(object):
                         _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.NEBIUS:
                     store = NebiusStore.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction,
-                        _bucket_sub_path=self._bucket_sub_path)
-                elif StoreType.is_s3_compatible(s_type.value):
-                    store_cls = _S3_COMPATIBLE_STORES[s_type.value]
-                    store = store_cls.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
@@ -1692,31 +1140,24 @@ class Storage(object):
             assert store is not None, self
             return store
 
-        # Determine store class
         store_cls: Type[AbstractStore]
-
-        # Traditional stores
-        if store_type == StoreType.S3:
-            store_cls = S3Store
+        # First check if it's a registered S3-compatible store
+        if store_type.value in _S3_COMPATIBLE_STORES:
+            store_cls = _S3_COMPATIBLE_STORES[store_type.value]
         elif store_type == StoreType.GCS:
             store_cls = GcsStore
         elif store_type == StoreType.AZURE:
             store_cls = AzureBlobStore
-        elif store_type == StoreType.R2:
-            store_cls = R2Store
         elif store_type == StoreType.IBM:
             store_cls = IBMCosStore
         elif store_type == StoreType.OCI:
             store_cls = OciStore
         elif store_type == StoreType.NEBIUS:
             store_cls = NebiusStore
-        elif StoreType.is_s3_compatible(store_type.value):
-            store_cls = _S3_COMPATIBLE_STORES[store_type.value]
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
-
         try:
             store = store_cls(
                 name=self.name,
@@ -1936,6 +1377,611 @@ class Storage(object):
         return config
 
 
+# Registry for S3-compatible stores
+_S3_COMPATIBLE_STORES = {}
+
+
+def register_s3_compatible_store(store_class):
+    """Decorator to automatically register S3-compatible stores."""
+    store_type = store_class.get_store_type()
+    _S3_COMPATIBLE_STORES[store_type] = store_class
+    return store_class
+
+
+@dataclass
+class S3CompatibleConfig:
+    """Configuration for S3-compatible storage providers."""
+    # Provider identification
+    provider_name: str  # Human-readable name (e.g., "S3", "R2", "MinIO")
+    store_type: str  # Store type identifier (e.g., "S3", "R2", "MINIO")
+    url_prefix: str  # URL prefix (e.g., "s3://", "r2://", "minio://")
+
+    # Client creation
+    client_factory: Callable[[Optional[str]], Any]
+    resource_factory: Callable[[str], StorageHandle]
+
+    # CLI configuration
+    aws_profile: Optional[str] = None
+    get_endpoint_url: Optional[Callable[[], str]] = None
+    credentials_file: Optional[str] = None
+    extra_cli_args: Optional[List[str]] = None
+
+    # Provider-specific settings
+    cloud_name: str = ''
+    default_region: Optional[str] = None
+    access_denied_message: str = 'Access Denied'
+
+    # Mounting
+    mount_cmd_factory: Optional[Callable] = None
+    mount_cached_cmd_factory: Optional[Callable] = None
+
+    def __post_init__(self):
+        if self.extra_cli_args is None:
+            self.extra_cli_args = []
+
+
+class S3CompatibleStore(AbstractStore):
+    """Base class for S3-compatible object storage providers.
+
+    This class implements all common S3 operations.
+    To add a new S3-compatible store:
+
+    @register_s3_compatible_store
+    class MyStore(S3CompatibleStore):
+        @classmethod
+        def get_store_type(cls) -> str:
+            return "MYSTORE"
+
+        def _get_config(self) -> S3CompatibleConfig:
+            return S3CompatibleConfig(
+                provider_name="MyStore",
+                store_type="MYSTORE",
+                url_prefix="mystore://",
+                client_factory=my_create_client,
+                resource_factory=lambda name: my_resource('s3').Bucket(name),
+                endpoint_url='https://my-endpoint.com',
+                cloud_name='MyCloud'
+            )
+    """
+
+    PROVIDER_PREFIXES = {
+        's3://', 'gs://', 'r2://', 'oci://', 'nebius://', 'cos://'
+    }
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = None,
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
+        # Initialize configuration first to get defaults
+        self.config = self.__class__.get_config()
+
+        # Use provider's default region if not specified
+        if region is None:
+            region = self.config.default_region
+
+        # Initialize S3CompatibleStore specific attributes
+        self.client: 'mypy_boto3_s3.Client'
+        self.bucket: 'StorageHandle'
+
+        # Call parent constructor
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction, _bucket_sub_path)
+
+    @classmethod
+    @abstractmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for this S3-compatible provider."""
+        pass
+
+    @classmethod
+    @abstractmethod
+    def get_store_type(cls) -> str:
+        """Return the store type identifier (e.g., 'S3', 'R2', 'MINIO')."""
+        pass
+
+    def _validate(self):
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+                if not isinstance(self, S3Store):
+                    assert data_utils.verify_s3_bucket(self.name), (
+                        f'Source specified as {self.source}, an S3 bucket. ',
+                        'S3 Bucket should exist.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+                if not isinstance(self, GcsStore):
+                    assert data_utils.verify_gcs_bucket(self.name), (
+                        f'Source specified as {self.source}, a GCS bucket. ',
+                        'GCS Bucket should exist.')
+            elif data_utils.is_az_container_endpoint(self.source):
+                storage_account_name, container_name, _ = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'Azure bucket is specified as path, the name should be '
+                    'the same as Azure bucket.')
+                if not isinstance(self, AzureBlobStore):
+                    assert data_utils.verify_az_bucket(
+                        storage_account_name, self.name), (
+                            f'Source specified as {self.source}, an Azure bucket. '
+                            'Azure bucket should exist.')
+            elif self.source.startswith('r2://'):
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
+                if not isinstance(self, R2Store):
+                    assert data_utils.verify_r2_bucket(self.name), (
+                        f'Source specified as {self.source}, a R2 bucket. ',
+                        'R2 Bucket should exist.')
+            elif self.source.startswith('nebius://'):
+                assert self.name == data_utils.split_nebius_path(
+                    self.source)[0], (
+                        'Nebius Object Storage is specified as path, the name '
+                        'should be the same as R2 bucket.')
+                if not isinstance(self, NebiusStore):
+                    assert data_utils.verify_nebius_bucket(self.name), (
+                        f'Source specified as {self.source}, a Nebius Object '
+                        f'Storage bucket. Nebius Object Storage Bucket should '
+                        f'exist.')
+            elif self.source.startswith('cos://'):
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
+                    'COS Bucket is specified as path, the name should be '
+                    'the same as COS bucket.')
+                if not isinstance(self, IBMCosStore):
+                    assert data_utils.verify_ibm_cos_bucket(self.name), (
+                        f'Source specified as {self.source}, a COS bucket. ',
+                        'COS Bucket should exist.')
+            elif self.source.startswith('oci://'):
+                raise NotImplementedError(
+                    f'Moving data from OCI to {self.source} is currently not supported.')
+
+        # Validate name
+        self.name = self.validate_name(self.name)
+
+        # Check if the storage is enabled
+        if not _is_storage_cloud_enabled(self.config.cloud_name):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    f'Storage "store: {self.config.store_type.lower()}" '
+                    f'specified, but '
+                    f'{self.config.cloud_name} access is disabled. '
+                    'To fix, enable '
+                    f'{self.config.cloud_name} by running `sky check`.')
+
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        """Validates the name of the S3 store.
+
+        Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # pylint: disable=line-too-long
+        """
+
+        def _raise_no_traceback_name_error(err_str):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageNameError(err_str)
+
+        if name is not None and isinstance(name, str):
+            if not 3 <= len(name) <= 63:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must be between 3 (min) '
+                    'and 63 (max) characters long.')
+
+            # Check for valid characters and start/end with a letter or number
+            pattern = r'^[a-z0-9][-a-z0-9.]*[a-z0-9]$'
+            if not re.match(pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} can consist only of '
+                    'lowercase letters, numbers, dots (.), and hyphens (-). '
+                    'It must begin and end with a letter or number.')
+
+            # Check for two adjacent periods
+            if '..' in name:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not contain '
+                    'two adjacent periods.')
+
+            # Check for IP address format
+            ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
+            if re.match(ip_pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not be formatted as '
+                    'an IP address (for example, 192.168.5.4).')
+
+            # Check for 'xn--' prefix
+            if name.startswith('xn--'):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not start with the '
+                    'prefix "xn--".')
+
+            # Check for '-s3alias' suffix
+            if name.endswith('-s3alias'):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not end with the '
+                    'suffix "-s3alias".')
+
+            # Check for '--ol-s3' suffix
+            if name.endswith('--ol-s3'):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not end with the '
+                    'suffix "--ol-s3".')
+        else:
+            _raise_no_traceback_name_error('Store name must be specified.')
+        return name
+
+    def initialize(self):
+        """Initializes the S3 store object on the cloud.
+
+        Initialization involves fetching bucket if exists, or creating it if
+        it does not.
+
+        Raises:
+          StorageBucketCreateError: If bucket creation fails
+          StorageBucketGetError: If fetching existing bucket fails
+          StorageInitError: If general initialization fails.
+        """
+        self.client = self.config.client_factory(self.region)
+        self.bucket, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def upload(self):
+        """Uploads source to store bucket.
+
+        Upload must be called by the Storage handler - it is not called on
+        Store initialization.
+
+        Raises:
+            StorageUploadError: if upload fails.
+        """
+        try:
+            if isinstance(self.source, list):
+                self.batch_aws_rsync(self.source, create_dirs=True)
+            elif self.source is not None:
+                if self._is_same_provider_source():
+                    pass  # No transfer needed
+                elif self._needs_cross_provider_transfer():
+                    self._transfer_from_other_provider()
+                else:
+                    self.batch_aws_rsync([self.source])
+        except exceptions.StorageUploadError:
+            raise
+        except Exception as e:
+            raise exceptions.StorageUploadError(
+                f'Upload failed for store {self.name}') from e
+
+    def _is_same_provider_source(self) -> bool:
+        """Check if source is from the same provider."""
+        return isinstance(self.source, str) and self.source.startswith(
+            self.config.url_prefix)
+
+    def _needs_cross_provider_transfer(self) -> bool:
+        """Check if source needs cross-provider transfer."""
+        if not isinstance(self.source, str):
+            return False
+        return any(
+            self.source.startswith(prefix)
+            for prefix in self.PROVIDER_PREFIXES)
+
+    def _transfer_from_other_provider(self):
+        """Transfer data from another cloud provider."""
+        source_type = self._detect_source_type()
+        target_type = self.config.store_type.lower()
+
+        if hasattr(data_transfer, f'{source_type}_to_{target_type}'):
+            transfer_func = getattr(data_transfer,
+                                    f'{source_type}_to_{target_type}')
+            transfer_func(self.name, self.name)
+
+    def _detect_source_type(self) -> str:
+        """Detect the source provider type from URL."""
+        if not isinstance(self.source, str):
+            return 'unknown'
+        
+        for provider in self.PROVIDER_PREFIXES:
+            if self.source.startswith(provider):
+                # Assume s3://, remove ://
+                return provider[:-len('://')]
+
+    def delete(self) -> None:
+        """Delete the bucket or sub-path."""
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
+        deleted_by_skypilot = self._delete_bucket(self.name)
+        provider = self.config.provider_name
+        if deleted_by_skypilot:
+            msg_str = f'Deleted {provider} bucket {self.name}.'
+        else:
+            msg_str = f'{provider} bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}{colorama.Style.RESET_ALL}')
+
+    def get_handle(self) -> StorageHandle:
+        """Get storage handle using provider's resource factory."""
+        return self.config.resource_factory(self.name)
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Download file using S3 API."""
+        self.bucket.download_file(remote_path, local_path)
+
+    def mount_command(self, mount_path: str) -> str:
+        """Get mount command using provider's mount factory."""
+        if self.config.mount_cmd_factory is None:
+            raise exceptions.NotSupportedError(
+                f'Mounting not supported for {self.config.provider_name}')
+
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = self.config.mount_cmd_factory(self.bucket.name, mount_path,
+                                                  self._bucket_sub_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """Get cached mount command. Can be overridden by subclasses."""
+        if self.config.mount_cached_cmd_factory is None:
+            raise exceptions.NotSupportedError(
+                f'Cached mounting not supported for {self.config.provider_name}'
+            )
+
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        mount_cmd = self.config.mount_cached_cmd_factory(
+            self.bucket.name, mount_path, self._bucket_sub_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
+
+    def batch_aws_rsync(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Generic S3-compatible rsync using AWS CLI."""
+        sub_path = f'/{self._bucket_sub_path}' if self._bucket_sub_path else ''
+
+        def get_file_sync_command(base_dir_path, file_names):
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
+
+            # Build AWS CLI command with provider-specific configuration
+            cmd_parts = ['aws s3 sync --no-follow-symlinks --exclude="*"']
+            cmd_parts.append(f'{includes} {base_dir_path}')
+            cmd_parts.append(f's3://{self.name}{sub_path}')
+
+            # Add provider-specific arguments
+            if self.config.get_endpoint_url:
+                cmd_parts.append(f'--endpoint-url {self.config.get_endpoint_url()}')
+            if self.config.aws_profile:
+                cmd_parts.append(f'--profile={self.config.aws_profile}')
+            if self.config.extra_cli_args:
+                cmd_parts.extend(self.config.extra_cli_args)
+
+            # Handle credentials file via environment
+            cmd = ' '.join(cmd_parts)
+            if self.config.credentials_file:
+                cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
+                {self.config.credentials_file} {cmd}'
+
+            return cmd
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
+            src_dir_path = shlex.quote(src_dir_path)
+
+            cmd_parts = ['aws s3 sync --no-follow-symlinks']
+            cmd_parts.append(f'{excludes} {src_dir_path}')
+            cmd_parts.append(f's3://{self.name}{sub_path}/{dest_dir_name}')
+
+            if self.config.get_endpoint_url:
+                cmd_parts.append(f'--endpoint-url {self.config.get_endpoint_url()}')
+            if self.config.aws_profile:
+                cmd_parts.append(f'--profile={self.config.aws_profile}')
+            if self.config.extra_cli_args:
+                cmd_parts.extend(self.config.extra_cli_args)
+
+            cmd = ' '.join(cmd_parts)
+            if self.config.credentials_file:
+                cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
+                    {self.config.credentials_file} {cmd}'
+
+            return cmd
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        provider_prefix = self.config.url_prefix
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = (f'{source_message} -> '
+                     f'{provider_prefix}{self.name}{sub_path}/')
+
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                log_path,
+                self.name,
+                self.config.access_denied_message,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Get or create bucket using S3 API."""
+        bucket = self.config.resource_factory(self.name)
+
+        try:
+            # Try Public bucket case.
+            self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
+            return bucket, False
+        except aws.botocore_exceptions().ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == '403':
+                command = f'aws s3 ls s3://{self.name}'
+                if self.config.aws_profile:
+                    command += f' --profile={self.config.aws_profile}'
+                if self.config.get_endpoint_url:
+                    command += f' --endpoint-url {self.config.get_endpoint_url()}'
+                if self.config.credentials_file:
+                    command = (f'AWS_SHARED_CREDENTIALS_FILE='
+                               f'{self.config.credentials_file} {command}')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider running `{command}`.') from e
+
+        if isinstance(self.source, str) and self.source.startswith(
+                self.config.url_prefix):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to use a non-existent bucket as a source: '
+                    f'{self.source}.')
+
+        # If bucket cannot be found, create it if needed
+        if self.sync_on_reconstruction:
+            bucket = self._create_bucket(self.name)
+            return bucket, True
+        else:
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
+
+    def _create_bucket(self, bucket_name: str) -> StorageHandle:
+        """Create bucket using S3 API."""
+        try:
+            create_bucket_config: Dict[str, Any] = {'Bucket': bucket_name}
+            if self.region is not None and self.region != 'us-east-1':
+                create_bucket_config['CreateBucketConfiguration'] = {
+                    'LocationConstraint': self.region
+                }
+            self.client.create_bucket(**create_bucket_config)
+            logger.info(
+                f'  {colorama.Style.DIM}Created S3 bucket {bucket_name!r} in '
+                f'{self.region or "us-east-1"}{colorama.Style.RESET_ALL}')
+
+            # Add AWS tags configured in config.yaml to the bucket.
+            # This is useful for cost tracking and external cleanup.
+            bucket_tags = skypilot_config.get_effective_region_config(
+                cloud=self.config.cloud_name, region=None, keys=('labels',), default_value={})
+            if bucket_tags:
+                self.client.put_bucket_tagging(
+                    Bucket=bucket_name,
+                    Tagging={
+                        'TagSet': [{
+                            'Key': k,
+                            'Value': v
+                        } for k, v in bucket_tags.items()]
+                    })
+        except aws.botocore_exceptions().ClientError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Attempted to create a bucket {self.name} but failed.'
+                ) from e
+        return self.config.resource_factory(bucket_name)
+
+    def _delete_bucket(self, bucket_name: str) -> bool:
+        """Delete bucket using AWS CLI."""
+        cmd_parts = [f'aws s3 rb s3://{bucket_name} --force']
+
+        if self.config.aws_profile:
+            cmd_parts.append(f'--profile={self.config.aws_profile}')
+        if self.config.get_endpoint_url:
+            cmd_parts.append(f'--endpoint-url {self.config.get_endpoint_url()}')
+
+        remove_command = ' '.join(cmd_parts)
+
+        if self.config.credentials_file:
+            remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
+                              f'{self.config.credentials_file} '
+                              f'{remove_command}')
+
+        return self._execute_remove_command(
+            remove_command, bucket_name,
+            f'Deleting {self.config.provider_name} bucket {bucket_name}',
+            (f'Failed to delete {self.config.provider_name} bucket '
+             f'{bucket_name}.'))
+
+    def _execute_remove_command(self, command: str, bucket_name: str,
+                                hint_operating: str, hint_failed: str) -> bool:
+        """Execute bucket removal command."""
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
+    def _delete_sub_path(self) -> None:
+        """Remove objects from the sub path in the bucket."""
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        provider = self.config.provider_name
+        if deleted_by_skypilot:
+            msg_str = (f'Removed objects from {provider} bucket '
+                       f'{self.name}/{self._bucket_sub_path}.')
+        else:
+            msg_str = (f'Failed to remove objects from {provider} bucket '
+                       f'{self.name}/{self._bucket_sub_path}.')
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}{colorama.Style.RESET_ALL}')
+
+    def _delete_bucket_sub_path(self, bucket_name: str, sub_path: str) -> bool:
+        """Delete objects in the sub path from the bucket."""
+        cmd_parts = [f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive']
+
+        if self.config.aws_profile:
+            cmd_parts.append(f'--profile={self.config.aws_profile}')
+        if self.config.endpoint_url:
+            cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
+
+        remove_command = ' '.join(cmd_parts)
+
+        if self.config.credentials_file:
+            remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
+                              f'{self.config.credentials_file} '
+                              f'{remove_command}')
+
+        return self._execute_remove_command(
+            remove_command, bucket_name,
+            (f'Removing objects from {self.config.provider_name} bucket '
+             f'{bucket_name}/{sub_path}'),
+            (f'Failed to remove objects from {self.config.provider_name} '
+             f'bucket {bucket_name}/{sub_path}.'))
+
 @register_s3_compatible_store
 class S3Store(S3CompatibleStore):
     """S3Store inherits from S3CompatibleStore and represents the backend
@@ -1973,7 +2019,8 @@ class S3Store(S3CompatibleStore):
     def get_store_type(cls) -> str:
         return 'S3'
 
-    def _get_config(self) -> S3CompatibleConfig:
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
         """Return the configuration for AWS S3."""
         return S3CompatibleConfig(
             provider_name='S3',
@@ -1982,16 +2029,383 @@ class S3Store(S3CompatibleStore):
             client_factory=data_utils.create_s3_client,
             resource_factory=lambda name: aws.resource('s3').Bucket(name),
             cloud_name=str(clouds.AWS()),
-            default_region=self._DEFAULT_REGION,
-            access_denied_message=self._ACCESS_DENIED_MESSAGE,
+            default_region=S3Store._DEFAULT_REGION,
+            access_denied_message=S3Store._ACCESS_DENIED_MESSAGE,
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
 
-    def _create_bucket(self, bucket_name: str) -> StorageHandle:
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+class S3Store2(AbstractStore):
+    """S3Store inherits from Storage Object and represents the backend
+    for S3 buckets.
+    """
+
+    _DEFAULT_REGION = 'us-east-1'
+    _ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _CUSTOM_ENDPOINT_REGIONS = [
+        'ap-east-1', 'me-south-1', 'af-south-1', 'eu-south-1', 'eu-south-2',
+        'ap-south-2', 'ap-southeast-3', 'ap-southeast-4', 'me-central-1',
+        'il-central-1'
+    ]
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = _DEFAULT_REGION,
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
+        self.client: 'mypy_boto3_s3.Client'
+        self.bucket: 'StorageHandle'
+        # TODO(romilb): This is purely a stopgap fix for
+        #  https://github.com/skypilot-org/skypilot/issues/3405
+        # We should eventually make all opt-in regions also work for S3 by
+        # passing the right endpoint flags.
+        if region in self._CUSTOM_ENDPOINT_REGIONS:
+            logger.warning('AWS opt-in regions are not supported for S3. '
+                           f'Falling back to default region '
+                           f'{self._DEFAULT_REGION} for bucket {name!r}.')
+            region = self._DEFAULT_REGION
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction, _bucket_sub_path)
+
+    def _validate(self):
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+                assert data_utils.verify_gcs_bucket(self.name), (
+                    f'Source specified as {self.source}, a GCS bucket. ',
+                    'GCS Bucket should exist.')
+            elif data_utils.is_az_container_endpoint(self.source):
+                storage_account_name, container_name, _ = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'Azure bucket is specified as path, the name should be '
+                    'the same as Azure bucket.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, an Azure bucket. '
+                        'Azure bucket should exist.')
+            elif self.source.startswith('r2://'):
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
+                assert data_utils.verify_r2_bucket(self.name), (
+                    f'Source specified as {self.source}, a R2 bucket. ',
+                    'R2 Bucket should exist.')
+            elif self.source.startswith('nebius://'):
+                assert self.name == data_utils.split_nebius_path(
+                    self.source)[0], (
+                        'Nebius Object Storage is specified as path, the name '
+                        'should be the same as Nebius Object Storage bucket.')
+                assert data_utils.verify_nebius_bucket(self.name), (
+                    f'Source specified as {self.source}, a Nebius Object '
+                    f'Storage bucket. Nebius Object Storage Bucket should'
+                    f' exist.')
+            elif self.source.startswith('cos://'):
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
+                    'COS Bucket is specified as path, the name should be '
+                    'the same as COS bucket.')
+                assert data_utils.verify_ibm_cos_bucket(self.name), (
+                    f'Source specified as {self.source}, a COS bucket. ',
+                    'COS Bucket should exist.')
+            elif self.source.startswith('oci://'):
+                raise NotImplementedError(
+                    'Moving data from OCI to S3 is currently not supported.')
+        # Validate name
+        self.name = self.validate_name(self.name)
+
+        # Check if the storage is enabled
+        if not _is_storage_cloud_enabled(str(clouds.AWS())):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: s3\' specified, but ' \
+                    'AWS access is disabled. To fix, enable '\
+                    'AWS by running `sky check`. More info: '\
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
+
+
+    def upload(self):
+        """Uploads source to store bucket.
+
+        Upload must be called by the Storage handler - it is not called on
+        Store initialization.
+
+        Raises:
+            StorageUploadError: if upload fails.
+        """
+        try:
+            if isinstance(self.source, list):
+                self.batch_aws_rsync(self.source, create_dirs=True)
+            elif self.source is not None:
+                if self.source.startswith('s3://'):
+                    pass
+                elif self.source.startswith('gs://'):
+                    self._transfer_to_s3()
+                elif self.source.startswith('r2://'):
+                    self._transfer_to_s3()
+                elif self.source.startswith('oci://'):
+                    self._transfer_to_s3()
+                elif self.source.startswith('nebius://'):
+                    self._transfer_to_s3()
+                else:
+                    self.batch_aws_rsync([self.source])
+        except exceptions.StorageUploadError:
+            raise
+        except Exception as e:
+            raise exceptions.StorageUploadError(
+                f'Upload failed for store {self.name}') from e
+
+    def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
+        deleted_by_skypilot = self._delete_s3_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted S3 bucket {self.name}.'
+        else:
+            msg_str = f'S3 bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_s3_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Removed objects from S3 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'Failed to remove objects from S3 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def get_handle(self) -> StorageHandle:
+        return aws.resource('s3').Bucket(self.name)
+
+    def batch_aws_rsync(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes aws s3 sync to batch upload a list of local paths to S3
+
+        AWS Sync by default uses 10 threads to upload files to the bucket.  To
+        increase parallelism, modify max_concurrent_requests in your aws config
+        file (Default path: ~/.aws/config).
+
+        Since aws s3 sync does not support batch operations, we construct
+        multiple commands to be run in parallel.
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
+        """
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
+
+        def get_file_sync_command(base_dir_path, file_names):
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
+            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                            f'{includes} {base_dir_path} '
+                            f's3://{self.name}{sub_path}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            # we exclude .git directory from the sync
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
+            excluded_list.append('.git/*')
+
+            # Process exclusion patterns to make them work correctly with aws
+            # s3 sync
+            processed_excludes = []
+            for excluded_path in excluded_list:
+                # Check if the path is a directory exclusion pattern
+                # For AWS S3 sync, directory patterns need to end with "/**" to
+                # exclude all contents
+                if (excluded_path.endswith('/') or os.path.isdir(
+                        os.path.join(src_dir_path, excluded_path.rstrip('/')))):
+                    # Remove any trailing slash and add '/*' to exclude all
+                    # contents
+                    processed_excludes.append(f'{excluded_path.rstrip("/")}/*')
+                else:
+                    processed_excludes.append(excluded_path)
+
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in processed_excludes
+            ])
+            src_dir_path = shlex.quote(src_dir_path)
+            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}{sub_path}/{dest_dir_name}')
+            return sync_command
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> s3://{self.name}{sub_path}/'
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                log_path,
+                self.name,
+                self._ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
+
+    def _transfer_to_s3(self) -> None:
+        assert isinstance(self.source, str), self.source
+        if self.source.startswith('gs://'):
+            data_transfer.gcs_to_s3(self.name, self.name)
+        elif self.source.startswith('r2://'):
+            data_transfer.r2_to_s3(self.name, self.name)
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Obtains the S3 bucket.
+
+        If the bucket exists, this method will return the bucket.
+        If the bucket does not exist, there are three cases:
+          1) Raise an error if the bucket source starts with s3://
+          2) Return None if bucket has been externally deleted and
+             sync_on_reconstruction is False
+          3) Create and return a new bucket otherwise
+
+        Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
+            StorageBucketCreateError: If creating the bucket fails
+            StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
+        """
+        s3 = aws.resource('s3')
+        bucket = s3.Bucket(self.name)
+
+        try:
+            # Try Public bucket case.
+            # This line does not error out if the bucket is an external public
+            # bucket or if it is a user's bucket that is publicly
+            # accessible.
+            self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
+            return bucket, False
+        except aws.botocore_exceptions().ClientError as e:
+            error_code = e.response['Error']['Code']
+            # AccessDenied error for buckets that are private and not owned by
+            # user.
+            if error_code == '403':
+                command = f'aws s3 ls {self.name}'
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider running `{command}`.') from e
+
+        if isinstance(self.source, str) and self.source.startswith('s3://'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to use a non-existent bucket as a source: '
+                    f'{self.source}. Consider using `aws s3 ls '
+                    f'{self.source}` to debug.')
+
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is to be created by Sky. However, creation is skipped if
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
+        if self.sync_on_reconstruction:
+            bucket = self._create_s3_bucket(self.name, self.region)
+            return bucket, True
+        else:
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on s3 bucket
+        using the boto3 API
+
+        Args:
+          remote_path: str; Remote path on S3 bucket
+          local_path: str; Local path on user's device
+        """
+        self.bucket.download_file(remote_path, local_path)
+
+    def mount_command(self, mount_path: str) -> str:
+        """Returns the command to mount the bucket to the mount_path.
+
+        Uses goofys to mount the bucket.
+
+        Args:
+          mount_path: str; Path to mount the bucket to.
+        """
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+                                                    mount_path,
+                                                    self._bucket_sub_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+    def _create_s3_bucket(self,
+                          bucket_name: str,
+                          region=_DEFAULT_REGION) -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
           bucket_name: str; Name of bucket
+          region: str; Region name, e.g. us-west-1, us-east-2
         Raises:
           StorageBucketCreateError: If bucket creation fails.
         """
@@ -2001,14 +2415,14 @@ class S3Store(S3CompatibleStore):
             # If default us-east-1 region of create_bucket API is used,
             # the LocationConstraint must not be specified.
             # Reference: https://stackoverflow.com/a/51912090
-            if self.region is not None and self.region != 'us-east-1':
+            if region is not None and region != 'us-east-1':
                 create_bucket_config['CreateBucketConfiguration'] = {
-                    'LocationConstraint': self.region
+                    'LocationConstraint': region
                 }
             s3_client.create_bucket(**create_bucket_config)
             logger.info(
                 f'  {colorama.Style.DIM}Created S3 bucket {bucket_name!r} in '
-                f'{self.region or "us-east-1"}{colorama.Style.RESET_ALL}')
+                f'{region or "us-east-1"}{colorama.Style.RESET_ALL}')
 
             # Add AWS tags configured in config.yaml to the bucket.
             # This is useful for cost tracking and external cleanup.
@@ -2031,16 +2445,68 @@ class S3Store(S3CompatibleStore):
                 ) from e
         return aws.resource('s3').Bucket(bucket_name)
 
-    def mount_cached_command(self, mount_path: str) -> str:
-        install_cmd = mounting_utils.get_rclone_install_cmd()
-        rclone_profile_name = (
-            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
-        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
-            rclone_profile_name=rclone_profile_name)
-        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cached_cmd)
+    def _execute_s3_remove_command(self, command: str, bucket_name: str,
+                                   hint_operating: str,
+                                   hint_failed: str) -> bool:
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
+    def _delete_s3_bucket(self, bucket_name: str) -> bool:
+        """Deletes S3 bucket, including all objects in bucket
+
+        Args:
+          bucket_name: str; Name of bucket
+
+        Returns:
+         bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
+        """
+        # Deleting objects is very slow programatically
+        # (i.e. bucket.objects.all().delete() is slow).
+        # In addition, standard delete operations (i.e. via `aws s3 rm`)
+        # are slow, since AWS puts deletion markers.
+        # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
+        # The fastest way to delete is to run `aws s3 rb --force`,
+        # which removes the bucket by force.
+        remove_command = f'aws s3 rb s3://{bucket_name} --force'
+        success = self._execute_s3_remove_command(
+            remove_command, bucket_name,
+            f'Deleting S3 bucket [green]{bucket_name}[/]',
+            f'Failed to delete S3 bucket {bucket_name}.')
+        if not success:
+            return False
+
+        # Wait until bucket deletion propagates on AWS servers
+        while data_utils.verify_s3_bucket(bucket_name):
+            time.sleep(0.1)
+        return True
+
+    def _delete_s3_bucket_sub_path(self, bucket_name: str,
+                                   sub_path: str) -> bool:
+        """Deletes the sub path from the bucket."""
+        remove_command = f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive'
+        return self._execute_s3_remove_command(
+            remove_command, bucket_name, f'Removing objects from S3 bucket '
+            f'[green]{bucket_name}/{sub_path}[/]',
+            f'Failed to remove objects from S3 bucket {bucket_name}/{sub_path}.'
+        )
 
 
 class GcsStore(AbstractStore):
@@ -2235,14 +2701,12 @@ class GcsStore(AbstractStore):
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
 
-        deleted_by_skypilot = self._delete_gcs_bucket(self.name,
-                                                      self._bucket_sub_path)
+        deleted_by_skypilot = self._delete_gcs_bucket(self.name)
         if deleted_by_skypilot:
-            msg_str = f'Deleted objects in GCS bucket ' \
-                      f'{self.name}/{self._bucket_sub_path}.'
+            msg_str = f'Deleted GCS bucket {self.name}.'
         else:
-            msg_str = f'GCS bucket {self.name} may have ' \
-                      'been deleted externally.'
+            msg_str = f'GCS bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -2387,6 +2851,7 @@ class GcsStore(AbstractStore):
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket.
         If the bucket exists, this method will connect to the bucket.
+
         If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with gs://
           2) Return None if bucket has been externally deleted and
@@ -3446,6 +3911,7 @@ class AzureBlobStore(AbstractStore):
         return True
 
 
+
 @register_s3_compatible_store
 class R2Store(S3CompatibleStore):
     """R2Store inherits from S3CompatibleStore and represents the backend
@@ -3468,7 +3934,8 @@ class R2Store(S3CompatibleStore):
     def get_store_type(cls) -> str:
         return 'R2'
 
-    def _get_config(self) -> S3CompatibleConfig:
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
         """Return the configuration for Cloudflare R2."""
         return S3CompatibleConfig(
             provider_name='R2',
@@ -3480,11 +3947,11 @@ class R2Store(S3CompatibleStore):
                                                                           ),
             credentials_file=cloudflare.R2_CREDENTIALS_PATH,
             aws_profile=cloudflare.R2_PROFILE_NAME,
-            endpoint_url=cloudflare.create_endpoint(),
+            get_endpoint_url=lambda: cloudflare.create_endpoint(),
             extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
             cloud_name=cloudflare.NAME,
             default_region='auto',
-            access_denied_message=self._ACCESS_DENIED_MESSAGE,
+            access_denied_message=R2Store._ACCESS_DENIED_MESSAGE,
             mount_cmd_factory=mounting_utils.get_r2_mount_cmd,
         )
 
@@ -3499,6 +3966,484 @@ class R2Store(S3CompatibleStore):
             rclone_config, rclone_profile_name, self.bucket.name, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
+
+
+class R2StoreOld(AbstractStore):
+    """R2Store inherits from S3Store Object and represents the backend
+    for R2 buckets.
+    """
+
+    _ACCESS_DENIED_MESSAGE = 'Access Denied'
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = 'auto',
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: Optional[bool] = True,
+                 _bucket_sub_path: Optional[str] = None):
+        self.client: 'mypy_boto3_s3.Client'
+        self.bucket: 'StorageHandle'
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction, _bucket_sub_path)
+
+    def _validate(self):
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+                assert data_utils.verify_s3_bucket(self.name), (
+                    f'Source specified as {self.source}, a S3 bucket. ',
+                    'S3 Bucket should exist.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+                assert data_utils.verify_gcs_bucket(self.name), (
+                    f'Source specified as {self.source}, a GCS bucket. ',
+                    'GCS Bucket should exist.')
+            elif data_utils.is_az_container_endpoint(self.source):
+                storage_account_name, container_name, _ = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'Azure bucket is specified as path, the name should be '
+                    'the same as Azure bucket.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, an Azure bucket. '
+                        'Azure bucket should exist.')
+            elif self.source.startswith('r2://'):
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
+            elif self.source.startswith('nebius://'):
+                assert self.name == data_utils.split_nebius_path(
+                    self.source)[0], (
+                        'Nebius Object Storage is specified as path, the name '
+                        'should be the same as Nebius Object Storage bucket.')
+                assert data_utils.verify_nebius_bucket(self.name), (
+                    f'Source specified as {self.source}, a Nebius Object '
+                    f'Storage  bucket. Nebius Object Storage Bucket should '
+                    f'exist.')
+            elif self.source.startswith('cos://'):
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
+                    'IBM COS Bucket is specified as path, the name should be '
+                    'the same as COS bucket.')
+                assert data_utils.verify_ibm_cos_bucket(self.name), (
+                    f'Source specified as {self.source}, a COS bucket. ',
+                    'COS Bucket should exist.')
+            elif self.source.startswith('oci://'):
+                raise NotImplementedError(
+                    'Moving data from OCI to R2 is currently not supported.')
+
+        # Validate name
+        self.name = S3Store.validate_name(self.name)
+        # Check if the storage is enabled
+        if not _is_storage_cloud_enabled(cloudflare.NAME):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: r2\' specified, but ' \
+                    'Cloudflare R2 access is disabled. To fix, '\
+                    'enable Cloudflare R2 by running `sky check`. '\
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    )
+
+    def initialize(self):
+        """Initializes the R2 store object on the cloud.
+
+        Initialization involves fetching bucket if exists, or creating it if
+        it does not.
+
+        Raises:
+          StorageBucketCreateError: If bucket creation fails
+          StorageBucketGetError: If fetching existing bucket fails
+          StorageInitError: If general initialization fails.
+        """
+        self.client = data_utils.create_r2_client(self.region)
+        self.bucket, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def upload(self):
+        """Uploads source to store bucket.
+
+        Upload must be called by the Storage handler - it is not called on
+        Store initialization.
+
+        Raises:
+            StorageUploadError: if upload fails.
+        """
+        try:
+            if isinstance(self.source, list):
+                self.batch_aws_rsync(self.source, create_dirs=True)
+            elif self.source is not None:
+                if self.source.startswith('s3://'):
+                    self._transfer_to_r2()
+                elif self.source.startswith('gs://'):
+                    self._transfer_to_r2()
+                elif self.source.startswith('r2://'):
+                    pass
+                elif self.source.startswith('oci://'):
+                    self._transfer_to_r2()
+                elif self.source.startswith('nebius://'):
+                    self._transfer_to_r2()
+                else:
+                    self.batch_aws_rsync([self.source])
+        except exceptions.StorageUploadError:
+            raise
+        except Exception as e:
+            raise exceptions.StorageUploadError(
+                f'Upload failed for store {self.name}') from e
+
+    def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
+        deleted_by_skypilot = self._delete_r2_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted R2 bucket {self.name}.'
+        else:
+            msg_str = f'R2 bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_r2_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Removed objects from R2 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'Failed to remove objects from R2 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def get_handle(self) -> StorageHandle:
+        return cloudflare.resource('s3').Bucket(self.name)
+
+    def batch_aws_rsync(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes aws s3 sync to batch upload a list of local paths to R2
+
+        AWS Sync by default uses 10 threads to upload files to the bucket.  To
+        increase parallelism, modify max_concurrent_requests in your aws config
+        file (Default path: ~/.aws/config).
+
+        Since aws s3 sync does not support batch operations, we construct
+        multiple commands to be run in parallel.
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
+        """
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
+
+        def get_file_sync_command(base_dir_path, file_names):
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            endpoint_url = cloudflare.create_endpoint()
+            base_dir_path = shlex.quote(base_dir_path)
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                'aws s3 sync --no-follow-symlinks --exclude="*" '
+                f'{includes} {base_dir_path} '
+                f's3://{self.name}{sub_path} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            # we exclude .git directory from the sync
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
+            endpoint_url = cloudflare.create_endpoint()
+            src_dir_path = shlex.quote(src_dir_path)
+            sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
+                f'aws s3 sync --no-follow-symlinks {excludes} '
+                f'{src_dir_path} '
+                f's3://{self.name}{sub_path}/{dest_dir_name} '
+                f'--endpoint {endpoint_url} '
+                # R2 does not support CRC64-NVME
+                # which is the default for aws s3 sync
+                # https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/13
+                f'--checksum-algorithm CRC32 '
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
+            return sync_command
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> r2://{self.name}{sub_path}/'
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                log_path,
+                self.name,
+                self._ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
+
+    def _transfer_to_r2(self) -> None:
+        assert isinstance(self.source, str), self.source
+        if self.source.startswith('gs://'):
+            data_transfer.gcs_to_r2(self.name, self.name)
+        elif self.source.startswith('s3://'):
+            data_transfer.s3_to_r2(self.name, self.name)
+        elif self.source.startswith('nebius://'):
+            data_transfer.s3_to_r2(self.name, self.name)
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Obtains the R2 bucket.
+
+        If the bucket exists, this method will return the bucket.
+        If the bucket does not exist, there are three cases:
+          1) Raise an error if the bucket source starts with s3://
+          2) Return None if bucket has been externally deleted and
+             sync_on_reconstruction is False
+          3) Create and return a new bucket otherwise
+
+        Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
+            StorageBucketCreateError: If creating the bucket fails
+            StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
+        """
+        r2 = cloudflare.resource('s3')
+        bucket = r2.Bucket(self.name)
+        endpoint_url = cloudflare.create_endpoint()
+        try:
+            # Try Public bucket case.
+            # This line does not error out if the bucket is an external public
+            # bucket or if it is a user's bucket that is publicly
+            # accessible.
+            self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
+            return bucket, False
+        except aws.botocore_exceptions().ClientError as e:
+            error_code = e.response['Error']['Code']
+            # AccessDenied error for buckets that are private and not owned by
+            # user.
+            if error_code == '403':
+                command = ('AWS_SHARED_CREDENTIALS_FILE='
+                           f'{cloudflare.R2_CREDENTIALS_PATH} '
+                           f'aws s3 ls s3://{self.name} '
+                           f'--endpoint {endpoint_url} '
+                           f'--profile={cloudflare.R2_PROFILE_NAME}')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider running `{command}`.') from e
+
+        if isinstance(self.source, str) and self.source.startswith('r2://'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to use a non-existent bucket as a source: '
+                    f'{self.source}. Consider using '
+                    '`AWS_SHARED_CREDENTIALS_FILE='
+                    f'{cloudflare.R2_CREDENTIALS_PATH} aws s3 ls '
+                    f's3://{self.name} '
+                    f'--endpoint {endpoint_url} '
+                    f'--profile={cloudflare.R2_PROFILE_NAME}\' '
+                    'to debug.')
+
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is to be created by Sky. However, creation is skipped if
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
+        if self.sync_on_reconstruction:
+            bucket = self._create_r2_bucket(self.name)
+            return bucket, True
+        else:
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on r2 bucket
+        using the boto3 API
+
+        Args:
+          remote_path: str; Remote path on R2 bucket
+          local_path: str; Local path on user's device
+        """
+        self.bucket.download_file(remote_path, local_path)
+
+    def mount_command(self, mount_path: str) -> str:
+        """Returns the command to mount the bucket to the mount_path.
+
+        Uses goofys to mount the bucket.
+
+        Args:
+          mount_path: str; Path to mount the bucket to.
+        """
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        endpoint_url = cloudflare.create_endpoint()
+        r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
+        r2_profile_name = cloudflare.R2_PROFILE_NAME
+        mount_cmd = mounting_utils.get_r2_mount_cmd(
+            r2_credential_path, r2_profile_name, endpoint_url, self.bucket.name,
+            mount_path, self._bucket_sub_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.R2.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+    def _create_r2_bucket(self,
+                          bucket_name: str,
+                          region='auto') -> StorageHandle:
+        """Creates R2 bucket with specific name in specific region
+
+        Args:
+          bucket_name: str; Name of bucket
+          region: str; Region name, r2 automatically sets region
+        Raises:
+          StorageBucketCreateError: If bucket creation fails.
+        """
+        r2_client = self.client
+        try:
+            if region is None:
+                r2_client.create_bucket(Bucket=bucket_name)
+            else:
+                location = {'LocationConstraint': region}
+                r2_client.create_bucket(Bucket=bucket_name,
+                                        CreateBucketConfiguration=location)
+                logger.info(f'  {colorama.Style.DIM}Created R2 bucket '
+                            f'{bucket_name!r} in {region}'
+                            f'{colorama.Style.RESET_ALL}')
+        except aws.botocore_exceptions().ClientError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Attempted to create a bucket '
+                    f'{self.name} but failed.') from e
+        return cloudflare.resource('s3').Bucket(bucket_name)
+
+    def _execute_r2_remove_command(self, command: str, bucket_name: str,
+                                   hint_operating: str,
+                                   hint_failed: str) -> bool:
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
+    def _delete_r2_bucket_sub_path(self, bucket_name: str,
+                                   sub_path: str) -> bool:
+        """Deletes the sub path from the bucket."""
+        endpoint_url = cloudflare.create_endpoint()
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
+            f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
+        return self._execute_r2_remove_command(
+            remove_command, bucket_name,
+            f'Removing objects from R2 bucket {bucket_name}/{sub_path}',
+            f'Failed to remove objects from R2 bucket {bucket_name}/{sub_path}.'
+        )
+
+    def _delete_r2_bucket(self, bucket_name: str) -> bool:
+        """Deletes R2 bucket, including all objects in bucket
+
+        Args:
+          bucket_name: str; Name of bucket
+
+        Returns:
+         bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
+        """
+        # Deleting objects is very slow programmatically
+        # (i.e. bucket.objects.all().delete() is slow).
+        # In addition, standard delete operations (i.e. via `aws s3 rm`)
+        # are slow, since AWS puts deletion markers.
+        # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
+        # The fastest way to delete is to run `aws s3 rb --force`,
+        # which removes the bucket by force.
+        endpoint_url = cloudflare.create_endpoint()
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
+            f'aws s3 rb s3://{bucket_name} --force '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
+
+        success = self._execute_r2_remove_command(
+            remove_command, bucket_name, f'Deleting R2 bucket {bucket_name}',
+            f'Failed to delete R2 bucket {bucket_name}.')
+        if not success:
+            return False
+
+        # Wait until bucket deletion propagates on AWS servers
+        while data_utils.verify_r2_bucket(bucket_name):
+            time.sleep(0.1)
+        return True
 
 
 class IBMCosStore(AbstractStore):
