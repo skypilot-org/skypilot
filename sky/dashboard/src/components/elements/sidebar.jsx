@@ -219,7 +219,7 @@ export function TopBar() {
       <div className="fixed top-0 left-0 right-0 bg-white z-30 h-14 px-4 border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between h-full">
           {/* Left side - Logo and mobile hamburger */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4 mr-4 md:mr-6">
             {/* Mobile hamburger menu button */}
             {isMobile && (
               <button

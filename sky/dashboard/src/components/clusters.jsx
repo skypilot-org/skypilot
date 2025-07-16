@@ -354,34 +354,16 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex flex-col gap-2 mb-1">
-        <div className="flex items-center justify-between">
-          <div className="text-base">
-            <Link
-              href="/clusters"
-              className="text-sky-blue hover:underline leading-none"
-            >
-              Sky Clusters
-            </Link>
-          </div>
-          <div className="flex items-center flex-wrap gap-2">
-            {loading && (
-              <div className="flex items-center">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">Loading...</span>
-              </div>
-            )}
-            <button
-              onClick={handleRefresh}
-              disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && <span>Refresh</span>}
-            </button>
-          </div>
+            <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
+        <div className="flex items-center gap-2">
+          <Link
+            href="/clusters"
+            className="text-sky-blue hover:underline leading-none text-base"
+          >
+            Sky Clusters
+          </Link>
         </div>
-        <div className="flex items-center">
+        <div className="w-full sm:w-auto">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={optionValues}
@@ -390,29 +372,43 @@ export function Clusters() {
             placeholder="Filter clusters"
           />
         </div>
-        <div className="flex items-center">
-          <label className="flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showHistory}
-              onChange={(e) => setShowHistory(e.target.checked)}
-              className="sr-only"
-            />
-            <div
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                showHistory ? 'bg-sky-600' : 'bg-gray-300'
+        <label className="flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showHistory}
+            onChange={(e) => setShowHistory(e.target.checked)}
+            className="sr-only"
+          />
+          <div
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              showHistory ? 'bg-sky-600' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                showHistory ? 'translate-x-5' : 'translate-x-1'
               }`}
-            >
-              <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                  showHistory ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
+            />
+          </div>
+          <span className="ml-2 text-sm text-gray-700">
+            Show history (Last 30 days)
+          </span>
+        </label>
+        <div className="flex items-center gap-2 ml-auto">
+          {loading && (
+            <div className="flex items-center">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
-            <span className="ml-2 text-sm text-gray-700 whitespace-nowrap">
-              Show history (Last 30 days)
-            </span>
-          </label>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
+          </button>
         </div>
       </div>
 
@@ -1198,14 +1194,14 @@ const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
-      <div className="border-r border-gray-300">
+    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible w-full max-w-full">
+      <div className="border-r border-gray-300 flex-shrink-0">
         <Select onValueChange={setPropertValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
-            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-24 sm:w-32 h-8"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm"
           >
-            <SelectValue placeholder="Select Property" />
+            <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
             {propertyList.map((item, index) => (
@@ -1216,7 +1212,7 @@ const FilterDropdown = ({
           </SelectContent>
         </Select>
       </div>
-      <div className="relative flex-1">
+      <div className="relative flex-1 min-w-0">
         <input
           type="text"
           ref={inputRef}
@@ -1225,7 +1221,7 @@ const FilterDropdown = ({
           onChange={handleValueChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-32 sm:w-64 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          className="h-8 w-full px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
           autoComplete="off"
         />
         {value && (

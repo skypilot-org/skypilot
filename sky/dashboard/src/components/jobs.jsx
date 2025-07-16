@@ -430,105 +430,101 @@ export function ManagedJobs() {
 
   return (
     <>
-      <div className="flex flex-col gap-2 mb-1">
-        <div className="flex items-center justify-between">
-          <div className="text-base">
-            <Link
-              href="/jobs"
-              className="text-sky-blue hover:underline leading-none"
-            >
-              Managed Jobs
-            </Link>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {loading && (
-              <div className="flex items-center">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-              </div>
-            )}
-            <button
-              onClick={handleRefresh}
-              disabled={loading}
-              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-              title="Refresh"
-            >
-              <RotateCwIcon className="h-4 w-4 mr-1.5" />
-              {!isMobile && <span>Refresh</span>}
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Filter by job name"
-              value={nameFilter}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            />
-            {nameFilter && (
-              <button
-                onClick={() => handleNameFilterChange('')}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear filter"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-          <Select
-            value={workspaceFilter}
-            onValueChange={handleWorkspaceFilterChange}
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <div className="text-base">
+          <Link
+            href="/jobs"
+            className="text-sky-blue hover:underline leading-none"
           >
-            <SelectTrigger className="h-8 w-36 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by workspace...">
-                {workspaceFilter === ALL_WORKSPACES_VALUE
-                  ? 'All Workspaces'
-                  : workspaceFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_WORKSPACES_VALUE}>
-                All Workspaces
+            Managed Jobs
+          </Link>
+        </div>
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Filter by job name"
+            value={nameFilter}
+            onChange={(e) => handleNameFilterChange(e.target.value)}
+            className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+          />
+          {nameFilter && (
+            <button
+              onClick={() => handleNameFilterChange('')}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              title="Clear filter"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+        <Select
+          value={workspaceFilter}
+          onValueChange={handleWorkspaceFilterChange}
+        >
+          <SelectTrigger className="h-8 w-36 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
+            <SelectValue placeholder="Filter by workspace...">
+              {workspaceFilter === ALL_WORKSPACES_VALUE
+                ? 'All Workspaces'
+                : workspaceFilter}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_WORKSPACES_VALUE}>
+              All Workspaces
+            </SelectItem>
+            {workspaces.map((ws) => (
+              <SelectItem key={ws} value={ws}>
+                {ws}
               </SelectItem>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={userFilter} onValueChange={handleUserFilterChange}>
-            <SelectTrigger className="h-8 w-32 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
-              <SelectValue placeholder="Filter by user...">
-                {userFilter === ALL_USERS_VALUE
-                  ? 'All Users'
-                  : users.find((u) => u.userId === userFilter)?.display ||
-                    userFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.userId} value={user.userId}>
-                  {user.display}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={userFilter} onValueChange={handleUserFilterChange}>
+          <SelectTrigger className="h-8 w-32 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
+            <SelectValue placeholder="Filter by user...">
+              {userFilter === ALL_USERS_VALUE
+                ? 'All Users'
+                : users.find((u) => u.userId === userFilter)?.display ||
+                  userFilter}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
+            {users.map((user) => (
+              <SelectItem key={user.userId} value={user.userId}>
+                {user.display}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-2 ml-auto">
+          {loading && (
+            <div className="flex items-center">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+            </div>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            title="Refresh"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
+          </button>
         </div>
       </div>
       <ManagedJobsTable
