@@ -1,6 +1,7 @@
 """Hyperbolic provisioner for SkyPilot."""
 
 from sky.provision.hyperbolic.config import bootstrap_instances
+from sky.provision.hyperbolic.instance import cleanup_custom_multi_network
 from sky.provision.hyperbolic.instance import cleanup_ports
 from sky.provision.hyperbolic.instance import get_cluster_info
 from sky.provision.hyperbolic.instance import open_ports

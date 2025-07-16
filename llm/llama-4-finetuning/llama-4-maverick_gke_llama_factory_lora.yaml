@@ -2,9 +2,9 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick.yaml -c maverick --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick_gke_llama_factory_lora.yaml -c maverick --env HF_TOKEN
 #
-# This config requires at least 2 nodes with 8x H200 GPUs each.
+# This config requires at least 2 nodes with 8x H100 GPUs each.
 
 envs:
   HF_TOKEN: 
@@ -56,4 +56,4 @@ run: |
 
   cd LLaMA-Factory
 
-  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=2 NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_lora_sft.yaml
+  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=$SKYPILOT_NUM_NODES NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_lora_sft.yaml
