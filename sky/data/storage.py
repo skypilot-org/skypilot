@@ -129,7 +129,8 @@ class StoreType(enum.Enum):
     VOLUME = 'VOLUME'
 
     @classmethod
-    def _get_s3_compatible_store_by_cloud(cls, cloud_name: str) -> Optional[str]:
+    def _get_s3_compatible_store_by_cloud(cls,
+                                          cloud_name: str) -> Optional[str]:
         """Get S3-compatible store type by cloud name."""
         for store_type, store_class in _S3_COMPATIBLE_STORES.items():
             config = store_class.get_config()
@@ -138,7 +139,8 @@ class StoreType(enum.Enum):
         return None
 
     @classmethod
-    def _get_s3_compatible_config(cls, store_type: str) -> Optional['S3CompatibleConfig']:
+    def _get_s3_compatible_config(
+            cls, store_type: str) -> Optional['S3CompatibleConfig']:
         """Get S3-compatible store configuration by store type."""
         store_class = _S3_COMPATIBLE_STORES.get(store_type)
         if store_class:
@@ -146,7 +148,8 @@ class StoreType(enum.Enum):
         return None
 
     @classmethod
-    def find_s3_compatible_config_by_prefix(cls, url_prefix: str) -> Optional[str]:
+    def find_s3_compatible_config_by_prefix(cls,
+                                            url_prefix: str) -> Optional[str]:
         """Get S3-compatible store type by URL prefix."""
         for store_type, store_class in _S3_COMPATIBLE_STORES.items():
             config = store_class.get_config()
@@ -186,7 +189,7 @@ class StoreType(enum.Enum):
         config = self._get_s3_compatible_config(self.value)
         if config:
             return config.cloud_name
-        
+
         if self == StoreType.GCS:
             return str(clouds.GCP())
         elif self == StoreType.AZURE:
@@ -206,7 +209,7 @@ class StoreType(enum.Enum):
     def from_store(cls, store: 'AbstractStore') -> 'StoreType':
         if isinstance(store, S3CompatibleStore):
             return cls(store.get_store_type())
-        
+
         if isinstance(store, GcsStore):
             return StoreType.GCS
         elif isinstance(store, AzureBlobStore):
@@ -227,7 +230,7 @@ class StoreType(enum.Enum):
         config = self._get_s3_compatible_config(self.value)
         if config:
             return config.url_prefix
-        
+
         if self == StoreType.GCS:
             return 'gs://'
         elif self == StoreType.AZURE:
@@ -295,12 +298,14 @@ class StoreType(enum.Enum):
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
                 elif store_type == StoreType.NEBIUS:
-                    bucket_name, sub_path = data_utils.split_nebius_path(store_url)
+                    bucket_name, sub_path = data_utils.split_nebius_path(
+                        store_url)
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
                 return store_type, bucket_name, \
                     sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -801,8 +806,9 @@ class Storage(object):
                         self.add_store(StoreType.OCI)
                     elif self.source.startswith('nebius://'):
                         self.add_store(StoreType.NEBIUS)
-                    
-                    store_type = StoreType.find_s3_compatible_config_by_prefix(self.source)
+
+                    store_type = StoreType.find_s3_compatible_config_by_prefix(
+                        self.source)
                     if store_type:
                         self.add_store(StoreType(store_type))
 
@@ -1508,9 +1514,9 @@ class S3CompatibleStore(AbstractStore):
                     'the same as Azure bucket.')
                 if not isinstance(self, AzureBlobStore):
                     assert data_utils.verify_az_bucket(
-                        storage_account_name, self.name), (
-                            f'Source specified as {self.source}, an Azure bucket. '
-                            'Azure bucket should exist.')
+                        storage_account_name, self.name
+                    ), (f'Source specified as {self.source}, an Azure bucket. '
+                        'Azure bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
@@ -1539,7 +1545,8 @@ class S3CompatibleStore(AbstractStore):
                         'COS Bucket should exist.')
             elif self.source.startswith('oci://'):
                 raise NotImplementedError(
-                    f'Moving data from OCI to {self.source} is currently not supported.')
+                    f'Moving data from OCI to {self.source} is currently not supported.'
+                )
 
         # Validate name
         self.name = self.validate_name(self.name)
@@ -1668,8 +1675,7 @@ class S3CompatibleStore(AbstractStore):
         if not isinstance(self.source, str):
             return False
         return any(
-            self.source.startswith(prefix)
-            for prefix in self.PROVIDER_PREFIXES)
+            self.source.startswith(prefix) for prefix in self.PROVIDER_PREFIXES)
 
     def _transfer_from_other_provider(self):
         """Transfer data from another cloud provider."""
@@ -1685,11 +1691,13 @@ class S3CompatibleStore(AbstractStore):
         """Detect the source provider type from URL."""
         if not isinstance(self.source, str):
             return 'unknown'
-        
+
         for provider in self.PROVIDER_PREFIXES:
             if self.source.startswith(provider):
                 # Assume s3://, remove ://
                 return provider[:-len('://')]
+
+        return ''
 
     def delete(self) -> None:
         """Delete the bucket or sub-path."""
@@ -1758,7 +1766,8 @@ class S3CompatibleStore(AbstractStore):
 
             # Add provider-specific arguments
             if self.config.get_endpoint_url:
-                cmd_parts.append(f'--endpoint-url {self.config.get_endpoint_url()}')
+                cmd_parts.append(
+                    f'--endpoint-url {self.config.get_endpoint_url()}')
             if self.config.aws_profile:
                 cmd_parts.append(f'--profile={self.config.aws_profile}')
             if self.config.extra_cli_args:
@@ -1786,7 +1795,8 @@ class S3CompatibleStore(AbstractStore):
             cmd_parts.append(f's3://{self.name}{sub_path}/{dest_dir_name}')
 
             if self.config.get_endpoint_url:
-                cmd_parts.append(f'--endpoint-url {self.config.get_endpoint_url()}')
+                cmd_parts.append(
+                    f'--endpoint-url {self.config.get_endpoint_url()}')
             if self.config.aws_profile:
                 cmd_parts.append(f'--profile={self.config.aws_profile}')
             if self.config.extra_cli_args:
@@ -1885,7 +1895,10 @@ class S3CompatibleStore(AbstractStore):
             # Add AWS tags configured in config.yaml to the bucket.
             # This is useful for cost tracking and external cleanup.
             bucket_tags = skypilot_config.get_effective_region_config(
-                cloud=self.config.cloud_name, region=None, keys=('labels',), default_value={})
+                cloud=self.config.cloud_name,
+                region=None,
+                keys=('labels',),
+                default_value={})
             if bucket_tags:
                 self.client.put_bucket_tagging(
                     Bucket=bucket_name,
@@ -1965,8 +1978,8 @@ class S3CompatibleStore(AbstractStore):
 
         if self.config.aws_profile:
             cmd_parts.append(f'--profile={self.config.aws_profile}')
-        if self.config.endpoint_url:
-            cmd_parts.append(f'--endpoint-url {self.config.endpoint_url}')
+        if self.config.get_endpoint_url:
+            cmd_parts.append(f'--endpoint-url {self.config.get_endpoint_url()}')
 
         remove_command = ' '.join(cmd_parts)
 
@@ -1981,6 +1994,7 @@ class S3CompatibleStore(AbstractStore):
              f'{bucket_name}/{sub_path}'),
             (f'Failed to remove objects from {self.config.provider_name} '
              f'bucket {bucket_name}/{sub_path}.'))
+
 
 @register_s3_compatible_store
 class S3Store(S3CompatibleStore):
@@ -2141,7 +2155,6 @@ class S3Store2(AbstractStore):
                     'AWS by running `sky check`. More info: '\
                     'https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
                     )
-
 
     def upload(self):
         """Uploads source to store bucket.
@@ -3909,7 +3922,6 @@ class AzureBlobStore(AbstractStore):
                         f'Failed to delete Azure container {container_name}. '
                         f'Detailed error: {e}')
         return True
-
 
 
 @register_s3_compatible_store

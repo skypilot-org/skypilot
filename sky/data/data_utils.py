@@ -370,17 +370,17 @@ def verify_oci_bucket(name: str) -> bool:
     try:
         # Import OCI adaptor
         from sky.adaptors import oci
-        
+
         # Get OCI client and check if bucket exists
         client = oci.get_object_storage_client()
         namespace = client.get_namespace(
             compartment_id=oci.get_oci_config()['tenancy']).data
-        
+
         # Try to get the bucket
         client.get_bucket(namespace_name=namespace, bucket_name=name)
         return True
     except Exception:  # pylint: disable=broad-except
-        # If any exception occurs (bucket not found, permission issues, etc.), 
+        # If any exception occurs (bucket not found, permission issues, etc.),
         # return False
         return False
 
