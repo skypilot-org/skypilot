@@ -942,7 +942,11 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    return backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    returnval = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    if isinstance(returnval, int):
+        return returnval
+    else:
+        return returnval[0]
 
 
 @usage_lib.entrypoint

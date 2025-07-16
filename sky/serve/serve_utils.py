@@ -901,6 +901,8 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         if tail is not None:
             lines = common_utils.read_last_n_lines(log_file_name, tail)
             for line in lines:
+                if not line.endswith('\n'):
+                    line += '\n'
                 print(line, end='', flush=True)
         else:
             with open(log_file_name, 'r', encoding='utf-8') as f:
@@ -929,7 +931,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
 
     # Handle launch logs based on number parameter
-    total_lines_printed = 0
+    final_lines_to_print = []
     if tail is not None:
         static_lines = common_utils.read_last_n_lines(launch_log_file_name,
                                                       tail)
@@ -939,9 +941,7 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
                 cluster_name=replica_cluster_name,
                 line_cap=tail,
             ))
-        total_lines_printed += len(lines)
-        for line in lines:
-            print(line, end='', flush=True)
+        final_lines_to_print += lines
     else:
         with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
             for line in _follow_logs_with_provision_expanding(
@@ -955,12 +955,22 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
     if (not follow and
             _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
         # Early exit if not following the logs.
+        if tail is not None:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                print(line, end='', flush=True)
         return ''
 
     backend = backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
+        if tail is not None:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                print(line, end='', flush=True)
         return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
@@ -974,14 +984,27 @@ def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
         if returncode != 0:
             return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                     f'{replica_id}.{colorama.Style.RESET_ALL}')
-    elif not follow and total_lines_printed < tail:
-        returncode = backend.tail_logs(handle,
-                                       job_id=None,
-                                       follow=follow,
-                                       tail=tail - total_lines_printed)
-        if returncode != 0:
+    elif not follow and tail > 0:
+        final = backend.tail_logs(handle,
+                                  job_id=None,
+                                  follow=follow,
+                                  tail=tail,
+                                  stream_logs=False,
+                                  require_outputs=True,
+                                  process_stream=True)
+        if isinstance(final, int) or (final[0] != 0 and final[0] != 101):
+            if tail is not None:
+                for line in final_lines_to_print:
+                    if not line.endswith('\n'):
+                        line += '\n'
+                    print(line, end='', flush=True)
             return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                     f'{replica_id}.{colorama.Style.RESET_ALL}')
+        final_lines_to_print += final[1].splitlines()
+        for line in final_lines_to_print[-tail:]:
+            if not line.endswith('\n'):
+                line += '\n'
+            print(line, end='', flush=True)
     return ''
 
 
@@ -1005,6 +1028,8 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         lines = common_utils.read_last_n_lines(os.path.expanduser(log_file),
                                                tail)
         for line in lines:
+            if not line.endswith('\n'):
+                line += '\n'
             print(line, end='', flush=True)
     else:
         with open(os.path.expanduser(log_file),
