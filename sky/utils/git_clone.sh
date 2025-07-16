@@ -288,7 +288,7 @@ if [ -d "$TARGET_DIR" ]; then
                 log "Current: $CURRENT_REMOTE ($CURRENT_SCHEMA)"
                 log "Target: $GIT_URL ($TARGET_SCHEMA)"
                 log "Updating remote URL to match authentication method"
-                git remote set-url origin "$GIT_URL"
+                git remote set-url origin "$CLONE_URL"
                 log "Remote URL updated successfully"
                 NEED_CLONE=false
             else

@@ -260,7 +260,7 @@ class GitRepo:
                 raise exceptions.GitError(
                     f'Failed to access repository {self.repo_url} using token '
                     'authentication. Please verify your token and repository '
-                    'access permissions. Original error: {str(e)}') from e
+                    f'access permissions. Original error: {str(e)}') from e
 
         # Step 3: Try SSH access with available keys
         if self._parsed_url.protocol == 'ssh':
