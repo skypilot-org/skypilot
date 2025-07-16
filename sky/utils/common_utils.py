@@ -20,7 +20,6 @@ import uuid
 
 import jsonschema
 
-from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -28,6 +27,7 @@ from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -598,9 +598,9 @@ def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
-        >>> e = sky.exceptions.FetchClusterInfoError()
+        >>> e = sky.utils.exceptions.FetchClusterInfoError()
         >>> class_fullname(e.__class__)
-        'sky.exceptions.FetchClusterInfoError'
+        'sky.utils.exceptions.FetchClusterInfoError'
 
     Args:
         cls: The class to get the full name.

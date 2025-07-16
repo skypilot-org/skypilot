@@ -10,7 +10,6 @@ import colorama
 
 from sky import catalog
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -25,6 +24,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils

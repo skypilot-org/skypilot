@@ -11,7 +11,6 @@ import colorama
 
 import sky
 from sky import backends
-from sky import exceptions
 from sky import execution
 from sky import sky_logging
 from sky import skypilot_config
@@ -29,6 +28,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import exceptions
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -519,7 +519,8 @@ def down(
           may potentially lead to resource leaks.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: if the sky serve controller
+            is not up.
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
@@ -578,7 +579,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
           resource leak.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: if the sky sere controller
+            is not up.
         RuntimeError: if failed to terminate the replica.
     """
     handle = backend_utils.is_controller_accessible(
@@ -771,7 +773,8 @@ def tail_logs(
             follow=False, replica_id=3)
 
     Raises:
-        sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: the sky serve controller
+            is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
     if isinstance(target, str):
@@ -864,7 +867,7 @@ def sync_down_logs(
     Raises:
         RuntimeError: If fails to gather logs or fails to rsync from the
           controller.
-        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        sky.utils.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
     # Step 0) get the controller handle

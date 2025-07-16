@@ -21,7 +21,6 @@ import filelock
 from typing_extensions import Literal
 
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -40,6 +39,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils

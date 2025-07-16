@@ -11,12 +11,12 @@ import pytest
 import requests
 
 import sky
-from sky import exceptions
 from sky import skypilot_config
 from sky.server import common
 from sky.server import constants as server_constants
 from sky.server.common import ApiServerInfo
 from sky.server.common import ApiServerStatus
+from sky.utils import exceptions
 
 
 def _create_test_cookie(name: str = 'test-cookie', value: str = 'test-value'):

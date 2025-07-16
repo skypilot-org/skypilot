@@ -9,12 +9,12 @@ import colorama
 
 from sky import admin_policy
 from sky import dag as dag_lib
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import exceptions
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

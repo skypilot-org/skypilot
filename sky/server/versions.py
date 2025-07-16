@@ -9,9 +9,9 @@ import colorama
 from packaging import version as version_lib
 
 import sky
-from sky import exceptions
 from sky import sky_logging
 from sky.server import constants
+from sky.utils import exceptions
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

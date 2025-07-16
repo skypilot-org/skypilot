@@ -33,7 +33,6 @@ from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
 import setproctitle
 
-from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -52,6 +51,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import exceptions
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline

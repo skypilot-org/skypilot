@@ -21,7 +21,6 @@ import filelock
 # will try to import code from a different SkyPilot runtime, causing exceptions.
 # pylint: disable=unused-import
 from sky import core
-from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -37,6 +36,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import exceptions
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -590,7 +590,7 @@ def _cleanup(job_id: int, dag_yaml: str):
     """
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
-    # sky.exceptions.ResourcesUnavailableError).
+    # sky.utils.exceptions.ResourcesUnavailableError).
     managed_job_state.remove_ha_recovery_script(job_id)
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:

@@ -9,7 +9,6 @@ import pytest
 
 import sky
 from sky import skypilot_config
-import sky.exceptions
 from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
@@ -17,6 +16,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import kubernetes_enums
+import sky.utils.exceptions
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
@@ -382,7 +382,7 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
 
 def test_invalid_override_config(monkeypatch, tmp_path) -> None:
     """Test that an invalid override config is rejected."""
-    with pytest.raises(sky.exceptions.InvalidSkyPilotConfigError) as e:
+    with pytest.raises(sky.utils.exceptions.InvalidSkyPilotConfigError) as e:
         with skypilot_config.override_skypilot_config({
                 'invalid_key': 'invalid_value',
         }):
@@ -442,7 +442,7 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     try:
         request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
         sky.stream_and_get(request_id)
-    except sky.exceptions.ResourcesUnavailableError:
+    except sky.utils.exceptions.ResourcesUnavailableError:
         exception_occurred = True
     assert exception_occurred
 

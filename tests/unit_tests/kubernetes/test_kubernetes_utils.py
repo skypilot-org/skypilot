@@ -10,10 +10,10 @@ from unittest.mock import patch
 import kubernetes
 import pytest
 
-from sky import exceptions
 from sky import models
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import utils
+from sky.utils import exceptions
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)

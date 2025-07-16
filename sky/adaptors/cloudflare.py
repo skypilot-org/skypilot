@@ -6,10 +6,10 @@ import os
 import threading
 from typing import Dict, Optional, Tuple
 
-from sky import exceptions
 from sky.adaptors import common
 from sky.clouds import cloud
 from sky.utils import annotations
+from sky.utils import exceptions
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'

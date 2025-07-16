@@ -7,10 +7,10 @@ import threading
 import typing
 from typing import Callable, Iterator, Optional, Tuple, Union
 
-from sky import exceptions
 from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
 from sky.utils import context
+from sky.utils import exceptions
 from sky.utils import message_utils
 from sky.utils import rich_console_utils
 

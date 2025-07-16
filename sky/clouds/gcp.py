@@ -12,7 +12,6 @@ import colorama
 
 from sky import catalog
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
@@ -21,6 +20,7 @@ from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils

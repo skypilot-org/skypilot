@@ -4,8 +4,8 @@ from unittest import mock
 
 import pytest
 
-from sky import exceptions
 from sky.server import rest
+from sky.utils import exceptions
 
 
 class TestHandleServerUnavailable:

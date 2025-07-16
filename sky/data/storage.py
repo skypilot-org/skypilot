@@ -14,7 +14,6 @@ import colorama
 
 from sky import check as sky_check
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -32,6 +31,7 @@ from sky.data import mounting_utils
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import status_lib

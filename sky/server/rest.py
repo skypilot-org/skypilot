@@ -9,12 +9,12 @@ from typing import Any, Callable, cast, Optional, TypeVar
 
 import colorama
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.server import constants
 from sky.server import versions
 from sky.utils import common_utils
+from sky.utils import exceptions
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 

@@ -3,10 +3,10 @@
 import concurrent.futures
 from typing import Any, Callable, Dict, List, Tuple
 
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import exceptions
 
 logger = sky_logging.init_logger(__name__)
 

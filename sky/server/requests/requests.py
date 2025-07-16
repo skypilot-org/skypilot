@@ -18,7 +18,6 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import colorama
 import filelock
 
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -31,6 +30,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils import exceptions
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

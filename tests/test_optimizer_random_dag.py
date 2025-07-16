@@ -9,7 +9,7 @@ import pandas as pd
 import sky
 from sky import catalog
 from sky import clouds
-from sky import exceptions
+from sky.utils import exceptions
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
