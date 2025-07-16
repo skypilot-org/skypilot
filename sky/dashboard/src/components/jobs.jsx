@@ -430,21 +430,42 @@ export function ManagedJobs() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
-        <div className="text-base flex items-center">
-          <Link
-            href="/jobs"
-            className="text-sky-blue hover:underline leading-none"
-          >
-            Managed Jobs
-          </Link>
-          <div className="relative ml-4 mr-2">
+      <div className="flex flex-col gap-2 mb-1">
+        <div className="flex items-center justify-between">
+          <div className="text-base">
+            <Link
+              href="/jobs"
+              className="text-sky-blue hover:underline leading-none"
+            >
+              Managed Jobs
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              </div>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              title="Refresh"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
             <input
               type="text"
               placeholder="Filter by job name"
               value={nameFilter}
               onChange={(e) => handleNameFilterChange(e.target.value)}
-              className="h-8 w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+              className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
             />
             {nameFilter && (
               <button
@@ -472,7 +493,7 @@ export function ManagedJobs() {
             value={workspaceFilter}
             onValueChange={handleWorkspaceFilterChange}
           >
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+            <SelectTrigger className="h-8 w-36 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by workspace...">
                 {workspaceFilter === ALL_WORKSPACES_VALUE
                   ? 'All Workspaces'
@@ -491,7 +512,7 @@ export function ManagedJobs() {
             </SelectContent>
           </Select>
           <Select value={userFilter} onValueChange={handleUserFilterChange}>
-            <SelectTrigger className="h-8 w-48 ml-2 mr-2 text-sm border-none focus:ring-0 focus:outline-none">
+            <SelectTrigger className="h-8 w-32 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
               <SelectValue placeholder="Filter by user...">
                 {userFilter === ALL_USERS_VALUE
                   ? 'All Users'
@@ -508,23 +529,6 @@ export function ManagedJobs() {
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="flex items-center space-x-2">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-            title="Refresh"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
         </div>
       </div>
       <ManagedJobsTable
@@ -580,6 +584,7 @@ export function ManagedJobsTable({
     message: '',
     onConfirm: null,
   });
+  const isMobile = useMobile();
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -926,7 +931,8 @@ export function ManagedJobsTable({
       </div>
 
       <Card>
-        <Table>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
           <TableHeader>
             <TableRow>
               <TableHead
@@ -1143,10 +1149,13 @@ export function ManagedJobsTable({
                       <p className="text-gray-500">No active jobs</p>
                     )}
                     {controllerStopped && (
-                      <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">
-                          The managed job controller has been stopped. Restart
-                          to check the latest job status.
+                      <div className="flex flex-col items-center space-y-3 px-4">
+                        <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
+                          {isMobile ? (
+                            <>Job controller stopped.<br/>Restart to check status.</>
+                          ) : (
+                            "The managed job controller has been stopped. Restart to check the latest job status."
+                          )}
                         </p>
                         <Button
                           variant="outline"
@@ -1158,12 +1167,12 @@ export function ManagedJobsTable({
                           {isRestarting ? (
                             <>
                               <CircularProgress size={12} className="mr-2" />
-                              Restarting...
+                              {isMobile ? 'Restarting...' : 'Restarting...'}
                             </>
                           ) : (
                             <>
                               <RefreshCcw className="h-4 w-4 mr-2" />
-                              Restart Controller
+                              {isMobile ? 'Restart' : 'Restart Controller'}
                             </>
                           )}
                         </Button>
@@ -1175,6 +1184,7 @@ export function ManagedJobsTable({
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}

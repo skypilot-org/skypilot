@@ -354,8 +354,8 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-2 h-5">
-        <div className="text-base flex items-center">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-1 min-h-[20px]">
+        <div className="text-base flex items-center flex-wrap gap-2">
           <Link
             href="/clusters"
             className="text-sky-blue hover:underline leading-none"
@@ -371,7 +371,7 @@ export function Clusters() {
             placeholder="Filter clusters"
           />
         </div>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-4 flex-wrap gap-2">
           <div className="flex items-center">
             <label className="flex items-center cursor-pointer">
               <input
@@ -391,7 +391,7 @@ export function Clusters() {
                   }`}
                 />
               </div>
-              <span className="ml-2 text-sm text-gray-700">
+              <span className="ml-2 text-sm text-gray-700 whitespace-nowrap">
                 Show history (Last 30 days)
               </span>
             </label>
@@ -700,25 +700,25 @@ export function ClusterTable({
                   Cluster{getSortDirection('cluster')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden sm:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('user')}
                 >
                   User{getSortDirection('user')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('workspace')}
                 >
                   Workspace{getSortDirection('workspace')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden lg:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('infra')}
                 >
                   Infra{getSortDirection('infra')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap hidden xl:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('resources_str')}
                 >
                   Resources{getSortDirection('resources_str')}
@@ -731,19 +731,19 @@ export function ClusterTable({
                 </TableHead>
                 {showHistory && (
                   <TableHead
-                    className="sortable whitespace-nowrap hidden lg:table-cell"
+                    className="sortable whitespace-nowrap"
                     onClick={() => requestSort('duration')}
                   >
                     Duration{getSortDirection('duration')}
                   </TableHead>
                 )}
                 <TableHead
-                  className="sortable whitespace-nowrap hidden md:table-cell"
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('autostop')}
                 >
                   Autostop{getSortDirection('autostop')}
                 </TableHead>
-                <TableHead className="sticky right-0 bg-white">
+                <TableHead className="md:sticky md:right-0 md:bg-white">
                   Actions
                 </TableHead>
               </TableRow>
@@ -777,13 +777,13 @@ export function ClusterTable({
                           {item.cluster || item.name}
                         </Link>
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell">
+                      <TableCell>
                         <UserDisplay
                           username={item.user}
                           userHash={item.user_hash}
                         />
                       </TableCell>
-                      <TableCell className="hidden md:table-cell">
+                      <TableCell>
                         <Link
                           href="/workspaces"
                           className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -791,7 +791,7 @@ export function ClusterTable({
                           {item.workspace || 'default'}
                         </Link>
                       </TableCell>
-                      <TableCell className="hidden lg:table-cell">
+                      <TableCell>
                         <NonCapitalizedTooltip
                           content={item.full_infra || item.infra}
                           className="text-sm text-muted-foreground"
@@ -812,7 +812,7 @@ export function ClusterTable({
                           </span>
                         </NonCapitalizedTooltip>
                       </TableCell>
-                      <TableCell className="hidden xl:table-cell">
+                      <TableCell>
                         <NonCapitalizedTooltip
                           content={
                             item.resources_str_full || item.resources_str
@@ -826,16 +826,16 @@ export function ClusterTable({
                         <TimestampWithTooltip date={item.time} />
                       </TableCell>
                       {showHistory && (
-                        <TableCell className="hidden lg:table-cell">
+                        <TableCell>
                           {formatDuration(item.duration)}
                         </TableCell>
                       )}
-                      <TableCell className="hidden md:table-cell">
+                      <TableCell>
                         {item.isHistorical
                           ? '-'
                           : formatAutostop(item.autostop, item.to_down)}
                       </TableCell>
-                      <TableCell className="text-left sticky right-0 bg-white">
+                      <TableCell className="text-left md:sticky md:right-0 md:bg-white">
                         {!item.isHistorical && (
                           <Status2Actions
                             cluster={item.cluster}
@@ -1197,12 +1197,12 @@ const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-visible">
+    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
       <div className="border-r border-gray-300">
         <Select onValueChange={setPropertValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
-            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-32 h-8"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-24 sm:w-32 h-8"
           >
             <SelectValue placeholder="Select Property" />
           </SelectTrigger>
@@ -1224,7 +1224,7 @@ const FilterDropdown = ({
           onChange={handleValueChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          className="h-8 w-32 sm:w-64 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
           autoComplete="off"
         />
         {value && (

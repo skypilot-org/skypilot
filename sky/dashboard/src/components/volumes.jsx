@@ -292,7 +292,8 @@ function VolumesTable({
   return (
     <div>
       <Card>
-        <Table>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
           <TableHeader>
             <TableRow>
               <TableHead
@@ -404,6 +405,7 @@ function VolumesTable({
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}

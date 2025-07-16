@@ -1275,7 +1275,8 @@ function UsersTable({
 
   return (
     <Card>
-      <Table>
+      <div className="overflow-x-auto rounded-lg">
+        <Table className="min-w-full">
         <TableHeader>
           <TableRow>
             <TableHead
@@ -1474,6 +1475,7 @@ function UsersTable({
           ))}
         </TableBody>
       </Table>
+      </div>
     </Card>
   );
 }
