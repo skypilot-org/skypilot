@@ -1545,8 +1545,8 @@ class S3CompatibleStore(AbstractStore):
                         'COS Bucket should exist.')
             elif self.source.startswith('oci://'):
                 raise NotImplementedError(
-                    f'Moving data from OCI to {self.source} is currently not supported.'
-                )
+                    f'Moving data from OCI to {self.source} is ',
+                    'currently not supported.')
 
         # Validate name
         self.name = self.validate_name(self.name)
@@ -1854,7 +1854,8 @@ class S3CompatibleStore(AbstractStore):
                 if self.config.aws_profile:
                     command += f' --profile={self.config.aws_profile}'
                 if self.config.get_endpoint_url:
-                    command += f' --endpoint-url {self.config.get_endpoint_url()}'
+                    command += f' --endpoint-url '\
+                        f'{self.config.get_endpoint_url()}'
                 if self.config.credentials_file:
                     command = (f'AWS_SHARED_CREDENTIALS_FILE='
                                f'{self.config.credentials_file} {command}')
@@ -3959,7 +3960,7 @@ class R2Store(S3CompatibleStore):
                                                                           ),
             credentials_file=cloudflare.R2_CREDENTIALS_PATH,
             aws_profile=cloudflare.R2_PROFILE_NAME,
-            get_endpoint_url=lambda: cloudflare.create_endpoint(),
+            get_endpoint_url=lambda: cloudflare.create_endpoint(),  # pylint: disable=unnecessary-lambda
             extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
             cloud_name=cloudflare.NAME,
             default_region='auto',

@@ -22,6 +22,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import oci
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -363,14 +364,11 @@ def verify_oci_bucket(name: str) -> bool:
 
     Args:
       name: str; Name of OCI Bucket (without oci:// prefix)
-    
+
     Returns:
       bool: True if the bucket exists, False otherwise
     """
     try:
-        # Import OCI adaptor
-        from sky.adaptors import oci
-
         # Get OCI client and check if bucket exists
         client = oci.get_object_storage_client()
         namespace = client.get_namespace(
