@@ -134,9 +134,9 @@ Task name (optional), used for display purposes.
 ``workdir``
 ~~~~~~~~~~~
 
-Working directory (optional), synced to ``~/sky_workdir`` on the remote cluster each time launch or exec is run with the yaml file.
+``workdir`` can be a local working directory or a git repository (optional), it is synced or cloned to ``~/sky_workdir`` on the remote cluster each time launch or exec is run with the yaml file.
 
-Commands in ``setup`` and ``run`` will be executed under it.
+Commands in ``setup`` and ``run`` will be executed under ``~/sky_workdir``.
 
 If a relative path is used, it's evaluated relative to the location from which ``sky`` is called.
 
@@ -152,6 +152,13 @@ OR
 
   workdir: ../my-project  # Relative path
 
+OR
+
+.. code-block:: yaml
+
+  workdir:
+    url: https://github.com/test/repo.git
+    ref: main
 
 .. _yaml-spec-num-nodes:
 
