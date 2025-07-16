@@ -179,7 +179,7 @@ def up(
             task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode():
-            controller_job_id = 1
+            controller_job_id = 0
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -323,10 +323,13 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            # socket_endpoint = backend_utils.get_endpoints(
-            #     controller_handle.cluster_name, lb_port,
-            #     skip_status_check=True).get(lb_port)
-            socket_endpoint = f'localhost:{lb_port}'
+            if not serve_utils.is_consolidation_mode():
+                socket_endpoint = backend_utils.get_endpoints(
+                    controller_handle.cluster_name,
+                    lb_port,
+                    skip_status_check=True).get(lb_port)
+            else:
+                socket_endpoint = f'localhost:{lb_port}'
             assert socket_endpoint is not None, (
                 'Did not get endpoint for controller.')
             # Already checked by validate_service_task
