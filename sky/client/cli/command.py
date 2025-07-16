@@ -739,12 +739,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.update_envs(env)
         task.update_secrets(secret)
 
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
     # Update the workdir config from the command line parameters.
     # And update the envs and secrets from the workdir.
-    _update_task_workdir(task, git_url, git_ref)
+    _update_task_workdir(task, workdir, git_url, git_ref)
     _update_task_workdir_and_secrets_from_workdir(task)
 
     # job launch specific.
@@ -760,22 +757,26 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     return task
 
 
-def _update_task_workdir(task: sky.Task, git_url: Optional[str],
-                         git_ref: Optional[str]):
+def _update_task_workdir(task: sky.Task, workdir: Optional[str],
+                         git_url: Optional[str], git_ref: Optional[str]):
     """Updates the task workdir.
 
     Args:
         task: The task to update.
+        workdir: The workdir to update.
+        git_url: The git url to update.
+        git_ref: The git ref to update.
     """
-    if task.workdir is None:
+    if task.workdir is None or isinstance(task.workdir, str):
+        if workdir is not None:
+            task.workdir = workdir
+            return
         if git_url is not None:
             task.workdir = {
                 'url': git_url,
                 'ref': git_ref,
             }
             return
-        return
-    if not isinstance(task.workdir, dict):
         return
     if git_url is not None:
         task.workdir['url'] = git_url

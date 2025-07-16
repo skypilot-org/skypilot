@@ -780,22 +780,6 @@ def _experimental_task_schema() -> dict:
     }
 
 
-def get_git_schema():
-    return {
-        'type': 'object',
-        'required': ['url'],
-        'additionalProperties': False,
-        'properties': {
-            'url': {
-                'type': 'string',
-            },
-            'ref': {
-                'type': 'string',
-            },
-        }
-    }
-
-
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -811,7 +795,16 @@ def get_task_schema():
                     'type': 'string',
                 }, {
                     'type': 'object',
-                    'properties': get_git_schema(),
+                    'required': ['url'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'ref': {
+                            'type': 'string',
+                        },
+                    },
                 }],
             },
             'event_callback': {

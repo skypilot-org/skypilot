@@ -239,6 +239,9 @@ class GitRepo:
                 auth=None)
 
             if response.status_code == 200:
+                logger.info(
+                    f'Successfully validated repository {https_url} access '
+                    'using public access')
                 return GitCloneInfo(url=https_url)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Public access failed: {str(e)}')

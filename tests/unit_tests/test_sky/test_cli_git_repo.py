@@ -23,8 +23,8 @@ class TestUpdateTaskWorkdir:
         task = sky.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir(task, 'https://github.com/test/repo.git',
-                                     'main')
+        command._update_task_workdir(task, None,
+                                     'https://github.com/test/repo.git', 'main')
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -36,7 +36,7 @@ class TestUpdateTaskWorkdir:
         task = sky.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir(task, None, 'main')
+        command._update_task_workdir(task, None, None, 'main')
 
         assert task.workdir is None
 
@@ -45,8 +45,8 @@ class TestUpdateTaskWorkdir:
         task = sky.Task(name='test', run='echo hello')
         task.workdir = None
 
-        command._update_task_workdir(task, 'https://github.com/test/repo.git',
-                                     None)
+        command._update_task_workdir(task, None,
+                                     'https://github.com/test/repo.git', None)
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -61,8 +61,8 @@ class TestUpdateTaskWorkdir:
             'ref': 'old_ref'
         }
 
-        command._update_task_workdir(task, 'https://github.com/new/repo.git',
-                                     None)
+        command._update_task_workdir(task, None,
+                                     'https://github.com/new/repo.git', None)
 
         assert task.workdir == {
             'url': 'https://github.com/new/repo.git',
@@ -77,7 +77,7 @@ class TestUpdateTaskWorkdir:
             'ref': 'old_ref'
         }
 
-        command._update_task_workdir(task, None, 'new_ref')
+        command._update_task_workdir(task, None, None, 'new_ref')
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
@@ -92,7 +92,8 @@ class TestUpdateTaskWorkdir:
             'ref': 'old_ref'
         }
 
-        command._update_task_workdir(task, 'https://github.com/new/repo.git',
+        command._update_task_workdir(task, None,
+                                     'https://github.com/new/repo.git',
                                      'new_ref')
 
         assert task.workdir == {
@@ -101,14 +102,27 @@ class TestUpdateTaskWorkdir:
         }
 
     def test_update_task_workdir_string_workdir(self):
-        """Test updating task workdir when workdir is a string (should not be modified)."""
+        """Test updating task workdir when workdir is a string."""
         task = sky.Task(name='test', run='echo hello')
         task.workdir = '/some/local/path'
 
-        command._update_task_workdir(task, 'https://github.com/test/repo.git',
-                                     'main')
+        command._update_task_workdir(task, None,
+                                     'https://github.com/test/repo.git', 'main')
 
-        assert task.workdir == '/some/local/path'
+        assert task.workdir == {
+            'url': 'https://github.com/test/repo.git',
+            'ref': 'main'
+        }
+
+    def test_update_task_workdir_string_workdir_update(self):
+        """Test updating task workdir when workdir is a string and override workdir is provided."""
+        task = sky.Task(name='test', run='echo hello')
+        task.workdir = '/some/local/path'
+
+        command._update_task_workdir(task, "abcd",
+                                     'https://github.com/test/repo.git', 'main')
+
+        assert task.workdir == "abcd"
 
     def test_update_task_workdir_no_changes(self):
         """Test updating task workdir when no git_url or git_ref is provided."""
@@ -118,7 +132,7 @@ class TestUpdateTaskWorkdir:
             'ref': 'main'
         }
 
-        command._update_task_workdir(task, None, None)
+        command._update_task_workdir(task, None, None, None)
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',

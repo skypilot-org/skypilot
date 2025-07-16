@@ -4,7 +4,6 @@
 # This script handles Git repository cloning with authentication and different ref types
 
 set -e  # Exit on any error
-set -x
 
 # Function to log messages
 log() {
@@ -252,9 +251,22 @@ elif [ -n "$GIT_COMMIT_HASH" ]; then
 else
     # Use git default behavior to clone the default branch
     REF_TYPE="default"
-    REF_VALUE=""  # Will be determined after clone
-    CLONE_ARGS="--depth 1"
-    log "No specific ref provided, using git default branch (shallow clone)"
+    # Get the remote default branch name before cloning
+    log "Determining remote default branch..."
+    if REF_VALUE=$(git ls-remote --symref "$CLONE_URL" HEAD 2>/dev/null | grep '^ref:' | sed 's/^ref: refs\/heads\///' | awk '{print $1}' | head -1); then
+        if [ -n "$REF_VALUE" ]; then
+            CLONE_ARGS="--depth 1 --branch $REF_VALUE"
+            log "Remote default branch: $REF_VALUE (shallow clone)"
+        else
+            REF_VALUE=""  # Will be determined after clone
+            CLONE_ARGS="--depth 1"
+            log "Could not determine remote default branch, using git default behavior"
+        fi
+    else
+        REF_VALUE=""  # Will be determined after clone
+        CLONE_ARGS="--depth 1"
+        log "Could not query remote, using git default behavior"
+    fi
 fi
 
 # Check if target directory already exists and has git repository
@@ -326,8 +338,10 @@ if [ "$NEED_CLONE" = true ]; then
         elif [ "$REF_TYPE" = "tag" ]; then
             log "Successfully cloned tag: $REF_VALUE"
         else
-            # Determine the actual default branch name
-            REF_VALUE=$(git branch --show-current)
+            # Determine the actual default branch name (if not already known)
+            if [ -z "$REF_VALUE" ]; then
+                REF_VALUE=$(git branch --show-current)
+            fi
             log "Successfully cloned default branch: $REF_VALUE"
         fi
     fi
@@ -357,8 +371,10 @@ else
             exit 1
         fi
     elif [ "$REF_TYPE" = "default" ]; then
-        # For default branch, get current branch and fetch it
-        REF_VALUE=$(git branch --show-current)
+        # For default branch, get current branch and fetch it (if not already known)
+        if [ -z "$REF_VALUE" ]; then
+            REF_VALUE=$(git branch --show-current)
+        fi
         log "Current default branch: $REF_VALUE"
         if ! git fetch origin "+refs/heads/$REF_VALUE:refs/remotes/origin/$REF_VALUE"; then
             log "ERROR: Failed to fetch default branch '$REF_VALUE' from remote"
@@ -407,14 +423,6 @@ elif [ "$REF_TYPE" = "tag" ]; then
         exit 1
     fi
     log "Successfully checked out tag: $REF_VALUE"
-elif [ "$REF_TYPE" = "default" ]; then
-    # For default branch, we're already on the correct branch
-    log "Using default branch: $REF_VALUE"
-    if [ "$NEED_CLONE" != true ]; then
-        # Ensure we're on the latest commit of the default branch
-        git reset --hard "origin/$REF_VALUE"
-        log "Updated to latest commit of default branch: $REF_VALUE"
-    fi
 else
     # Checkout specific branch
     log "Checking out branch: $REF_VALUE"
