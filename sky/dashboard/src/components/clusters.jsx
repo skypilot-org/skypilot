@@ -354,51 +354,19 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-1 min-h-[20px]">
-        <div className="text-base flex items-center flex-wrap gap-2">
-          <Link
-            href="/clusters"
-            className="text-sky-blue hover:underline leading-none"
-          >
-            Sky Clusters
-          </Link>
-
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            updateURLParams={updateURLParams}
-            placeholder="Filter clusters"
-          />
-        </div>
-        <div className="flex items-center space-x-4 flex-wrap gap-2">
-          <div className="flex items-center">
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => setShowHistory(e.target.checked)}
-                className="sr-only"
-              />
-              <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    showHistory ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </div>
-              <span className="ml-2 text-sm text-gray-700 whitespace-nowrap">
-                Show history (Last 30 days)
-              </span>
-            </label>
+      <div className="flex flex-col gap-2 mb-1">
+        <div className="flex items-center justify-between">
+          <div className="text-base">
+            <Link
+              href="/clusters"
+              className="text-sky-blue hover:underline leading-none"
+            >
+              Sky Clusters
+            </Link>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-center flex-wrap gap-2">
             {loading && (
-              <div className="flex items-center mr-2">
+              <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
                 <span className="ml-2 text-gray-500">Loading...</span>
               </div>
@@ -412,6 +380,39 @@ export function Clusters() {
               {!isMobile && <span>Refresh</span>}
             </button>
           </div>
+        </div>
+        <div className="flex items-center">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter clusters"
+          />
+        </div>
+        <div className="flex items-center">
+          <label className="flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => setShowHistory(e.target.checked)}
+              className="sr-only"
+            />
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showHistory ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  showHistory ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+            <span className="ml-2 text-sm text-gray-700 whitespace-nowrap">
+              Show history (Last 30 days)
+            </span>
+          </label>
         </div>
       </div>
 

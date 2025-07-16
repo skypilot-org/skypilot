@@ -930,6 +930,36 @@ export function ManagedJobsTable({
         </div>
       </div>
 
+      {/* Mobile-specific controller stopped message outside table */}
+      {isMobile && controllerStopped && paginatedData.length === 0 && !loading && !isInitialLoad && (
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+          <div className="flex flex-col items-center space-y-3">
+            <p className="text-gray-700 text-center text-sm">
+              Job controller stopped.<br/>Restart to check status.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRestartController}
+              className="text-sky-blue hover:text-sky-blue-bright"
+              disabled={loading || isRestarting}
+            >
+              {isRestarting ? (
+                <>
+                  <CircularProgress size={12} className="mr-2" />
+                  Restarting...
+                </>
+              ) : (
+                <>
+                  <RefreshCcw className="h-4 w-4 mr-2" />
+                  Restart
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
@@ -1148,14 +1178,11 @@ export function ManagedJobsTable({
                     {!controllerStopped && !controllerLaunching && (
                       <p className="text-gray-500">No active jobs</p>
                     )}
-                    {controllerStopped && (
+                    {/* Desktop controller stopped message stays in table */}
+                    {!isMobile && controllerStopped && (
                       <div className="flex flex-col items-center space-y-3 px-4">
                         <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
-                          {isMobile ? (
-                            <>Job controller stopped.<br/>Restart to check status.</>
-                          ) : (
-                            "The managed job controller has been stopped. Restart to check the latest job status."
-                          )}
+                          The managed job controller has been stopped. Restart to check the latest job status.
                         </p>
                         <Button
                           variant="outline"
@@ -1167,12 +1194,12 @@ export function ManagedJobsTable({
                           {isRestarting ? (
                             <>
                               <CircularProgress size={12} className="mr-2" />
-                              {isMobile ? 'Restarting...' : 'Restarting...'}
+                              Restarting...
                             </>
                           ) : (
                             <>
                               <RefreshCcw className="h-4 w-4 mr-2" />
-                              {isMobile ? 'Restart' : 'Restart Controller'}
+                              Restart Controller
                             </>
                           )}
                         </Button>
