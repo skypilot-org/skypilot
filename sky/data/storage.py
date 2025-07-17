@@ -275,15 +275,11 @@ class StoreType(enum.Enum):
                 elif store_type == StoreType.IBM:
                     bucket_name, sub_path, region = data_utils.split_cos_path(
                         store_url)
-                elif store_type == StoreType.R2:
-                    bucket_name, sub_path = data_utils.split_r2_path(store_url)
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
                 elif store_type == StoreType.NEBIUS:
                     bucket_name, sub_path = data_utils.split_nebius_path(
                         store_url)
-                elif store_type == StoreType.S3:
-                    bucket_name, sub_path = data_utils.split_s3_path(store_url)
                 # Check compatible stores
                 for compatible_store_type, store_class in \
                     _S3_COMPATIBLE_STORES.items():
