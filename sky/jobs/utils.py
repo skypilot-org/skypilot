@@ -312,14 +312,22 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         error_msg = None
         tasks = managed_job_state.get_managed_jobs(job_id)
         for task in tasks:
-            cluster_name = (
-                managed_job_state.get_current_cluster_name_from_job_id(job_id))
             pool = task['pool']
+            if pool is None:
+                task_name = task['job_name']
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id)
+            else:
+                cluster_name, _ = (
+                    managed_job_state.get_pool_submit_info(job_id))
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
                 try:
-                    serve_utils.release_cluster_name(pool, cluster_name)
+                    if pool is None:
+                        terminate_cluster(cluster_name)
+                    else:
+                        serve_utils.release_cluster_name(pool, cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (
                         f'Failed to terminate cluster {cluster_name}: '

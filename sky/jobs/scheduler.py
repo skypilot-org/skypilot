@@ -181,7 +181,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                         # Can't schedule anything, break from scheduling loop.
                         break
 
-                logger.info(f'Scheduling job {maybe_next_job["job_id"]}')
+                logger.debug(f'Scheduling job {maybe_next_job["job_id"]}')
                 state.scheduler_set_launching(maybe_next_job['job_id'],
                                               current_state)
 

@@ -67,7 +67,6 @@ class JobsController:
         logger.info(self._dag)
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
-        assert pool is not None
         self._pool = pool
 
         # pylint: disable=line-too-long
@@ -125,6 +124,12 @@ class JobsController:
             managed_job_state.set_local_log_file(self._job_id, task_id,
                                                  log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
+    def _cleanup_cluster(self, cluster_name: str) -> None:
+        if self._pool is None:
+            managed_job_utils.terminate_cluster(cluster_name)
+        else:
+            serve_utils.release_cluster_name(self._pool, cluster_name)
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -196,10 +201,11 @@ class JobsController:
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         assert task.name is not None, task
-        # cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-        #     task.name, self._job_id)
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, self._job_id) if self._pool is None else ''
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            '', self._backend, task, self._job_id, task_id, self._pool)
+            cluster_name, self._backend, task, self._job_id, task_id,
+            self._pool)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -226,18 +232,17 @@ class JobsController:
         # Only do the initial cluster launch if not resuming from a controller
         # failure. Otherwise, we will transit to recovering immediately.
         remote_job_submitted_at = time.time()
-        cluster_name = managed_job_state.get_current_cluster_name_from_job_id(
-            self._job_id)
-        job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
-            self._job_id)
+        if self._pool is None:
+            job_id_on_pm = None
+        else:
+            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
+                self._job_id)
         if not is_resume:
             remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
-            cluster_name = (
-                managed_job_state.get_current_cluster_name_from_job_id(
-                    self._job_id))
-            job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
-                self._job_id)
+            if self._pool is not None:
+                cluster_name, job_id_on_pm = (
+                    managed_job_state.get_pool_submit_info(self._job_id))
         assert cluster_name is not None
 
         if not is_resume:
@@ -329,7 +334,7 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                serve_utils.release_cluster_name(self._pool, cluster_name)
+                self._cleanup_cluster(cluster_name)
                 return True
 
             # For single-node jobs, non-terminated job_status indicates a
@@ -470,7 +475,7 @@ class JobsController:
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    serve_utils.release_cluster_name(self._pool, cluster_name)
+                    self._cleanup_cluster(cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
@@ -480,10 +485,7 @@ class JobsController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
-            cluster_name = (
-                managed_job_state.get_current_cluster_name_from_job_id(
-                    self._job_id))
-            job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
+            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
                 self._job_id)
             assert cluster_name is not None
             managed_job_state.set_recovered(self._job_id,
@@ -610,21 +612,23 @@ def _cleanup(job_id: int, dag_yaml: str, pool: Optional[str]):
     # Cleanup the HA recovery script first as it is possible that some error
     # was raised when we construct the task object (e.g.,
     # sky.exceptions.ResourcesUnavailableError).
-    assert pool is not None
     managed_job_state.remove_ha_recovery_script(job_id)
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
-        cluster_name = managed_job_state.get_current_cluster_name_from_job_id(
-            job_id)
-        if cluster_name is not None:
-            serve_utils.release_cluster_name(pool, cluster_name)
-            job_id_on_pm = managed_job_state.get_job_id_on_pm_from_job_id(
+        if pool is None:
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task.name, job_id)
+            managed_job_utils.terminate_cluster(cluster_name)
+        else:
+            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
                 job_id)
-            if job_id_on_pm is not None:
-                core.cancel(cluster_name=cluster_name,
-                            job_ids=[job_id_on_pm],
-                            _try_cancel_if_cluster_is_init=True)
+            if cluster_name is not None:
+                serve_utils.release_cluster_name(pool, cluster_name)
+                if job_id_on_pm is not None:
+                    core.cancel(cluster_name=cluster_name,
+                                job_ids=[job_id_on_pm],
+                                _try_cancel_if_cluster_is_init=True)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.

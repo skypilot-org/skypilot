@@ -1380,47 +1380,32 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
 
 
 @_init_db
-def set_current_cluster_name(job_id: int, cluster_name: str) -> None:
-    """Set the current cluster name for the job id."""
+def set_pool_submit_info(job_id: int, current_cluster_name: str,
+                         job_id_on_pm: int) -> None:
+    """Set the pool and job id on the pool for the job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update(
-                {job_info_table.c.current_cluster_name: cluster_name})
+            job_info_table.c.spot_job_id == job_id).update({
+                job_info_table.c.current_cluster_name: current_cluster_name,
+                job_info_table.c.job_id_on_pm: job_id_on_pm
+            })
         session.commit()
 
 
 @_init_db
-def get_current_cluster_name_from_job_id(job_id: int) -> Optional[str]:
-    """Get the current cluster name from the job id."""
+def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
+    """Get the cluster name and job id on the pool from the managed job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        current_cluster_name = session.execute(
-            sqlalchemy.select(job_info_table.c.current_cluster_name).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
-        return current_cluster_name[0] if current_cluster_name else None
-
-
-@_init_db
-def set_job_id_on_pm(job_id: int, job_id_on_pm: int) -> None:
-    """Set the job id on the pool for the job id."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update(
-                {job_info_table.c.job_id_on_pm: job_id_on_pm})
-        session.commit()
-
-
-@_init_db
-def get_job_id_on_pm_from_job_id(job_id: int) -> Optional[int]:
-    """Get the job id on the pool from the job id."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        job_id_on_pm = session.execute(
-            sqlalchemy.select(job_info_table.c.job_id_on_pm).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
-        return job_id_on_pm[0] if job_id_on_pm else None
+        info = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.current_cluster_name,
+                job_info_table.c.job_id_on_pm).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if info is None:
+            return None, None
+        return info[0], info[1]
 
 
 @_init_db
