@@ -372,29 +372,29 @@ export function Clusters() {
             placeholder="Filter clusters"
           />
         </div>
-        <label className="flex items-center cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showHistory}
-            onChange={(e) => setShowHistory(e.target.checked)}
-            className="sr-only"
-          />
-          <div
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              showHistory ? 'bg-sky-600' : 'bg-gray-300'
-            }`}
-          >
-            <span
-              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                showHistory ? 'translate-x-5' : 'translate-x-1'
-              }`}
-            />
-          </div>
-          <span className="ml-2 text-sm text-gray-700">
-            Show history (Last 30 days)
-          </span>
-        </label>
         <div className="flex items-center gap-2 ml-auto">
+          <label className="flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => setShowHistory(e.target.checked)}
+              className="sr-only"
+            />
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showHistory ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  showHistory ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+            <span className="ml-2 text-sm text-gray-700">
+              Show history (Last 30 days)
+            </span>
+          </label>
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
@@ -1192,7 +1192,7 @@ const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible w-full max-w-full">
+    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
       <div className="border-r border-gray-300 flex-shrink-0">
         <Select onValueChange={setPropertValue} value={propertyValue}>
           <SelectTrigger
@@ -1210,7 +1210,7 @@ const FilterDropdown = ({
           </SelectContent>
         </Select>
       </div>
-      <div className="relative flex-1 min-w-0">
+      <div className="relative flex-1">
         <input
           type="text"
           ref={inputRef}
@@ -1219,7 +1219,7 @@ const FilterDropdown = ({
           onChange={handleValueChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-full px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
           autoComplete="off"
         />
         {value && (
