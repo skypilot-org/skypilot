@@ -40,6 +40,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,9 @@ class OCI(clouds.Cloud):
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
                 ('High availability controllers are not supported on '
+                 f'{cls._REPR}.'),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+                ('Customized multiple network interfaces are not supported on '
                  f'{cls._REPR}.'),
         }
         if resources.use_spot:
@@ -207,13 +211,15 @@ class OCI(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: Optional['clouds.Region'],
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
 

@@ -18,9 +18,9 @@ import {
   SlackIcon,
   CommentFeedbackIcon,
   BookDocIcon,
-  UserCircleIcon,
   UsersIcon,
   StarIcon,
+  VolumeIcon,
 } from '@/components/elements/icons';
 import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
@@ -148,6 +148,7 @@ export function TopBar() {
   const isMobile = useMobile();
   const { userEmail, userRole } = useSidebar();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -247,6 +248,15 @@ export function TopBar() {
             {!isMobile && <span>Jobs</span>}
           </Link>
 
+          <Link
+            href="/volumes"
+            className={getLinkClasses('/volumes')}
+            prefetch={false}
+          >
+            <VolumeIcon className="w-4 h-4" />
+            {!isMobile && <span>Volumes</span>}
+          </Link>
+
           <div className="border-l border-gray-200 h-6 mx-1"></div>
 
           <Link
@@ -267,6 +277,7 @@ export function TopBar() {
             <BookDocIcon className="w-4 h-4" />
             {!isMobile && <span>Workspaces</span>}
           </Link>
+
           <Link
             href="/users"
             className={getLinkClasses('/users')}

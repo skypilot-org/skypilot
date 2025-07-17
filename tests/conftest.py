@@ -9,7 +9,12 @@ from typing import List
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
+from sqlalchemy import exc as sqlalchemy_exc
+from sqlalchemy import orm
+from sqlalchemy import text as sqlalchemy_text
+import sqlalchemy_adapter
 
+from sky import global_user_state
 from sky import sky_logging
 
 # Initialize logger at the top level
@@ -172,6 +177,14 @@ def pytest_addoption(parser):
         default='',
         help='Package name to use for Helm tests',
     )
+    parser.addoption(
+        '--jobs-consolidation',
+        action='store_true',
+        default=False,
+        help=('If set, the tests will be run in jobs consolidation mode '
+              '(The config change is made in buildkite so this is a flag to '
+              'ensure the tests will not be skipped but no actual effect)'),
+    )
 
 
 def pytest_configure(config):
@@ -182,6 +195,18 @@ def pytest_configure(config):
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
+
+    # Validate incompatible option combinations
+    if config.getoption('--remote-server'):
+        if config.getoption('--jobs-consolidation'):
+            raise ValueError(
+                '--remote-server and --jobs-consolidation are not compatible. '
+                'Jobs consolidation mode is not supported with remote server testing.'
+            )
+        if config.getoption('--postgres'):
+            raise ValueError(
+                '--remote-server and --postgres are not compatible. '
+                'Postgres backend is not supported with remote server testing.')
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 

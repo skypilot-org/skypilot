@@ -21,6 +21,7 @@
 
 import pathlib
 import re
+import shlex
 import tempfile
 import textwrap
 from typing import Dict, List
@@ -28,11 +29,13 @@ from typing import Dict, List
 import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
+from smoke_tests.docker import docker_utils
 
 import sky
 from sky import AWS
 from sky import Azure
 from sky import GCP
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -278,7 +281,6 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
 @pytest.mark.no_hyperbolic
-@pytest.mark.resource_heavy
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -698,7 +700,6 @@ def test_azure_http_server_with_custom_ports():
 
 # ---------- Web apps with custom ports on Kubernetes. ----------
 @pytest.mark.kubernetes
-@pytest.mark.resource_heavy
 def test_kubernetes_http_server_with_custom_ports():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -768,6 +769,8 @@ def test_scp_http_server_with_custom_ports():
 # ---------- Labels from task on AWS (instance_tags) ----------
 @pytest.mark.aws
 def test_task_labels_aws():
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Skipping test_task_labels on remote server')
     name = smoke_tests_utils.get_cluster_name()
     template_str = pathlib.Path(
         'tests/test_yamls/test_labels.yaml.j2').read_text()
@@ -944,7 +947,6 @@ def test_add_and_remove_pod_annotations_with_autostop():
 
 
 # ---------- Container logs from task on Kubernetes ----------
-@pytest.mark.resource_heavy
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -1972,7 +1974,7 @@ def test_gcp_network_tier():
 def test_gcp_network_tier_with_gpu():
     """Test GCP network_tier=best with GPU to verify GPU Direct functionality."""
     name = smoke_tests_utils.get_cluster_name() + '-gpu-best'
-
+    cmd = 'echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths" || exit 1'
     test = smoke_tests_utils.Test(
         'gcp-network-tier-best-gpu',
         [
@@ -1981,13 +1983,44 @@ def test_gcp_network_tier_with_gpu():
             f'--gpus H100:8 --network-tier best '
             f'echo "Testing network tier best with GPU"',
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=
-                'echo "LD_LIBRARY_PATH check for GPU workloads:" && echo $LD_LIBRARY_PATH && echo $LD_LIBRARY_PATH | grep -q "/usr/local/nvidia/lib64:/usr/local/tcpx/lib64" && echo "LD_LIBRARY_PATH contains required paths" || echo "LD_LIBRARY_PATH missing required paths"'
-            )
+            f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=15 * 60,  # 15 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_remote_server_api_login():
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('This test is only for remote server')
+
+    endpoint = docker_utils.get_api_server_endpoint_inside_docker()
+    config_path = skypilot_config._GLOBAL_CONFIG_PATH
+    backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
+
+    test = smoke_tests_utils.Test(
+        'remote-server-api-login',
+        [
+            # Backup existing config file if it exists
+            f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
+            # Run sky api login
+            f'sky api login -e {endpoint}',
+            # Echo the config file content to see what was written
+            f'echo "Config file content after sky api login:" && cat {config_path}',
+            # Verify the config file is updated with the endpoint
+            f'grep -q "endpoint: {endpoint}" {config_path}',
+            # Verify the api_server section exists
+            f'grep -q "api_server:" {config_path}',
+        ],
+        # Restore original config file if backup exists
+        f'if [ -f {backup_path} ]; then mv {backup_path} {config_path}; fi',
+    )
+
+    with pytest.MonkeyPatch().context() as m:
+        m.setattr(docker_utils, 'get_api_server_endpoint_inside_docker',
+                  lambda: 'http://255.255.255.255:41540')
+        # Mock the environment config to return a non-existing endpoint.
+        # The sky api login command should not read from environment config
+        # when an explicit endpoint is provided as an argument.
+        smoke_tests_utils.run_one_test(test, check_sky_status=False)

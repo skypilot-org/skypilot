@@ -12,6 +12,7 @@ import colorama
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import rich_console_utils
 
 if typing.TYPE_CHECKING:
@@ -57,10 +58,14 @@ def print_exception_no_traceback():
             if error():
                 raise ValueError('...')
     """
-    original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-    sys.tracebacklimit = 0
-    yield
-    sys.tracebacklimit = original_tracelimit
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        # When SKYPILOT_DEBUG is set, show the full traceback
+        yield
+    else:
+        original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
+        sys.tracebacklimit = 0
+        yield
+        sys.tracebacklimit = original_tracelimit
 
 
 @contextlib.contextmanager
@@ -248,9 +253,7 @@ def command_hint_messages(hint_type: CommandHintType,
                 f'{BOLD}sky jobs logs {job_id}{RESET_BOLD}'
                 f'\n{INDENT_SYMBOL}To stream controller logs:\t\t'
                 f'{BOLD}sky jobs logs --controller {job_id}{RESET_BOLD}'
-                f'\n{INDENT_SYMBOL}To view all managed jobs:\t\t'
-                f'{BOLD}sky jobs queue{RESET_BOLD}'
-                f'\n{INDENT_LAST_SYMBOL}To view managed job dashboard:\t\t'
-                f'{BOLD}sky jobs dashboard{RESET_BOLD}')
+                f'\n{INDENT_LAST_SYMBOL}To view all managed jobs:\t\t'
+                f'{BOLD}sky jobs queue{RESET_BOLD}')
     else:
         raise ValueError(f'Invalid hint type: {hint_type}')

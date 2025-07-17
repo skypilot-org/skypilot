@@ -5,6 +5,7 @@ jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import collections
+import datetime
 import enum
 import os
 import pathlib
@@ -29,11 +30,16 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -124,6 +130,112 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
+def _validate_consolidation_mode_config(
+        current_is_consolidation_mode: bool) -> None:
+    """Validate the consolidation mode config."""
+    if (current_is_consolidation_mode and
+            not env_options.Options.IS_DEVELOPER.get() and
+            server_common.is_api_server_local()):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Consolidation mode is not supported when running locally.')
+    # Check whether the consolidation mode config is changed.
+    if current_is_consolidation_mode:
+        controller_cn = (
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
+        if global_user_state.get_cluster_from_name(controller_cn) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InconsistentConsolidationModeError(
+                    f'{colorama.Fore.RED}Consolidation mode is '
+                    f'enabled, but the controller cluster '
+                    f'{controller_cn} is still running. Please '
+                    'terminate the controller cluster first.'
+                    f'{colorama.Style.RESET_ALL}')
+    else:
+        all_jobs = managed_job_state.get_managed_jobs()
+        if all_jobs:
+            nonterminal_jobs = (
+                managed_job_state.get_nonterminal_job_ids_by_name(
+                    None, all_users=True))
+            if nonterminal_jobs:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.InconsistentConsolidationModeError(
+                        f'{colorama.Fore.RED}Consolidation mode '
+                        'is disabled, but there are still '
+                        f'{len(nonterminal_jobs)} managed jobs '
+                        'running. Please terminate those jobs '
+                        f'first.{colorama.Style.RESET_ALL}')
+            else:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are {len(all_jobs)} jobs from previous '
+                    'consolidation mode. Reset the `jobs.controller.'
+                    'consolidation_mode` to `true` and run `sky jobs queue` '
+                    'to see those jobs. Switching to normal mode will '
+                    f'lose the job history.{colorama.Style.RESET_ALL}')
+
+
+# Whether to use consolidation mode or not. When this is enabled, the managed
+# jobs controller will not be running on a separate cluster, but locally on the
+# API Server. Under the hood, we submit the job monitoring logic as processes
+# directly in the API Server.
+# Use LRU Cache so that the check is only done once.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+    _validate_consolidation_mode_config(consolidation_mode)
+    return consolidation_mode
+
+
+def ha_recovery_for_consolidation_mode():
+    """Recovery logic for HA mode."""
+    # No setup recovery is needed in consolidation mode, as the API server
+    # already has all runtime installed. Directly start jobs recovery here.
+    # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
+    runner = command_runner.LocalProcessCommandRunner()
+    with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH, 'w',
+              encoding='utf-8') as f:
+        start = time.time()
+        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
+        for job in managed_job_state.get_managed_jobs():
+            job_id = job['job_id']
+            controller_pid = job['controller_pid']
+
+            # In consolidation mode, it is possible that only the API server
+            # process is restarted, and the controller process is not. In such
+            # case, we don't need to do anything and the controller process will
+            # just keep running.
+            if controller_pid is not None:
+                try:
+                    if _controller_process_alive(controller_pid, job_id):
+                        f.write(f'Controller pid {controller_pid} for '
+                                f'job {job_id} is still running. '
+                                'Skipping recovery.\n')
+                        continue
+                except Exception:  # pylint: disable=broad-except
+                    # _controller_process_alive may raise if psutil fails; we
+                    # should not crash the recovery logic because of this.
+                    f.write('Error checking controller pid '
+                            f'{controller_pid} for job {job_id}\n')
+
+            if job['schedule_state'] not in [
+                    managed_job_state.ManagedJobScheduleState.DONE,
+                    managed_job_state.ManagedJobScheduleState.WAITING
+            ]:
+                script = managed_job_state.get_ha_recovery_script(job_id)
+                if script is None:
+                    f.write(f'Job {job_id}\'s recovery script does not exist. '
+                            'Skipping recovery. Job schedule state: '
+                            f'{job["schedule_state"]}\n')
+                    continue
+                runner.run(script)
+                f.write(f'Job {job_id} completed recovery at '
+                        f'{datetime.datetime.now()}\n')
+        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+        f.write(f'Total recovery time: {time.time() - start} seconds\n')
+
+
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
@@ -157,9 +269,8 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
         process = psutil.Process(pid)
-        # The last two args of the command line should be --job-id <id>
-        job_args = process.cmdline()[-2:]
-        return process.is_running() and job_args == ['--job-id', str(job_id)]
+        cmd_str = ' '.join(process.cmdline())
+        return process.is_running() and f'--job-id {job_id}' in cmd_str
     except psutil.NoSuchProcess:
         return False
 
@@ -945,7 +1056,7 @@ def dump_managed_job_queue() -> str:
     # Figure out what the highest priority blocking job is. We need to know in
     # order to determine if other jobs are blocked by a higher priority job, or
     # just by the limited controller resources.
-    highest_blocking_priority = 0
+    highest_blocking_priority = constants.MIN_PRIORITY
     for job in jobs:
         if job['schedule_state'] not in (
                 # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with
@@ -1136,7 +1247,6 @@ def format_job_table(
         'TASK',
         *(['WORKSPACE'] if show_workspace else []),
         'NAME',
-        'PRIORITY',
         *user_cols,
         'REQUESTED',
         'SUBMITTED',
@@ -1147,7 +1257,14 @@ def format_job_table(
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
-        columns += ['STARTED', 'INFRA', 'RESOURCES', 'SCHED. STATE', 'DETAILS']
+        columns += [
+            'STARTED',
+            'INFRA',
+            'RESOURCES',
+            'SCHED. STATE',
+            'DETAILS',
+            'GIT_COMMIT',
+        ]
     if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -1208,7 +1325,6 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            priority = job_tasks[0].get('priority', '-')
             managed_job_status, current_task_id = _get_job_status_from_tasks(
                 job_tasks)
             for task in job_tasks:
@@ -1244,7 +1360,6 @@ def format_job_table(
                 '',
                 *([''] if show_workspace else []),
                 job_name,
-                str(priority),
                 *user_values,
                 '-',
                 submitted,
@@ -1262,6 +1377,7 @@ def format_job_table(
                     '-',
                     job_tasks[0]['schedule_state'],
                     generate_details(details, failure_reason),
+                    job_tasks[0].get('metadata', {}).get('git_commit', '-'),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1275,13 +1391,11 @@ def format_job_table(
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             user_values = get_user_column_values(task)
             task_workspace = '-' if len(job_tasks) > 1 else workspace
-            priority = task.get('priority', '-')
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
                 *([task_workspace] if show_workspace else []),
                 task['task_name'],
-                str(priority),
                 *user_values,
                 task['resources'],
                 # SUBMITTED
@@ -1329,6 +1443,8 @@ def format_job_table(
                     generate_details(task.get('details'),
                                      task['failure_reason']),
                 ])
+
+                values.append(task.get('metadata', {}).get('git_commit', '-'))
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
@@ -1414,6 +1530,22 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_version_and_job_table(cls) -> str:
+        """Generate code to get controller version and raw job table."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
+
+        # Get and print raw job table (load_managed_job_queue can parse this directly)
+        job_table = utils.dump_managed_job_queue()
+        print(job_table, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
         from sky.utils import message_utils
@@ -1467,8 +1599,13 @@ class ManagedJobCodeGen:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r})
+                if managed_job_version < 7:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r})
+                else:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r},
+                                    {task.metadata_json!r})
                 """)
         return cls._build(code)
 

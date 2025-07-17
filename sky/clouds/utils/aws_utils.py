@@ -28,10 +28,16 @@ class AWSReservation:
 
 
 def use_reservations() -> bool:
-    prioritize_reservations = skypilot_config.get_nested(
-        ('aws', 'prioritize_reservations'), False)
-    specific_reservations = skypilot_config.get_nested(
-        ('aws', 'specific_reservations'), set())
+    prioritize_reservations = skypilot_config.get_effective_region_config(
+        cloud='aws',
+        region=None,
+        keys=('prioritize_reservations',),
+        default_value=False)
+    specific_reservations = skypilot_config.get_effective_region_config(
+        cloud='aws',
+        region=None,
+        keys=('specific_reservations',),
+        default_value=set())
     return prioritize_reservations or specific_reservations
 
 

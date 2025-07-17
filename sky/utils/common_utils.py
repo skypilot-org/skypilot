@@ -11,6 +11,7 @@ import platform
 import random
 import re
 import socket
+import subprocess
 import sys
 import time
 import typing
@@ -26,6 +27,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -70,11 +72,10 @@ def get_usage_run_id() -> str:
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
-    try:
-        int(user_hash, 16)
-    except (TypeError, ValueError):
-        return False
-    return len(user_hash) == USER_HASH_LENGTH
+    # Must start with a letter, followed by alphanumeric characters and hyphens
+    # This covers both old hex format (e.g., "abc123") and new service account
+    # format (e.g., "sa-abc123-token-xyz")
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
 def generate_user_hash() -> str:
@@ -85,6 +86,18 @@ def generate_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
+
+
+def get_git_commit(path: Optional[str] = None) -> Optional[str]:
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_user_hash() -> str:
@@ -296,6 +309,13 @@ def get_current_user() -> 'models.User':
     if _current_user is not None:
         return _current_user
     return models.User.get_current_user()
+
+
+def get_current_user_name() -> str:
+    """Returns the current user name."""
+    name = common_utils.get_current_user().name
+    assert name is not None
+    return name
 
 
 def set_current_user(user: 'models.User'):
@@ -754,7 +774,7 @@ def get_cleaned_username(username: str = '') -> str:
     Returns:
       A cleaned username.
     """
-    username = username or getpass.getuser()
+    username = username or common_utils.get_current_user_name()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

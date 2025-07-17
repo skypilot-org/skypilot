@@ -191,6 +191,12 @@ class InconsistentHighAvailabilityError(Exception):
     pass
 
 
+class InconsistentConsolidationModeError(Exception):
+    """Raised when the consolidation mode property in the user config
+    is inconsistent with the actual cluster."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
@@ -503,6 +509,11 @@ class APIVersionMismatchError(RuntimeError):
     pass
 
 
+class APINotSupportedError(RuntimeError):
+    """Raised when the API is not supported by the remote peer."""
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 
@@ -605,4 +616,29 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class VolumeNotFoundError(Exception):
+    """Raised when a volume is not found."""
+    pass
+
+
+class VolumeTopologyConflictError(Exception):
+    """Raised when the there is conflict in the volumes and compute topology"""
+    pass
+
+
+class ServerTemporarilyUnavailableError(Exception):
+    """Raised when the server is temporarily unavailable."""
+    pass
+
+
+class RestfulPolicyError(Exception):
+    """Raised when failed to call a RESTful policy."""
+    pass
+
+
+class GitError(Exception):
+    """Raised when a git operation fails."""
     pass

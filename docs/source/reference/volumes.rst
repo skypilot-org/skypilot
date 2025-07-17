@@ -1,30 +1,123 @@
 .. _volumes:
 
-Cloud Volumes
-=============
+Volumes
+=======
 
-SkyPilot supports mounting **reattachable network volumes** (e.g., GCP Persistent Disks) or
-**temporary instance volumes** (e.g., GCP Local SSDs) to a SkyPilot cluster.
+Volumes offer a high-performance alternative to :ref:`cloud buckets <sky-storage>` for storing data. Unlike buckets, volumes are limited to a single region and cannot be accessed across regions and clouds.
 
-Currently, the following volume types are supported:
+Benefits of using volumes:
 
-- GCP
+* **Performance**: Volumes are generally faster than object stores, and SkyPilot lets you choose from different storage classes based on your performance requirements.
+* **Data persistence**: Volumes can persist data independently of task life cycles, making it easy to share data between different tasks (e.g., datasets, caches) or preserve results.
+* **Size control**: You can set volume size limits to manage costs and limit storage usage.
 
-  - Network volumes: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_
-  - Instance volumes: `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_ (temporary)
+SkyPilot supports creating and managing volumes directly through the ``sky`` CLI and the web dashboard.
 
-Use cases
----------
+Supported volume types:
 
-Use volumes for regional storage with high performance. A volume is created in a
-particular region and can only be attached to instances in the same region.
+- Kubernetes: `Persistent Volume Claims (PVCs) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
+- GCP: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ and `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_
 
-Use :ref:`Cloud Buckets <sky-storage>` for object storage that works across zones, regions, and clouds.
 
-Usage
------
+.. _volumes-on-kubernetes:
 
-Volumes are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
+Volumes on Kubernetes
+---------------------
+
+SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters through three commands:
+
+- ``sky volumes apply``: Create a new volume
+- ``sky volumes ls``: List all volumes
+- ``sky volumes delete``: Delete a volume
+
+.. note::
+
+  Volumes are shared across users on a SkyPilot API server. A user can mount volumes created by other users. This is useful for sharing caches and data across users.
+
+Quickstart
+~~~~~~~~~~
+
+1. Prepare a volume YAML file:
+
+   .. code-block:: yaml
+
+     # volume.yaml
+     name: new-pvc
+     type: k8s-pvc
+     infra: kubernetes  # or k8s or k8s/context
+     size: 10Gi
+     config:
+       namespace: default  # optional
+       storage_class_name: csi-mounted-fs-path-sc  # optional
+       access_mode: ReadWriteMany  # optional
+
+2. Create the volume with ``sky volumes apply volume.yaml``:
+
+   .. code-block:: console
+
+     $ sky volumes apply volume.yaml
+     Proceed to create volume 'new-pvc'? [Y/n]: Y
+     Creating PVC: new-pvc-73ec42f2-5c6c4e
+
+3. Mount the volume in your task YAML:
+
+   .. code-block:: yaml
+
+     # task.yaml
+     volumes:
+       /mnt/data: new-pvc  # The volume new-pvc will be mounted to /mnt/data
+
+     run: |
+       echo "Hello, World!" > /mnt/data/hello.txt
+
+Managing volumes
+~~~~~~~~~~~~~~~~
+
+List all volumes with ``sky volumes ls``:
+
+.. code-block:: console
+
+  $ sky volumes ls
+  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE     USED_BY
+  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  <timestamp>  <cluster_name>
+
+
+.. tip::
+
+  Use ``-v`` to view detailed information about a volume.
+
+  .. code-block:: console
+
+    $ sky volumes ls -v
+    NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE             USED_BY   NAME_ON_CLOUD              STORAGE_CLASS           ACCESS_MODE
+    new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  2025-06-24 10:18:32  training  new-pvc-73ec42f2-5c6c4e    csi-mounted-fs-path-sc  ReadWriteMany
+
+Delete a volume with ``sky volumes delete``:
+
+.. code-block:: console
+
+  $ sky volumes delete new-pvc
+  Proceed to delete volume 'new-pvc'? [Y/n]: Y
+  Deleting PVC: new-pvc-73ec42f2-5c6c4e
+
+
+If the volume is in use, it will be marked as ``IN_USE`` and cannot be deleted.
+
+You can also check the volumes in the SkyPilot dashboard.
+
+.. figure:: ../images/volumes.png
+    :alt: SkyPilot volumes
+    :align: center
+    :width: 80%
+
+Volumes on GCP
+--------------
+
+.. note::
+
+  GCP volume support is currently in development, and will be updated to use the ``sky volumes`` commands.
+
+Volumes on GCP are specified using the :ref:`file_mounts <yaml-spec-file-mounts>` field in a SkyPilot task.
 
 There are three ways to mount volumes:
 
@@ -110,7 +203,7 @@ There are three ways to mount volumes:
 Configuration options
 ~~~~~~~~~~~~~~~~~~~~~
 
-Here's a complete example showing all available configuration options:
+Here's a complete example showing all available configuration options for GCP volumes:
 
 .. code-block:: yaml
 

@@ -40,6 +40,7 @@ from argparse import ArgumentParser
 import contextlib
 from functools import lru_cache
 import os
+import sys
 import time
 import typing
 
@@ -89,12 +90,12 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     source_environment_cmd = (f'source {env_file_path};'
                               if env_file_path else '')
-    run_controller_cmd = ('python -u -m sky.jobs.controller '
+    run_controller_cmd = (f'{sys.executable} -u -m sky.jobs.controller '
                           f'{dag_yaml_path} --job-id {job_id};')
 
     # If the command line here is changed, please also update
-    # utils._controller_process_alive. `--job-id X` should be at
-    # the end.
+    # utils._controller_process_alive. The substring `--job-id X`
+    # should be in the command.
     run_cmd = (f'{activate_python_env_cmd}'
                f'{source_environment_cmd}'
                f'{run_controller_cmd}')
@@ -331,10 +332,13 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
-    parser.add_argument('--priority',
-                        type=int,
-                        default=500,
-                        help='Job priority (0-1000). Default: 500.')
+    parser.add_argument(
+        '--priority',
+        type=int,
+        default=constants.DEFAULT_PRIORITY,
+        help=
+        f'Job priority ({constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}).'
+        f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
                args.priority)

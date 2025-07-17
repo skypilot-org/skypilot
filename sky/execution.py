@@ -23,6 +23,7 @@ from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -171,6 +172,11 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag.resolve_and_validate_volumes()
+    if (not _is_launched_by_jobs_controller and
+            not _is_launched_by_sky_serve_controller):
+        # Only process pre-mount operations on API server.
+        dag.pre_mount_volumes()
     for task in dag.tasks:
         if task.storage_mounts is not None:
             for storage in task.storage_mounts.values():
@@ -425,7 +431,7 @@ def _execute_dag(
             logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
-            backend.sync_workdir(handle, task.workdir)
+            backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,
@@ -471,6 +477,9 @@ def _execute_dag(
 
 @timeline.event
 @usage_lib.entrypoint
+# A launch routine will share tempfiles between steps, so we init a tempdir
+# for the launch routine and gc the entire dir after launch.
+@tempstore.with_tempdir
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,

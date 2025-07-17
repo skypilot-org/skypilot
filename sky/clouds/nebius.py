@@ -16,6 +16,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 _INDENT_PREFIX = '    '
 
@@ -61,6 +62,9 @@ class Nebius(clouds.Cloud):
             ('Custom network tier is currently not supported on Nebius.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Nebius.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on '
+             f'{_REPR}.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
     # 63 - 8 - 5 = 50 characters since
@@ -196,13 +200,15 @@ class Nebius(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         del dryrun, cluster_name
         assert zones is None, ('Nebius does not support zones', zones)
 
@@ -213,16 +219,24 @@ class Nebius(clouds.Cloud):
             acc_dict)
         platform, _ = resources.instance_type.split('_')
 
-        if platform in ('cpu-d3', 'cpu-e2'):
-            image_family = 'ubuntu22.04-driverless'
-        elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
-            image_family = 'ubuntu22.04-cuda12'
+        # Selecting image_family by platform
+        # https://docs.nebius.com/compute/storage/boot-disk-images
+        if platform.startswith('cpu'):
+            image_family = 'ubuntu24.04-driverless'
+        elif platform.startswith('gpu'):
+            image_family = 'ubuntu24.04-cuda12'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        config_fs = skypilot_config.get_nested(
-            ('nebius', region.name, 'filesystems'), [])
+        config_fs = skypilot_config.get_effective_region_config(
+            cloud='nebius',
+            region=None,
+            keys=(
+                region.name,
+                'filesystems',
+            ),
+            default_value=[])
         resources_vars_fs = []
         for i, fs in enumerate(config_fs):
             resources_vars_fs.append({

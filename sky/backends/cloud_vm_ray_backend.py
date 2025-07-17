@@ -73,6 +73,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1327,6 +1328,7 @@ class RetryingVmProvisioner(object):
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
+        volume_mounts: Optional[List[volume_lib.VolumeMount]],
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1432,7 +1434,9 @@ class RetryingVmProvisioner(object):
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists)
+                    keep_launch_fields_in_existing_config=cluster_exists,
+                    volume_mounts=volume_mounts,
+                )
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -1596,7 +1600,8 @@ class RetryingVmProvisioner(object):
                     CloudVmRayBackend().post_teardown_cleanup(
                         handle,
                         terminate=not prev_cluster_ever_up,
-                        remove_from_db=False)
+                        remove_from_db=False,
+                        failover=True)
                     # TODO(suquark): other clouds may have different zone
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
@@ -2081,7 +2086,9 @@ class RetryingVmProvisioner(object):
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
                     prev_cluster_ever_up=prev_cluster_ever_up,
-                    skip_if_config_hash_matches=skip_if_config_hash_matches)
+                    skip_if_config_hash_matches=skip_if_config_hash_matches,
+                    volume_mounts=task.volume_mounts,
+                )
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2435,9 +2442,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             zip(cluster_internal_ips, cluster_feasible_ips))
 
         # Ensure head node is the first element, then sort based on the
-        # external IPs for stableness
-        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
-            internal_external_ips[1:], key=lambda x: x[1])
+        # external IPs for stableness. Skip for k8s nodes since pods
+        # worker ids are already mapped.
+        if (cluster_info is not None and
+                cluster_info.provider_name == 'kubernetes'):
+            stable_internal_external_ips = internal_external_ips
+        else:
+            stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+                internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @context_utils.cancellation_guard
@@ -2694,6 +2706,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+
+
+class LocalResourcesHandle(CloudVmRayResourceHandle):
+    """A handle for local resources."""
+
+    @context_utils.cancellation_guard
+    @annotations.lru_cache(scope='global')
+    @timeline.event
+    def get_command_runners(self,
+                            force_cached: bool = False,
+                            avoid_ssh_control: bool = False
+                           ) -> List[command_runner.CommandRunner]:
+        """Returns a list of local command runners."""
+        del force_cached, avoid_ssh_control  # Unused.
+        return [command_runner.LocalProcessCommandRunner()]
 
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
@@ -3183,9 +3210,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self._open_ports(handle)
 
         # Capture task YAML and command
-        task_config = None
+        task_config_redacted = None
         if task is not None:
-            task_config = task.to_yaml_config(redact_secrets=True)
+            task_config_redacted = task.to_yaml_config(redact_secrets=True)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3194,7 +3221,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 set(task.resources),
                 ready=True,
                 config_hash=config_hash,
-                task_config=task_config,
+                task_config=task_config_redacted,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
@@ -3213,10 +3240,59 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             common_utils.remove_file_if_exists(lock_path)
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
-                      workdir: Path) -> None:
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
+        if isinstance(workdir, dict):
+            self._sync_git_workdir(handle, envs_and_secrets)
+        else:
+            self._sync_path_workdir(handle, workdir)
+
+    def _sync_git_workdir(self, handle: CloudVmRayResourceHandle,
+                          envs_and_secrets: Dict[str, str]) -> None:
+        style = colorama.Style
+        ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
+
+        log_path = os.path.join(self.log_dir, 'workdir_sync.log')
+
+        # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
+        runners = handle.get_command_runners()
+
+        def _sync_git_workdir_node(
+                runner: command_runner.CommandRunner) -> None:
+            # Type assertion to help mypy understand the type
+            assert hasattr(
+                runner, 'git_clone'
+            ), f'CommandRunner should have git_clone method, ' \
+                f'got {type(runner)}'
+            runner.git_clone(
+                target_dir=SKY_REMOTE_WORKDIR,
+                log_path=log_path,
+                stream_logs=False,
+                max_retry=3,
+                envs_and_secrets=envs_and_secrets,
+            )
+
+        num_nodes = handle.launched_nodes
+        plural = 's' if num_nodes > 1 else ''
+        logger.info(
+            f'  {style.DIM}Syncing workdir (to {num_nodes} node{plural}): '
+            f'{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+        os.system(f'touch {log_path}')
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Syncing workdir', log_path)):
+            subprocess_utils.run_in_parallel(_sync_git_workdir_node, runners,
+                                             num_threads)
+        logger.info(ux_utils.finishing_message('Synced workdir.', log_path))
+
+    def _sync_path_workdir(self, handle: CloudVmRayResourceHandle,
+                           workdir: Path) -> None:
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
@@ -3586,13 +3662,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str],
-                 resources_str: str) -> Tuple[int, str]:
+                 job_name: Optional[str], resources_str: str,
+                 metadata: str) -> Tuple[int, str]:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
-            resources_str=resources_str)
+            resources_str=resources_str,
+            metadata=metadata)
         returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -3675,7 +3752,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str)
+        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
+                                        task.metadata_json)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
@@ -4043,19 +4121,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        # get the run_timestamp
-        # the function takes in [job_id]
-        code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
-        returncode, run_timestamps, stderr = self.run_on_head(
-            handle,
-            code,
-            stream_logs=False,
-            require_outputs=True,
-            separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to sync logs.', stderr)
-        # returns with a dict of {job_id: run_timestamp}
-        run_timestamps = message_utils.decode_payload(run_timestamps)
+        if isinstance(handle, LocalResourcesHandle):
+            # In consolidation mode, we don't submit a ray job, therefore no
+            # run_timestamp is available. We use a dummy run_timestamp here.
+            run_timestamps = {
+                job_id: f'managed-jobs-consolidation-mode-{job_id}'
+            }
+        else:
+            # get the run_timestamp
+            # the function takes in [job_id]
+            code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs([str(job_id)])
+            returncode, run_timestamps_payload, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync logs.', stderr)
+            # returns with a dict of {job_id: run_timestamp}
+            run_timestamps = message_utils.decode_payload(
+                run_timestamps_payload)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4368,12 +4454,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               terminate: bool,
                               purge: bool = False,
-                              remove_from_db: bool = True) -> None:
+                              remove_from_db: bool = True,
+                              failover: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
         * Deleting the TPUs;
         * Removing ssh configs for the cluster;
+        * Deleting the open ports;
+        * Deleting the custom multi network infrastructure based on the
+          failover flag (e.g. delete firewalls, subnets, and VPCs for GPU
+          Direct if failover is False, otherwise, only delete the subnets);
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
         """
@@ -4405,12 +4496,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The cluster yaml does not exist when skypilot has not found
             # the right resource to provision the cluster.
             if handle.cluster_yaml is not None:
+                launched_resources = (
+                    handle.launched_resources.assert_launchable())
+                cloud = launched_resources.cloud
+                config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                ports_cleaned_up = False
+                custom_multi_network_cleaned_up = False
                 try:
-                    launched_resources = (
-                        handle.launched_resources.assert_launchable())
-                    cloud = launched_resources.cloud
-                    config = global_user_state.get_cluster_yaml_dict(
-                        handle.cluster_yaml)
                     cloud.check_features_are_supported(
                         launched_resources,
                         {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -4418,7 +4511,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 cluster_name_on_cloud,
                                                 handle.launched_resources.ports,
                                                 config['provider'])
-                    self.remove_cluster_config(handle)
+                    ports_cleaned_up = True
                 except exceptions.NotSupportedError:
                     pass
                 except exceptions.PortDoesNotExistError:
@@ -4431,6 +4524,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'set. Details: {msg}')
                     else:
                         raise
+
+                # Clean up custom multi networks, e.g. the subnets, firewalls,
+                # and VPCs created for GCP GPUDirect TCPX
+                try:
+                    cloud.check_features_are_supported(
+                        handle.launched_resources, {
+                            clouds.CloudImplementationFeatures.
+                            CUSTOM_MULTI_NETWORK
+                        })
+                    provision_lib.cleanup_custom_multi_network(
+                        repr(cloud), cluster_name_on_cloud, config['provider'],
+                        failover)
+                    custom_multi_network_cleaned_up = True
+                except exceptions.NotSupportedError:
+                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    if purge:
+                        msg = common_utils.format_exception(e, use_bracket=True)
+                        logger.warning(
+                            f'Failed to cleanup custom multi network. Skipping '
+                            f'since purge is set. Details: {msg}')
+                    else:
+                        raise
+
+                if ports_cleaned_up and custom_multi_network_cleaned_up:
+                    try:
+                        self.remove_cluster_config(handle)
+                    except Exception as e:  # pylint: disable=broad-except
+                        if purge:
+                            msg = common_utils.format_exception(
+                                e, use_bracket=True)
+                            logger.warning(
+                                f'Failed to remove cluster config. Skipping '
+                                f'since purge is set. Details: {msg}')
+                        else:
+                            raise
 
         sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
             handle.cluster_name)

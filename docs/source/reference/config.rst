@@ -27,6 +27,8 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`api_server <config-yaml-api-server>`:
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
+    :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
+    :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -76,6 +78,19 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`kueue <config-yaml-kubernetes-kueue>`:
+      :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
+    :ref:`dws <config-yaml-kubernetes-dws>`:
+      enabled: true
+      max_run_duration: 10m
+    :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
@@ -186,6 +201,30 @@ Example:
   api_server:
     endpoint: http://xx.xx.xx.xx:8000
 
+.. _config-yaml-api-server-service-account-token:
+
+``api_server.service_account_token``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Service account token for the SkyPilot API server (optional). For more details, see :ref:`service-accounts`.
+
+.. _config-yaml-api-server-requests-gc-retention-hours:
+
+``api_server.requests_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for finished requests in hours (optional). Set to a negative value to disable requests GC.
+
+Requests GC will remove request entries in `sky api status`, i.e., the logs and status of the requests. All the launched resources (clusters/jobs) will still be correctly running.
+
+Default: ``24`` (1 day).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    requests_retention_hours: -1 # Disable requests GC
 
 .. _config-yaml-jobs:
 
@@ -1078,6 +1117,80 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+.. _config-yaml-kubernetes-kueue:
+
+``kubernetes.kueue``
+~~~~~~~~~~~~~~~~~~~~~
+
+Kueue configuration (optional).
+
+.. _config-yaml-kubernetes-kueue-local-queue-name:
+
+``kubernetes.kueue.local_queue_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
+
+.. _config-yaml-kubernetes-dws:
+
+``kubernetes.dws``
+~~~~~~~~~~~~~~~~~~
+
+GKE DWS configuration (optional).
+
+Refer to :ref:`Using DWS on GKE <dws-on-gke>` for more details.
+
+``kubernetes.dws.enabled``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to enable DWS (optional).
+
+When ``enabled: true``, SkyPilot will automatically use DWS with flex-start mode. If ``kubernetes.kueue.local_queue_name`` is set, it will use flex-start with queued provisioning mode.
+
+Default: ``false``.
+
+``kubernetes.dws.max_run_duration``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum runtime of a node (optional), only used in ``flex-start-queued-provisioning`` mode.
+
+Default: ``null``.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    dws:
+      enabled: true
+      max_run_duration: 10m
+
+.. _config-yaml-kubernetes-context-configs:
+
+``kubernetes.context_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Context-specific configuration for Kubernetes resources (optional).
+
+When using multiple Kubernetes contexts, you can specify context-specific configuration for Kubernetes resources.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      context1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      context2:
+        remote_identity: my-k8s-service-account
+
+When a config field is specified for both the ``kubernetes`` and specific context ``kubernetes.context_configs.context-name``,
+the context-specific config overrides the general config according to the :ref:`config-overrides` rules.
+
 .. _config-yaml-ssh:
 
 ``ssh``
@@ -1168,10 +1281,11 @@ Example:
 .. code-block:: yaml
 
     nebius:
-        :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-        :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+        use_internal_ips: true
+        ssh_proxy_command:
           eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
           eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+        tenant_id: tenant-1234567890
         # Region-specific configuration
         eu-north1:
             # Project identifier for this region
@@ -1235,6 +1349,21 @@ Example:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
 
+.. _config-yaml-nebius-tenant-id:
+
+``nebius.tenant_id``
+~~~~~~~~~~~~~~~~~~~~
+
+Nebius tenant ID (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    tenant_id: tenant-1234567890
+
+
 .. _config-yaml-rbac:
 
 ``rbac``
@@ -1268,6 +1397,12 @@ persist API server state.
 
 Currently, managed job controller state is not persisted in remote databases
 even if ``db`` is specified.
+
+.. note::
+
+  (available on nightly version 20250626 and later)
+
+  ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
 
 .. note::
 

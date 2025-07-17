@@ -28,7 +28,8 @@ _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
 
 
 def get_port_mode(
-        mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
+        mode_str: Optional[str],
+        context: Optional[str]) -> kubernetes_enums.KubernetesPortMode:
     """Get the port mode from the provider config."""
 
     curr_kube_config = kubernetes_utils.get_current_kube_config_context_name()
@@ -38,9 +39,11 @@ def get_port_mode(
         # If running in kind (`sky local up`), use ingress mode
         return kubernetes_enums.KubernetesPortMode.INGRESS
 
-    mode_str = mode_str or skypilot_config.get_nested(
-        ('kubernetes', 'ports'),
-        kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
+    mode_str = mode_str or skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('ports',),
+        default_value=kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
     try:
         port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
     except ValueError as e:
@@ -54,12 +57,16 @@ def get_port_mode(
 
 
 def get_networking_mode(
-    mode_str: Optional[str] = None
+    mode_str: Optional[str],
+    context: Optional[str],
 ) -> kubernetes_enums.KubernetesNetworkingMode:
     """Get the networking mode from the provider config."""
-    mode_str = mode_str or skypilot_config.get_nested(
-        ('kubernetes', 'networking_mode'),
-        kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
+    mode_str = mode_str or skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('networking_mode',),
+        default_value=kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.
+        value)
     try:
         networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
             mode_str)
@@ -70,9 +77,9 @@ def get_networking_mode(
     return networking_mode
 
 
-def fill_loadbalancer_template(namespace: str, service_name: str,
-                               ports: List[int], selector_key: str,
-                               selector_value: str) -> Dict:
+def fill_loadbalancer_template(namespace: str, context: Optional[str],
+                               service_name: str, ports: List[int],
+                               selector_key: str, selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  _LOADBALANCER_TEMPLATE_NAME)
     if not os.path.exists(template_path):
@@ -81,10 +88,16 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
-    annotations = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata', 'annotations'), {})
-    labels = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata', 'labels'), {})
+    annotations = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata', 'annotations'),
+        default_value={})
+    labels = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata', 'labels'),
+        default_value={})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -99,10 +112,10 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
     return content
 
 
-def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
-                                                                      str]],
-                          ingress_name: str, selector_key: str,
-                          selector_value: str) -> Dict:
+def fill_ingress_template(namespace: str, context: Optional[str],
+                          service_details: List[Tuple[str, int,
+                                                      str]], ingress_name: str,
+                          selector_key: str, selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
@@ -110,10 +123,16 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
-    annotations = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata', 'annotations'), {})
-    labels = skypilot_config.get_nested(
-        ('kubernetes', 'custom_metadata', 'labels'), {})
+    annotations = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata', 'annotations'),
+        default_value={})
+    labels = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata', 'labels'),
+        default_value={})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,

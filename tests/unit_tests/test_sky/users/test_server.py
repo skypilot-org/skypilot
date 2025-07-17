@@ -53,9 +53,24 @@ class TestUsersEndpoints:
 
         # Verify
         assert len(result) == 3
-        assert result[0] == {'id': 'user1', 'name': 'Alice', 'role': 'admin'}
-        assert result[1] == {'id': 'user2', 'name': 'Bob', 'role': 'user'}
-        assert result[2] == {'id': 'user3', 'name': 'Charlie', 'role': ''}
+        assert result[0] == {
+            'id': 'user1',
+            'name': 'Alice',
+            'role': 'admin',
+            'created_at': None
+        }
+        assert result[1] == {
+            'id': 'user2',
+            'name': 'Bob',
+            'role': 'user',
+            'created_at': None
+        }
+        assert result[2] == {
+            'id': 'user3',
+            'name': 'Charlie',
+            'role': '',
+            'created_at': None
+        }
 
         # Verify function calls
         mock_get_all_users.assert_called_once()
@@ -288,9 +303,24 @@ class TestUsersEndpoints:
 
         # Verify - should return the first role in the list
         assert len(result) == 3
-        assert result[0] == {'id': 'user1', 'name': 'Alice', 'role': 'admin'}
-        assert result[1] == {'id': 'user2', 'name': 'Bob', 'role': 'user'}
-        assert result[2] == {'id': 'user3', 'name': 'Charlie', 'role': 'viewer'}
+        assert result[0] == {
+            'id': 'user1',
+            'name': 'Alice',
+            'role': 'admin',
+            'created_at': None
+        }
+        assert result[1] == {
+            'id': 'user2',
+            'name': 'Bob',
+            'role': 'user',
+            'created_at': None
+        }
+        assert result[2] == {
+            'id': 'user3',
+            'name': 'Charlie',
+            'role': 'viewer',
+            'created_at': None
+        }
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio

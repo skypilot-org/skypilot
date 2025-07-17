@@ -24,6 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -244,14 +245,17 @@ class Task:
         run: Optional[CommandOrCommandGen] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
-        workdir: Optional[str] = None,
+        workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
+        volumes: Optional[Dict[str, str]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
+        volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initializes a Task.
 
@@ -297,10 +301,14 @@ class Task:
           secrets: A dictionary of secret environment variables to set before
             running the setup and run commands. These will be redacted in logs
             and YAML output.
-          workdir: The local working directory.  This directory will be synced
+          workdir: The local working directory or a git repository.
+            For a local working directory, this directory will be synced
             to a location on the remote VM(s), and ``setup`` and ``run``
             commands will be run under that location (thus, they can rely on
             relative paths when invoking binaries).
+            If a git repository is provided, the repository will be cloned to
+            the working directory and the ``setup`` and ``run`` commands will
+            be run under the cloned repository.
           num_nodes: The number of nodes to provision for this Task.  If None,
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command, where ``run`` can either be a str, meaning all
@@ -310,6 +318,7 @@ class Task:
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
           blocked_resources: A set of resources that this task cannot run on.
+          metadata: A dictionary of metadata to be added to the task.
         """
         self.name = name
         self.run = run
@@ -319,6 +328,7 @@ class Task:
         self.setup = setup
         self._envs = envs or {}
         self._secrets = secrets or {}
+        self._volumes = volumes or {}
 
         # Validate Docker login configuration early if both envs and secrets
         # contain Docker variables
@@ -342,8 +352,7 @@ class Task:
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
-        # The priority of the managed job running this task.
-        self._job_priority: Optional[int] = None
+
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -362,7 +371,11 @@ class Task:
         self.best_resources: Optional[sky.Resources] = None
 
         # For internal use only.
-        self.file_mounts_mapping = file_mounts_mapping
+        self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
+        self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
+            volume_mounts)
+
+        self._metadata = metadata if metadata is not None else {}
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -443,12 +456,9 @@ class Task:
         if self.file_mounts is None:
             return
         for target, source in self.file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
+            location = f'file_mounts.{target}: {source}'
+            self._validate_mount_path(target, location)
+            self._validate_path(source, location)
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -463,17 +473,25 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
-            # TODO(zhwu): /home/username/sky_workdir as the target path need
-            # to be filtered out as well.
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
-                        'destination path of a file mount, as it will be used '
-                        'by the workdir. If uploading a file/folder to the '
-                        'workdir is needed, please specify the full path to '
-                        'the file/folder.')
+
+    def _validate_mount_path(self, path: str, location: str):
+        self._validate_path(path, location)
+        # TODO(zhwu): /home/username/sky_workdir as the target path need
+        # to be filtered out as well.
+        if (path == constants.SKY_REMOTE_WORKDIR and self.workdir is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                    'destination path of a file mount, as it will be used '
+                    'by the workdir. If uploading a file/folder to the '
+                    'workdir is needed, please specify the full path to '
+                    'the file/folder.')
+
+    def _validate_path(self, path: str, location: str):
+        if path.endswith('/'):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Mount paths cannot end with a slash '
+                                 f'Found: {path} in {location}')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -484,6 +502,12 @@ class Task:
         """
         if self.workdir is None:
             return
+        # Only expand the workdir if it is a string
+        if isinstance(self.workdir, dict):
+            git_ref = self.workdir.get('ref')
+            if git_ref is not None:
+                self._metadata['git_commit'] = git_ref
+            return
         user_workdir = self.workdir
         self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
         if not os.path.isdir(self.workdir):
@@ -492,6 +516,8 @@ class Task:
                 raise ValueError(
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
+
+        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
     @staticmethod
     def from_yaml_config(
@@ -588,6 +614,8 @@ class Task:
             secrets=config.pop('secrets', None),
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
+            volumes=config.pop('volumes', None),
+            metadata=config.pop('_metadata', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -712,9 +740,15 @@ class Task:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
-        job = config.pop('job', None)
-        if job is not None and 'priority' in job:
-            task.set_job_priority(job['priority'])
+        volume_mounts = config.pop('volume_mounts', None)
+        if volume_mounts is not None:
+            task.volume_mounts = []
+            for vol in volume_mounts:
+                common_utils.validate_schema(vol,
+                                             schemas.get_volume_mount_schema(),
+                                             'Invalid volume mount config: ')
+                volume_mount = volume_lib.VolumeMount.from_yaml_config(vol)
+                task.volume_mounts.append(volume_mount)
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task
@@ -750,6 +784,97 @@ class Task:
             config = {}
         return Task.from_yaml_config(config)
 
+    def resolve_and_validate_volumes(self) -> None:
+        """Resolve volumes config to volume mounts and validate them.
+
+        Raises:
+            exceptions.VolumeNotFoundError: if any volume is not found.
+            exceptions.VolumeTopologyConflictError: if there is conflict in the
+              volumes and compute topology.
+        """
+        # Volumes has been resolved, a typical case is that the API server
+        # has resolved the volumes and the dag was then submitted to
+        # controllers.
+        if self.volume_mounts is not None:
+            return None
+        if not self._volumes:
+            return None
+        volume_mounts: List[volume_lib.VolumeMount] = []
+        for dst_path, vol in self._volumes.items():
+            self._validate_mount_path(dst_path, location='volumes')
+            # Shortcut for `dst_path: volume_name`
+            if isinstance(vol, str):
+                volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
+            elif isinstance(vol, dict):
+                assert 'name' in vol, 'Volume name must be set.'
+                volume_mount = volume_lib.VolumeMount.resolve(
+                    dst_path, vol['name'])
+            else:
+                raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
+            volume_mounts.append(volume_mount)
+        # Disable certain access modes
+        disabled_modes = {}
+        if self.num_nodes > 1:
+            disabled_modes[
+                volume_lib.VolumeAccessMode.READ_WRITE_ONCE.value] = (
+                    'access mode ReadWriteOnce is not supported for '
+                    'multi-node tasks.')
+            disabled_modes[
+                volume_lib.VolumeAccessMode.READ_WRITE_ONCE_POD.value] = (
+                    'access mode ReadWriteOncePod is not supported for '
+                    'multi-node tasks.')
+        # TODO(aylei): generalize access mode to all volume types
+        # Record the required topology and the volume that requires it, e.g.
+        # {'cloud': ('volume_name', 'aws')}
+        topology: Dict[str, Tuple[str, Optional[str]]] = {
+            'cloud': ('', None),
+            'region': ('', None),
+            'zone': ('', None),
+        }
+        for vol in volume_mounts:
+            # Check access mode
+            access_mode = vol.volume_config.config.get('access_mode', '')
+            if access_mode in disabled_modes:
+                raise ValueError(f'Volume {vol.volume_name} with '
+                                 f'{disabled_modes[access_mode]}')
+            # Check topology
+            for key, (vol_name, previous_req) in topology.items():
+                req = getattr(vol.volume_config, key)
+                if req is not None:
+                    if previous_req is not None and req != previous_req:
+                        raise exceptions.VolumeTopologyConflictError(
+                            f'Volume {vol.volume_name} can only be attached on '
+                            f'{key}:{req}, which conflicts with another volume '
+                            f'{vol_name} that requires {key}:{previous_req}.'
+                            f'Please use different volumes and retry.')
+                    topology[key] = (vol_name, req)
+        # Now we have the topology requirements from the intersection of all
+        # volumes. Check if there is topology conflict with the resources.
+        # Volume must have no conflict with ALL resources even if user
+        # specifies 'any_of' resources to ensure no resources will conflict
+        # with the volumes during failover.
+
+        for res in self.resources:
+            for key, (vol_name, vol_req) in topology.items():
+                req = getattr(res, key)
+                if (req is not None and vol_req is not None and
+                        str(req) != vol_req):
+                    raise exceptions.VolumeTopologyConflictError(
+                        f'The task requires {key}:{req}, which conflicts with '
+                        f'the volume constraint {key}:{vol_req}. Please '
+                        f'use different volumes and retry.')
+        # No topology conflict, we safely override the topology of resources to
+        # satisfy the volume constraints.
+        override_params = {}
+        for key, (vol_name, vol_req) in topology.items():
+            if vol_req is not None:
+                if key == 'cloud':
+                    override_params[key] = sky.CLOUD_REGISTRY.from_str(vol_req)
+                else:
+                    override_params[key] = vol_req
+        self.set_resources_override(override_params)
+        self.volume_mounts = volume_mounts
+
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
@@ -765,12 +890,36 @@ class Task:
         self._num_nodes = num_nodes
 
     @property
+    def metadata(self) -> Dict[str, Any]:
+        return self._metadata
+
+    @property
+    def metadata_json(self) -> str:
+        return json.dumps(self._metadata)
+
+    @property
     def envs(self) -> Dict[str, str]:
         return self._envs
 
     @property
     def secrets(self) -> Dict[str, str]:
         return self._secrets
+
+    @property
+    def volumes(self) -> Dict[str, str]:
+        return self._volumes
+
+    def set_volumes(self, volumes: Dict[str, str]) -> None:
+        """Sets the volumes for this task.
+
+        Args:
+          volumes: a dict of ``{mount_path: volume_name}``.
+        """
+        self._volumes = volumes
+
+    def update_volumes(self, volumes: Dict[str, str]) -> None:
+        """Updates the volumes for this task."""
+        self._volumes.update(volumes)
 
     def update_envs(
             self, envs: Union[None, List[Tuple[str, str]],
@@ -974,23 +1123,6 @@ class Task:
           self: The current task, with service set.
         """
         self._service = service
-        return self
-
-    @property
-    def job_priority(self) -> Optional[int]:
-        """The priority of the managed job running this task."""
-        return self._job_priority
-
-    def set_job_priority(self, priority: int) -> 'Task':
-        """Sets the job priority for this task.
-
-        Args:
-          priority: an integer between 0 and 1000.
-
-        Returns:
-          self: The current task, with job priority set.
-        """
-        self._job_priority = priority
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
@@ -1405,7 +1537,7 @@ class Task:
                 d[k] = v
         return d
 
-    def to_yaml_config(self, redact_secrets: bool = True) -> Dict[str, Any]:
+    def to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 
         INTERNAL: this method is internal-facing.
@@ -1435,9 +1567,6 @@ class Task:
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
-
-        if self.job_priority is not None:
-            add_if_not_none('job', {'priority': self.job_priority})
 
         add_if_not_none('num_nodes', self.num_nodes)
 
@@ -1478,6 +1607,14 @@ class Task:
             })
 
         add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
+        add_if_not_none('volumes', self.volumes)
+        if self.volume_mounts is not None:
+            config['volume_mounts'] = [
+                volume_mount.to_yaml_config()
+                for volume_mount in self.volume_mounts
+            ]
+        # we manually check if its empty to not clog up the generated yaml
+        add_if_not_none('_metadata', self._metadata if self._metadata else None)
         return config
 
     def get_required_cloud_features(

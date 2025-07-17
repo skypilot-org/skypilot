@@ -13,6 +13,7 @@ from sky.utils.resources_utils import DiskTier
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+    from sky.volumes import volume as volume_lib
 
 
 @registry.CLOUD_REGISTRY.register
@@ -54,6 +55,8 @@ class Hyperbolic(clouds.Cloud):
             ('Auto-stop not supported.'),
         clouds.CloudImplementationFeatures.AUTODOWN:
             ('Auto-down not supported.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces not supported.'),
     }
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -244,13 +247,15 @@ class Hyperbolic(clouds.Cloud):
         return 0.0
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         """Returns a dict of variables for the deployment template."""
         del dryrun, region, cluster_name  # unused
         assert zones is None, ('Hyperbolic does not support zones', zones)

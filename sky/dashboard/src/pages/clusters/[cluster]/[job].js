@@ -4,7 +4,10 @@ import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  formatFullTimestamp,
+} from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
@@ -12,6 +15,7 @@ import { StatusBadge } from '@/components/elements/StatusBadge';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -172,6 +176,7 @@ export function JobDetailPage() {
         infra: clusterData.infra,
         cluster: clusterData.cluster,
         user: clusterData.user,
+        user_hash: clusterData.user_hash,
       };
     }
   }
@@ -234,7 +239,22 @@ export function JobDetailPage() {
                       <div className="text-gray-600 font-medium text-base">
                         User
                       </div>
-                      <div className="text-base mt-1">{jobData.user}</div>
+                      <div className="text-base mt-1">
+                        <UserDisplay
+                          username={jobData.user}
+                          userHash={jobData.user_hash}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Submitted
+                      </div>
+                      <div className="text-base mt-1">
+                        {jobData.submitted_at
+                          ? formatFullTimestamp(jobData.submitted_at)
+                          : 'N/A'}
+                      </div>
                     </div>
                     {jobData.resources && (
                       <div>
@@ -296,8 +316,7 @@ export function JobDetailPage() {
                   {isPending ? (
                     <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
                       <span>
-                        Waiting for the job to start, please refresh after a
-                        while
+                        Waiting for the job to start; refresh in a few moments.
                       </span>
                     </div>
                   ) : isLoadingLogs ? (

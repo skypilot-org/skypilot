@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
@@ -272,10 +273,18 @@ def need_to_query_reservations() -> bool:
     clouds that do not use reservations.
     """
     for cloud_str in registry.CLOUD_REGISTRY.keys():
-        cloud_specific_reservations = skypilot_config.get_nested(
-            (cloud_str, 'specific_reservations'), None)
-        cloud_prioritize_reservations = skypilot_config.get_nested(
-            (cloud_str, 'prioritize_reservations'), False)
+        cloud_specific_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('specific_reservations',),
+                default_value=None))
+        cloud_prioritize_reservations = (
+            skypilot_config.get_effective_region_config(
+                cloud=cloud_str,
+                region=None,
+                keys=('prioritize_reservations',),
+                default_value=False))
         if (cloud_specific_reservations is not None or
                 cloud_prioritize_reservations):
             return True
@@ -331,3 +340,98 @@ def make_launchables_for_valid_region_zones(
             # Batch the requests at the granularity of a single region.
             launchables.append(launchable_resources.copy(region=region.name))
     return launchables
+
+
+def parse_memory_resource(resource_qty_str: Union[str, int, float],
+                          field_name: str,
+                          ret_type: type = int,
+                          unit: str = 'gb',
+                          allow_plus: bool = False,
+                          allow_x: bool = False,
+                          allow_rounding: bool = False) -> str:
+    """Returns memory size in chosen units given a resource quantity string.
+
+    Args:
+        resource_qty_str: Resource quantity string
+        unit: Unit to convert to
+        allow_plus: Whether to allow '+' prefix
+        allow_x: Whether to allow 'x' suffix
+    """
+    assert unit in constants.MEMORY_SIZE_UNITS, f'Invalid unit: {unit}'
+
+    error_msg = (f'"{field_name}" field should be a '
+                 f'{constants.MEMORY_SIZE_PATTERN}+?,'
+                 f' got {resource_qty_str}')
+
+    resource_str = str(resource_qty_str)
+
+    # Handle plus and x suffixes, x is only used internally for jobs controller
+    plus = ''
+    if resource_str.endswith('+'):
+        if allow_plus:
+            resource_str = resource_str[:-1]
+            plus = '+'
+        else:
+            raise ValueError(error_msg)
+
+    x = ''
+    if resource_str.endswith('x'):
+        if allow_x:
+            resource_str = resource_str[:-1]
+            x = 'x'
+        else:
+            raise ValueError(error_msg)
+
+    try:
+        # We assume it is already in the wanted units to maintain backwards
+        # compatibility
+        ret_type(resource_str)
+        return f'{resource_str}{plus}{x}'
+    except ValueError:
+        pass
+
+    resource_str = resource_str.lower()
+    for mem_unit, multiplier in constants.MEMORY_SIZE_UNITS.items():
+        if resource_str.endswith(mem_unit):
+            try:
+                value = ret_type(resource_str[:-len(mem_unit)])
+                converted = (value * multiplier /
+                             constants.MEMORY_SIZE_UNITS[unit])
+                if not allow_rounding and ret_type(converted) != converted:
+                    raise ValueError(error_msg)
+                converted = ret_type(converted)
+                return f'{converted}{plus}{x}'
+            except ValueError:
+                continue
+
+    raise ValueError(error_msg)
+
+
+def parse_time_minutes(time: str) -> int:
+    """Convert a time string to minutes.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+
+    Returns:
+        Time in minutes as an integer
+    """
+    time_str = str(time)
+
+    if time_str.isdecimal():
+        # We assume it is already in minutes to maintain backwards
+        # compatibility
+        return int(time_str)
+
+    time_str = time_str.lower()
+    for unit, multiplier in constants.TIME_UNITS.items():
+        if time_str.endswith(unit):
+            try:
+                value = float(time_str[:-len(unit)])
+                final_value = math.ceil(value * multiplier)
+                if final_value >= 0:
+                    return final_value
+            except ValueError:
+                continue
+
+    raise ValueError(f'Invalid time format: {time}')

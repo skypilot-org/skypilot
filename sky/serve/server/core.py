@@ -28,6 +28,7 @@ from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -139,10 +140,13 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     serve_utils.validate_service_task(task)
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+    dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(task)
+    dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag.pre_mount_volumes()
     task = dag.tasks[0]
 
     with rich_utils.safe_status(
@@ -297,6 +301,8 @@ def up(
             assert task.service is not None
             protocol = ('http'
                         if task.service.tls_credential is None else 'https')
+            socket_endpoint = socket_endpoint.replace('https://', '').replace(
+                'http://', '')
             endpoint = f'{protocol}://{socket_endpoint}'
 
         logger.info(
@@ -716,6 +722,9 @@ def status(
             else:
                 protocol = ('https'
                             if service_record['tls_encrypted'] else 'http')
+                if endpoint is not None:
+                    endpoint = endpoint.replace('https://',
+                                                '').replace('http://', '')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
 
     return service_records
