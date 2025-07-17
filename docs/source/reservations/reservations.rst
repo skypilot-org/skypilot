@@ -235,35 +235,6 @@ When using DWS with Kueue, you can additionally specify `max_run_duration` in ``
     kueue:
       local_queue_name: skypilot-local-queue
 
-Or, specify the ``dws`` and ``kueue`` fields in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml>`):
-
-.. code-block:: yaml
-
-    name: dws-kueue
-
-    resources:
-      infra: k8s
-      accelerators: H100:8
-
-    num_nodes: 2
-
-    config:
-      kubernetes:
-        dws:
-          enabled: true
-          max_run_duration: 10m
-        kueue:
-          local_queue_name: skypilot-local-queue
-
-And specify the ``kubernetes.autoscaler: gke`` in ``~/.sky/config.yaml``:
-
-.. code-block:: yaml
-
-  kubernetes:
-    autoscaler: gke
-
-In addition, you can also configure ``autoscaler`` in ``~/.sky/config.yaml`` per Kubernetes context, refer to :ref:`Kubernetes Context Configs <config-yaml-kubernetes-context-configs>` for more details.
-
 .. note::
   `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. Depending  on whether Kueue is enabled, the behavior of allocating new resources is different:
 

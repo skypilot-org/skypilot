@@ -58,6 +58,19 @@ the Kueue config needs to be patched to support plain pods.
             # Wait for the restart to complete
             kubectl -n kueue-system rollout status deployment kueue-controller-manager
 
+        Check that the patch is applied by running the following command:
+
+        .. code-block:: bash
+
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks'
+
+        This should output:
+
+        .. code-block:: bash
+
+            ...
+            - pod
+
     .. tab-item:: Patch Kueue with GPUDirect enabled on GKE
         :sync: patch-kueue-gke-tab
 
@@ -75,24 +88,21 @@ the Kueue config needs to be patched to support plain pods.
             # Wait for the restart to complete
             kubectl -n kueue-system rollout status deployment kueue-controller-manager
 
-Check that the patch is applied by running the following command:
+        Check that the patch is applied by running the following command:
 
-.. code-block:: bash
+        .. code-block:: bash
 
-    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations, .resources'
 
-This should output:
+        This should output:
 
-.. code-block:: bash
+        .. code-block:: bash
 
-    ...
-    - pod
-    ...
-    # For GKE with GPUDirect enabled
-    resources:
-      excludeResourcePrefixes:
-        - "networking.gke.io.networks"
-    ...
+            frameworks:
+              ...
+              - pod
+            excludeResourcePrefixes:
+              - networking.gke.io.networks
 
 (Optional) Patch Kueue to support gang scheduling
 -----------------------------------------------------------
