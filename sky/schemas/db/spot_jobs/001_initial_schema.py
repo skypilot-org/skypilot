@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 from sky.jobs.state import Base
 from sky.skylet import constants
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
 revision = '001'

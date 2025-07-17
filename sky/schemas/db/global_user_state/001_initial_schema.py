@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 from sky.global_user_state import Base
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
 revision = '001'

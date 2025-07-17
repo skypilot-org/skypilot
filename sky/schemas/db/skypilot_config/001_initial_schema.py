@@ -9,7 +9,7 @@ Create Date: 2024-01-01 12:00:00.000000
 from alembic import op
 
 from sky.skypilot_config import Base
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
 revision = '001'
