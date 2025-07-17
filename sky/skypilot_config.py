@@ -71,7 +71,7 @@ from sqlalchemy.pool import NullPool
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.schemas.db import db_constants
+from sky.schemas.db import migration_utils
 from sky.skylet import constants
 from sky.utils import alembic_utils
 from sky.utils import common_utils
@@ -575,29 +575,17 @@ def _reload_config_as_server() -> None:
             'if db config is specified, no other config is allowed')
 
     if db_url:
-        with _DB_USE_LOCK:
+        with migration_utils.db_lock(migration_utils.SKYPILOT_CONFIG_DB_NAME):
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
 
             # Get alembic config for sky config db and run migrations
             alembic_config = alembic_utils.get_alembic_config(
-                sqlalchemy_engine, db_constants.SKYPILOT_CONFIG_DB_NAME)
+                sqlalchemy_engine, migration_utils.SKYPILOT_CONFIG_DB_NAME)
             # pylint: disable=line-too-long
-            alembic_config.config_ini_section = db_constants.SKYPILOT_CONFIG_DB_NAME
-            try:
-                alembic_command.upgrade(alembic_config,
-                                        db_constants.SKYPILOT_CONFIG_VERSION)
-            except (sqlalchemy_exc.IntegrityError,
-                    sqlalchemy_exc.OperationalError) as e:
-                # If the version already exists (due to concurrent
-                # initialization), we can safely ignore this error
-                if ('UNIQUE constraint failed: '
-                        'alembic_version_sky_config_db.version_num' in str(e) or
-                        'table alembic_version_sky_config_db already exists'
-                        in str(e)):
-                    pass
-                else:
-                    raise
+            alembic_config.config_ini_section = migration_utils.SKYPILOT_CONFIG_DB_NAME
+            alembic_command.upgrade(alembic_config,
+                                    migration_utils.SKYPILOT_CONFIG_VERSION)
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:

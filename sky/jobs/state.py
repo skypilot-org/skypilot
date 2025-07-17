@@ -23,7 +23,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.schemas.db import db_constants
+from sky.schemas.db import migration_utils
 from sky.skylet import constants
 from sky.utils import alembic_utils
 from sky.utils import common_utils
@@ -39,7 +39,6 @@ CallbackType = Callable[[str], None]
 logger = sky_logging.init_logger(__name__)
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_DB_INIT_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -135,27 +134,16 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
     # Get alembic config for spot jobs db and run migrations
     alembic_config = alembic_utils.get_alembic_config(
-        engine, db_constants.SPOT_JOBS_DB_NAME)
-    alembic_config.config_ini_section = db_constants.SPOT_JOBS_DB_NAME
-    try:
-        alembic_command.upgrade(alembic_config, db_constants.SPOT_JOBS_VERSION)
-    except (sqlalchemy_exc.IntegrityError,
-            sqlalchemy_exc.OperationalError) as e:
-        # If the version already exists (due to concurrent
-        # initialization), we can safely ignore this error
-        if ('UNIQUE constraint failed: '
-                'alembic_version_spot_jobs_db.version_num' in str(e) or
-                'table alembic_version_spot_jobs_db already exists' in str(e)):
-            pass
-        else:
-            raise
+        engine, migration_utils.SPOT_JOBS_DB_NAME)
+    alembic_config.config_ini_section = migration_utils.SPOT_JOBS_DB_NAME
+    alembic_command.upgrade(alembic_config, migration_utils.SPOT_JOBS_VERSION)
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with _DB_INIT_LOCK:
+    with migration_utils.db_lock(migration_utils.SPOT_JOBS_DB_NAME):
         if _SQLALCHEMY_ENGINE is None:
             conn_string = None
             if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
