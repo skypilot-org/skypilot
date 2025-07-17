@@ -27,13 +27,13 @@ from sqlalchemy.ext import declarative
 import yaml
 
 from sky import models
-from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import db_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:

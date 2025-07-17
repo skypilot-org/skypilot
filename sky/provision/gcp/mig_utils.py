@@ -3,9 +3,9 @@ import re
 import subprocess
 from typing import Any, Dict
 
-from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision.gcp import constants
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

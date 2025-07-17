@@ -3,7 +3,7 @@ import collections
 from typing import Any, Dict, List
 
 from sky import global_user_state
-from sky import sky_logging
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

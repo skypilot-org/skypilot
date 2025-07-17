@@ -9,7 +9,6 @@ from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
@@ -17,6 +16,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

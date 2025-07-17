@@ -8,11 +8,11 @@ History:
 """
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.provision import common
 from sky.provision.oci.query_utils import query_helper
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

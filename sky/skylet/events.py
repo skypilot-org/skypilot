@@ -10,7 +10,6 @@ import psutil
 import yaml
 
 from sky import clouds
-from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import scheduler as managed_job_scheduler
 from sky.jobs import state as managed_job_state
@@ -23,6 +22,7 @@ from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 # Seconds of sleep between the processing of skylet events.

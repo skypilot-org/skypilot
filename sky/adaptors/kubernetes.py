@@ -4,10 +4,10 @@ import os
 import platform
 from typing import Any, Callable, Optional, Set
 
-from sky import sky_logging
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '

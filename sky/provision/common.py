@@ -5,9 +5,9 @@ import functools
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import sky_logging
 from sky.utils import env_options
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
 # pydantic provides more features like validation or parsing from

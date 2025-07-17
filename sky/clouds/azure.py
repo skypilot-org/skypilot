@@ -12,7 +12,6 @@ from packaging import version as pversion
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds.utils import azure_utils
@@ -20,6 +19,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

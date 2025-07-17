@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import yaml
 
-from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
@@ -14,6 +13,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

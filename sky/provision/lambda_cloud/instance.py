@@ -3,11 +3,11 @@
 import time
 from typing import Any, Dict, List, Optional
 
-from sky import sky_logging
 from sky.provision import common
 from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import ux_utils
 

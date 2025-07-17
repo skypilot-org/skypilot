@@ -6,11 +6,11 @@ import ssl
 import time
 import urllib.request as urllib2
 
-from sky import sky_logging
 from sky.adaptors import vsphere as vsphere_adaptor
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
 from sky.provision.vsphere.common.id_generator import generate_random_uuid
 from sky.provision.vsphere.common.vim_utils import get_obj_by_mo_id
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 

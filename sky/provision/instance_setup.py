@@ -10,7 +10,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sky import exceptions
 from sky import logs
 from sky import provision
-from sky import sky_logging
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
@@ -23,6 +22,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -46,7 +46,10 @@ _DUMP_RAY_PORTS = (
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
-    '"from sky import sky_logging\n'
+    '"try:\n'
+    '  from sky.utils import sky_logging\n'
+    'except ImportError:\n'
+    '  from sky import sky_logging\n'
     'with sky_logging.silent(): '
     'from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
     '2> /dev/null || echo 6379);'

@@ -3,10 +3,10 @@
 import time
 from typing import Any, Dict, List, Optional
 
-from sky import sky_logging
 from sky.provision import common
 from sky.provision.cudo import cudo_machine_type
 from sky.provision.cudo import cudo_wrapper
+from sky.utils import sky_logging
 from sky.utils import status_lib
 
 POLL_INTERVAL = 10

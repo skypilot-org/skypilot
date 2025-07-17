@@ -16,7 +16,6 @@ import requests
 
 import sky
 from sky import global_user_state
-from sky import sky_logging
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
@@ -35,6 +34,7 @@ from sky.utils import annotations
 from sky.utils import controller_utils
 from sky.utils import message_utils
 from sky.utils import registry
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger("sky.pytest")
 

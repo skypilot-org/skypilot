@@ -15,7 +15,6 @@ from filelock import FileLock
 
 from sky import clouds
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
@@ -25,6 +24,7 @@ from sky.adaptors import nebius
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 Client = Any

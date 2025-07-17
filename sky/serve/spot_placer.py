@@ -8,10 +8,10 @@ from typing import Any, Dict, List, Optional, Set
 
 from sky import check as sky_check
 from sky import clouds as sky_clouds
-from sky import sky_logging
 from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

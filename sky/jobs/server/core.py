@@ -14,7 +14,6 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import provision as provision_lib
-from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -32,6 +31,7 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline

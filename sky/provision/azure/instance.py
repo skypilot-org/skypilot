@@ -10,11 +10,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
 from sky.utils import common_utils
+from sky.utils import sky_logging
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

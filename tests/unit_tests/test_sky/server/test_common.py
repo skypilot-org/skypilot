@@ -155,7 +155,7 @@ def mock_all_dependencies():
     """Mock all dependencies used in reload_for_new_request."""
     with mock.patch('sky.utils.common_utils.set_request_context') as mock_status, \
          mock.patch('sky.usage.usage_lib.messages.reset') as mock_reset, \
-         mock.patch('sky.sky_logging.reload_logger') as mock_logger:
+         mock.patch('sky.utils.sky_logging.reload_logger') as mock_logger:
         yield {
             'set_status': mock_status,
             'reset_messages': mock_reset,

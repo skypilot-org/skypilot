@@ -24,11 +24,11 @@ import time
 import colorama
 
 from sky import clouds
-from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.data import data_utils
 from sky.utils import rich_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

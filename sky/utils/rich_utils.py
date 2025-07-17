@@ -223,7 +223,7 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
     See also: :func:`client_status`, :class:`EncodedStatus`.
     """
-    from sky import sky_logging  # pylint: disable=import-outside-toplevel
+    from sky.utils import sky_logging  # pylint: disable=import-outside-toplevel
     if (annotations.is_on_api_server and _is_thread_safe() and
             not sky_logging.is_silent()):
         if _get_server_status() is None:
@@ -278,7 +278,7 @@ class RichSafeStreamHandler(logging.StreamHandler):
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded client-side console.status."""
-    from sky import sky_logging  # pylint: disable=import-outside-toplevel
+    from sky.utils import sky_logging  # pylint: disable=import-outside-toplevel
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _get_client_status() is None:

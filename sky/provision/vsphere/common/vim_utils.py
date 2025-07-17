@@ -6,9 +6,9 @@ import subprocess
 import time
 from typing import List
 
-from sky import sky_logging
 from sky.adaptors import vsphere as vsphere_adaptor
 from sky.catalog.data_fetchers.fetch_vsphere import get_accelerators_from_csv
+from sky.utils import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 DISPLAY_CONTROLLER_CLASS_ID_PREFIXES = ['03']

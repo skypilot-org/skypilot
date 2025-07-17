@@ -7,11 +7,11 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common
 from sky.clouds import GCP
 from sky.utils import resources_utils
+from sky.utils import sky_logging
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
