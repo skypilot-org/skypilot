@@ -32,7 +32,7 @@ setup: |
   pip install --pre --upgrade torchtune==0.7.0.dev20250610+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 
   # Download the model (~200 GB, may take time to download)
-  tune download meta-llama/Llama-4-Scout-17B-16E \
+  tune download meta-llama/Llama-4-Scout-17B-16E-Instruct \
     --hf-token $HF_TOKEN
 
 run: |
@@ -46,7 +46,7 @@ run: |
   --rdzv_backend c10d \
   --rdzv_endpoint=$MASTER_ADDR:29500 \
   full_finetune_distributed \
-  --config llama4/scout_17B_16E_full.yaml \
-  model_dir=/tmp/Llama-4-Scout-17B-16E \
+  --config llama4/scout_17B_16E_full \
+  model_dir=/tmp/Llama-4-Scout-17B-16E-Instruct \
   max_steps_per_epoch=10 \
   epochs=1
