@@ -483,9 +483,10 @@ class JobsController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
-            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
-                self._job_id)
-            assert cluster_name is not None
+            if self._pool is not None:
+                cluster_name, job_id_on_pm = (
+                    managed_job_state.get_pool_submit_info(self._job_id))
+                assert cluster_name is not None
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,

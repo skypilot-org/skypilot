@@ -390,18 +390,17 @@ def launch(
 
     if consolidation_mode_job_ids is None:
         return _submit_one(None)
-    else:
-        if pool is None:
-            assert len(consolidation_mode_job_ids) == 1
-            return _submit_one(consolidation_mode_job_ids[0])
-        ids = []
-        all_handle = None
-        for job_id in consolidation_mode_job_ids:
-            jid, handle = _submit_one(job_id)
-            assert jid is not None, (job_id, handle)
-            ids.append(jid)
-            all_handle = handle
-        return ids, all_handle
+    if pool is None:
+        assert len(consolidation_mode_job_ids) == 1
+        return _submit_one(consolidation_mode_job_ids[0])
+    ids = []
+    all_handle = None
+    for job_id in consolidation_mode_job_ids:
+        jid, handle = _submit_one(job_id)
+        assert jid is not None, (job_id, handle)
+        ids.append(jid)
+        all_handle = handle
+    return ids, all_handle
 
 
 def queue_from_kubernetes_pod(
