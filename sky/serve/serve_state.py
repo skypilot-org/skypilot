@@ -34,8 +34,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
         auto_restart INTEGER DEFAULT NULL,
-        requested_resources BLOB DEFAULT NULL,
-        pool INTEGER DEFAULT 0)""")
+        requested_resources BLOB DEFAULT NULL)""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS replicas (
         service_name TEXT,
