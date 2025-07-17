@@ -302,6 +302,13 @@ class StoreType(enum.Enum):
                         store_url)
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
+                # Check compatible stores
+                for compatible_store_type, store_class in \
+                    _S3_COMPATIBLE_STORES.items():
+                    config = store_class.get_config()
+                    if store_type == compatible_store_type:
+                        bucket_name, sub_path = config.split_path(store_url)
+                        break
                 return store_type, bucket_name, \
                     sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
@@ -1409,6 +1416,7 @@ class S3CompatibleConfig:
     # Client creation
     client_factory: Callable[[Optional[str]], Any]
     resource_factory: Callable[[str], StorageHandle]
+    split_path: Callable[[str], Tuple[str, str]]
 
     # CLI configuration
     aws_profile: Optional[str] = None
@@ -2049,6 +2057,7 @@ class S3Store(S3CompatibleStore):
             url_prefix='s3://',
             client_factory=data_utils.create_s3_client,
             resource_factory=lambda name: aws.resource('s3').Bucket(name),
+            split_path=data_utils.split_s3_path,
             cloud_name=str(clouds.AWS()),
             default_region=S3Store._DEFAULT_REGION,
             access_denied_message=S3Store._ACCESS_DENIED_MESSAGE,
@@ -3964,6 +3973,7 @@ class R2Store(S3CompatibleStore):
                                                                       'auto'),
             resource_factory=lambda name: cloudflare.resource('s3').Bucket(name
                                                                           ),
+            split_path=data_utils.split_r2_path,
             credentials_file=cloudflare.R2_CREDENTIALS_PATH,
             aws_profile=cloudflare.R2_PROFILE_NAME,
             get_endpoint_url=lambda: cloudflare.create_endpoint(),  # pylint: disable=unnecessary-lambda
