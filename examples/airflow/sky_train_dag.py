@@ -133,7 +133,6 @@ def run_sky_task(base_path: str,
 @task
 def generate_bucket_uuid():
     """Generate a unique bucket UUID for this DAG run."""
-    import uuid
     bucket_uuid = str(uuid.uuid4())[:4]
     return bucket_uuid
 
