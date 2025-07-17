@@ -60,7 +60,7 @@ def upgrade():
             'spot',
             'metadata',
             sa.Text(),
-            server_default='"{}"',
+            server_default='{}',
             value_to_replace_existing_entries='{}')
 
         # Job info table columns

@@ -36,7 +36,7 @@ def upgrade():
         db_utils.add_column_to_table_alembic('clusters',
                                              'metadata',
                                              sa.Text(),
-                                             server_default='"{}"')
+                                             server_default='{}')
         db_utils.add_column_to_table_alembic('clusters',
                                              'to_down',
                                              sa.Integer(),
@@ -68,7 +68,7 @@ def upgrade():
         db_utils.add_column_to_table_alembic('clusters',
                                              'workspace',
                                              sa.Text(),
-                                             server_default='"default"')
+                                             server_default='default')
         db_utils.add_column_to_table_alembic('clusters',
                                              'last_creation_yaml',
                                              sa.Text(),
