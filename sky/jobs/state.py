@@ -133,10 +133,10 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     # Get alembic config for spot jobs db and run migrations
-    alembic_config = alembic_utils.get_alembic_config(engine, 'spot_jobs_db')
-    alembic_config.config_ini_section = 'spot_jobs_db'
+    alembic_config = alembic_utils.get_alembic_config(engine, db_constants.SPOT_JOBS_DB_NAME)
+    alembic_config.config_ini_section = db_constants.SPOT_JOBS_DB_NAME
     try:
-        alembic_command.upgrade(alembic_config, '001')
+        alembic_command.upgrade(alembic_config, db_constants.SPOT_JOBS_VERSION)
     except (sqlalchemy_exc.IntegrityError,
             sqlalchemy_exc.OperationalError) as e:
         # If the version already exists (due to concurrent

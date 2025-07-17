@@ -71,6 +71,7 @@ from sqlalchemy.pool import NullPool
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.schemas.db import db_constants
 from sky.skylet import constants
 from sky.utils import alembic_utils
 from sky.utils import common_utils
@@ -580,10 +581,10 @@ def _reload_config_as_server() -> None:
 
             # Get alembic config for sky config db and run migrations
             alembic_config = alembic_utils.get_alembic_config(
-                sqlalchemy_engine, 'sky_config_db')
-            alembic_config.config_ini_section = 'sky_config_db'
+                sqlalchemy_engine, db_constants.SKYPILOT_CONFIG_DB_NAME)
+            alembic_config.config_ini_section = db_constants.SKYPILOT_CONFIG_DB_NAME
             try:
-                alembic_command.upgrade(alembic_config, '001')
+                alembic_command.upgrade(alembic_config, db_constants.SKYPILOT_CONFIG_VERSION)
             except (sqlalchemy_exc.IntegrityError,
                     sqlalchemy_exc.OperationalError) as e:
                 # If the version already exists (due to concurrent

@@ -32,6 +32,7 @@ import yaml
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.schemas.db import db_constants
 from sky.skylet import constants
 from sky.utils import alembic_utils
 from sky.utils import common_utils
@@ -245,9 +246,10 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     # Get alembic config for state db and run migrations
-    alembic_config = alembic_utils.get_alembic_config(engine, 'state_db')
-    alembic_config.config_ini_section = 'state_db'
-    alembic_command.upgrade(alembic_config, '001')
+    alembic_config = alembic_utils.get_alembic_config(engine,
+                                                      db_constants.GLOBAL_USER_STATE_DB_NAME)
+    alembic_config.config_ini_section = db_constants.GLOBAL_USER_STATE_DB_NAME
+    alembic_command.upgrade(alembic_config, db_constants.GLOBAL_USER_STATE_VERSION)
 
 
 @contextlib.contextmanager
