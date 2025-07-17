@@ -22,10 +22,10 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.utils.db import migration_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row

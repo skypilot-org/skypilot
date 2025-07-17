@@ -71,14 +71,14 @@ from sqlalchemy.pool import NullPool
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.utils.db import migration_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
-from sky.utils.db import db_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:

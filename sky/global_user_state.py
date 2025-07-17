@@ -29,13 +29,13 @@ import yaml
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.utils.db import migration_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
-from sky.utils.db import db_utils
 from sky.utils import registry
 from sky.utils import status_lib
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
