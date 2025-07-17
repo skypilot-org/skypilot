@@ -1949,7 +1949,7 @@ def api_start(
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
-    is_local_api_server = server_common.is_api_server_local(startup=True)
+    is_local_api_server = server_common.is_server_url_local()
     if not is_local_api_server:
         server_url = server_common.get_server_url()
         with ux_utils.print_exception_no_traceback():
@@ -1995,7 +1995,15 @@ def api_stop() -> None:
     """
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
-    if not server_common.is_api_server_local(startup=True):
+    api_server_status = server_common.get_api_server_status()
+    if (api_server_status.version is not None and
+            int(api_server_status.version) >= 12):
+        is_local = server_common.is_api_server_local(server_url)
+    else:
+        # either old version, or its unhealthy
+        is_local = server_common.is_server_url_local(server_url)
+
+    if not is_local:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Cannot kill the API server at {server_url} because it is not '

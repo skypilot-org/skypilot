@@ -265,8 +265,20 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local(server_url: Optional[str] = None,
-                        startup: bool = False) -> bool:
+def is_server_url_local(server_url: Optional[str] = None) -> bool:
+    """Checks if the server URL is local."""
+    # On startup, we don't care if the port file exists yet, so we return True
+    # to allow the server to start. If there is an ssh port foward, when we try
+    # to start the server, we will get "port already in use" error and a
+    # duplicate server will be started.
+    if server_url is None:
+        server_url = get_server_url()
+    server_parsed = parse.urlparse(server_url)
+    return server_parsed.hostname in AVAILBLE_LOCAL_API_SERVER_HOSTS
+
+
+@annotations.lru_cache(scope='global')
+def is_api_server_local(server_url: Optional[str] = None) -> bool:
     """Checks if the API server is local.
 
     Args:
@@ -286,30 +298,22 @@ def is_api_server_local(server_url: Optional[str] = None,
     """
     if server_url is None:
         server_url = get_server_url()
-    server_parsed = parse.urlparse(server_url)
-    port = server_parsed.port
 
-    # Short circuit since this is true in all cases
-    if server_parsed.hostname not in AVAILBLE_LOCAL_API_SERVER_HOSTS:
+    if not is_server_url_local(server_url):
         return False
 
-    # On startup, we don't care if the port file exists yet, so we return True
-    # to allow the server to start. If it is being port forwarded from a remote
-    # server, we will killing the server of fail starting the server due to a
-    # port mismatch.
-    if startup:
-        return True
+    server_parsed = parse.urlparse(server_url)
+    port = server_parsed.port
 
     try:
         with open(server_constants.API_SERVER_PORT_FILE, 'r',
                   encoding='utf-8') as f:
             port_file_port = f.read().strip()
     except (FileNotFoundError, OSError):
-        if not startup:
-            return False
+        return False
 
-    # This should always be true unless the port file was never created due to
-    # the API server being killed.
+    # This should be true unless the port file was never created due to the API
+    # server being killed or if we are ssh port forwarding.
     return port == int(port_file_port)
 
 
@@ -458,18 +462,21 @@ def _start_api_server(deploy: bool = False,
                       metrics: bool = False,
                       metrics_port: Optional[int] = None,
                       enable_basic_auth: bool = False):
-    """Starts a SkyPilot API server locally."""
+    """Starts a SkyPilot API server locally.
+
+    Args:
+        host: The host to start the server on. A string like '127.0.0.1' or
+            'localhost'.
+        port: The port to start the server on.
+    """
     server_url = get_server_url(host, port)
-    assert is_api_server_local(
-        server_url,
-        startup=True), (f'server url {server_url} is not a local url')
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        if not is_api_server_local(startup=True):
+        if not is_server_url_local(server_url):
             raise RuntimeError(f'Cannot start API server: {get_server_url()} '
                                'is not a local URL')
 
@@ -690,7 +697,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
         endpoint = get_server_url()
-        if not is_api_server_local(startup=True):
+        if not is_server_url_local():
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the
