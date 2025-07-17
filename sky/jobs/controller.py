@@ -7,13 +7,11 @@ import asyncio
 import logging
 import os
 import shutil
-import sys
 import time
 import traceback
 import typing
 from typing import Dict, Optional, Set, Tuple
 
-import filelock
 import psutil
 
 # This import ensures backward compatibility. Controller processes may not have
@@ -54,10 +52,27 @@ logger = logging.getLogger(__name__)
 # Global state for active jobs
 job_tasks: Dict[int, asyncio.Task] = {}
 starting: Set[int] = set()
+background_tasks = set()
 
 # Lock for synchronizing access to global state dictionary
 _job_tasks_lock = asyncio.Lock()
-_scaling_semaphore = asyncio.Semaphore(0)
+_background_tasks_lock = asyncio.Lock()
+
+
+async def create_background_task(coro: typing.Coroutine) -> None:
+    """Create a background task and add it to the set of background tasks.
+
+    Main reason we do this is since tasks are only held as a weak reference in
+    the executor, we need to keep a strong reference to the task to avoid it
+    being garbage collected.
+
+    Args:
+        coro: The coroutine to create a task for.
+    """
+    async with _background_tasks_lock:
+        task = asyncio.create_task(coro)
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
@@ -755,12 +770,21 @@ async def run_job_loop(job_id: int, dag_yaml: str, job_logger: logging.Logger):
     """Background task that runs the job loop."""
     cancelling = False
     try:
-        # we wait for 1 second to put this to the back of the queue
-        await asyncio.sleep(1)
         job_logger.info(f'Starting job loop for {job_id}')
 
         controller = JobsController(job_id, dag_yaml, job_logger)
-        await controller.run()
+
+        async with _job_tasks_lock:
+            if job_id in job_tasks:
+                job_logger.error(f'Job {job_id} already exists in job_tasks')
+                raise ValueError(f'Job {job_id} already exists')
+
+            # Create the task and store it
+            # This function should return instantly and run the job loop in the
+            # background.
+            task = asyncio.create_task(controller.run())
+            job_tasks[job_id] = task
+        await task
     except asyncio.CancelledError:
         job_logger.info(f'Job {job_id} was cancelled')
         dag, _ = _get_dag_and_name(dag_yaml)
@@ -853,17 +877,7 @@ async def start_job(job_id: int, dag_yaml: str):
 
     job_logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}')
 
-    async with _job_tasks_lock:
-        if job_id in job_tasks:
-            job_logger.error(f'Job {job_id} already exists in job_tasks')
-            raise ValueError(f'Job {job_id} already exists')
-
-        # Create the task and store it
-        # This function should return instantly and run the job loop in the
-        # background.
-        task = asyncio.create_task(run_job_loop(job_id, dag_yaml, job_logger))
-
-        job_tasks[job_id] = task
+    await create_background_task(run_job_loop(job_id, dag_yaml, job_logger))
 
     job_logger.info(f'Job {job_id} started successfully')
 
@@ -873,35 +887,20 @@ async def cancel_job():
     while True:
         cancels = os.listdir(jobs_constants.SIGNAL_PATH)
         for cancel in cancels:
-            if int(cancel) in job_tasks:
-                job_id = int(cancel)
+            async with _job_tasks_lock:
+                if int(cancel) in job_tasks:
+                    job_id = int(cancel)
 
-                logger.info(f'Cancelling job {job_id}')
-
-                async with _job_tasks_lock:
-                    if job_id not in job_tasks:
-                        logger.error(f'Job {job_id} not found in job_tasks')
-                        raise ValueError(f'Job {job_id} not found')
+                    logger.info(f'Cancelling job {job_id}')
 
                     task = job_tasks[job_id]
 
-                async def _cancel_task(task: asyncio.Task, job_id: int):
-                    task.cancel()
-                    try:
-                        await task  # Wait for the task to be cancelled
-                    except asyncio.CancelledError:
-                        pass  # Expected when task is cancelled
+                    # Run the cancellation in the background, so we can return
+                    # immediately.
+                    await create_background_task(task.cancel())
+                    logger.info(f'Job {job_id} cancelled successfully')
 
-                    async with _job_tasks_lock:
-                        if job_id in job_tasks:
-                            del job_tasks[job_id]
-
-                # Run the cancellation in the background, so we can return
-                # immediately.
-                asyncio.create_task(_cancel_task(task, job_id))
-                logger.info(f'Job {job_id} cancelled successfully')
-
-                os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
+                    os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
         await asyncio.sleep(1)
 
 
@@ -909,7 +908,6 @@ async def monitor_loop():
     """Monitor the job loop."""
     logger.info('Starting monitor loop...')
 
-    tries = 5
     while True:
         async with _job_tasks_lock:
             running_tasks = [
@@ -939,28 +937,8 @@ async def monitor_loop():
             continue
 
         if waiting_job is None:
-            if len(running_tasks) == 0:
-                tries -= 1
-                if tries <= 0:
-                    # do none blocking attempt first
-                    if can_scale()[1]:
-                        # There is another job controller running, so we can
-                        # scale down by killing ourselves. There is a possible
-                        # race condition here, so we use a file lock to
-                        # prevent it.
-                        with filelock.FileLock(
-                                scheduler.JOB_CONTROLLER_PID_LOCK, timeout=0):
-                            if can_scale()[1]:
-                                sys.exit(0)
-                    else:
-                        # will try again in 60 seconds
-                        tries = 6
-
             await asyncio.sleep(10)
             continue
-
-        # we found a new job to run so we can reset the tries
-        tries = 6
 
         if (waiting_job['schedule_state'] !=
                 managed_job_state.ManagedJobScheduleState.WAITING):
@@ -1002,55 +980,6 @@ async def monitor_loop():
             starting.add(job_id)
 
         await start_job(job_id, dag_yaml_path)
-
-
-def can_scale() -> Tuple[bool, bool]:
-    """Check if we can scale.
-
-    We can scale if the amount of running jobs controllers in the PID file
-    is less than the amount of memory our system has divided by the amount of
-    memory each job controller uses.
-
-    We can scale down if the amount of running controllers is greater than 1.
-
-    Returns:
-        Tuple[bool, bool]: Whether we can scale up, and whether we can scale
-            down.
-    """
-    try:
-        # Read the PID file, filter out non-alive PIDs, and clean up the file
-        # only if needed.
-        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
-                  encoding='utf-8') as f:
-            pids = f.read().split('\n')[:-1]
-        alive_pids = []
-        dead_found = False
-        for pid in pids:
-            pid_stripped = pid.strip()
-            if not pid_stripped:
-                continue
-            try:
-                pid_int = int(pid_stripped)
-            except ValueError:
-                continue
-            if subprocess_utils.is_process_alive(pid_int):
-                alive_pids.append(pid_stripped)
-            else:
-                dead_found = True
-        # Only rewrite the PID file if a dead controller was found
-        if dead_found:
-            with open(scheduler.JOB_CONTROLLER_PID_PATH, 'w',
-                      encoding='utf-8') as f:
-                for pid in alive_pids:
-                    f.write(f'{pid}\n')
-        running_controllers = alive_pids
-    except OSError as e:
-        logger.error(f'Failed to get running controllers file: {e}')
-        # return conservative values
-        return False, False
-
-    return (len(running_controllers) < scheduler.JOBS_PER_WORKER,
-            len(running_controllers) > 1)
 
 
 if __name__ == '__main__':

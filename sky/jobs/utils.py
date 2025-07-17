@@ -284,26 +284,6 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
         return False
 
 
-def maybe_scale() -> None:
-    """Maybe scale the controller.
-
-    We only scale up if there are more pending jobs than
-    JOBS_PER_WORKER * WORKER_COUNT jobs that are able to be scheduled.
-    """
-    pending_jobs = managed_job_state.get_processing_jobs_count()
-    try:
-        with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
-                  encoding='utf-8') as f:
-            # there is always a newline at the end of the file
-            pids = max(len(f.read().split('\n')) - 1, 0)
-    except FileNotFoundError:
-        # this might happen, no worries
-        pids = 0
-
-    if pending_jobs > scheduler.JOBS_PER_WORKER * pids:
-        scheduler.start_controller()
-
-
 def update_managed_jobs_statuses(job_id: Optional[int] = None):
     """Update managed job status if the controller process failed abnormally.
 
@@ -643,6 +623,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
+    started = False
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -659,6 +640,13 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
         if job_controller_pid is not None and job_controller_pid < 0:
+            if not started:
+                # there is the chance that the controller server is not started
+                # yet, and won't be able to cancel the jobs. So we start the
+                # controller server here. We only need to do this once.
+                scheduler.maybe_start_controllers()
+                started = True
+
             # This is a consolidated job controller, so we need to cancel the
             # with the controller server API
             try:

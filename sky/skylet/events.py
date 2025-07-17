@@ -76,8 +76,7 @@ class ManagedJobEvent(SkyletEvent):
 
     def _run(self):
         managed_job_utils.update_managed_jobs_statuses()
-        managed_job_utils.maybe_scale()
-        scheduler.maybe_start_controller()
+        scheduler.maybe_start_controllers()
 
 
 class ServiceUpdateEvent(SkyletEvent):
