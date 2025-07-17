@@ -4455,16 +4455,6 @@ class NebiusStore(S3CompatibleStore):
     for Nebius Object Storage buckets.
     """
 
-    def __init__(self,
-                 name: str,
-                 source: str,
-                 region: Optional[str] = None,
-                 is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
-        super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path)
-
     @classmethod
     def get_config(cls) -> S3CompatibleConfig:
         """Return the configuration for Nebius Object Storage."""
@@ -4487,7 +4477,6 @@ class NebiusStore(S3CompatibleStore):
         # we'll need to create a client to get it
         client = data_utils.create_nebius_client()
         endpoint_url = client.meta.endpoint_url
-        return mounting_utils.get_nebius_mount_cmd(
-            nebius.NEBIUS_PROFILE_NAME, bucket_name, endpoint_url,
-            mount_path, bucket_sub_path)
-
+        return mounting_utils.get_nebius_mount_cmd(nebius.NEBIUS_PROFILE_NAME,
+                                                   bucket_name, endpoint_url,
+                                                   mount_path, bucket_sub_path)
