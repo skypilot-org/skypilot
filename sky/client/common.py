@@ -206,9 +206,14 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                     f'Retrying... ({attempt + 1} / {max_attempts})')
                 time.sleep(1)
             else:
+                try:
+                    response_details = response.json().get('detail')
+                except Exception:  # pylint: disable=broad-except
+                    response_details = response.content
                 error_msg = (
                     f'Failed to upload chunk: {params.chunk_index + 1} / '
-                    f'{params.total_chunks}: {response.json().get("detail")}')
+                    f'{params.total_chunks}: {response_details} '
+                    f'(Status code: {response.status_code})')
                 upload_logger.error(error_msg)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
@@ -267,7 +272,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
     upload_list = []
     for task_ in dag.tasks:
         task_.file_mounts_mapping = {}
-        if task_.workdir:
+        if task_.workdir and isinstance(task_.workdir, str):
             workdir = task_.workdir
             assert os.path.isabs(workdir)
             upload_list.append(workdir)

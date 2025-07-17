@@ -174,6 +174,11 @@ class AWS(clouds.Cloud):
                 f'High availability controllers are not supported on {cls._REPR}.'
             )
 
+        unsupported_features[
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK] = (
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
+            )
+
         return unsupported_features
 
     @classmethod
@@ -458,10 +463,16 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
-        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
-                                                    False)
-        user_security_group_config = skypilot_config.get_nested(
-            ('aws', 'security_group_name'), None)
+        disk_encrypted = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('disk_encrypted',),
+            default_value=False)
+        user_security_group_config = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('security_group_name',),
+            default_value=None)
         user_security_group = None
         if isinstance(user_security_group_config, str):
             user_security_group = user_security_group_config
@@ -728,7 +739,7 @@ class AWS(clouds.Cloud):
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+                              stderr=subprocess.DEVNULL)
         if proc.returncode != 0:
             return None
         return proc.stdout

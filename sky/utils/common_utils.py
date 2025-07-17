@@ -11,6 +11,7 @@ import platform
 import random
 import re
 import socket
+import subprocess
 import sys
 import time
 import typing
@@ -71,11 +72,10 @@ def get_usage_run_id() -> str:
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
-    try:
-        int(user_hash, 16)
-    except (TypeError, ValueError):
-        return False
-    return len(user_hash) == USER_HASH_LENGTH
+    # Must start with a letter, followed by alphanumeric characters and hyphens
+    # This covers both old hex format (e.g., "abc123") and new service account
+    # format (e.g., "sa-abc123-token-xyz")
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$', user_hash))
 
 
 def generate_user_hash() -> str:
@@ -86,6 +86,18 @@ def generate_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
+
+
+def get_git_commit(path: Optional[str] = None) -> Optional[str]:
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_user_hash() -> str:

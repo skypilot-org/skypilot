@@ -178,7 +178,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         return handle, False
 
     def _sync_workdir(self, handle: LocalDockerResourceHandle,
-                      workdir: Path) -> None:
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
         """Workdir is sync'd by adding to the docker image.
 
         This happens in the execute step.

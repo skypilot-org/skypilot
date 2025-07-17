@@ -14,6 +14,13 @@ from typing import Optional, Tuple
 
 import filelock
 
+# This import ensures backward compatibility. Controller processes may not have
+# imported this module initially, but will attempt to import it during job
+# termination on the fly. If a job was launched with an old SkyPilot runtime
+# and a new job is launched with a newer runtime, the old job's termination
+# will try to import code from a different SkyPilot runtime, causing exceptions.
+# pylint: disable=unused-import
+from sky import core
 from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -581,6 +588,10 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
+    # Cleanup the HA recovery script first as it is possible that some error
+    # was raised when we construct the task object (e.g.,
+    # sky.exceptions.ResourcesUnavailableError).
+    managed_job_state.remove_ha_recovery_script(job_id)
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task

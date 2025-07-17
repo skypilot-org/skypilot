@@ -1,13 +1,11 @@
 """Workspace management core."""
 
-import concurrent.futures
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import filelock
 
 from sky import check as sky_check
 from sky import exceptions
-from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -17,6 +15,7 @@ from sky.users import permission
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import resource_checker
 from sky.utils import schemas
 from sky.workspaces import utils as workspaces_utils
 
@@ -79,116 +78,6 @@ def _update_workspaces_config(
             f'file if you believe it is stale.') from e
 
 
-def _check_workspace_has_no_active_resources(workspace_name: str,
-                                             operation: str) -> None:
-    """Check if a workspace has active clusters or managed jobs.
-
-    Args:
-        workspace_name: The name of the workspace to check.
-        operation: The operation being performed ('update' or 'delete').
-
-    Raises:
-        ValueError: If the workspace has active clusters or managed jobs.
-    """
-    _check_workspaces_have_no_active_resources([(workspace_name, operation)])
-
-
-def _check_workspaces_have_no_active_resources(
-        workspace_operations: list) -> None:
-    """Check if workspaces have active clusters or managed jobs.
-
-    Args:
-        workspace_operations: List of tuples (workspace_name, operation) where
-            operation is 'update' or 'delete'.
-
-    Raises:
-        ValueError: If any workspace has active clusters or managed jobs.
-            The error message will include all workspaces with issues.
-    """
-    if not workspace_operations:
-        return
-
-    def get_all_clusters():
-        return global_user_state.get_clusters()
-
-    def get_all_managed_jobs():
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs.server import core as managed_jobs_core
-        try:
-            return managed_jobs_core.queue(refresh=False,
-                                           skip_finished=True,
-                                           all_users=True)
-        except exceptions.ClusterNotUpError:
-            logger.warning('All jobs should be finished in workspace.')
-            return []
-
-    # Fetch both clusters and jobs in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        clusters_future = executor.submit(get_all_clusters)
-        jobs_future = executor.submit(get_all_managed_jobs)
-
-        all_clusters = clusters_future.result()
-        all_managed_jobs = jobs_future.result()
-
-    # Collect all error messages instead of raising immediately
-    error_messages = []
-
-    # Check each workspace against the fetched data
-    for workspace_name, operation in workspace_operations:
-        # Filter clusters for this workspace
-        workspace_clusters = [
-            cluster for cluster in all_clusters
-            if (cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-                == workspace_name)
-        ]
-
-        # Filter managed jobs for this workspace
-        workspace_active_jobs = [
-            job for job in all_managed_jobs
-            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) ==
-            workspace_name
-        ]
-
-        # Collect error messages for this workspace
-        workspace_errors = []
-
-        if workspace_clusters:
-            active_cluster_names = [
-                cluster['name'] for cluster in workspace_clusters
-            ]
-            cluster_list = ', '.join(active_cluster_names)
-            workspace_errors.append(
-                f'{len(workspace_clusters)} active cluster(s): {cluster_list}')
-
-        if workspace_active_jobs:
-            job_names = [str(job['job_id']) for job in workspace_active_jobs]
-            job_list = ', '.join(job_names)
-            workspace_errors.append(
-                f'{len(workspace_active_jobs)} active managed job(s): '
-                f'{job_list}')
-
-        # If this workspace has issues, add to overall error messages
-        if workspace_errors:
-            workspace_error_summary = ' and '.join(workspace_errors)
-            error_messages.append(
-                f'Cannot {operation} workspace {workspace_name!r} because it '
-                f'has {workspace_error_summary}.')
-
-    # If we collected any errors, raise them all together
-    if error_messages:
-        if len(error_messages) == 1:
-            # Single workspace error
-            full_message = error_messages[
-                0] + ' Please terminate these resources first.'
-        else:
-            # Multiple workspace errors
-            full_message = (f'Cannot proceed due to active resources in '
-                            f'{len(error_messages)} workspace(s):\n' +
-                            '\n'.join(f'• {msg}' for msg in error_messages) +
-                            '\nPlease terminate these resources first.')
-        raise ValueError(full_message)
-
-
 def _validate_workspace_config(workspace_name: str,
                                workspace_config: Dict[str, Any]) -> None:
     """Validate the workspace configuration.
@@ -229,7 +118,8 @@ def update_workspace(workspace_name: str, config: Dict[str,
     # Check for active clusters and managed jobs in the workspace
     # TODO(zhwu): we should allow the edits that only contain changes to
     # allowed_users or private.
-    _check_workspace_has_no_active_resources(workspace_name, 'update')
+    resource_checker.check_no_active_resources_for_workspaces([(workspace_name,
+                                                                'update')])
 
     def update_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to update workspace inside the lock."""
@@ -327,7 +217,8 @@ def delete_workspace(workspace_name: str) -> Dict[str, Any]:
         raise ValueError(f'Workspace {workspace_name!r} does not exist.')
 
     # Check for active clusters and managed jobs in the workspace
-    _check_workspace_has_no_active_resources(workspace_name, 'delete')
+    resource_checker.check_no_active_resources_for_workspaces([(workspace_name,
+                                                                'delete')])
 
     def delete_workspace_fn(workspaces: Dict[str, Any]) -> None:
         """Function to delete workspace inside the lock."""
@@ -396,7 +287,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     new_workspaces = config.get('workspaces', {})
 
     # Collect all workspaces that need to be checked for active resources
-    workspaces_to_check = []
+    workspaces_to_check: List[Tuple[str, str]] = []
     workspaces_to_check_policy: Dict[str, Dict[str, List[str]]] = {
         'add': {},
         'update': {},
@@ -430,7 +321,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             workspaces_to_check_policy['delete'][workspace_name] = ['*']
 
     # Check all workspaces for active resources in one efficient call
-    _check_workspaces_have_no_active_resources(workspaces_to_check)
+    resource_checker.check_no_active_resources_for_workspaces(
+        workspaces_to_check)
 
     # Use file locking to prevent race conditions
     lock_path = skypilot_config.get_skypilot_config_lock_path()

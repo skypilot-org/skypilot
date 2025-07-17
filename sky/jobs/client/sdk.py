@@ -82,12 +82,11 @@ def launch(
             task=dag_str,
             name=name,
         )
-        response = rest.post(
-            f'{server_common.get_server_url()}/jobs/launch',
+        response = server_common.make_authenticated_request(
+            'POST',
+            '/jobs/launch',
             json=json.loads(body.model_dump_json()),
-            timeout=(5, None),
-            cookies=server_common.get_api_cookie_jar(),
-        )
+            timeout=(5, None))
         return server_common.get_request_id(response)
 
 
@@ -123,11 +122,13 @@ def queue(refresh: bool,
                 'resources': (str) resources of the job,
                 'submitted_at': (float) timestamp of submission,
                 'end_at': (float) timestamp of end,
-                'duration': (float) duration in seconds,
+                'job_duration': (float) duration in seconds,
                 'recovery_count': (int) Number of retries,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
               }
             ]
 
@@ -142,12 +143,11 @@ def queue(refresh: bool,
         all_users=all_users,
         job_ids=job_ids,
     )
-    response = rest.post(
-        f'{server_common.get_server_url()}/jobs/queue',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/queue',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
@@ -182,12 +182,11 @@ def cancel(
         all=all,
         all_users=all_users,
     )
-    response = rest.post(
-        f'{server_common.get_server_url()}/jobs/cancel',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/cancel',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     return server_common.get_request_id(response=response)
 
 
@@ -233,13 +232,12 @@ def tail_logs(name: Optional[str] = None,
         refresh=refresh,
         tail=tail,
     )
-    response = rest.post(
-        f'{server_common.get_server_url()}/jobs/logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     request_id = server_common.get_request_id(response)
     # Log request is idempotent when tail is 0, thus can resume previous
     # streaming point on retry.
@@ -283,12 +281,11 @@ def download_logs(
         controller=controller,
         local_dir=local_dir,
     )
-    response = rest.post(
-        f'{server_common.get_server_url()}/jobs/download_logs',
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/download_logs',
         json=json.loads(body.model_dump_json()),
-        timeout=(5, None),
-        cookies=server_common.get_api_cookie_jar(),
-    )
+        timeout=(5, None))
     job_id_remote_path_dict = sdk.stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(

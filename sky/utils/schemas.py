@@ -7,6 +7,7 @@ import enum
 from typing import Any, Dict, List, Tuple
 
 from sky.skylet import constants
+from sky.utils import kubernetes_enums
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -309,6 +310,9 @@ def _get_single_resources_schema():
                         'type': 'boolean',
                     }
                 }
+            },
+            '_no_missing_accel_warnings': {
+                'type': 'boolean'
             },
             'image_id': {
                 'anyOf': [{
@@ -787,7 +791,21 @@ def get_task_schema():
                 'type': 'string',
             },
             'workdir': {
-                'type': 'string',
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['url'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'ref': {
+                            'type': 'string',
+                        },
+                    },
+                }],
             },
             'event_callback': {
                 'type': 'string',
@@ -865,6 +883,9 @@ def get_task_schema():
             'volume_mounts': {
                 'type': 'array',
                 'items': get_volume_mount_schema(),
+            },
+            '_metadata': {
+                'type': 'object',
             },
             **_experimental_task_schema(),
         }
@@ -1018,10 +1039,95 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    'networking': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+        ],
+    },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
+    'pod_config': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating pod spec is hard
+        'additionalProperties': True,
+    },
+    'custom_metadata': {
+        'type': 'object',
+        'required': [],
+        # Allow arbitrary keys since validating metadata is hard
+        'additionalProperties': True,
+        # Disallow 'name' and 'namespace' keys in this dict
+        'not': {
+            'anyOf': [{
+                'required': ['name']
+            }, {
+                'required': ['namespace']
+            }]
+        },
+    },
+    'provision_timeout': {
+        'type': 'integer',
+    },
+    'autoscaler': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesAutoscalerType
+        ],
+    },
+    'high_availability': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'storage_class_name': {
+                'type': 'string',
+            }
+        },
+    },
+    'kueue': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'local_queue_name': {
+                'type': 'string',
+            },
+        },
+    },
+    'dws': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'enabled': {
+                'type': 'boolean',
+            },
+            # Only used when Kueue is enabled.
+            'max_run_duration': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.TIME_PATTERN,
+                }, {
+                    'type': 'integer',
+                }]
+            },
+        },
+    },
+    'remote_identity': {
+        'type': 'string',
+    }
+}
+
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.utils import kubernetes_enums
 
     resources_schema = {
         k: v
@@ -1178,70 +1284,21 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'networking': {
-                    'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value
-                        for type in kubernetes_enums.KubernetesNetworkingMode
-                    ]
-                },
-                'ports': {
-                    'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value
-                        for type in kubernetes_enums.KubernetesPortMode
-                    ]
-                },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
-                },
-                'custom_metadata': {
-                    'type': 'object',
-                    'required': [],
-                    # Allow arbitrary keys since validating metadata is hard
-                    'additionalProperties': True,
-                    # Disallow 'name' and 'namespace' keys in this dict
-                    'not': {
-                        'anyOf': [{
-                            'required': ['name']
-                        }, {
-                            'required': ['namespace']
-                        }]
-                    }
-                },
-                'provision_timeout': {
-                    'type': 'integer',
-                },
-                'autoscaler': {
-                    'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value
-                        for type in kubernetes_enums.KubernetesAutoscalerType
-                    ]
-                },
-                'high_availability': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'storage_class_name': {
-                            'type': 'string',
-                        }
-                    }
-                },
-                'kueue': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'local_queue_name': {
-                            'type': 'string',
+                    'properties': {},
+                    # Properties are kubernetes context names.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
                         },
                     },
                 },
+                **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
             }
         },
         'ssh': {
@@ -1399,6 +1456,21 @@ def get_config_schema():
                 'type': 'string',
                 # Apply validation for URL
                 'pattern': r'^https?://.*$',
+            },
+            'service_account_token': {
+                'anyOf': [
+                    {
+                        'type': 'string',
+                        # Validate that token starts with sky_ prefix
+                        'pattern': r'^sky_.+$',
+                    },
+                    {
+                        'type': 'null',
+                    }
+                ]
+            },
+            'requests_retention_hours': {
+                'type': 'integer',
             },
         }
     }

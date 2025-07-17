@@ -878,8 +878,10 @@ def cancel(
         f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
+    user_hash: Optional[str] = common_utils.get_current_user().id
 
     if all_users:
+        user_hash = None
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
@@ -904,7 +906,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_current_user().id)
+                        user_hash=user_hash)
 
 
 @usage_lib.entrypoint
@@ -1310,6 +1312,26 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
         cleanup=cleanup,
         infra=infra,
     )
+
+
+@usage_lib.entrypoint
+def ssh_status(context_name: str) -> Tuple[bool, str]:
+    """Check the status of an SSH Node Pool context.
+
+    Args:
+        context_name: The SSH context name (e.g., 'ssh-my-cluster')
+
+    Returns:
+        Tuple[bool, str]: (is_ready, reason)
+            - is_ready: True if the SSH Node Pool is ready, False otherwise
+            - reason: Explanation of the status
+    """
+    try:
+        is_ready, reason = clouds.SSH.check_single_context(context_name)
+        return is_ready, reason
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('Failed to check SSH context: '
+                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

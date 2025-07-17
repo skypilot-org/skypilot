@@ -7,6 +7,7 @@ import { getManagedJobs } from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getInfraData } from '@/data/connectors/infra';
+import { getVolumes } from '@/data/connectors/volumes';
 
 /**
  * Complete list of all dashboard cache functions organized by page
@@ -20,6 +21,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
     getInfraData: { fn: getInfraData, args: [] },
+    getVolumes: { fn: getVolumes, args: [] },
   },
 
   // Functions with arguments (require dynamic data)
@@ -39,6 +41,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       'getEnabledClouds',
     ],
     users: ['getUsers', 'getClusters', 'getManagedJobs'],
+    volumes: ['getVolumes'],
   },
 };
 

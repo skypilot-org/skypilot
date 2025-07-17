@@ -183,142 +183,121 @@ class TestRetryOnServerUnavailableDecorator:
             assert call_count == 3
 
 
-class TestRestWrapperFunctions:
-    """Test cases for REST wrapper functions (post and get)."""
+class TestRestRequestFunctions:
+    """Test cases for REST request functions (request and request_without_retry)."""
 
-    @mock.patch('sky.adaptors.common.LazyImport')
-    def test_post_successful_request(self, mock_lazy_import):
+    @mock.patch('sky.server.rest._session')
+    def test_post_successful_request(self, mock_session):
         """Test successful POST request."""
-        mock_requests = mock.Mock()
         mock_response = mock.Mock()
         mock_response.status_code = 200
-        mock_requests.post.return_value = mock_response
-        mock_lazy_import.return_value = mock_requests
+        mock_response.headers = {}
+        mock_session.request.return_value = mock_response
 
-        # Import after mocking to get the mocked requests
-        import importlib
-        importlib.reload(rest)
-
-        result = rest.post('http://test.com', json={'key': 'value'})
+        result = rest.request('POST', 'http://test.com', json={'key': 'value'})
 
         assert result == mock_response
-        mock_requests.post.assert_called_once_with('http://test.com',
-                                                   data=None,
-                                                   json={'key': 'value'})
+        mock_session.request.assert_called_once_with('POST',
+                                                     'http://test.com',
+                                                     json={'key': 'value'})
 
-    @mock.patch('sky.adaptors.common.LazyImport')
-    def test_get_successful_request(self, mock_lazy_import):
+    @mock.patch('sky.server.rest._session')
+    def test_get_successful_request(self, mock_session):
         """Test successful GET request."""
-        mock_requests = mock.Mock()
         mock_response = mock.Mock()
         mock_response.status_code = 200
-        mock_requests.get.return_value = mock_response
-        mock_lazy_import.return_value = mock_requests
+        mock_response.headers = {}
+        mock_session.request.return_value = mock_response
 
-        # Import after mocking to get the mocked requests
-        import importlib
-        importlib.reload(rest)
-
-        result = rest.get('http://test.com', params={'param': 'value'})
+        result = rest.request('GET',
+                              'http://test.com',
+                              params={'param': 'value'})
 
         assert result == mock_response
-        mock_requests.get.assert_called_once_with('http://test.com',
-                                                  params={'param': 'value'})
+        mock_session.request.assert_called_once_with('GET',
+                                                     'http://test.com',
+                                                     params={'param': 'value'})
 
-    @mock.patch('sky.adaptors.common.LazyImport')
-    def test_post_with_503_response_retries(self, mock_lazy_import):
+    @mock.patch('sky.server.rest._session')
+    def test_post_with_503_response_retries(self, mock_session):
         """Test POST request retries on 503 response."""
-        mock_requests = mock.Mock()
-
         # First call returns 503, second call succeeds
         mock_response_503 = mock.Mock()
         mock_response_503.status_code = 503
+        mock_response_503.headers = {}
         mock_response_200 = mock.Mock()
         mock_response_200.status_code = 200
+        mock_response_200.headers = {}
 
-        mock_requests.post.side_effect = [mock_response_503, mock_response_200]
-        mock_lazy_import.return_value = mock_requests
-
-        # Import after mocking to get the mocked requests
-        import importlib
-        importlib.reload(rest)
+        mock_session.request.side_effect = [
+            mock_response_503, mock_response_200
+        ]
 
         with mock.patch('time.sleep'):  # Speed up test
-            result = rest.post('http://test.com', json={'key': 'value'})
+            result = rest.request('POST',
+                                  'http://test.com',
+                                  json={'key': 'value'})
 
         assert result == mock_response_200
-        assert mock_requests.post.call_count == 2
+        assert mock_session.request.call_count == 2
 
-    @mock.patch('sky.adaptors.common.LazyImport')
-    def test_get_with_503_response_retries(self, mock_lazy_import):
+    @mock.patch('sky.server.rest._session')
+    def test_get_with_503_response_retries(self, mock_session):
         """Test GET request retries on 503 response."""
-        mock_requests = mock.Mock()
-
         # First call returns 503, second call succeeds
         mock_response_503 = mock.Mock()
         mock_response_503.status_code = 503
+        mock_response_503.headers = {}
         mock_response_200 = mock.Mock()
         mock_response_200.status_code = 200
+        mock_response_200.headers = {}
 
-        mock_requests.get.side_effect = [mock_response_503, mock_response_200]
-        mock_lazy_import.return_value = mock_requests
+        mock_session.request.side_effect = [
+            mock_response_503, mock_response_200
+        ]
 
-        # Import after mocking to get the mocked requests
-        import importlib
-        importlib.reload(rest)
+        with pytest.raises(exceptions.ServerTemporarilyUnavailableError):
+            rest.request_without_retry('GET', 'http://test.com')
 
-        with mock.patch('time.sleep'):  # Speed up test
-            result = rest.get('http://test.com', params={'param': 'value'})
-
-        assert result == mock_response_200
-        assert mock_requests.get.call_count == 2
-
-    @mock.patch('sky.adaptors.common.LazyImport')
-    def test_post_passes_through_kwargs(self, mock_lazy_import):
+    @mock.patch('sky.server.rest._session')
+    def test_post_passes_through_kwargs(self, mock_session):
         """Test that POST passes through additional kwargs."""
-        mock_requests = mock.Mock()
         mock_response = mock.Mock()
         mock_response.status_code = 200
-        mock_requests.post.return_value = mock_response
-        mock_lazy_import.return_value = mock_requests
+        mock_response.headers = {}
+        mock_session.request.return_value = mock_response
 
-        # Import after mocking to get the mocked requests
-        import importlib
-        importlib.reload(rest)
-
-        result = rest.post('http://test.com',
-                           json={'key': 'value'},
-                           headers={'Authorization': 'Bearer token'},
-                           timeout=30)
+        result = rest.request('POST',
+                              'http://test.com',
+                              json={'key': 'value'},
+                              headers={'Authorization': 'Bearer token'},
+                              timeout=30)
 
         assert result == mock_response
-        mock_requests.post.assert_called_once_with(
+        mock_session.request.assert_called_once_with(
+            'POST',
             'http://test.com',
-            data=None,
             json={'key': 'value'},
             headers={'Authorization': 'Bearer token'},
             timeout=30)
 
-    @mock.patch('sky.adaptors.common.LazyImport')
-    def test_get_passes_through_kwargs(self, mock_lazy_import):
+    @mock.patch('sky.server.rest._session')
+    def test_get_passes_through_kwargs(self, mock_session):
         """Test that GET passes through additional kwargs."""
-        mock_requests = mock.Mock()
         mock_response = mock.Mock()
         mock_response.status_code = 200
-        mock_requests.get.return_value = mock_response
-        mock_lazy_import.return_value = mock_requests
+        mock_response.headers = {}
+        mock_session.request.return_value = mock_response
 
-        # Import after mocking to get the mocked requests
-        import importlib
-        importlib.reload(rest)
-
-        result = rest.get('http://test.com',
-                          params={'param': 'value'},
-                          headers={'User-Agent': 'SkyPilot'},
-                          timeout=30)
+        result = rest.request_without_retry('GET',
+                                            'http://test.com',
+                                            params={'param': 'value'},
+                                            headers={'User-Agent': 'SkyPilot'},
+                                            timeout=30)
 
         assert result == mock_response
-        mock_requests.get.assert_called_once_with(
+        mock_session.request.assert_called_once_with(
+            'GET',
             'http://test.com',
             params={'param': 'value'},
             headers={'User-Agent': 'SkyPilot'},

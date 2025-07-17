@@ -65,12 +65,16 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
+    'pyjwt',
+    'gitpython',
+    'types-paramiko',
 ]
 
 server_dependencies = [
     'casbin',
     'sqlalchemy_adapter',
     'passlib',
+    'pyjwt',
 ]
 
 local_ray = [
@@ -127,6 +131,7 @@ extras_require: Dict[str, List[str]] = {
         'azure-mgmt-compute>=33.0.0',
         'azure-storage-blob>=12.23.1',
         'msgraph-sdk',
+        'msrestazure',
     ] + local_ray,
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances. Reference:
@@ -171,7 +176,7 @@ extras_require: Dict[str, List[str]] = {
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
     'nebius': [
-        'nebius>=0.2.0',
+        'nebius>=0.2.37',
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'server': server_dependencies,

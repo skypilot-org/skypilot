@@ -33,6 +33,7 @@ import {
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -148,7 +149,7 @@ function ClusterDetails() {
     // Use the matched cluster name if available, otherwise fall back to the display name
     const clusterParam = matchedClusterName || clusterData?.cluster || '$__all';
 
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-instance=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // Update isInitialLoad when cluster details are first loaded (not waiting for jobs)
@@ -464,7 +465,12 @@ function ActiveTab({
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>
-                <div className="text-base mt-1">{clusterData.user}</div>
+                <div className="text-base mt-1">
+                  <UserDisplay
+                    username={clusterData.user}
+                    userHash={clusterData.user_hash}
+                  />
+                </div>
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">
@@ -660,9 +666,12 @@ function ActiveTab({
         </div>
       </div>
 
-      {/* GPU Metrics Section - Only show for Kubernetes in-cluster */}
+      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
-        clusterData.full_infra === 'Kubernetes (in-cluster)' &&
+        clusterData.full_infra &&
+        clusterData.full_infra.includes('Kubernetes') &&
+        !clusterData.full_infra.includes('SSH') &&
+        !clusterData.full_infra.includes('ssh') &&
         isGrafanaAvailable && (
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">

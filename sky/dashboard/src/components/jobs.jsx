@@ -40,6 +40,7 @@ import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import {
   Select,
@@ -852,7 +853,7 @@ export function ManagedJobsTable({
               <button
                 key={status}
                 onClick={() => handleStatusClick(status)}
-                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
                   isStatusHighlighted(status) ||
                   selectedStatuses.includes(status)
                     ? getBadgeStyle(status)
@@ -1032,11 +1033,16 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.user}</TableCell>
+                      <TableCell>
+                        <UserDisplay
+                          username={item.user}
+                          userHash={item.user_hash}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Link
                           href="/workspaces"
-                          className="text-blue-600 hover:underline"
+                          className="text-gray-700 hover:text-blue-600 hover:underline"
                         >
                           {item.workspace || 'default'}
                         </Link>
@@ -1550,11 +1556,16 @@ export function ClusterJobs({
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{item.user}</TableCell>
+                    <TableCell>
+                      <UserDisplay
+                        username={item.user}
+                        userHash={item.user_hash}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Link
                         href="/workspaces"
-                        className="text-blue-600 hover:underline"
+                        className="text-gray-700 hover:text-blue-600 hover:underline"
                       >
                         {item.workspace || 'default'}
                       </Link>

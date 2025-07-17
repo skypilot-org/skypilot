@@ -509,6 +509,11 @@ class APIVersionMismatchError(RuntimeError):
     pass
 
 
+class APINotSupportedError(RuntimeError):
+    """Raised when the API is not supported by the remote peer."""
+    pass
+
+
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
 
@@ -631,4 +636,9 @@ class ServerTemporarilyUnavailableError(Exception):
 
 class RestfulPolicyError(Exception):
     """Raised when failed to call a RESTful policy."""
+    pass
+
+
+class GitError(Exception):
+    """Raised when a git operation fails."""
     pass

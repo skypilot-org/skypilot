@@ -3,7 +3,6 @@ import copy
 import json
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
-import uuid
 
 from sky import exceptions
 from sky import sky_logging
@@ -13,6 +12,7 @@ from sky.provision import common
 from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import volume
@@ -31,14 +31,10 @@ _MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_POD_INITIALIZED = 'skypilot-initialized'
-TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 
 
 def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
-    return {TAG_RAY_CLUSTER_NAME: cluster_name}
+    return {k8s_constants.TAG_RAY_CLUSTER_NAME: cluster_name}
 
 
 def _is_head(pod) -> bool:
@@ -76,7 +72,8 @@ def is_high_availability_cluster_by_kubectl(
         deployment_list = kubernetes.apps_api(
             context).list_namespaced_deployment(
                 namespace,
-                label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
+                label_selector=
+                f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
     except kubernetes.api_exception():
         return False
     # It is a high availability cluster if there is at least one deployment
@@ -281,10 +278,12 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
-        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        cluster_name = new_nodes[0].metadata.labels[
+            k8s_constants.TAG_SKYPILOT_CLUSTER_NAME]
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
+            label_selector=
+            f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in pods}
@@ -362,10 +361,12 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
 
     while True:
         # Get all pods in a single API call
-        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        cluster_name = new_nodes[0].metadata.labels[
+            k8s_constants.TAG_SKYPILOT_CLUSTER_NAME]
         all_pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
-            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
+            label_selector=
+            f'{k8s_constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in all_pods}
@@ -733,7 +734,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     else:
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
-        {TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+        {k8s_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
@@ -818,9 +819,29 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
                 constants.WORKER_NODE_TAGS)
-            pod_uuid = str(uuid.uuid4())[:6]
-            pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
-            pod_spec_copy['metadata']['name'] = f'{pod_name}-worker'
+            pod_name = f'{cluster_name_on_cloud}-worker{i}'
+            if pod_name in running_pods:
+                # If the pod is already running, we skip creating it.
+                return
+            pod_spec_copy['metadata']['name'] = pod_name
+            pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        # We need to keep the following fields in the pod spec to be same for
+        # head and worker pods.
+        # So that Kueue can merge them into a single PodSet when creating
+        # ProvisioningRequest to trigger scale up of the cluster autoscaler,
+        # this is especially required for DWS queued provisioning mode in GKE.
+        #  spec.containers[*].resources.requests
+        #  spec.initContainers[*].resources.requests
+        #  spec.resources
+        #  spec.nodeSelector
+        #  spec.tolerations
+        #  spec.affinity
+        #  resourceClaims
+        # Refer to the following links for more details:
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # pylint: disable=line-too-long
+        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # pylint: disable=line-too-long
+        if config.count > 1:
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
             # This is not set as a hard constraint because if different nodes
@@ -839,7 +860,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'podAffinityTerm': {
                     'labelSelector': {
                         'matchExpressions': [{
-                            'key': TAG_SKYPILOT_CLUSTER_NAME,
+                            'key': k8s_constants.TAG_SKYPILOT_CLUSTER_NAME,
                             'operator': 'In',
                             'values': [cluster_name_on_cloud]
                         }]
@@ -852,10 +873,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                  'preferredDuringSchedulingIgnoredDuringExecution'),
                 existing_rules)
             pod_spec_copy['spec']['affinity'] = pod_spec_config
-
-        # Check if any PVCs with access mode ReadWriteOnce or ReadWriteOncePod
-        # is used by any pod in the namespace.
-        volume.check_pvc_usage_for_pod(context, namespace, pod_spec_copy)
 
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
         # This is to prevent from non-TPU workloads from being scheduled on TPU
@@ -876,6 +893,22 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
+        # Add GPU toleration if GPU is requested.
+        # The nodes provisioned by DWS with flex start with queued provisioning
+        # mode have the GPU taint, so we have to add the GPU toleration.
+        # No need to check if DWS is enabled here since this has no side effect
+        # to the non-DWS case.
+        if needs_gpus:
+            gpu_toleration = {
+                'key': kubernetes_utils.get_gpu_resource_key(),
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            }
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                gpu_toleration
+            ]
 
         if to_create_deployment:
             volume.create_persistent_volume_claim(namespace, context, pvc_spec)
@@ -886,7 +919,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # Add the deployment name as a label to the pod spec
             deployment_name = deployment_spec['metadata']['name']
             pod_spec_copy['metadata']['labels'][
-                TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
+                k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME] = deployment_name
             template_pod_spec['metadata'] = pod_spec_copy['metadata']
             template_pod_spec['spec'].update(pod_spec_copy['spec'])
             # Propagate the labels to the deployment for identification.
@@ -899,6 +932,10 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             except Exception as e:
                 print('Deployment failed', e)
                 raise e
+
+        # Check if any PVCs with access mode ReadWriteOnce or ReadWriteOncePod
+        # is used by any pod in the namespace.
+        volume.check_pvc_usage_for_pod(context, namespace, pod_spec_copy)
 
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
@@ -939,7 +976,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             head_pod_name = pod.metadata.name
 
     networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'))
+        config.provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         # Adding the jump pod to the new_nodes list as well so it can be
         # checked if it's scheduled and running along with other pods.
@@ -1100,7 +1137,7 @@ def terminate_instances(
 
     # Clean up the SSH jump pod if in use
     networking_mode = network_utils.get_networking_mode(
-        provider_config.get('networking_mode'))
+        provider_config.get('networking_mode'), context)
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         pod_name = list(pods.keys())[0]
         try:
@@ -1145,8 +1182,11 @@ def get_cluster_info(
     head_pod_name = None
 
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                  port_forward_mode.value)
+    network_mode_str = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('networking_mode',),
+        default_value=port_forward_mode.value)
     network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
         network_mode_str)
     external_ip = kubernetes_utils.get_external_ip(network_mode, context)
@@ -1284,7 +1324,8 @@ def get_command_runners(
 
         # Try to get deployment name from label first
         head_instance_info = instances[pod_name][0]
-        deployment = head_instance_info.tags.get(TAG_SKYPILOT_DEPLOYMENT_NAME)
+        deployment = head_instance_info.tags.get(
+            k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME)
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(

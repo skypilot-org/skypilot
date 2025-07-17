@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import base64
 import contextlib
-import dataclasses
 import datetime
 import hashlib
 import json
@@ -14,6 +13,7 @@ import os
 import pathlib
 import posixpath
 import re
+import resource
 import shutil
 import sys
 import threading
@@ -26,6 +26,7 @@ import fastapi
 from fastapi.middleware import cors
 from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
+import uvloop
 
 import sky
 from sky import catalog
@@ -39,6 +40,7 @@ from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
+from sky.metrics import utils as metrics_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -47,11 +49,13 @@ from sky.server import constants as server_constants
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
+from sky.server import versions
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
 from sky.users import server as users_rest
@@ -118,11 +122,14 @@ def _basic_auth_401_response(content: str):
 # TODO(hailong): Remove this function and use request.state.auth_user instead.
 async def _override_user_info_in_request_body(request: fastapi.Request,
                                               auth_user: Optional[models.User]):
+    if auth_user is None:
+        return
+
     body = await request.body()
-    if auth_user and body:
+    if body:
         try:
             original_json = await request.json()
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(f'Error parsing request JSON: {e}')
         else:
             logger.debug(f'Overriding user for {request.state.request_id}: '
@@ -214,12 +221,24 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
-    if 'X-Auth-Request-Email' not in request.headers:
+    header_name = os.environ.get(constants.ENV_VAR_SERVER_AUTH_USER_HEADER,
+                                 'X-Auth-Request-Email')
+    if header_name not in request.headers:
         return None
-    user_name = request.headers['X-Auth-Request-Email']
+    user_name = request.headers[header_name]
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
+
+
+class InitializeRequestAuthUserMiddleware(
+        starlette.middleware.base.BaseHTTPMiddleware):
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        # Make sure that request.state.auth_user is set. Otherwise, we may get a
+        # KeyError while trying to read it.
+        request.state.auth_user = None
+        return await call_next(request)
 
 
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -227,14 +246,17 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/api/'):
-            # Try to set the auth user from the basic auth header so the
-            # following endpoint handlers can leverage the auth_user info
+            # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
-        if not auth_header or not auth_header.lower().startswith('basic '):
-            return _basic_auth_401_response('Invalid basic auth')
+        if not auth_header:
+            return _basic_auth_401_response('Authentication required')
+
+        # Only handle basic auth
+        if not auth_header.lower().startswith('basic '):
+            return _basic_auth_401_response('Invalid authentication method')
 
         # Check username and password
         encoded = auth_header.split(' ', 1)[1]
@@ -266,11 +288,150 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle Bearer Token Auth (Service Accounts)."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        """Make sure correct bearer token auth is present.
+
+        1. If the request has the X-Skypilot-Auth-Mode: token header, it must
+           have a valid bearer token.
+        2. For backwards compatibility, if the request has a Bearer token
+           beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
+           it must be a valid token.
+        3. If X-Skypilot-Auth-Mode is not set to "token", and there is no Bearer
+           token beginning with "sky_", allow the request to continue.
+
+        In conjunction with an auth proxy, the idea is to make the auth proxy
+        bypass requests with bearer tokens, instead setting the
+        X-Skypilot-Auth-Mode header. The auth proxy should either validate the
+        auth or set the header X-Skypilot-Auth-Mode: token.
+        """
+        has_skypilot_auth_header = (
+            request.headers.get('X-Skypilot-Auth-Mode') == 'token')
+        auth_header = request.headers.get('authorization')
+        has_bearer_token_starting_with_sky = (
+            auth_header and auth_header.lower().startswith('bearer ') and
+            auth_header.split(' ', 1)[1].startswith('sky_'))
+
+        if (not has_skypilot_auth_header and
+                not has_bearer_token_starting_with_sky):
+            # This is case #3 above. We do not need to validate the request.
+            # No Bearer token, continue with normal processing (OAuth2 cookies,
+            # etc.)
+            return await call_next(request)
+        # After this point, all requests must be validated.
+
+        if auth_header is None:
+            return fastapi.responses.JSONResponse(
+                status_code=401, content={'detail': 'Authentication required'})
+
+        # Extract token
+        split_header = auth_header.split(' ', 1)
+        if split_header[0].lower() != 'bearer':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid authentication method'})
+        sa_token = split_header[1]
+
+        # Handle SkyPilot service account tokens
+        return await self._handle_service_account_token(request, sa_token,
+                                                        call_next)
+
+    async def _handle_service_account_token(self, request: fastapi.Request,
+                                            sa_token: str, call_next):
+        """Handle SkyPilot service account tokens."""
+        # Check if service account tokens are enabled
+        sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                                    'false').lower()
+        if sa_enabled != 'true':
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={'detail': 'Service account authentication disabled'})
+
+        try:
+            # Import here to avoid circular imports
+            # pylint: disable=import-outside-toplevel
+            from sky.users.token_service import token_service
+
+            # Verify and decode JWT token
+            payload = token_service.verify_token(sa_token)
+
+            if payload is None:
+                logger.warning('Service account token verification failed')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={
+                        'detail': 'Invalid or expired service account token'
+                    })
+
+            # Extract user information from JWT payload
+            user_id = payload.get('sub')
+            user_name = payload.get('name')
+            token_id = payload.get('token_id')
+
+            if not user_id or not token_id:
+                logger.warning(
+                    'Invalid token payload: missing user_id or token_id')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Invalid token payload'})
+
+            # Verify user still exists in database
+            user_info = global_user_state.get_user(user_id)
+            if user_info is None:
+                logger.warning(
+                    f'Service account user {user_id} no longer exists')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={'detail': 'Service account user no longer exists'})
+
+            # Update last used timestamp for token tracking
+            try:
+                global_user_state.update_service_account_token_last_used(
+                    token_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to update token last used time: {e}')
+
+            # Set the authenticated user
+            auth_user = models.User(id=user_id,
+                                    name=user_name or user_info.name)
+            request.state.auth_user = auth_user
+
+            # Override user info in request body for service account requests
+            await _override_user_info_in_request_body(request, auth_user)
+
+            logger.debug(f'Authenticated service account: {user_id}')
+
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Service account authentication failed: {e}',
+                         exc_info=True)
+            return fastapi.responses.JSONResponse(
+                status_code=401,
+                content={
+                    'detail': f'Service account authentication failed: {str(e)}'
+                })
+
+        return await call_next(request)
+
+
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
         auth_user = _get_auth_user_header(request)
+
+        if request.state.auth_user is not None:
+            # Previous middleware is trusted more than this middleware.  For
+            # instance, a client could set the Authorization and the
+            # X-Auth-Request-Email header. In that case, the auth proxy will be
+            # skipped and we should rely on the Bearer token to authenticate the
+            # user - but that means the user could set X-Auth-Request-Email to
+            # whatever the user wants. We should thus ignore it.
+            if auth_user is not None:
+                logger.debug('Warning: ignoring auth proxy header since the '
+                             'auth user was already set.')
+            return await call_next(request)
 
         # Add user to database if auth_user is present
         if auth_user is not None:
@@ -282,8 +443,6 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
             request.state.auth_user = auth_user
-        else:
-            request.state.auth_user = None
 
         await _override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
@@ -329,9 +488,12 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
                 request_id=event.id,
                 request_name=event.name,
                 request_body=payloads.RequestBody(),
-                func=event.event_fn,
+                func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
+                # Request deamon should be retried if the process pool is
+                # broken.
+                retryable=True,
             )
         except exceptions.RequestAlreadyExistsError:
             # Lifespan will be executed in each uvicorn worker process, we
@@ -401,10 +563,48 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add API version to the request."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        version_info = versions.check_compatibility_at_server(request.headers)
+        # Bypass version handling for backward compatibility with clients prior
+        # to v0.11.0, the client will check the version in the body of
+        # /api/health response and hint an upgrade.
+        # TODO(aylei): remove this after v0.13.0 is released.
+        if version_info is None:
+            return await call_next(request)
+        if version_info.error is None:
+            versions.set_remote_api_version(version_info.api_version)
+            versions.set_remote_version(version_info.version)
+            response = await call_next(request)
+        else:
+            response = fastapi.responses.JSONResponse(
+                status_code=400,
+                content={
+                    'error': common.ApiServerStatus.VERSION_MISMATCH.value,
+                    'message': version_info.error,
+                })
+        response.headers[server_constants.API_VERSION_HEADER] = str(
+            server_constants.API_VERSION)
+        response.headers[server_constants.VERSION_HEADER] = \
+            versions.get_local_readable_version()
+        return response
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+# Middleware wraps in the order defined here. E.g., given
+#   app.add_middleware(Middleware1)
+#   app.add_middleware(Middleware2)
+#   app.add_middleware(Middleware3)
+# The effect will be like:
+#   Middleware3(Middleware2(Middleware1(request)))
+# If MiddlewareN does something like print(n); call_next(); print(n), you'll get
+#   3; 2; 1; <request>; 1; 2; 3
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
+app.add_middleware(APIVersionMiddleware)
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
@@ -418,12 +618,26 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    # TODO(syang): remove X-Request-ID when v0.10.0 is released.
+    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
     expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
+app.add_middleware(RBACMiddleware)
+# AuthProxyMiddleware should precede BasicAuthMiddleware and
+# BearerTokenMiddleware, since it should be skipped if either of those set the
+# auth user.
+app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
 if str(enable_basic_auth).lower() == 'true':
     app.add_middleware(BasicAuthMiddleware)
-app.add_middleware(AuthProxyMiddleware)
+# Bearer token middleware should always be present to handle service account
+# authentication
+app.add_middleware(BearerTokenMiddleware)
+# InitializeRequestAuthUserMiddleware must be the last added middleware so that
+# request.state.auth_user is always set, but can be overridden by the auth
+# middleware above.
+app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -432,6 +646,19 @@ app.include_router(workspaces_rest.router,
                    prefix='/workspaces',
                    tags=['workspaces'])
 app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
+app.include_router(ssh_node_pools_rest.router,
+                   prefix='/ssh_node_pools',
+                   tags=['ssh_node_pools'])
+
+# Increase the limit of files we can open to our hard limit. This fixes bugs
+# where we can not aquire file locks or open enough logs and the API server
+# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
+# TODO(luca) figure out what to do if we need to open more than 2^63 files.
+try:
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+except Exception:  # pylint: disable=broad-except
+    pass  # no issue, we will warn the user later if its too low
 
 
 @app.get('/token')
@@ -1141,36 +1368,9 @@ async def local_down(request: fastapi.Request) -> None:
     )
 
 
-@app.post('/ssh_up')
-async def ssh_up(request: fastapi.Request,
-                 ssh_up_body: payloads.SSHUpBody) -> None:
-    """Deploys a Kubernetes cluster on SSH targets."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='ssh_up',
-        request_body=ssh_up_body,
-        func=core.ssh_up,
-        schedule_type=requests_lib.ScheduleType.LONG,
-    )
-
-
-@app.post('/ssh_down')
-async def ssh_down(request: fastapi.Request,
-                   ssh_up_body: payloads.SSHUpBody) -> None:
-    """Tears down a Kubernetes cluster on SSH targets."""
-    # We still call ssh_up but with cleanup=True
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='ssh_down',
-        request_body=ssh_up_body,
-        func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
-        schedule_type=requests_lib.ScheduleType.LONG,
-    )
-
-
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> requests_lib.RequestPayload:
+async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
         request_task = requests_lib.get_request(request_id)
@@ -1185,9 +1385,8 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
                     detail=f'Request {request_id!r} should be retried')
             request_error = request_task.get_error()
             if request_error is not None:
-                raise fastapi.HTTPException(status_code=500,
-                                            detail=dataclasses.asdict(
-                                                request_task.encode()))
+                raise fastapi.HTTPException(
+                    status_code=500, detail=request_task.encode().model_dump())
             return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
@@ -1266,6 +1465,12 @@ async def stream(
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
+        if not log_path_to_stream.exists():
+            # The log file might be deleted by the request GC daemon but the
+            # request task is still in the database.
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Log of request {request_id!r} has been deleted')
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1325,7 +1530,7 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
-) -> List[requests_lib.RequestPayload]:
+) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
         statuses = None
@@ -1362,9 +1567,13 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
+    logger.info(f'Health endpoint: request.state.auth_user = {user}')
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
-        'api_version': server_constants.API_VERSION,
+        # Kept for backward compatibility, clients before 0.11.0 will read this
+        # field to check compatibility and hint the user to upgrade the CLI.
+        # TODO(aylei): remove this field after 0.13.0
+        'api_version': str(server_constants.API_VERSION),
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
@@ -1462,6 +1671,38 @@ async def all_contexts(request: fastapi.Request) -> None:
     )
 
 
+@app.get('/gpu-metrics')
+async def gpu_metrics() -> fastapi.Response:
+    """Gets the GPU metrics from multiple external k8s clusters"""
+    contexts = core.get_all_contexts()
+    all_metrics = []
+    successful_contexts = 0
+
+    tasks = [
+        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
+        for context in contexts
+        if context != 'in-cluster'
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(
+                f'Failed to get metrics for context {contexts[i]}: {result}')
+        else:
+            metrics_text = result
+            all_metrics.append(metrics_text)
+            successful_contexts += 1
+
+    combined_metrics = '\n\n'.join(all_metrics)
+
+    # Return as plain text for Prometheus compatibility
+    return fastapi.Response(
+        content=combined_metrics,
+        media_type='text/plain; version=0.0.4; charset=utf-8')
+
+
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
@@ -1544,13 +1785,18 @@ if __name__ == '__main__':
 
     queue_server: Optional[multiprocessing.Process] = None
     workers: List[executor.RequestWorker] = []
+    # Global background tasks that will be scheduled in a separate event loop.
+    global_tasks: List[asyncio.Task] = []
     try:
+        background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
-            metrics_thread = threading.Thread(target=metrics.run_metrics_server,
-                                              args=(cmd_args.host,
-                                                    cmd_args.metrics_port),
-                                              daemon=True)
-            metrics_thread.start()
+            metrics_server = metrics.build_metrics_server(
+                cmd_args.host, cmd_args.metrics_port)
+            global_tasks.append(background.create_task(metrics_server.serve()))
+        global_tasks.append(
+            background.create_task(requests_lib.requests_gc_daemon()))
+        threading.Thread(target=background.run_forever, daemon=True).start()
+
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
@@ -1568,6 +1814,8 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
 
+        for gt in global_tasks:
+            gt.cancel()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))

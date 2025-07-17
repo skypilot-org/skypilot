@@ -13,10 +13,10 @@ CLOUDS_TO_TEST = [
 
 
 def mock_server_api_version(monkeypatch, version):
-    original_get = requests.get
+    original_request = requests.request
 
-    def mock_get(url, *args, **kwargs):
-        if '/api/health' in url:
+    def mock_request(method, url, *args, **kwargs):
+        if '/api/health' in url and method == 'GET':
             mock_response = mock.MagicMock()
             mock_response.status_code = 200
             mock_response.json.return_value = {
@@ -25,9 +25,9 @@ def mock_server_api_version(monkeypatch, version):
                 'commit': '1234567890'
             }
             return mock_response
-        return original_get(url, *args, **kwargs)
+        return original_request(method, url, *args, **kwargs)
 
-    monkeypatch.setattr(requests, 'get', mock_get)
+    monkeypatch.setattr(requests, 'request', mock_request)
 
 
 class TestWithNoCloudEnabled:
@@ -107,33 +107,6 @@ class TestWithNoCloudEnabled:
 
         result = cli_runner.invoke(command.check, ['notarealcloud'])
         assert isinstance(result.exception, ValueError)
-
-
-class TestServerVersion:
-
-    def test_cli_low_version_server_high_version(self, monkeypatch,
-                                                 mock_client_requests):
-        mock_server_api_version(monkeypatch, '2')
-        monkeypatch.setattr(server.constants, 'API_VERSION', 3)
-        cli_runner = cli_testing.CliRunner()
-
-        result = cli_runner.invoke(command.status, [])
-        assert "Client and local API server version mismatch" in str(
-            result.exception)
-        assert result.exit_code == 1
-
-    def test_cli_high_version_server_low_version(self, monkeypatch,
-                                                 mock_client_requests):
-        mock_server_api_version(monkeypatch, '3')
-        monkeypatch.setattr(server.constants, 'API_VERSION', 2)
-        cli_runner = cli_testing.CliRunner()
-
-        result = cli_runner.invoke(command.status, [])
-
-        # Verify the error message contains correct versions
-        assert "Client and local API server version mismatch" in str(
-            result.exception)
-        assert result.exit_code == 1
 
 
 class TestHelperFunctions:

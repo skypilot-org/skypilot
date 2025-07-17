@@ -1,9 +1,27 @@
 """Payloads for the Sky API requests.
 
-TODO(zhwu): We can consider a better way to handle the default values of the
-kwargs for the payloads, otherwise, we have to keep the default values the sync
-with the backend functions. The benefit of having the default values in the
-payloads is that a user can find the default values in the Restful API docs.
+All the payloads that will be used between the client and server communication
+must be defined here to make sure it get covered by our API compatbility tests.
+
+Compatibility note:
+- Adding a new body for new API is compatible as long as the SDK method using
+  the new API is properly decorated with `versions.minimal_api_version`.
+- Adding a new field with default value to an existing body is compatible at
+  API level, but the business logic must handle the case where the field is
+  not proccessed by an old version of remote client/server. This can usually
+  be done by checking `versions.get_remote_api_version()`.
+- Other changes are not compatible at API level, so must be handled specially.
+  A common pattern is to keep both the old and new version of the body and
+  checking `versions.get_remote_api_version()` to decide which body to use. For
+  example, say we refactor the `LaunchBody`, the original `LaunchBody` must be
+  kept in the codebase and the new body should be added via `LaunchBodyV2`.
+  Then if the remote runs in an old version, the local code should still send
+  `LaunchBody` to keep the backward compatibility. `LaunchBody` can be removed
+  later when constants.MIN_COMPATIBLE_API_VERSION is updated to a version that
+  supports `LaunchBodyV2`
+
+Also refer to sky.server.constants.MIN_COMPATIBLE_API_VERSION and the
+sky.server.versions module for more details.
 """
 import os
 import typing
@@ -94,7 +112,18 @@ def get_override_skypilot_config_path_from_client() -> Optional[str]:
     return skypilot_config.loaded_config_path_serialized()
 
 
-class RequestBody(pydantic.BaseModel):
+class BasePayload(pydantic.BaseModel):
+    """The base payload for the SkyPilot API."""
+    # Ignore extra fields in the request body, which is useful for backward
+    # compatibility. The difference with `allow` is that `ignore` will not
+    # include the unknown fields when dump the model, i.e., we can add new
+    # fields to the request body without breaking the existing old API server
+    # where the handler function does not accept the new field in function
+    # signature.
+    model_config = pydantic.ConfigDict(extra='ignore')
+
+
+class RequestBody(BasePayload):
     """The request body for the SkyPilot API."""
     env_vars: Dict[str, str] = {}
     entrypoint: str = ''
@@ -102,11 +131,6 @@ class RequestBody(pydantic.BaseModel):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
-
-    # Allow extra fields in the request body, which is useful for backward
-    # compatibility, i.e., we can add new fields to the request body without
-    # breaking the existing old API server.
-    model_config = pydantic.ConfigDict(extra='allow')
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -356,6 +380,39 @@ class UserUpdateBody(RequestBody):
 class UserImportBody(RequestBody):
     """The request body for the user import endpoint."""
     csv_content: str
+
+
+class ServiceAccountTokenCreateBody(RequestBody):
+    """The request body for creating a service account token."""
+    token_name: str
+    expires_in_days: Optional[int] = None
+
+
+class ServiceAccountTokenDeleteBody(RequestBody):
+    """The request body for deleting a service account token."""
+    token_id: str
+
+
+class UpdateRoleBody(RequestBody):
+    """The request body for updating a user role."""
+    role: str
+
+
+class ServiceAccountTokenRoleBody(RequestBody):
+    """The request body for getting a service account token role."""
+    token_id: str
+
+
+class ServiceAccountTokenUpdateRoleBody(RequestBody):
+    """The request body for updating a service account token role."""
+    token_id: str
+    role: str
+
+
+class ServiceAccountTokenRotateBody(RequestBody):
+    """The request body for rotating a service account token."""
+    token_id: str
+    expires_in_days: Optional[int] = None
 
 
 class DownloadBody(RequestBody):
@@ -634,3 +691,25 @@ class GetConfigBody(RequestBody):
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
+
+
+class RequestPayload(BasePayload):
+    """The payload for the requests."""
+
+    request_id: str
+    name: str
+    entrypoint: str
+    request_body: str
+    status: str
+    created_at: float
+    user_id: str
+    return_value: str
+    error: str
+    pid: Optional[int]
+    schedule_type: str
+    user_name: Optional[str] = None
+    # Resources the request operates on.
+    cluster_name: Optional[str] = None
+    status_msg: Optional[str] = None
+    should_retry: bool = False
+    finished_at: Optional[float] = None

@@ -55,6 +55,9 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
     AUTOSTOP = 'autostop'  # Pod/VM can stop itself
     AUTODOWN = 'autodown'  # Pod/VM can down itself
+    # Pod/VM can have customized multiple network interfaces
+    # e.g. GCP GPUDirect TCPX
+    CUSTOM_MULTI_NETWORK = 'custom_multi_network'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
@@ -669,8 +672,11 @@ class Cloud:
             resources)
 
         # Docker image is not compatible with ssh proxy command.
-        if skypilot_config.get_nested(
-            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+        if skypilot_config.get_effective_region_config(
+                cloud=str(cls).lower(),
+                region=None,
+                keys=('ssh_proxy_command',),
+                default_value=None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
                     f'Docker image is currently not supported on {cls._REPR} '
