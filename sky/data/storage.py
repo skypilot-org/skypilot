@@ -1441,9 +1441,6 @@ class S3CompatibleStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
-    PROVIDER_PREFIXES = {
-        's3://', 'gs://', 'r2://', 'oci://', 'nebius://', 'cos://'
-    }
 
     def __init__(self,
                  name: str,
@@ -1477,6 +1474,26 @@ class S3CompatibleStore(AbstractStore):
     def get_store_type(cls) -> str:
         """Return the store type identifier from configuration."""
         return cls.get_config().store_type
+
+    @property
+    def provider_prefixes(self) -> set:
+        """Dynamically get all provider prefixes from registered stores."""
+        prefixes = set()
+        
+        # Get prefixes from all registered S3-compatible stores
+        for store_class in _S3_COMPATIBLE_STORES.values():
+            config = store_class.get_config()
+            prefixes.add(config.url_prefix)
+        
+        # Add hardcoded prefixes for non-S3-compatible stores
+        prefixes.update({
+            'gs://',     # GCS
+            'https://',  # Azure  
+            'cos://',    # IBM COS
+            'oci://',    # OCI
+        })
+        
+        return prefixes
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1665,28 +1682,16 @@ class S3CompatibleStore(AbstractStore):
         if not isinstance(self.source, str):
             return False
         return any(
-            self.source.startswith(prefix) for prefix in self.PROVIDER_PREFIXES)
-
-    def _transfer_from_other_provider(self):
-        """Transfer data from another cloud provider."""
-        source_type = self._detect_source_type()
-        target_type = self.config.store_type.lower()
-
-        if hasattr(data_transfer, f'{source_type}_to_{target_type}'):
-            transfer_func = getattr(data_transfer,
-                                    f'{source_type}_to_{target_type}')
-            transfer_func(self.name, self.name)
+            self.source.startswith(prefix) for prefix in self.provider_prefixes)
 
     def _detect_source_type(self) -> str:
         """Detect the source provider type from URL."""
         if not isinstance(self.source, str):
             return 'unknown'
 
-        for provider in self.PROVIDER_PREFIXES:
+        for provider in self.provider_prefixes:
             if self.source.startswith(provider):
-                # Assume s3://, remove ://
                 return provider[:-len('://')]
-
         return ''
 
     def delete(self) -> None:
