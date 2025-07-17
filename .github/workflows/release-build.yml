@@ -315,6 +315,7 @@ jobs:
 
   create-pr:
     needs: [release-build, smoke-tests, quicktest-core, release-tests]
+    if: always() && needs.release-build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

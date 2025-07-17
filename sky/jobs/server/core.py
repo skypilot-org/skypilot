@@ -115,7 +115,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
-                                          task.name, resources_str)
+                                          task.name, resources_str,
+                                          task.metadata_json)
         job_ids.append(consolidation_mode_job_id)
     return job_ids
 

@@ -1281,10 +1281,11 @@ Example:
 .. code-block:: yaml
 
     nebius:
-        :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-        :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+        use_internal_ips: true
+        ssh_proxy_command:
           eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
           eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+        tenant_id: tenant-1234567890
         # Region-specific configuration
         eu-north1:
             # Project identifier for this region
@@ -1347,6 +1348,21 @@ Example:
     ssh_proxy_command:
       eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
       eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
+
+.. _config-yaml-nebius-tenant-id:
+
+``nebius.tenant_id``
+~~~~~~~~~~~~~~~~~~~~
+
+Nebius tenant ID (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    tenant_id: tenant-1234567890
+
 
 .. _config-yaml-rbac:
 

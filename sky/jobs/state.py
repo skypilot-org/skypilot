@@ -77,6 +77,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('task_name', sqlalchemy.Text),
     sqlalchemy.Column('specs', sqlalchemy.Text),
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -116,17 +117,16 @@ ha_recovery_script_table = sqlalchemy.Table(
 )
 
 
-def create_table():
+def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
     # See: issue #3863, #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
-    if (_SQLALCHEMY_ENGINE.dialect.name
-            == db_utils.SQLAlchemyDialect.SQLITE.value and
+    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
             not common_utils.is_wsl()):
         try:
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            with orm.Session(engine) as session:
                 session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
                 session.commit()
         except sqlalchemy_exc.OperationalError as e:
@@ -136,10 +136,10 @@ def create_table():
             # is not critical and is likely to be enabled by other processes.
 
     # Create tables if they don't exist
-    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, engine)
 
     # Backward compatibility: add columns that not exist in older databases
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         db_utils.add_column_to_table_sqlalchemy(session, 'spot',
                                                 'failure_reason',
                                                 sqlalchemy.Text())
@@ -174,6 +174,14 @@ def create_table():
             'local_log_file',
             sqlalchemy.Text(),
             default_statement='DEFAULT NULL')
+
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            'spot',
+            'metadata',
+            sqlalchemy.Text(),
+            default_statement='DEFAULT \'{}\'',
+            value_to_replace_existing_entries='{}')
 
         db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
                                                 'schedule_state',
@@ -242,15 +250,15 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
                 conn_string = skypilot_config.get_nested(('db',), None)
             if conn_string:
                 logger.debug(f'using db URI from {conn_string}')
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-                    conn_string, poolclass=sqlalchemy.NullPool)
+                engine = sqlalchemy.create_engine(conn_string,
+                                                  poolclass=sqlalchemy.NullPool)
             else:
                 db_path = os.path.expanduser('~/.sky/spot_jobs.db')
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
                                                        exist_ok=True)
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
-                                                              db_path)
-            create_table()
+                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
+            create_table(engine)
+            _SQLALCHEMY_ENGINE = engine
     return _SQLALCHEMY_ENGINE
 
 
@@ -296,6 +304,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'task_name': r['task_name'],
         'specs': r['specs'],
         'local_log_file': r['local_log_file'],
+        'metadata': r['metadata'],
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r[job_info_table.c.spot_job_id
                              ],  # ambiguous, use table.column
@@ -587,7 +596,13 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
 
 
 @_init_db
-def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
+def set_pending(
+    job_id: int,
+    task_id: int,
+    task_name: str,
+    resources_str: str,
+    metadata: str,
+):
     """Set the task to pending state."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -597,6 +612,7 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
                 task_id=task_id,
                 task_name=task_name,
                 resources=resources_str,
+                metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
             ))
         session.commit()
@@ -1222,38 +1238,40 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     # Note: we will get the user_hash here, but don't try to call
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
+    query = sqlalchemy.select(spot_table, job_info_table).select_from(
+        spot_table.outerjoin(
+            job_info_table,
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+    if job_id is not None:
+        query = query.where(spot_table.c.spot_job_id == job_id)
+    query = query.order_by(spot_table.c.spot_job_id.desc(),
+                           spot_table.c.task_id.asc())
+    rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        query = sqlalchemy.select(spot_table, job_info_table).select_from(
-            spot_table.outerjoin(
-                job_info_table,
-                spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
-        if job_id is not None:
-            query = query.where(spot_table.c.spot_job_id == job_id)
-        query = query.order_by(spot_table.c.spot_job_id.desc(),
-                               spot_table.c.task_id.asc())
         rows = session.execute(query).fetchall()
-        jobs = []
-        for row in rows:
-            job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
-            job_dict['status'] = ManagedJobStatus(job_dict['status'])
-            job_dict['schedule_state'] = ManagedJobScheduleState(
-                job_dict['schedule_state'])
-            if job_dict['job_name'] is None:
-                job_dict['job_name'] = job_dict['task_name']
+    jobs = []
+    for row in rows:
+        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        job_dict['status'] = ManagedJobStatus(job_dict['status'])
+        job_dict['schedule_state'] = ManagedJobScheduleState(
+            job_dict['schedule_state'])
+        if job_dict['job_name'] is None:
+            job_dict['job_name'] = job_dict['task_name']
+        job_dict['metadata'] = json.loads(job_dict['metadata'])
 
-            # Add user YAML content for managed jobs.
-            yaml_path = job_dict.get('original_user_yaml_path')
-            if yaml_path:
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        job_dict['user_yaml'] = f.read()
-                except (FileNotFoundError, IOError, OSError):
-                    job_dict['user_yaml'] = None
-            else:
+        # Add user YAML content for managed jobs.
+        yaml_path = job_dict.get('original_user_yaml_path')
+        if yaml_path:
+            try:
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    job_dict['user_yaml'] = f.read()
+            except (FileNotFoundError, IOError, OSError):
                 job_dict['user_yaml'] = None
+        else:
+            job_dict['user_yaml'] = None
 
-            jobs.append(job_dict)
-        return jobs
+        jobs.append(job_dict)
+    return jobs
 
 
 @_init_db

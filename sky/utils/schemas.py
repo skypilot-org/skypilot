@@ -793,7 +793,21 @@ def get_task_schema():
                 'type': 'string',
             },
             'workdir': {
-                'type': 'string',
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['url'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'ref': {
+                            'type': 'string',
+                        },
+                    },
+                }],
             },
             'event_callback': {
                 'type': 'string',
@@ -871,6 +885,9 @@ def get_task_schema():
             'volume_mounts': {
                 'type': 'array',
                 'items': get_volume_mount_schema(),
+            },
+            '_metadata': {
+                'type': 'object',
             },
             **_experimental_task_schema(),
         }
@@ -1105,6 +1122,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'remote_identity': {
+        'type': 'string',
+    }
 }
 
 

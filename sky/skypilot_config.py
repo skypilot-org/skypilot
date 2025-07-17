@@ -52,6 +52,7 @@ import contextlib
 import copy
 import json
 import os
+import pathlib
 import tempfile
 import threading
 import typing
@@ -573,7 +574,8 @@ def _reload_config_as_server() -> None:
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
-            Base.metadata.create_all(bind=sqlalchemy_engine)
+            db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
+                                                 sqlalchemy_engine)
 
             def _get_config_yaml_from_db(
                     key: str) -> Optional[config_utils.Config]:
@@ -847,7 +849,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
-        global_config_path = get_user_config_path()
+        # Fallback to ~/.sky/config.yaml, and make sure it exists.
+        global_config_path = os.path.expanduser(get_user_config_path())
+        pathlib.Path(global_config_path).touch(exist_ok=True)
 
     db_updated = False
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
@@ -859,7 +863,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             with _DB_USE_LOCK:
                 sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
                                                              poolclass=NullPool)
-                Base.metadata.create_all(bind=sqlalchemy_engine)
+                db_utils.add_tables_to_db_sqlalchemy(Base.metadata,
+                                                     sqlalchemy_engine)
 
                 def _set_config_yaml_to_db(key: str,
                                            config: config_utils.Config):

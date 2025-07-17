@@ -65,6 +65,7 @@ class TestPermissionService:
         with mock.patch.object(permission.PermissionService,
                                '_maybe_initialize_policies'):
             service = permission.PermissionService()
+            service._lazy_initialize()
 
             # Verify SQLAlchemy adapter was created with the correct engine
             mock_adapter_class.assert_called_once_with(mock_engine)
@@ -122,30 +123,26 @@ class TestPermissionService:
         # Mock users
         mock_get_users.return_value = mock_users
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service._maybe_initialize_policies()
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._maybe_initialize_policies()
 
-            # Verify policies were added for user role blocklist
-            mock_enforcer.add_policy.assert_any_call('user',
-                                                     '/workspaces/config',
-                                                     'POST')
+        # Verify policies were added for user role blocklist
+        mock_enforcer.add_policy.assert_any_call('user', '/workspaces/config',
+                                                 'POST')
 
-            # Verify workspace policies were added
-            mock_enforcer.add_policy.assert_any_call('*', 'default', '*')
-            mock_enforcer.add_policy.assert_any_call('user1', 'private-ws', '*')
-            mock_enforcer.add_policy.assert_any_call('user2', 'private-ws', '*')
+        # Verify workspace policies were added
+        mock_enforcer.add_policy.assert_any_call('*', 'default', '*')
+        mock_enforcer.add_policy.assert_any_call('user1', 'private-ws', '*')
+        mock_enforcer.add_policy.assert_any_call('user2', 'private-ws', '*')
 
-            # Verify users were assigned default roles
-            for user in mock_users:
-                mock_enforcer.add_grouping_policy.assert_any_call(
-                    user.id, rbac.get_default_role())
+        # Verify users were assigned default roles
+        for user in mock_users:
+            mock_enforcer.add_grouping_policy.assert_any_call(
+                user.id, rbac.get_default_role())
 
-            # Verify policy was saved
-            mock_enforcer.save_policy.assert_called()
+        # Verify policy was saved
+        mock_enforcer.save_policy.assert_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.rbac.get_workspace_policy_permissions')
@@ -198,17 +195,14 @@ class TestPermissionService:
         # Mock users
         mock_get_users.return_value = mock_users
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service._maybe_initialize_policies()
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._maybe_initialize_policies()
 
-            # Verify no new policies were added (since they already exist)
-            mock_enforcer.remove_filtered_policy.assert_not_called()
-            # save_policy should not be called if no updates were made
-            # (users already have roles, policies already exist)
+        # Verify no new policies were added (since they already exist)
+        mock_enforcer.remove_filtered_policy.assert_not_called()
+        # save_policy should not be called if no updates were made
+        # (users already have roles, policies already exist)
 
     def test_add_user_if_not_exists_new_user(self):
         """Test adding a new user that doesn't exist."""
@@ -216,17 +210,14 @@ class TestPermissionService:
         mock_enforcer.get_roles_for_user.return_value = []  # No existing roles
         mock_enforcer.add_grouping_policy.return_value = True
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            result = service._add_user_if_not_exists_no_lock('new_user')
+        result = service._add_user_if_not_exists_no_lock('new_user')
 
-            assert result is True
-            mock_enforcer.add_grouping_policy.assert_called_once_with(
-                'new_user', rbac.get_default_role())
+        assert result is True
+        mock_enforcer.add_grouping_policy.assert_called_once_with(
+            'new_user', rbac.get_default_role())
 
     def test_add_user_if_not_exists_existing_user(self):
         """Test adding a user that already exists."""
@@ -235,16 +226,13 @@ class TestPermissionService:
             'user'
         ]  # User already has roles
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            result = service._add_user_if_not_exists_no_lock('existing_user')
+        result = service._add_user_if_not_exists_no_lock('existing_user')
 
-            assert result is False
-            mock_enforcer.add_grouping_policy.assert_not_called()
+        assert result is False
+        mock_enforcer.add_grouping_policy.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_update_role_new_role(self, mock_policy_lock):
@@ -257,21 +245,18 @@ class TestPermissionService:
         mock_enforcer.remove_grouping_policy.return_value = True
         mock_enforcer.add_grouping_policy.return_value = True
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service._load_policy_no_lock = mock.Mock()
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
 
-            service.update_role('user1', 'admin')
+        service.update_role('user1', 'admin')
 
-            # Verify old role was removed and new role was added
-            mock_enforcer.remove_grouping_policy.assert_called_once_with(
-                'user1', 'user')
-            mock_enforcer.add_grouping_policy.assert_called_once_with(
-                'user1', 'admin')
-            mock_enforcer.save_policy.assert_called_once()
+        # Verify old role was removed and new role was added
+        mock_enforcer.remove_grouping_policy.assert_called_once_with(
+            'user1', 'user')
+        mock_enforcer.add_grouping_policy.assert_called_once_with(
+            'user1', 'admin')
+        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_update_role_same_role(self, mock_policy_lock):
@@ -283,54 +268,44 @@ class TestPermissionService:
         mock_enforcer.get_roles_for_user.return_value = ['admin'
                                                         ]  # Current role
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service._load_policy_no_lock = mock.Mock()
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
 
-            service.update_role('user1', 'admin')
+        service.update_role('user1', 'admin')
 
-            # Verify no changes were made
-            mock_enforcer.remove_grouping_policy.assert_not_called()
-            mock_enforcer.add_grouping_policy.assert_not_called()
-            mock_enforcer.save_policy.assert_not_called()
+        # Verify no changes were made
+        mock_enforcer.remove_grouping_policy.assert_not_called()
+        mock_enforcer.add_grouping_policy.assert_not_called()
+        mock_enforcer.save_policy.assert_not_called()
 
     def test_get_user_roles(self):
         """Test getting user roles."""
         mock_enforcer = mock.Mock()
         mock_enforcer.get_roles_for_user.return_value = ['admin', 'user']
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service._load_policy_no_lock = mock.Mock()
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
 
-            roles = service.get_user_roles('user1')
+        roles = service.get_user_roles('user1')
 
-            assert roles == ['admin', 'user']
-            mock_enforcer.get_roles_for_user.assert_called_once_with('user1')
+        assert roles == ['admin', 'user']
+        mock_enforcer.get_roles_for_user.assert_called_once_with('user1')
 
     def test_check_endpoint_permission(self):
         """Test checking endpoint permissions."""
         mock_enforcer = mock.Mock()
         mock_enforcer.enforce.return_value = True
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            result = service.check_endpoint_permission('user1', '/api/test',
-                                                       'GET')
+        result = service.check_endpoint_permission('user1', '/api/test', 'GET')
 
-            assert result is True
-            mock_enforcer.enforce.assert_called_once_with(
-                'user1', '/api/test', 'GET')
+        assert result is True
+        mock_enforcer.enforce.assert_called_once_with('user1', '/api/test',
+                                                      'GET')
 
     def test_check_workspace_permission_non_server(self):
         """Test workspace permission check when not on API server."""
@@ -338,16 +313,13 @@ class TestPermissionService:
         if constants.ENV_VAR_IS_SKYPILOT_SERVER in os.environ:
             del os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER]
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
+        service = permission.PermissionService()
+        service._lazy_initialize()
 
-            result = service.check_workspace_permission('user1',
-                                                        'test-workspace')
+        result = service.check_workspace_permission('user1', 'test-workspace')
 
-            # Should always return True when not on API server
-            assert result is True
+        # Should always return True when not on API server
+        assert result is True
 
     def test_check_workspace_permission_admin_user(self):
         """Test workspace permission check for admin user."""
@@ -355,18 +327,15 @@ class TestPermissionService:
 
         mock_enforcer = mock.Mock()
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service.get_user_roles = mock.Mock(return_value=['admin'])
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service.get_user_roles = mock.Mock(return_value=['admin'])
 
-            result = service.check_workspace_permission('admin_user',
-                                                        'test-workspace')
+        result = service.check_workspace_permission('admin_user',
+                                                    'test-workspace')
 
-            # Admin should always have access
-            assert result is True
+        # Admin should always have access
+        assert result is True
 
     def test_check_workspace_permission_regular_user(self):
         """Test workspace permission check for regular user."""
@@ -375,19 +344,15 @@ class TestPermissionService:
         mock_enforcer = mock.Mock()
         mock_enforcer.enforce.return_value = True
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
-            service.get_user_roles = mock.Mock(return_value=['user'])
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service.get_user_roles = mock.Mock(return_value=['user'])
 
-            result = service.check_workspace_permission('user1',
-                                                        'test-workspace')
+        result = service.check_workspace_permission('user1', 'test-workspace')
 
-            assert result is True
-            mock_enforcer.enforce.assert_called_once_with(
-                'user1', 'test-workspace', '*')
+        assert result is True
+        mock_enforcer.enforce.assert_called_once_with('user1', 'test-workspace',
+                                                      '*')
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_add_workspace_policy(self, mock_policy_lock):
@@ -398,20 +363,15 @@ class TestPermissionService:
         mock_enforcer = mock.Mock()
         mock_enforcer.add_policy.return_value = True
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            service.add_workspace_policy('test-workspace', ['user1', 'user2'])
+        service.add_workspace_policy('test-workspace', ['user1', 'user2'])
 
-            # Verify policies were added for each user
-            mock_enforcer.add_policy.assert_any_call('user1', 'test-workspace',
-                                                     '*')
-            mock_enforcer.add_policy.assert_any_call('user2', 'test-workspace',
-                                                     '*')
-            mock_enforcer.save_policy.assert_called_once()
+        # Verify policies were added for each user
+        mock_enforcer.add_policy.assert_any_call('user1', 'test-workspace', '*')
+        mock_enforcer.add_policy.assert_any_call('user2', 'test-workspace', '*')
+        mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission.filelock.FileLock')
     def test_policy_lock_context_manager(self, mock_filelock):
@@ -510,9 +470,11 @@ class TestPermissionServiceMultiProcess:
                                '_maybe_initialize_policies'):
             # Create first instance
             service1 = permission.PermissionService()
+            service1._lazy_initialize()
 
             # Create second instance
             service2 = permission.PermissionService()
+            service2._lazy_initialize()
 
             # Both should share the same enforcer
             assert service1.enforcer is service2.enforcer
@@ -579,13 +541,10 @@ class TestPermissionServiceMultiProcess:
 
         def create_service():
             try:
-                with mock.patch.object(permission.PermissionService,
-                                       '__init__',
-                                       return_value=None):
-                    service = permission.PermissionService()
-                    service.enforcer = mock_enforcer
-                    service._maybe_initialize_policies()
-                    services.append(service)
+                service = permission.PermissionService()
+                service.enforcer = mock_enforcer
+                service._maybe_initialize_policies()
+                services.append(service)
             except Exception as e:
                 errors.append(e)
 
@@ -674,26 +633,23 @@ class TestPermissionServiceMultiProcess:
         mock_get_workspace_perms.return_value = {}
         mock_get_users.return_value = mock_users
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            # Initialize policies multiple times
-            service._maybe_initialize_policies()
-            service._maybe_initialize_policies()
-            service._maybe_initialize_policies()
+        # Initialize policies multiple times
+        service._maybe_initialize_policies()
+        service._maybe_initialize_policies()
+        service._maybe_initialize_policies()
 
-            # Each user should only be added once (3 users total)
-            assert len(grouping_policy_calls) == len(mock_users)
+        # Each user should only be added once (3 users total)
+        assert len(grouping_policy_calls) == len(mock_users)
 
-            # Verify each user was added exactly once
-            expected_calls = {
-                (user.id, rbac.get_default_role()) for user in mock_users
-            }
-            actual_calls = set(grouping_policy_calls)
-            assert actual_calls == expected_calls
+        # Verify each user was added exactly once
+        expected_calls = {
+            (user.id, rbac.get_default_role()) for user in mock_users
+        }
+        actual_calls = set(grouping_policy_calls)
+        assert actual_calls == expected_calls
 
     @mock.patch('sky.users.permission._policy_lock')
     def test_concurrent_policy_updates_use_lock(self, mock_policy_lock):
@@ -718,20 +674,17 @@ class TestPermissionServiceMultiProcess:
         mock_enforcer.add_policy.return_value = True
         mock_enforcer.save_policy.return_value = True
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            # Test a single workspace policy update to verify lock is used
-            service.add_workspace_policy('test-workspace', ['user1'])
+        # Test a single workspace policy update to verify lock is used
+        service.add_workspace_policy('test-workspace', ['user1'])
 
-            # Verify that lock was acquired and released
-            assert 'enter' in lock_calls
-            assert 'exit' in lock_calls
-            assert len([call for call in lock_calls if call == 'enter']) == 1
-            assert len([call for call in lock_calls if call == 'exit']) == 1
+        # Verify that lock was acquired and released
+        assert 'enter' in lock_calls
+        assert 'exit' in lock_calls
+        assert len([call for call in lock_calls if call == 'enter']) == 1
+        assert len([call for call in lock_calls if call == 'exit']) == 1
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.rbac.get_workspace_policy_permissions')
@@ -775,18 +728,15 @@ class TestPermissionServiceMultiProcess:
 
         mock_get_users.return_value = mock_users
 
-        with mock.patch.object(permission.PermissionService,
-                               '__init__',
-                               return_value=None):
-            service = permission.PermissionService()
-            service.enforcer = mock_enforcer
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
 
-            # Initialize policies when they already exist
-            service._maybe_initialize_policies()
+        # Initialize policies when they already exist
+        service._maybe_initialize_policies()
 
-            # Since policies already exist and users already have roles,
-            # no new policies or grouping policies should be added
-            mock_enforcer.remove_filtered_policy.assert_not_called()
+        # Since policies already exist and users already have roles,
+        # no new policies or grouping policies should be added
+        mock_enforcer.remove_filtered_policy.assert_not_called()
 
-            # The save_policy might not be called if no changes were made
-            # We mainly want to ensure no duplicate additions occurred
+        # The save_policy might not be called if no changes were made
+        # We mainly want to ensure no duplicate additions occurred

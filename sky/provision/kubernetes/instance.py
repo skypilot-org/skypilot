@@ -825,6 +825,23 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        # We need to keep the following fields in the pod spec to be same for
+        # head and worker pods.
+        # So that Kueue can merge them into a single PodSet when creating
+        # ProvisioningRequest to trigger scale up of the cluster autoscaler,
+        # this is especially required for DWS queued provisioning mode in GKE.
+        #  spec.containers[*].resources.requests
+        #  spec.initContainers[*].resources.requests
+        #  spec.resources
+        #  spec.nodeSelector
+        #  spec.tolerations
+        #  spec.affinity
+        #  resourceClaims
+        # Refer to the following links for more details:
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # pylint: disable=line-too-long
+        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # pylint: disable=line-too-long
+        if config.count > 1:
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
             # This is not set as a hard constraint because if different nodes

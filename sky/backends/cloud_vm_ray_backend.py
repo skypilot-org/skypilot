@@ -3240,10 +3240,59 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             common_utils.remove_file_if_exists(lock_path)
 
     def _sync_workdir(self, handle: CloudVmRayResourceHandle,
-                      workdir: Path) -> None:
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
+        if isinstance(workdir, dict):
+            self._sync_git_workdir(handle, envs_and_secrets)
+        else:
+            self._sync_path_workdir(handle, workdir)
+
+    def _sync_git_workdir(self, handle: CloudVmRayResourceHandle,
+                          envs_and_secrets: Dict[str, str]) -> None:
+        style = colorama.Style
+        ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
+
+        log_path = os.path.join(self.log_dir, 'workdir_sync.log')
+
+        # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
+        runners = handle.get_command_runners()
+
+        def _sync_git_workdir_node(
+                runner: command_runner.CommandRunner) -> None:
+            # Type assertion to help mypy understand the type
+            assert hasattr(
+                runner, 'git_clone'
+            ), f'CommandRunner should have git_clone method, ' \
+                f'got {type(runner)}'
+            runner.git_clone(
+                target_dir=SKY_REMOTE_WORKDIR,
+                log_path=log_path,
+                stream_logs=False,
+                max_retry=3,
+                envs_and_secrets=envs_and_secrets,
+            )
+
+        num_nodes = handle.launched_nodes
+        plural = 's' if num_nodes > 1 else ''
+        logger.info(
+            f'  {style.DIM}Syncing workdir (to {num_nodes} node{plural}): '
+            f'{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+        os.system(f'touch {log_path}')
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Syncing workdir', log_path)):
+            subprocess_utils.run_in_parallel(_sync_git_workdir_node, runners,
+                                             num_threads)
+        logger.info(ux_utils.finishing_message('Synced workdir.', log_path))
+
+    def _sync_path_workdir(self, handle: CloudVmRayResourceHandle,
+                           workdir: Path) -> None:
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
@@ -3613,13 +3662,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str],
-                 resources_str: str) -> Tuple[int, str]:
+                 job_name: Optional[str], resources_str: str,
+                 metadata: str) -> Tuple[int, str]:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
-            resources_str=resources_str)
+            resources_str=resources_str,
+            metadata=metadata)
         returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -3702,7 +3752,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str)
+        job_id, log_dir = self._add_job(handle, task_copy.name, resources_str,
+                                        task.metadata_json)
 
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
