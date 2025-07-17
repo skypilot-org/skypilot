@@ -73,7 +73,6 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.schemas.db import migration_utils
 from sky.skylet import constants
-from sky.utils import alembic_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
@@ -580,7 +579,7 @@ def _reload_config_as_server() -> None:
                                                          poolclass=NullPool)
 
             # Get alembic config for sky config db and run migrations
-            alembic_config = alembic_utils.get_alembic_config(
+            alembic_config = migration_utils.get_alembic_config(
                 sqlalchemy_engine, migration_utils.SKYPILOT_CONFIG_DB_NAME)
             # pylint: disable=line-too-long
             alembic_config.config_ini_section = migration_utils.SKYPILOT_CONFIG_DB_NAME
@@ -875,7 +874,7 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                                                              poolclass=NullPool)
 
                 # Get alembic config for sky config db and run migrations
-                alembic_config = alembic_utils.get_alembic_config(
+                alembic_config = migration_utils.get_alembic_config(
                     sqlalchemy_engine, 'sky_config_db')
                 alembic_config.config_ini_section = 'sky_config_db'
                 try:
