@@ -180,6 +180,8 @@ def _get_resources_ports(service_task_yaml_path: str) -> str:
     # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
     assert task.service is not None, task
+    if task.service.pool:
+        return '-'
     assert task.service.ports is not None, task
     return task.service.ports
 
@@ -647,7 +649,7 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def ready_replica_urls(self) -> List[str]:
+    def get_active_replica_urls(self) -> List[str]:
         """Get the urls of the active replicas."""
         raise NotImplementedError
 
@@ -1307,7 +1309,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
-    def ready_replica_urls(self) -> List[str]:
+    def get_active_replica_urls(self) -> List[str]:
         """Get the urls of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '

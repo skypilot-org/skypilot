@@ -148,7 +148,10 @@ def up(
     dag, mutated_user_config = admin_policy_utils.apply(dag)
     dag.pre_mount_volumes()
     task = dag.tasks[0]
-    task.run = 'echo "setup done"'
+    assert task.service is not None
+    if task.service.pool:
+        # Use dummy run script for cluster pool.
+        task.run = 'echo "setup done"'
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
@@ -749,10 +752,14 @@ def status(
         service_record['endpoint'] = None
         if service_record['load_balancer_port'] is not None:
             try:
-                endpoint = backend_utils.get_endpoints(
-                    cluster=common.SKY_SERVE_CONTROLLER_NAME,
-                    port=service_record['load_balancer_port']).get(
-                        service_record['load_balancer_port'], None)
+                lb_port = service_record['load_balancer_port']
+                if not serve_utils.is_consolidation_mode():
+                    endpoint = backend_utils.get_endpoints(
+                        cluster=common.SKY_SERVE_CONTROLLER_NAME,
+                        port=lb_port).get(lb_port, None)
+                else:
+                    # TODO(tian): Show "unavailable" for pool=true.
+                    endpoint = f'localhost:{lb_port}'
             except exceptions.ClusterNotUpError:
                 pass
             else:

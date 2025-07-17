@@ -147,7 +147,6 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
     from the current process and there will not be a parent/child relationship.
     See launch_new_process_tree for more.
     """
-    logger.debug(f'maybe_schedule_next_jobs: {pool=}')
     try:
         # We must use a global lock rather than a per-job lock to ensure correct
         # parallelism control. If we cannot obtain the lock, exit immediately.
@@ -159,8 +158,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 if maybe_next_job is None:
                     # Nothing left to start, break from scheduling loop
                     break
-                logger.debug(f'maybe_next_job: {maybe_next_job}')
-                pm = maybe_next_job['pool']
+                pool = maybe_next_job['pool']
 
                 current_state = maybe_next_job['schedule_state']
 
@@ -179,7 +177,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
-                    if not _can_start_new_job(pm):
+                    if not _can_start_new_job(pool):
                         # Can't schedule anything, break from scheduling loop.
                         break
 
@@ -195,7 +193,8 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
                     env_file_path = maybe_next_job['env_file_path']
 
-                    _start_controller(job_id, dag_yaml_path, env_file_path, pm)
+                    _start_controller(job_id, dag_yaml_path, env_file_path,
+                                      pool)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -259,7 +258,7 @@ def scheduled_launch(job_id: int):
         while (state.get_job_schedule_state(job_id) !=
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
-    pm = state.get_pool_from_job_id(job_id)
+    pool = state.get_pool_from_job_id(job_id)
 
     try:
         yield
@@ -273,7 +272,7 @@ def scheduled_launch(job_id: int):
         with filelock.FileLock(_get_lock_path()):
             state.scheduler_set_alive(job_id)
     finally:
-        maybe_schedule_next_jobs(pm)
+        maybe_schedule_next_jobs(pool)
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -288,19 +287,19 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
-    pm = state.get_pool_from_job_id(job_id)
+    pool = state.get_pool_from_job_id(job_id)
 
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs(pm)
+    maybe_schedule_next_jobs(pool)
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
-    pm = state.get_pool_from_job_id(job_id)
-    maybe_schedule_next_jobs(pm)
+    pool = state.get_pool_from_job_id(job_id)
+    maybe_schedule_next_jobs(pool)
 
 
 def _get_job_parallelism() -> int:

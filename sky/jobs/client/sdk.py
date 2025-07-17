@@ -69,8 +69,11 @@ def launch(
             dag, at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
-            # request_id = sdk.optimize(dag)
-            # sdk.stream_and_get(request_id)
+            if pool is None:
+                request_id = sdk.optimize(dag)
+                sdk.stream_and_get(request_id)
+            else:
+                click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
             prompt = f'Launching a managed job {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,

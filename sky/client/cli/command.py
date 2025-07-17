@@ -4201,7 +4201,6 @@ def jobs_launch(
                                                 controller=False)
             sys.exit(returncode)
     else:
-        # TODO(tian): Add a batch ID.
         batch_ids = job_id_handle[0]
         bids = ','.join(map(str, batch_ids))
         click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
