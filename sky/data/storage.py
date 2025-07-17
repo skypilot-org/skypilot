@@ -164,14 +164,10 @@ class StoreType(enum.Enum):
             return StoreType.GCS
         elif cloud_lower == str(clouds.IBM()).lower():
             return StoreType.IBM
-        elif cloud_lower == cloudflare.NAME.lower():
-            return StoreType.R2
         elif cloud_lower == str(clouds.Azure()).lower():
             return StoreType.AZURE
         elif cloud_lower == str(clouds.OCI()).lower():
             return StoreType.OCI
-        elif cloud_lower == str(clouds.Nebius()).lower():
-            return StoreType.NEBIUS
         elif cloud_lower == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Lambda Cloud does not provide cloud storage.')
@@ -194,14 +190,10 @@ class StoreType(enum.Enum):
             return str(clouds.GCP())
         elif self == StoreType.AZURE:
             return str(clouds.Azure())
-        elif self == StoreType.R2:
-            return cloudflare.NAME
         elif self == StoreType.IBM:
             return str(clouds.IBM())
         elif self == StoreType.OCI:
             return str(clouds.OCI())
-        elif self == StoreType.NEBIUS:
-            return str(clouds.Nebius())
         else:
             raise ValueError(f'Unknown store type: {self}')
 
@@ -214,14 +206,10 @@ class StoreType(enum.Enum):
             return StoreType.GCS
         elif isinstance(store, AzureBlobStore):
             return StoreType.AZURE
-        elif isinstance(store, R2Store):
-            return StoreType.R2
         elif isinstance(store, IBMCosStore):
             return StoreType.IBM
         elif isinstance(store, OciStore):
             return StoreType.OCI
-        elif isinstance(store, NebiusStore):
-            return StoreType.NEBIUS
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
@@ -235,16 +223,10 @@ class StoreType(enum.Enum):
             return 'gs://'
         elif self == StoreType.AZURE:
             return 'https://'
-        # R2 storages use 's3://' as a prefix for various aws cli commands
-        elif self == StoreType.R2:
-            return 'r2://'
         elif self == StoreType.IBM:
             return 'cos://'
         elif self == StoreType.OCI:
             return 'oci://'
-        # Nebius storages use 's3://' as a prefix for various aws cli commands
-        elif self == StoreType.NEBIUS:
-            return 'nebius://'
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
@@ -1507,10 +1489,9 @@ class S3CompatibleStore(AbstractStore):
         pass
 
     @classmethod
-    @abstractmethod
     def get_store_type(cls) -> str:
-        """Return the store type identifier (e.g., 'S3', 'R2', 'MINIO')."""
-        pass
+        """Return the store type identifier from configuration."""
+        return cls.get_config().store_type
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2070,10 +2051,6 @@ class S3Store(S3CompatibleStore):
                          sync_on_reconstruction, _bucket_sub_path)
 
     @classmethod
-    def get_store_type(cls) -> str:
-        return 'S3'
-
-    @classmethod
     def get_config(cls) -> S3CompatibleConfig:
         """Return the configuration for AWS S3."""
         return S3CompatibleConfig(
@@ -2083,7 +2060,7 @@ class S3Store(S3CompatibleStore):
             resource_factory=lambda name: aws.resource('s3').Bucket(name),
             split_path=data_utils.split_s3_path,
             cloud_name=str(clouds.AWS()),
-            default_region=S3Store._DEFAULT_REGION,
+            default_region=cls._DEFAULT_REGION,
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
 
@@ -3518,10 +3495,6 @@ class R2Store(S3CompatibleStore):
                          sync_on_reconstruction, _bucket_sub_path)
 
     @classmethod
-    def get_store_type(cls) -> str:
-        return 'R2'
-
-    @classmethod
     def get_config(cls) -> S3CompatibleConfig:
         """Return the configuration for Cloudflare R2."""
         return S3CompatibleConfig(
@@ -4495,10 +4468,6 @@ class NebiusStore(S3CompatibleStore):
                  _bucket_sub_path: Optional[str] = None):
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
-
-    @classmethod
-    def get_store_type(cls) -> str:
-        return 'NEBIUS'
 
     @classmethod
     def get_config(cls) -> S3CompatibleConfig:
