@@ -888,16 +888,15 @@ async def cancel_job():
         cancels = os.listdir(jobs_constants.SIGNAL_PATH)
         for cancel in cancels:
             async with _job_tasks_lock:
-                if int(cancel) in job_tasks:
-                    job_id = int(cancel)
-
+                job_id = int(cancel)
+                if job_id in job_tasks:
                     logger.info(f'Cancelling job {job_id}')
 
                     task = job_tasks[job_id]
 
                     # Run the cancellation in the background, so we can return
                     # immediately.
-                    await create_background_task(task.cancel())
+                    task.cancel()
                     logger.info(f'Job {job_id} cancelled successfully')
 
                     os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
