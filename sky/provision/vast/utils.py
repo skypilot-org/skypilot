@@ -35,7 +35,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
            image_name: str, ports: Optional[List[int]],
-	   preemptible: bool) -> str:
+           preemptible: bool) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -82,9 +82,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
       *  Vast instance types are an invention for skypilot. Refer to
          catalog/vast_catalog.py for the current construction
-         of the type.
-
-    """
+         of the type."""
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
@@ -107,7 +105,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     instance_touse = instance_list[0]
 
-    port_map = " ".join([f"-p {p}:{p}" for p in ports]) if ports else ""
+    port_map = ' '.join([f'-p {p}:{p}' for p in ports]) if ports else ''
 
     launch_params = {
         'id': instance_touse['id'],
