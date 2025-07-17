@@ -1395,6 +1395,7 @@ class S3CompatibleConfig:
     client_factory: Callable[[Optional[str]], Any]
     resource_factory: Callable[[str], StorageHandle]
     split_path: Callable[[str], Tuple[str, str]]
+    verify_bucket: Callable[[str], bool]
 
     # CLI configuration
     aws_profile: Optional[str] = None
@@ -1419,25 +1420,98 @@ class S3CompatibleConfig:
 class S3CompatibleStore(AbstractStore):
     """Base class for S3-compatible object storage providers.
 
-    This class implements all common S3 operations.
-    To add a new S3-compatible store:
+    This class provides a unified interface for all S3-compatible storage
+    providers (AWS S3, Cloudflare R2, Nebius, MinIO, etc.) by leveraging
+    a configuration-driven approach that eliminates code duplication.
 
+    ## Adding a New S3-Compatible Store
+
+    To add a new S3-compatible storage provider (e.g., MinIO),
+    follow these steps:
+
+    ### 1. Add Store Type to Enum
+    First, add your store type to the StoreType enum:
+    ```python
+    class StoreType(enum.Enum):
+        # ... existing entries ...
+        MINIO = 'MINIO'
+    ```
+
+    ### 2. Create Store Class
+    Create a new store class that inherits from S3CompatibleStore:
+    ```python
     @register_s3_compatible_store
-    class MyStore(S3CompatibleStore):
-        @classmethod
-        def get_store_type(cls) -> str:
-            return "MYSTORE"
+    class MinIOStore(S3CompatibleStore):
+        '''MinIOStore for MinIO object storage.'''
 
-        def _get_config(self) -> S3CompatibleConfig:
+        @classmethod
+        def get_config(cls) -> S3CompatibleConfig:
+            '''Return the configuration for MinIO.'''
             return S3CompatibleConfig(
-                store_type="MyStore",
-                store_type="MYSTORE",
-                url_prefix="mystore://",
-                client_factory=my_create_client,
-                resource_factory=lambda name: my_resource('s3').Bucket(name),
-                endpoint_url='https://my-endpoint.com',
-                cloud_name='MyCloud'
+                store_type='MINIO',
+                url_prefix='minio://',
+                client_factory=lambda region:\
+                    data_utils.create_minio_client(region),
+                resource_factory=lambda name:\
+                    minio.resource('s3').Bucket(name),
+                split_path=data_utils.split_minio_path,
+                aws_profile='minio',
+                get_endpoint_url=lambda: minio.get_endpoint_url(),
+                cloud_name='minio',
+                default_region='us-east-1',
+                mount_cmd_factory=mounting_utils.get_minio_mount_cmd,
             )
+    ```
+
+    ### 3. Implement Required Utilities
+    Create the necessary utility functions:
+
+    #### In `sky/data/data_utils.py`:
+    ```python
+    def create_minio_client(region: Optional[str] = None):
+        '''Create MinIO S3 client.'''
+        return boto3.client('s3',
+                          endpoint_url=minio.get_endpoint_url(),
+                          aws_access_key_id=minio.get_access_key(),
+                          aws_secret_access_key=minio.get_secret_key(),
+                          region_name=region or 'us-east-1')
+
+    def split_minio_path(minio_path: str) -> Tuple[str, str]:
+        '''Split minio://bucket/key into (bucket, key).'''
+        path_parts = minio_path.replace('minio://', '').split('/', 1)
+        bucket = path_parts[0]
+        key = path_parts[1] if len(path_parts) > 1 else ''
+        return bucket, key
+    ```
+
+    #### In `sky/utils/mounting_utils.py`:
+    ```python
+    def get_minio_mount_cmd(profile: str, bucket_name: str, endpoint_url: str,
+                           mount_path: str,
+                           bucket_sub_path: Optional[str]) -> str:
+        '''Generate MinIO mount command using s3fs.'''
+        # Implementation similar to other S3-compatible mount commands
+        pass
+    ```
+
+    ### 4. Create Adapter Module (if needed)
+    Create `sky/adaptors/minio.py` for MinIO-specific configuration:
+    ```python
+    '''MinIO adapter for SkyPilot.'''
+
+    MINIO_PROFILE_NAME = 'minio'
+
+    def get_endpoint_url() -> str:
+        '''Get MinIO endpoint URL from configuration.'''
+        # Read from ~/.minio/config or environment variables
+        pass
+
+    def resource(resource_name: str):
+        '''Get MinIO resource.'''
+        # Implementation for creating MinIO resources
+        pass
+    ```
+
     """
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
@@ -1479,32 +1553,37 @@ class S3CompatibleStore(AbstractStore):
     def provider_prefixes(self) -> set:
         """Dynamically get all provider prefixes from registered stores."""
         prefixes = set()
-        
+
         # Get prefixes from all registered S3-compatible stores
         for store_class in _S3_COMPATIBLE_STORES.values():
             config = store_class.get_config()
             prefixes.add(config.url_prefix)
-        
+
         # Add hardcoded prefixes for non-S3-compatible stores
         prefixes.update({
-            'gs://',     # GCS
-            'https://',  # Azure  
-            'cos://',    # IBM COS
-            'oci://',    # OCI
+            'gs://',  # GCS
+            'https://',  # Azure
+            'cos://',  # IBM COS
+            'oci://',  # OCI
         })
-        
+
         return prefixes
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
-            if self.source.startswith('s3://'):
-                assert self.name == data_utils.split_s3_path(self.source)[0], (
-                    'S3 Bucket is specified as path, the name should be the'
-                    ' same as S3 bucket.')
-                if not isinstance(self, S3Store):
-                    assert data_utils.verify_s3_bucket(self.name), (
-                        f'Source specified as {self.source}, an S3 bucket. ',
-                        'S3 Bucket should exist.')
+            if self.source.startswith(self.config.url_prefix):
+                bucket_name, _ = self.config.split_path(self.source)
+                assert self.name == bucket_name, (
+                    f'{self.config.store_type} Bucket is specified as path, '
+                    f'the name should be the same as {self.config.store_type} '
+                    f'bucket.')
+                # Only verify if this is NOT the same store type as the source
+                if self.__class__.get_store_type() != self.config.store_type:
+                    assert self.config.verify_bucket(self.name), (
+                        f'Source specified as {self.source},'
+                        f'a {self.config.store_type} '
+                        f'bucket. {self.config.store_type} Bucket should exist.'
+                    )
             elif self.source.startswith('gs://'):
                 assert self.name == data_utils.split_gcs_path(self.source)[0], (
                     'GCS Bucket is specified as path, the name should be '
@@ -1524,24 +1603,6 @@ class S3CompatibleStore(AbstractStore):
                         storage_account_name, self.name
                     ), (f'Source specified as {self.source}, an Azure bucket. '
                         'Azure bucket should exist.')
-            elif self.source.startswith('r2://'):
-                assert self.name == data_utils.split_r2_path(self.source)[0], (
-                    'R2 Bucket is specified as path, the name should be '
-                    'the same as R2 bucket.')
-                if not isinstance(self, R2Store):
-                    assert data_utils.verify_r2_bucket(self.name), (
-                        f'Source specified as {self.source}, a R2 bucket. ',
-                        'R2 Bucket should exist.')
-            elif self.source.startswith('nebius://'):
-                assert self.name == data_utils.split_nebius_path(
-                    self.source)[0], (
-                        'Nebius Object Storage is specified as path, the name '
-                        'should be the same as R2 bucket.')
-                if not isinstance(self, NebiusStore):
-                    assert data_utils.verify_nebius_bucket(self.name), (
-                        f'Source specified as {self.source}, a Nebius Object '
-                        f'Storage bucket. Nebius Object Storage Bucket should '
-                        f'exist.')
             elif self.source.startswith('cos://'):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'COS Bucket is specified as path, the name should be '
@@ -1693,6 +1754,21 @@ class S3CompatibleStore(AbstractStore):
             if self.source.startswith(provider):
                 return provider[:-len('://')]
         return ''
+
+    def _transfer_from_other_provider(self):
+        """Transfer data from another cloud to this S3-compatible store."""
+        source_type = self._detect_source_type()
+        target_type = self.config.store_type.lower()
+
+        if hasattr(data_transfer, f'{source_type}_to_{target_type}'):
+            transfer_func = getattr(data_transfer,
+                                    f'{source_type}_to_{target_type}')
+            transfer_func(self.name, self.name)
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise NotImplementedError(
+                    f'Transfer from {source_type} to {target_type} '
+                    'is not yet supported.')
 
     def delete(self) -> None:
         """Delete the bucket or sub-path."""
@@ -2006,64 +2082,6 @@ class S3CompatibleStore(AbstractStore):
              f'{bucket_name}/{sub_path}'),
             (f'Failed to remove objects from {self.config.store_type} '
              f'bucket {bucket_name}/{sub_path}.'))
-
-
-@register_s3_compatible_store
-class S3Store(S3CompatibleStore):
-    """S3Store inherits from S3CompatibleStore and represents the backend
-    for S3 buckets.
-    """
-
-    _DEFAULT_REGION = 'us-east-1'
-    _CUSTOM_ENDPOINT_REGIONS = [
-        'ap-east-1', 'me-south-1', 'af-south-1', 'eu-south-1', 'eu-south-2',
-        'ap-south-2', 'ap-southeast-3', 'ap-southeast-4', 'me-central-1',
-        'il-central-1'
-    ]
-
-    def __init__(self,
-                 name: str,
-                 source: str,
-                 region: Optional[str] = None,
-                 is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
-        # TODO(romilb): This is purely a stopgap fix for
-        #  https://github.com/skypilot-org/skypilot/issues/3405
-        # We should eventually make all opt-in regions also work for S3 by
-        # passing the right endpoint flags.
-        if region in self._CUSTOM_ENDPOINT_REGIONS:
-            logger.warning('AWS opt-in regions are not supported for S3. '
-                           f'Falling back to default region '
-                           f'{self._DEFAULT_REGION} for bucket {name!r}.')
-            region = self._DEFAULT_REGION
-        super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path)
-
-    @classmethod
-    def get_config(cls) -> S3CompatibleConfig:
-        """Return the configuration for AWS S3."""
-        return S3CompatibleConfig(
-            store_type='S3',
-            url_prefix='s3://',
-            client_factory=data_utils.create_s3_client,
-            resource_factory=lambda name: aws.resource('s3').Bucket(name),
-            split_path=data_utils.split_s3_path,
-            cloud_name=str(clouds.AWS()),
-            default_region=cls._DEFAULT_REGION,
-            mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
-        )
-
-    def mount_cached_command(self, mount_path: str) -> str:
-        install_cmd = mounting_utils.get_rclone_install_cmd()
-        rclone_profile_name = (
-            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
-        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
-            rclone_profile_name=rclone_profile_name)
-        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cached_cmd)
 
 
 class GcsStore(AbstractStore):
@@ -3468,55 +3486,6 @@ class AzureBlobStore(AbstractStore):
         return True
 
 
-@register_s3_compatible_store
-class R2Store(S3CompatibleStore):
-    """R2Store inherits from S3CompatibleStore and represents the backend
-    for R2 buckets.
-    """
-
-    def __init__(self,
-                 name: str,
-                 source: str,
-                 region: Optional[str] = 'auto',
-                 is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
-        super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path)
-
-    @classmethod
-    def get_config(cls) -> S3CompatibleConfig:
-        """Return the configuration for Cloudflare R2."""
-        return S3CompatibleConfig(
-            store_type='R2',
-            url_prefix='r2://',
-            client_factory=lambda region: data_utils.create_r2_client(region or
-                                                                      'auto'),
-            resource_factory=lambda name: cloudflare.resource('s3').Bucket(name
-                                                                          ),
-            split_path=data_utils.split_r2_path,
-            credentials_file=cloudflare.R2_CREDENTIALS_PATH,
-            aws_profile=cloudflare.R2_PROFILE_NAME,
-            get_endpoint_url=lambda: cloudflare.create_endpoint(),  # pylint: disable=unnecessary-lambda
-            extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
-            cloud_name=cloudflare.NAME,
-            default_region='auto',
-            mount_cmd_factory=mounting_utils.get_r2_mount_cmd,
-        )
-
-    def mount_cached_command(self, mount_path: str) -> str:
-        """R2-specific cached mount implementation using rclone."""
-        install_cmd = mounting_utils.get_rclone_install_cmd()
-        rclone_profile_name = (
-            data_utils.Rclone.RcloneStores.R2.get_profile_name(self.name))
-        rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
-            rclone_profile_name=rclone_profile_name)
-        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cached_cmd)
-
-
 class IBMCosStore(AbstractStore):
     """IBMCosStore inherits from Storage Object and represents the backend
     for COS buckets.
@@ -4444,6 +4413,115 @@ class OciStore(AbstractStore):
 
 
 @register_s3_compatible_store
+class S3Store(S3CompatibleStore):
+    """S3Store inherits from S3CompatibleStore and represents the backend
+    for S3 buckets.
+    """
+
+    _DEFAULT_REGION = 'us-east-1'
+    _CUSTOM_ENDPOINT_REGIONS = [
+        'ap-east-1', 'me-south-1', 'af-south-1', 'eu-south-1', 'eu-south-2',
+        'ap-south-2', 'ap-southeast-3', 'ap-southeast-4', 'me-central-1',
+        'il-central-1'
+    ]
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = None,
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
+        # TODO(romilb): This is purely a stopgap fix for
+        #  https://github.com/skypilot-org/skypilot/issues/3405
+        # We should eventually make all opt-in regions also work for S3 by
+        # passing the right endpoint flags.
+        if region in self._CUSTOM_ENDPOINT_REGIONS:
+            logger.warning('AWS opt-in regions are not supported for S3. '
+                           f'Falling back to default region '
+                           f'{self._DEFAULT_REGION} for bucket {name!r}.')
+            region = self._DEFAULT_REGION
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction, _bucket_sub_path)
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for AWS S3."""
+        return S3CompatibleConfig(
+            store_type='S3',
+            url_prefix='s3://',
+            client_factory=data_utils.create_s3_client,
+            resource_factory=lambda name: aws.resource('s3').Bucket(name),
+            split_path=data_utils.split_s3_path,
+            verify_bucket=data_utils.verify_s3_bucket,
+            cloud_name=str(clouds.AWS()),
+            default_region=cls._DEFAULT_REGION,
+            mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
+        )
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class R2Store(S3CompatibleStore):
+    """R2Store inherits from S3CompatibleStore and represents the backend
+    for R2 buckets.
+    """
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = 'auto',
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction, _bucket_sub_path)
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for Cloudflare R2."""
+        return S3CompatibleConfig(
+            store_type='R2',
+            url_prefix='r2://',
+            client_factory=lambda region: data_utils.create_r2_client(region or
+                                                                      'auto'),
+            resource_factory=lambda name: cloudflare.resource('s3').Bucket(name
+                                                                          ),
+            split_path=data_utils.split_r2_path,
+            verify_bucket=data_utils.verify_r2_bucket,
+            credentials_file=cloudflare.R2_CREDENTIALS_PATH,
+            aws_profile=cloudflare.R2_PROFILE_NAME,
+            get_endpoint_url=lambda: cloudflare.create_endpoint(),  # pylint: disable=unnecessary-lambda
+            extra_cli_args=['--checksum-algorithm', 'CRC32'],  # R2 specific
+            cloud_name=cloudflare.NAME,
+            default_region='auto',
+            mount_cmd_factory=mounting_utils.get_r2_mount_cmd,
+        )
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """R2-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.R2.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+@register_s3_compatible_store
 class NebiusStore(S3CompatibleStore):
     """NebiusStore inherits from S3CompatibleStore and represents the backend
     for Nebius Object Storage buckets.
@@ -4458,6 +4536,7 @@ class NebiusStore(S3CompatibleStore):
             client_factory=lambda region: data_utils.create_nebius_client(),
             resource_factory=lambda name: nebius.resource('s3').Bucket(name),
             split_path=data_utils.split_nebius_path,
+            verify_bucket=data_utils.verify_nebius_bucket,
             aws_profile=nebius.NEBIUS_PROFILE_NAME,
             cloud_name=str(clouds.Nebius()),
             mount_cmd_factory=cls._get_nebius_mount_cmd,
