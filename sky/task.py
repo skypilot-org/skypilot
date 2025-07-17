@@ -504,6 +504,9 @@ class Task:
             return
         # Only expand the workdir if it is a string
         if isinstance(self.workdir, dict):
+            git_ref = self.workdir.get('ref')
+            if git_ref is not None:
+                self._metadata['git_commit'] = git_ref
             return
         user_workdir = self.workdir
         self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
