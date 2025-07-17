@@ -37,18 +37,22 @@ _image_df = common.read_catalog('gcp/images.csv',
 _quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-# We will select from the following three CPU instance families:
+# We will select from the following six CPU instance families:
 _DEFAULT_INSTANCE_FAMILY = [
-    # This is the latest general-purpose instance family as of Mar 2023.
-    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # This is a widely used general-purpose instance family as of July 2025.
+    # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
+    #  or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 4 GiB RAM per 1 vCPU;
     'n2-standard',
-    # This is the latest memory-optimized instance family as of Mar 2023.
-    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # This is a memory-optimized instance family as of July 2025.
+    # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
+    # or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 8 GiB RAM per 1 vCPU;
     'n2-highmem',
-    # This is the latest compute-optimized instance family as of Mar 2023.
-    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # This is a compute-optimized instance family as of July 2025.
+
+    # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
+    #  or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 1 GiB RAM per 1 vCPU;
     'n2-highcpu',
     # This is the latest general-purpose instance family as of July 2025.
