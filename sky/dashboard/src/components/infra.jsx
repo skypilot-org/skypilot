@@ -1963,14 +1963,14 @@ export function GPUs() {
 
     return (
       <>
-        {/* Show SSH Node Pool Infrastructure first */}
-        {renderSSHNodePoolInfrastructure()}
-
-        {/* Show Kubernetes Infrastructure second */}
+        {/* Show Kubernetes Infrastructure first */}
         {renderKubernetesInfrastructure()}
 
-        {/* Then show Cloud Infrastructure */}
+        {/* Show Cloud Infrastructure second */}
         {renderCloudInfrastructure()}
+
+        {/* Show SSH Node Pool Infrastructure last, only if there are any SSH node pools */}
+        {sshContexts.length > 0 && renderSSHNodePoolInfrastructure()}
       </>
     );
   };
