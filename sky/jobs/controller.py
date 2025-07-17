@@ -239,8 +239,8 @@ class JobsController:
             job_id_on_pm = None
         else:
             # Update the cluster name when using cluster pool.
-            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
-                self._job_id)
+            cluster_name, job_id_on_pm = (
+                managed_job_state.get_pool_submit_info(self._job_id))
             assert cluster_name is not None, (cluster_name, job_id_on_pm)
 
         if not is_resume:
@@ -620,8 +620,8 @@ def _cleanup(job_id: int, dag_yaml: str, pool: Optional[str]):
                 task.name, job_id)
             managed_job_utils.terminate_cluster(cluster_name)
         else:
-            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
-                job_id)
+            cluster_name, job_id_on_pm = (
+                managed_job_state.get_pool_submit_info(job_id))
             if cluster_name is not None:
                 serve_utils.release_cluster_name(pool, cluster_name)
                 if job_id_on_pm is not None:
