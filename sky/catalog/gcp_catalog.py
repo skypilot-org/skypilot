@@ -50,7 +50,6 @@ _DEFAULT_INSTANCE_FAMILY = [
     # Memory: 8 GiB RAM per 1 vCPU;
     'n2-highmem',
     # This is a compute-optimized instance family as of July 2025.
-
     # CPU: Primarily Intel Ice Lake (3rd Gen Intel Xeon Scalable Processors)
     #  or Cascade Lake (2nd Gen Intel Xeon Scalable Processors).
     # Memory: 1 GiB RAM per 1 vCPU;
