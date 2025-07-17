@@ -88,6 +88,7 @@ from sky.admin_policy import UserRequest
 from sky.catalog import list_accelerators
 from sky.client.sdk import api_cancel
 from sky.client.sdk import api_info
+from sky.client.sdk import api_login
 from sky.client.sdk import api_server_logs
 from sky.client.sdk import api_start
 from sky.client.sdk import api_status
@@ -206,6 +207,7 @@ __all__ = [
     'api_status',
     'api_cancel',
     'api_info',
+    'api_login',
     'api_start',
     'api_stop',
     'api_server_logs',
