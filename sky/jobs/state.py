@@ -23,6 +23,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.schemas.db import db_constants
 from sky.skylet import constants
 from sky.utils import alembic_utils
 from sky.utils import common_utils
@@ -133,7 +134,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     # Get alembic config for spot jobs db and run migrations
-    alembic_config = alembic_utils.get_alembic_config(engine, db_constants.SPOT_JOBS_DB_NAME)
+    alembic_config = alembic_utils.get_alembic_config(
+        engine, db_constants.SPOT_JOBS_DB_NAME)
     alembic_config.config_ini_section = db_constants.SPOT_JOBS_DB_NAME
     try:
         alembic_command.upgrade(alembic_config, db_constants.SPOT_JOBS_VERSION)

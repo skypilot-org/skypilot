@@ -1,3 +1,5 @@
+"""Constants for the database schemas."""
+
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
 GLOBAL_USER_STATE_VERSION = '001'
 

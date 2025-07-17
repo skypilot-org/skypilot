@@ -246,10 +246,11 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # is not critical and is likely to be enabled by other processes.
 
     # Get alembic config for state db and run migrations
-    alembic_config = alembic_utils.get_alembic_config(engine,
-                                                      db_constants.GLOBAL_USER_STATE_DB_NAME)
+    alembic_config = alembic_utils.get_alembic_config(
+        engine, db_constants.GLOBAL_USER_STATE_DB_NAME)
     alembic_config.config_ini_section = db_constants.GLOBAL_USER_STATE_DB_NAME
-    alembic_command.upgrade(alembic_config, db_constants.GLOBAL_USER_STATE_VERSION)
+    alembic_command.upgrade(alembic_config,
+                            db_constants.GLOBAL_USER_STATE_VERSION)
 
 
 @contextlib.contextmanager
