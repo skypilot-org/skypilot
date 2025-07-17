@@ -6,6 +6,7 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+import contextlib
 import functools
 import json
 import os
@@ -19,6 +20,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from alembic import command as alembic_command
+import filelock
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -50,6 +52,8 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_DB_INIT_LOCK_PATH = os.path.expanduser('~/.sky/state.db.lock')
+_DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 _DB_INIT_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
@@ -243,25 +247,28 @@ def create_table(engine: sqlalchemy.engine.Engine):
     # Get alembic config for state db and run migrations
     alembic_config = alembic_utils.get_alembic_config(engine, 'state_db')
     alembic_config.config_ini_section = 'state_db'
+    alembic_command.upgrade(alembic_config, '001')
+
+
+@contextlib.contextmanager
+def _db_lock():
     try:
-        alembic_command.upgrade(alembic_config, '001')
-    except (sqlalchemy_exc.IntegrityError,
-            sqlalchemy_exc.OperationalError) as e:
-        # If the version already exists (due to concurrent
-        # initialization), we can safely ignore this error
-        if ('UNIQUE constraint failed: '
-                'alembic_version_state_db.version_num' in str(e) or
-                'table alembic_version_state_db already exists' in str(e)):
-            pass
-        else:
-            raise
+        with filelock.FileLock(_DB_INIT_LOCK_PATH,
+                               _DB_INIT_LOCK_TIMEOUT_SECONDS):
+            yield
+    except filelock.Timeout as e:
+        raise RuntimeError(f'Failed to initialize database due to a timeout '
+                           f'when trying to acquire the lock at '
+                           f'{_DB_INIT_LOCK_PATH}. '
+                           'Please try again or manually remove the lock '
+                           f'file if you believe it is stale.') from e
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with _DB_INIT_LOCK:
+    with _db_lock():
         if _SQLALCHEMY_ENGINE is None:
             conn_string = None
             if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
