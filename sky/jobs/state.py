@@ -49,9 +49,6 @@ _DB_INIT_LOCK = threading.Lock()
 
 _DB_RETRY_TIMES = 30
 
-# File lock for database operations to prevent race conditions
-_DB_LOCK_PATH = os.path.expanduser('~/.sky/locks/managed_job_db.lock')
-
 Base = declarative.declarative_base()
 
 # === Database schema ===
@@ -346,6 +343,10 @@ def _init_db_async(func):
                 last_exc = e
             except sqlite3.OperationalError as e:
                 last_exc = e
+            except sqlalchemy.exc.InterfaceError as e:
+                last_exc = e
+            except sqlite3.InterfaceError:
+                last_exc = e
             logger.debug(f'DB error: {last_exc}')
             await asyncio.sleep(backoff.current_backoff())
         raise last_exc
@@ -376,6 +377,12 @@ def _init_db(func):
             except OSError as e:
                 last_exc = e
             except sqlalchemy.exc.TimeoutError as e:
+                last_exc = e
+            except sqlite3.OperationalError as e:
+                last_exc = e
+            except sqlalchemy.exc.InterfaceError as e:
+                last_exc = e
+            except sqlite3.InterfaceError:
                 last_exc = e
             logger.debug(f'DB error: {last_exc}')
             time.sleep(backoff.current_backoff())
@@ -665,13 +672,12 @@ def set_job_info(job_id: int, name: str, workspace: str, entrypoint: str):
 
 
 @_init_db
-def get_pending_jobs_count() -> int:
+def get_processing_jobs_count() -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         return session.query(spot_table).filter(
-            job_info_table.c.schedule_state.in_([
-                ManagedJobScheduleState.WAITING.value,
-                ManagedJobScheduleState.ALIVE_WAITING.value,
+            spot_table.c.status.in_([
+                s.value for s in ManagedJobStatus.processing_statuses()
             ])).count()
 
 

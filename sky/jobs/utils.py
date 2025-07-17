@@ -290,7 +290,7 @@ def maybe_scale() -> None:
     We only scale up if there are more pending jobs than
     JOBS_PER_WORKER * WORKER_COUNT jobs that are able to be scheduled.
     """
-    pending_jobs = managed_job_state.get_pending_jobs_count()
+    pending_jobs = managed_job_state.get_processing_jobs_count()
     try:
         with open(scheduler.JOB_CONTROLLER_PID_PATH, 'r',
                   encoding='utf-8') as f:
