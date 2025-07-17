@@ -382,9 +382,8 @@ Volumes on top of Nebius shared filesystem
 
 The above guide allows you to mount the entire Nebius shared filesystem to all SkyPilot clusters. Additionally, SkyPilot supports creating and managing :ref:`volumes <volumes-on-kubernetes>` on top of the shared filesystem using Kubernetes Persistent Volume Claims.
 
-Volumes provide several key benefits for data management:
+Volumes provide several key benefits:
 
-* **Data Sharing**: Share data between different clusters or jobs efficiently
 * **Caching**: Serve as persistent cache for PyPI packages, Hugging Face models, and other dependencies
 * **Isolation**: Provide better data isolation between clusters and jobs compared to mounting the shared filesystem directly to node groups
 

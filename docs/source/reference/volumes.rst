@@ -7,7 +7,7 @@ Volumes offer a high-performance alternative to :ref:`cloud buckets <sky-storage
 
 Benefits of using volumes:
 
-* **Performance**: volumes are generally faster than object stores, and SkyPilot lets you choose from different storage classes based on your performance requirements.
+* **Performance**: Volumes are generally faster than object stores, and SkyPilot lets you choose from different storage classes based on your performance requirements.
 * **Data persistence**: Volumes can persist data independently of task life cycles, making it easy to share data between different tasks (e.g., datasets, caches) or preserve results.
 * **Size control**: You can set volume size limits to manage costs and limit storage usage.
 
