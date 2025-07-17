@@ -7,24 +7,24 @@
 
 Meta's Llama 4 represents the next generation of open-source large language models, featuring advanced capabilities with the **Llama-4-Maverick-17B-128E model** - a 400B  parameter (17B active) Mixture of Experts (MoE) architecture with 128 experts.
 
-This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) and various frameworks to **finetune Llama 4 on your own infra**. Everything is packaged in simple [SkyPilot YAMLs](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
+This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) with torchtune and Llama Factory to **finetune Llama 4 on your own infra**. Everything is packaged in simple [SkyPilot YAMLs](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
 - Kubernetes cluster
 - Cloud accounts ([16+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
 
-## 📁 Available Configuration Files
+## 📁 Available Recipes
 
-Choose the right configuration for your needs:
+Choose the right recipe for your needs:
 
-| **Configuration File** | **Requirements** | **Description** |
+| **Recipe** | **Requirements** | **Description** |
 |------------------------|------------------|-----------------|
-| 🌟 **llama-4-maverick-sft.yaml** | **4 nodes**<br>16x H200 GPUs<br>1000+ GB CPU memory | **✅ RECOMMENDED** - CPU-friendly full finetuning using LLaMA-Factory with CPU offloading. Best starting point for most users. |
+| 🌟 **llama-4-maverick-sft.yaml** | **4 nodes**<br>32x H200 GPUs<br>1000+ GB CPU memory per node | **✅ RECOMMENDED** - Full finetuning using torchtune with CPU offloading. Best starting point for most users. |
 | 🎯 **llama-4-maverick_gke_llama_factory_lora.yaml** | **2 nodes**<br>16x H100 GPUs<br>1000+ GB CPU memory | **Memory efficient** - LoRA fine-tuning with lower resource requirements. Great for limited GPU resources. |
 
-## 🚀 Recommended: CPU-Friendly Full Finetuning
+## Full finetuning with CPU offloading
 
-**Start here for most users!** This approach uses [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) with CPU offloading to reduce GPU memory requirements.
+**Start here for most users!** This approach uses [torchtune](https://github.com/pytorch/torchtune) with CPU offloading to reduce GPU memory requirements.
 
-**SkyPilot YAML**: [`llama-4-maverick-sft.yaml.yaml`](llama-4-maverick-sft.yaml.yaml)
+**SkyPilot YAML**: [`llama-4-maverick-sft.yaml`](llama-4-maverick-sft.yaml)
 
 Run the following on your local machine:
 
@@ -114,7 +114,7 @@ For users with limited GPU resources, LoRA (Low-Rank Adaptation) provides an eff
 
 ```bash
 # LoRA finetuning - requires fewer resources
-sky launch -c maverick-lora llama-4-maverick-llama-factory-lora.yaml \
+sky launch -c maverick-lora llama-4-maverick-lora.yaml \
   --env HF_TOKEN
 ```
 
