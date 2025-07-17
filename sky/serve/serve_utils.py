@@ -1134,7 +1134,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             status_str,
             replicas,
             endpoint,
-            'Yes' if record['pool'] else 'No',
+            'Yes' if record.get('pool', False) else 'No',
         ]
         if show_all:
             service_values.extend(
