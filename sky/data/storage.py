@@ -148,12 +148,13 @@ class StoreType(enum.Enum):
         return None
 
     @classmethod
-    def find_s3_compatible_config_by_prefix(cls, source: str) -> Optional[str]:
+    def find_s3_compatible_config_by_prefix(
+            cls, source: str) -> Optional['StoreType']:
         """Get S3-compatible store type by URL prefix."""
         for store_type, store_class in _S3_COMPATIBLE_STORES.items():
             config = store_class.get_config()
             if source.startswith(config.url_prefix):
-                return store_type
+                return StoreType(store_type)
         return None
 
     @classmethod
@@ -795,10 +796,14 @@ class Storage(object):
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
                 if isinstance(self.source, str):
-                    if self.source.startswith('gs://'):
+                    if self.source.startswith('s3://'):
+                        self.add_store(StoreType.S3)
+                    elif self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
                     elif data_utils.is_az_container_endpoint(self.source):
                         self.add_store(StoreType.AZURE)
+                    elif self.source.startswith('r2://'):
+                        self.add_store(StoreType.R2)
                     elif self.source.startswith('cos://'):
                         self.add_store(StoreType.IBM)
                     elif self.source.startswith('oci://'):
@@ -809,7 +814,7 @@ class Storage(object):
                     store_type = StoreType.find_s3_compatible_config_by_prefix(
                         self.source)
                     if store_type:
-                        self.add_store(StoreType(store_type))
+                        self.add_store(store_type)
 
     def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
         """Adds the bucket sub path prefix to the blob path."""
@@ -1781,8 +1786,10 @@ class S3CompatibleStore(AbstractStore):
             return cmd
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
+            # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
+
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
                 for file_name in excluded_list
