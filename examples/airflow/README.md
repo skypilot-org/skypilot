@@ -103,7 +103,7 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
     # Use the bucket_uuid from previous task
     common_envs = {
         'DATA_BUCKET_NAME': f"sky-data-demo-{bucket_uuid}",
-        'DATA_BUCKET_STORE_TYPE': 'gcs',
+        'DATA_BUCKET_STORE_TYPE': 's3',
     }
 
     preprocess_task = run_sky_task.override(task_id="data_preprocess")(
