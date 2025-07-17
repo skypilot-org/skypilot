@@ -277,13 +277,18 @@ class StoreType(enum.Enum):
                         store_url)
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
-                # Check compatible stores
-                for compatible_store_type, store_class in \
-                    _S3_COMPATIBLE_STORES.items():
-                    config = store_class.get_config()
-                    if store_type == compatible_store_type:
-                        bucket_name, sub_path = config.split_path(store_url)
-                        break
+                else:
+                    # Check compatible stores
+                    for compatible_store_type, store_class in \
+                        _S3_COMPATIBLE_STORES.items():
+                        if store_type.value == compatible_store_type:
+                            config = store_class.get_config()
+                            bucket_name, sub_path = config.split_path(store_url)
+                            break
+                    else:
+                        # If we get here, it's an unknown S3-compatible store
+                        raise ValueError(
+                            f'Unknown S3-compatible store type: {store_type}')
                 return store_type, bucket_name, \
                     sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
