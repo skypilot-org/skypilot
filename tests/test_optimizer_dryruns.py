@@ -227,6 +227,8 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # Choose General Purpose instance types
     assert 'm6i.2xlarge' in stdout  # AWS, 8 vCPUs, 32 GB memory
     assert 'Standard_D8s_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
+    assert 'n4-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
+    # Just test
     assert 'n2-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
 
     _test_resources_launch(memory=32)
