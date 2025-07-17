@@ -277,9 +277,6 @@ class StoreType(enum.Enum):
                         store_url)
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
-                elif store_type == StoreType.NEBIUS:
-                    bucket_name, sub_path = data_utils.split_nebius_path(
-                        store_url)
                 # Check compatible stores
                 for compatible_store_type, store_class in \
                     _S3_COMPATIBLE_STORES.items():
@@ -781,20 +778,14 @@ class Storage(object):
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
                 if isinstance(self.source, str):
-                    if self.source.startswith('s3://'):
-                        self.add_store(StoreType.S3)
-                    elif self.source.startswith('gs://'):
+                    if self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
                     elif data_utils.is_az_container_endpoint(self.source):
                         self.add_store(StoreType.AZURE)
-                    elif self.source.startswith('r2://'):
-                        self.add_store(StoreType.R2)
                     elif self.source.startswith('cos://'):
                         self.add_store(StoreType.IBM)
                     elif self.source.startswith('oci://'):
                         self.add_store(StoreType.OCI)
-                    elif self.source.startswith('nebius://'):
-                        self.add_store(StoreType.NEBIUS)
 
                     store_type = StoreType.find_s3_compatible_config_by_prefix(
                         self.source)
@@ -1159,8 +1150,6 @@ class Storage(object):
             store_cls = IBMCosStore
         elif store_type == StoreType.OCI:
             store_cls = OciStore
-        elif store_type == StoreType.NEBIUS:
-            store_cls = NebiusStore
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
