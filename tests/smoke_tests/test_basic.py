@@ -109,6 +109,14 @@ def test_minimal_with_git_workdir(generic_cloud: str):
             # Check the current branch
             f'sky exec {name} \'git status | grep master || exit 1\'',
             # Checkout to releases/0.10.0
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to default branch
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
             f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 tests/test_yamls/minimal.yaml',
             # Check the current branch
             f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',

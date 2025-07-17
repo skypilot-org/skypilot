@@ -50,7 +50,6 @@ class TestUpdateTaskWorkdir:
 
         assert task.workdir == {
             'url': 'https://github.com/test/repo.git',
-            'ref': None
         }
 
     def test_update_task_workdir_dict_workdir_update_url(self):
