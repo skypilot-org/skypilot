@@ -312,7 +312,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         error_msg = None
         tasks = managed_job_state.get_managed_jobs(job_id)
         for task in tasks:
-            pool = task['pool']
+            pool = task.get('pool', None)
             if pool is None:
                 task_name = task['job_name']
                 cluster_name = generate_managed_job_cluster_name(
@@ -1383,7 +1383,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
-                job_tasks[0]['pool'],
+                job_tasks[0].get('pool', '-'),
                 '-',
                 '-',
             ]
@@ -1426,9 +1426,9 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
-                task['pool'],
-                task['current_cluster_name'],
-                task['job_id_on_pm'],
+                task.get('pool', '-'),
+                task.get('current_cluster_name', '-'),
+                task.get('job_id_on_pm', '-'),
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have

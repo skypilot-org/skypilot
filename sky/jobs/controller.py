@@ -232,18 +232,16 @@ class JobsController:
         # Only do the initial cluster launch if not resuming from a controller
         # failure. Otherwise, we will transit to recovering immediately.
         remote_job_submitted_at = time.time()
-        if self._pool is None:
-            job_id_on_pm = None
-        else:
-            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
-                self._job_id)
         if not is_resume:
             remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
-            if self._pool is not None:
-                cluster_name, job_id_on_pm = (
-                    managed_job_state.get_pool_submit_info(self._job_id))
-        assert cluster_name is not None
+        if self._pool is None:
+            job_id_on_pm = None
+        else:
+            # Update the cluster name when using cluster pool.
+            cluster_name, job_id_on_pm = managed_job_state.get_pool_submit_info(
+                self._job_id)
+            assert cluster_name is not None, (cluster_name, job_id_on_pm)
 
         if not is_resume:
             managed_job_state.set_started(job_id=self._job_id,

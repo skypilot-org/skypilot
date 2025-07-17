@@ -1382,7 +1382,7 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
 @_init_db
 def set_pool_submit_info(job_id: int, current_cluster_name: str,
                          job_id_on_pm: int) -> None:
-    """Set the pool and job id on the pool for the job id."""
+    """Set the cluster name and job id on the pool from the managed job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(job_info_table).filter(

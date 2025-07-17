@@ -255,13 +255,28 @@ def launch(
                         f'Reason: {common_utils.format_exception(e)}')
 
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
+    controller = controller_utils.Controllers.JOBS_CONTROLLER
+    controller_name = controller.value.cluster_name
     prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
+    remote_original_user_yaml_path = (
+        f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
+    remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
+    remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
+    remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller,
+        task_resources=sum([list(t.resources) for t in dag.tasks], []))
+
     consolidation_mode_job_ids = _maybe_submit_job_locally(
         prefix, dag, pool, batch_size)
 
+    # This is only needed for non-consolidation mode. For consolidation
+    # mode, the controller uses the same catalog as API server.
+    modified_catalogs = {} if consolidation_mode_job_ids is not None else (
+        service_catalog_common.get_modified_catalog_file_mounts())
+
     file_mount_synced = False
 
-    # pylint: disable=line-too-long
     def _submit_one(
         consolidation_mode_job_id: Optional[int]
     ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -274,28 +289,15 @@ def launch(
             original_user_yaml_path.flush()
 
             dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-            controller = controller_utils.Controllers.JOBS_CONTROLLER
-            controller_name = controller.value.cluster_name
-            remote_original_user_yaml_path = (
-                f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
-            remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
-            remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-            remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
-            controller_resources = controller_utils.get_controller_resources(
-                controller=controller,
-                task_resources=sum([list(t.resources) for t in dag.tasks], []))
-
-            # This is only needed for non-consolidation mode. For consolidation
-            # mode, the controller uses the same catalog as API server.
-            modified_catalogs = {} if consolidation_mode_job_ids is not None else (
-                service_catalog_common.get_modified_catalog_file_mounts())
 
             vars_to_fill = {
-                'remote_original_user_yaml_path': remote_original_user_yaml_path,
+                'remote_original_user_yaml_path':
+                    (remote_original_user_yaml_path),
                 'original_user_dag_path': original_user_yaml_path.name,
                 'remote_user_yaml_path': remote_user_yaml_path,
                 'user_yaml_path': f.name,
-                'local_to_controller_file_mounts': local_to_controller_file_mounts,
+                'local_to_controller_file_mounts':
+                    (local_to_controller_file_mounts),
                 'jobs_controller': controller_name,
                 # Note: actual cluster name will be <task.name>-<managed job ID>
                 'dag_name': dag.name,
@@ -317,7 +319,7 @@ def launch(
 
             yaml_path = os.path.join(
                 managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                f'{name}-{dag_uuid}.yaml')
+                f'{name}-{dag_uuid}-{consolidation_mode_job_id}.yaml')
             common_utils.fill_template(
                 managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
                 vars_to_fill,
@@ -334,8 +336,9 @@ def launch(
                         f'Launching managed job {dag.name!r}{batch_identity} '
                         f'from jobs controller...{colorama.Style.RESET_ALL}')
 
-            # Launch with the api server's user hash, so that sky status does not
-            # show the owner of the controller as whatever user launched it first.
+            # Launch with the api server's user hash, so that sky status does
+            # not show the owner of the controller as whatever user launched
+            # it first.
             with common.with_server_user():
                 # Always launch the controller in the default workspace.
                 with skypilot_config.local_active_workspace_ctx(
@@ -352,7 +355,7 @@ def launch(
                                                 retry_until_up=True,
                                                 fast=True,
                                                 _disable_controller_check=True)
-                    # Manually launch the scheduler process in consolidation mode.
+                    # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(
                         controller=controller, stopped_message='')
                     backend = backend_utils.get_backend_from_handle(
@@ -368,9 +371,10 @@ def launch(
                         file_mount_synced = True
                     run_script = controller_task.run
                     assert isinstance(run_script, str)
-                    # Manually add the env variables to the run script. Originally
-                    # this is done in ray jobs submission but now we have to do it
-                    # manually because there is no ray runtime on the API server.
+                    # Manually add the env variables to the run script.
+                    # Originally this is done in ray jobs submission but now we
+                    # have to do it manually because there is no ray runtime on
+                    # the API server.
                     env_cmds = [
                         f'export {k}={v!r}'
                         for k, v in controller_task.envs.items()
@@ -384,12 +388,11 @@ def launch(
                     backend.run_on_head(local_handle, run_script)
                     return consolidation_mode_job_id, local_handle
 
-    # pylint: enable=line-too-long
-
     if consolidation_mode_job_ids is None:
         return _submit_one(None)
     else:
         if pool is None:
+            assert len(consolidation_mode_job_ids) == 1
             return _submit_one(consolidation_mode_job_ids[0])
         ids = []
         all_handle = None
