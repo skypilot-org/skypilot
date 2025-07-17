@@ -4505,9 +4505,8 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        ports=('8000',),
+        ports=ports,
     )
-    del ports  # Unused.
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
@@ -4516,6 +4515,12 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
+
+    if task.service.pool:
+        if task.service.ports is not None or ports:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify ports in a cluster pool.')
+        return task
 
     # NOTE(yi): we only allow one service port now.
     service_port: Optional[int] = int(

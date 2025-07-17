@@ -322,7 +322,7 @@ def validate_service_task(task: 'sky.Task') -> None:
                 raise ValueError(
                     '`spot_placer` is only supported for spot resources. '
                     'Please explicitly specify `use_spot: true` in resources.')
-        if task.service.ports is None:
+        if not task.service.pool and task.service.ports is None:
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
             if len(requested_ports) != 1:
@@ -342,6 +342,11 @@ def validate_service_task(task: 'sky.Task') -> None:
                         f'Got multiple ports: {service_port} and '
                         f'{replica_ingress_port} in different resources. '
                         'Please specify the same port instead.')
+        if task.service.pool:
+            if (task.service.ports is not None or
+                    requested_resources.ports is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify ports in a cluster pool.')
 
 
 def generate_service_name():
