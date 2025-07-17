@@ -4,6 +4,9 @@ FROM continuumio/miniconda3:23.3.1-0
 # Detect architecture
 ARG TARGETARCH
 
+# Control Next.js basePath for staging deployments
+ARG NEXT_BASE_PATH=/dashboard
+
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
 
@@ -51,7 +54,8 @@ RUN cd /skypilot && \
         apt-get install -y nodejs && \
         npm install -g npm@latest && \
         echo "Building dashboard" && \
-        npm --prefix sky/dashboard install && npm --prefix sky/dashboard run build; \
+        npm --prefix sky/dashboard install && \
+        NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
