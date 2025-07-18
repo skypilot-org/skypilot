@@ -243,6 +243,18 @@
   font-weight: 500;
 }
 
+.shepherd-text a {
+  color: #3b82f6;
+  text-decoration: none;
+  font-weight: normal;
+  transition: color 0.2s ease;
+}
+
+.shepherd-text a:hover {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
 .shepherd-footer {
   background: white;
   padding: 12px 24px 20px;
