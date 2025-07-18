@@ -35,6 +35,7 @@ export function useTour() {
           },
           scrollTo: { behavior: 'smooth', block: 'center' },
           arrow: true,
+          highlightClass: 'shepherd-highlight',
           when: {
             show() {
               const currentStep = Shepherd.activeTour?.getCurrentStep();
@@ -44,63 +45,129 @@ export function useTour() {
               progress.className = 'shepherd-progress';
               progress.innerText = `${Shepherd.activeTour?.steps.indexOf(currentStep) + 1} of ${Shepherd.activeTour?.steps.length}`;
               footer?.insertBefore(progress, footer.firstChild);
-            }
+
+              // Add custom highlight styling to the target element
+              const targetElement = currentStep?.getTarget();
+              if (targetElement && targetElement instanceof HTMLElement) {
+                targetElement.style.outline = '3px solid #3b82f6';
+                targetElement.style.outlineOffset = '2px';
+                targetElement.style.borderRadius = '8px';
+                targetElement.style.position = 'relative';
+                targetElement.style.zIndex = '9999';
+                targetElement.setAttribute('data-shepherd-highlighted', 'true');
+              }
+            },
+                         hide() {
+               // Remove custom highlight styling when step is hidden
+               const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
+               if (targetElement && targetElement instanceof HTMLElement) {
+                 targetElement.style.outline = '';
+                 targetElement.style.outlineOffset = '';
+                 targetElement.style.borderRadius = '';
+                 targetElement.style.boxShadow = '';
+                 targetElement.style.position = '';
+                 targetElement.style.zIndex = '';
+                 targetElement.removeAttribute('data-shepherd-highlighted');
+               }
+             }
           },
         },
       });
 
+      // Add global CSS styling for tour
+      const globalStyle = document.createElement('style');
+      globalStyle.id = 'shepherd-global-custom-style';
+      globalStyle.textContent = `
+        .shepherd-element {
+          /* Uniform 1px border using inner box-shadow so corners stay consistent */
+          border: none !important;
+          border-radius: 10px !important;
+          z-index: 30000 !important;
+          box-shadow: 0 0 0 1px #d1d5db inset, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+          overflow: hidden !important;
+          background-clip: padding-box !important;
+        }
+        
+
+      `;
+      if (!document.getElementById('shepherd-global-custom-style')) {
+        document.head.appendChild(globalStyle);
+      }
+
       // Add tour event listeners
       tourRef.current.on('complete', () => {
+        // Remove any remaining highlights
+        const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
+        if (targetElement && targetElement instanceof HTMLElement) {
+          targetElement.style.outline = '';
+          targetElement.style.outlineOffset = '';
+          targetElement.style.borderRadius = '';
+          targetElement.style.boxShadow = '';
+          targetElement.style.position = '';
+          targetElement.style.zIndex = '';
+          targetElement.removeAttribute('data-shepherd-highlighted');
+        }
+        // Remove column overlay and related elements
+        const overlay = document.getElementById('shepherd-column-overlay');
+        if (overlay) {
+          overlay.remove();
+        }
+        const anchorPoint = document.getElementById('shepherd-column-anchor');
+        if (anchorPoint) {
+          anchorPoint.remove();
+        }
+        const globalStyle = document.getElementById('shepherd-global-custom-style');
+        if (globalStyle) {
+          globalStyle.remove();
+        }
         markTourCompleted();
       });
 
       tourRef.current.on('cancel', () => {
+        // Remove any remaining highlights when tour is cancelled
+        const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
+        if (targetElement && targetElement instanceof HTMLElement) {
+          targetElement.style.outline = '';
+          targetElement.style.outlineOffset = '';
+          targetElement.style.borderRadius = '';
+          targetElement.style.boxShadow = '';
+          targetElement.style.position = '';
+          targetElement.style.zIndex = '';
+          targetElement.removeAttribute('data-shepherd-highlighted');
+        }
+        // Remove column overlay and related elements
+        const overlay = document.getElementById('shepherd-column-overlay');
+        if (overlay) {
+          overlay.remove();
+        }
+        const anchorPoint = document.getElementById('shepherd-column-anchor');
+        if (anchorPoint) {
+          anchorPoint.remove();
+        }
+        const globalStyle = document.getElementById('shepherd-global-custom-style');
+        if (globalStyle) {
+          globalStyle.remove();
+        }
         markTourCompleted();
       });
 
       // Define tour steps
       const steps = [
-        {
-            text: `
-            <p><strong>Welcome to SkyPilot!</strong></p>
-            <p>SkyPilot is a framework for managing AI workloads on any cluster and cloud infrastructure.</p>
-          `,
-          buttons: [
-            {
-              text: 'Skip Tour',
-              action() {
-                this.cancel();
-              },
-              classes: 'shepherd-button-secondary',
-            },
-            {
-              text: 'Start Tour',
-              action() {
-                this.next();
-              },
-            },
-          ],
-        },
         // {
-        //   title: 'Navigation Bar',
-        //   text: `
-        //     <p>This is your main navigation bar containing all the core sections of SkyPilot.</p>
-        //     <p>Let's explore each section step by step.</p>
+        //     text: `
+        //     <p><strong>Welcome to SkyPilot!</strong></p>
+        //     <p>SkyPilot is a framework for managing AI workloads on any cluster and cloud infrastructure.</p>
         //   `,
-        //   attachTo: {
-        //     element: '.fixed.top-0.left-0.right-0.bg-white',
-        //     on: 'bottom',
-        //   },
         //   buttons: [
         //     {
-        //       text: 'Back',
+        //       text: 'Skip Tour',
         //       action() {
-        //         this.back();
+        //         this.cancel();
         //       },
         //       classes: 'shepherd-button-secondary',
         //     },
         //     {
-        //       text: 'Next',
+        //       text: 'Start Tour',
         //       action() {
         //         this.next();
         //       },
@@ -141,30 +208,145 @@ export function useTour() {
           `,
           attachTo: {
             element: function() {
-              // Target the Infra column header (th element with "Infra" text and sortable class)
-              const infraHeader = Array.from(document.querySelectorAll('th.sortable')).find(th =>
+              // Target the anchor point at the bottom edge of the column highlight
+              const anchorPoint = document.getElementById('shepherd-column-anchor');
+              if (anchorPoint) {
+                return anchorPoint;
+              }
+              
+              // Fallback to the bottom cell of the Infra column
+              const infraHeader = Array.from(document.querySelectorAll('thead th')).find(th =>
                 th.textContent && th.textContent.trim() === 'Infra'
               );
+              
               if (infraHeader) {
+                const table = infraHeader.closest('table');
+                const headerRow = infraHeader.parentElement;
+                const columnIndex = Array.from(headerRow.children).indexOf(infraHeader);
+                
+                if (table) {
+                  // Find the last row with data in this column
+                  const rows = table.querySelectorAll('tbody tr');
+                  let lastCell = null;
+                  
+                  // Iterate through rows to find the last one with a cell in this column
+                  for (let i = rows.length - 1; i >= 0; i--) {
+                    const cell = rows[i].children[columnIndex];
+                    if (cell) {
+                      lastCell = cell;
+                      break;
+                    }
+                  }
+                  
+                  if (lastCell) {
+                    return lastCell;
+                  }
+                }
+                
+                // Fallback to header if no data cells found
                 return infraHeader;
               }
-              // Fallback: find any th with "Infra" text
-              return Array.from(document.querySelectorAll('th')).find(th =>
-                th.textContent && th.textContent.trim() === 'Infra'
-              ) || 'th';
+              
+              // Fallback to table
+              return document.querySelector('table') || 'body';
             },
             on: 'bottom',
-            offset: { skidding: 0, distance: 0 },
+            offset: { skidding: 0, distance: 5 },
           },
           beforeShowPromise: function() {
             // Navigate to clusters page if not already there
             if (window.location.pathname !== '/dashboard/clusters') {
               return new Promise((resolve) => {
                 window.location.href = '/dashboard/clusters';
-                setTimeout(resolve, 1000);
+                setTimeout(resolve, 1500); // Increased timeout to ensure table loads
               });
             }
             return Promise.resolve();
+          },
+          when: {
+            show() {
+              // Find the Infra column and create a unified column highlight
+              const infraHeader = Array.from(document.querySelectorAll('thead th')).find(th =>
+                th.textContent && th.textContent.trim() === 'Infra'
+              );
+              
+              if (infraHeader && infraHeader instanceof HTMLElement) {
+                const table = infraHeader.closest('table');
+                const headerRow = infraHeader.parentElement;
+                const columnIndex = Array.from(headerRow.children).indexOf(infraHeader);
+                
+                if (table) {
+                  // Calculate the bounding box for the entire column
+                  const headerRect = infraHeader.getBoundingClientRect();
+                  const tableRect = table.getBoundingClientRect();
+                  
+                  // Find all data cells in this column
+                  const rows = table.querySelectorAll('tbody tr');
+                  let lastCellRect = headerRect;
+                  
+                  rows.forEach(row => {
+                    const cell = row.children[columnIndex];
+                    if (cell) {
+                      lastCellRect = cell.getBoundingClientRect();
+                    }
+                  });
+                  
+                  // Create a single overlay for the entire column
+                  const overlay = document.createElement('div');
+                  overlay.id = 'shepherd-column-overlay';
+                  overlay.style.position = 'fixed';
+                  overlay.style.left = `${headerRect.left - 4}px`;
+                  overlay.style.top = `${headerRect.top - 4}px`;
+                  overlay.style.width = `${headerRect.width + 8}px`;
+                  overlay.style.height = `${lastCellRect.bottom - headerRect.top + 8}px`;
+                  overlay.style.outline = '3px solid #3b82f6';
+                  overlay.style.outlineOffset = '2px';
+                  overlay.style.borderRadius = '8px';
+                  overlay.style.zIndex = '9998';
+                  overlay.style.pointerEvents = 'none';
+                  overlay.style.backgroundColor = 'transparent';
+                  
+                  document.body.appendChild(overlay);
+                  
+                  // Create invisible anchor point at the bottom edge of the highlighted column
+                  const overlayBottom = lastCellRect.bottom + 8 + 2 + 3; // +8 for overlay padding, +2 for outline offset, +3 for outline width
+                  const anchorPoint = document.createElement('div');
+                  anchorPoint.id = 'shepherd-column-anchor';
+                  anchorPoint.style.position = 'fixed';
+                  anchorPoint.style.left = `${headerRect.left + headerRect.width / 2}px`;
+                  anchorPoint.style.top = `${overlayBottom}px`;
+                  anchorPoint.style.width = '1px';
+                  anchorPoint.style.height = '1px';
+                  anchorPoint.style.zIndex = '9999';
+                  anchorPoint.style.pointerEvents = 'none';
+                  anchorPoint.style.backgroundColor = 'transparent';
+                  anchorPoint.style.transform = 'translate(-50%, -50%)';
+                  
+                  document.body.appendChild(anchorPoint);
+                }
+              }
+
+
+            },
+            hide() {
+              // Remove the column overlay
+              const overlay = document.getElementById('shepherd-column-overlay');
+              if (overlay) {
+                overlay.remove();
+              }
+              
+              // Remove the anchor point
+              const anchorPoint = document.getElementById('shepherd-column-anchor');
+              if (anchorPoint) {
+                anchorPoint.remove();
+              }
+              
+              // Remove custom styles
+              const globalStyle = document.getElementById('shepherd-global-custom-style');
+              if (globalStyle) {
+                globalStyle.remove();
+              }
+            }
           },
           buttons: [
             {
