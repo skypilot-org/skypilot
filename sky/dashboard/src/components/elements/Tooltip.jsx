@@ -17,4 +17,4 @@ export function Tooltip({ children, text }) {
       )}
     </div>
   );
-} 
+}

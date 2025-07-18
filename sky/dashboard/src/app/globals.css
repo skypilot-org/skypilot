@@ -176,7 +176,9 @@
   z-index: 9999 !important;
   max-width: 480px;
   border-radius: 0.5rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border: 1px solid #e5e7eb;
   background: white;
   font-family: inherit;
@@ -296,7 +298,9 @@
 
 .shepherd-button:hover {
   background: #1d4ed8;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.1),
+    0 1px 2px 0 rgba(0, 0, 0, 0.06);
 }
 
 .shepherd-button-secondary {
@@ -309,7 +313,9 @@
 .shepherd-button-secondary:hover {
   background: #f9fafb;
   border-color: #9ca3af;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.1),
+    0 1px 2px 0 rgba(0, 0, 0, 0.06);
 }
 
 .shepherd-cancel-icon {
@@ -440,7 +446,8 @@
 }
 
 @keyframes highlight-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.6;
     transform: scale(1);
   }
@@ -468,7 +475,8 @@
 
 .shepherd-element .bg-gray-50 code.block {
   font-size: 14px !important;
-  font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace !important;
+  font-family:
+    'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace !important;
   display: block !important;
   padding: 0 !important;
   margin: 0 !important;

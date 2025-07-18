@@ -10,16 +10,16 @@ export function useFirstVisit() {
 
   useEffect(() => {
     setIsClient(true);
-    
+
     // Check if this is the first visit
     const hasVisited = localStorage.getItem(FIRST_VISIT_KEY);
     const hasTourCompleted = localStorage.getItem(TOUR_COMPLETED_KEY);
-    
+
     if (!hasVisited) {
       setIsFirstVisit(true);
       localStorage.setItem(FIRST_VISIT_KEY, 'true');
     }
-    
+
     if (hasTourCompleted) {
       setTourCompleted(true);
     }
@@ -49,4 +49,4 @@ export function useFirstVisit() {
     resetFirstVisit,
     isClient,
   };
-} 
+}

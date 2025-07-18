@@ -58,7 +58,8 @@ export function WelcomeNotification() {
                 Welcome to SkyPilot!
               </h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                New to the dashboard? Take a quick guided tour to discover all the features.
+                New to the dashboard? Take a quick guided tour to discover all
+                the features.
               </p>
             </div>
           </div>
@@ -84,4 +85,4 @@ export function WelcomeNotification() {
   );
 }
 
-export default WelcomeNotification; 
+export default WelcomeNotification;
