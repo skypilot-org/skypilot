@@ -3,6 +3,22 @@ import { useRouter } from 'next/router';
 import Shepherd from 'shepherd.js';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
 
+// Global function for copying code blocks in tour
+if (typeof window !== 'undefined') {
+  window['copyDashboardCodeBlock'] = function(button) {
+    const codeContainer = button.closest('.bg-gray-50').querySelector('pre');
+    const codeBlock = codeContainer.querySelector('code.block');
+    const text = codeBlock.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const originalSvg = button.innerHTML;
+      button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check h-4 w-4"><path d="m9 12 2 2 4-4"/><path d="m21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.87 0 5.42 1.35 7.07 3.45"/></svg>';
+      setTimeout(() => {
+        button.innerHTML = originalSvg;
+      }, 2000);
+    });
+  };
+}
+
 export function useTour() {
   const tourRef = useRef(null);
   const router = useRouter();
@@ -201,20 +217,6 @@ export function useTour() {
                 </div>
               </div>
             </div>
-            <script>
-              function copyDashboardCodeBlock(button) {
-                const codeContainer = button.closest('.bg-gray-50').querySelector('pre');
-                const codeBlock = codeContainer.querySelector('code.block');
-                const text = codeBlock.textContent;
-                navigator.clipboard.writeText(text).then(() => {
-                  const originalSvg = button.innerHTML;
-                  button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check h-4 w-4"><path d="m9 12 2 2 4-4"/><path d="m21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.87 0 5.42 1.35 7.07 3.45"/></svg>';
-                  setTimeout(() => {
-                    button.innerHTML = originalSvg;
-                  }, 2000);
-                });
-              }
-            </script>
             `,
             buttons: [
                 {
