@@ -1996,11 +1996,14 @@ def api_stop() -> None:
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
     api_server_status = server_common.get_api_server_status()
-    if (api_server_status.version is not None and
-            int(api_server_status.version) >= 12):
-        is_local = server_common.is_api_server_local(server_url)
-    else:
-        # either old version, or its unhealthy
+    try:
+        if (api_server_status.version is not None and
+                int(api_server_status.version) >= 12):
+            is_local = server_common.is_api_server_local(server_url)
+        else:
+            # either old version, or its unhealthy
+            is_local = server_common.is_server_url_local(server_url)
+    except ValueError:
         is_local = server_common.is_server_url_local(server_url)
 
     if not is_local:
