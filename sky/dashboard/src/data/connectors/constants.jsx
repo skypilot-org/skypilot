@@ -64,7 +64,7 @@ export const CLOUDS_LIST = [
   'Nebius',
 ];
 
-export const CLOUD_CONONICATIONS = Object.fromEntries([
+export const CLOUD_CANONICALIZATIONS = Object.fromEntries([
   ...CLOUDS_LIST.map((cloud) => [cloud.toLowerCase(), cloud]),
   ['kubernetes', 'Kubernetes'],
   ['ssh', 'SSH Node Pool'],
