@@ -183,7 +183,10 @@
 }
 
 .shepherd-header {
-  display: none;
+  display: block; /* Show header so the arrow is rendered above the content */
+  padding: 16px 24px 12px; /* Spacing consistent with the body padding */
+  background: white; /* Match the card background */
+  border-bottom: none; /* Remove default bottom border */
 }
 
 .shepherd-title {
@@ -195,7 +198,7 @@
 }
 
 .shepherd-text {
-  padding: 24px;
+  padding: 12px 24px 24px;
   font-size: 16px;
   line-height: 1.6;
   color: #4b5563;
@@ -325,6 +328,17 @@
 
 .shepherd-element[data-popper-placement^='right'] .shepherd-arrow::before {
   border-right-color: white;
+}
+
+/* Fix arrow positioning for bottom-positioned tooltips */
+.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
+  top: -4px;
+  transform: none;
+}
+
+.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::before {
+  border-bottom-color: white;
+  border-top-color: transparent;
 }
 
 /* Help button styles - matching sidebar icon style */

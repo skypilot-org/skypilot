@@ -36,7 +36,7 @@ export function useTour() {
         {
             text: `
             <p><strong>Welcome to SkyPilot!</strong></p>
-            <p>SkyPilot is an open-source framework for running AI workloads on any cloud infrastructure.</p>
+            <p>SkyPilot is a framework for managing AI workloads on any cluster and cloud infrastructure.</p>
           `,
           buttons: [
             {
@@ -83,14 +83,15 @@ export function useTour() {
         {
           title: 'Clusters',
           text: `
-            <p><strong>Sky Cluster</strong> is SkyPilot's core resource unit – one or more VMs or Kubernetes pods.</p>
-            <p>You can SSH into any node of a cluster, connect an IDE to edit code, or queue development jobs on it.</p>
+            <p>Spin up <strong>Sky Clusters</strong> on any infrastructure you have access to.</p>
+            <p>You can SSH into any node, connect an IDE, or queue development jobs on it.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/clusters"]',
-            on: 'bottom-start',
+            on: 'bottom',
+            offset: { skidding: 0, distance: 0 },
           },
-          modalOverlayOpeningPadding: 4,
+          modalOverlayOpeningPadding: 8,
           buttons: [
             {
               text: 'Back',
@@ -108,25 +109,26 @@ export function useTour() {
           ],
         },
         {
-          title: 'Infra',
+          title: 'SkyPilot is infra-agnostic',
           text: `
-            <p>SkyPilot is natively <strong>infra-agnostic</strong>: spin up on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
+            <p>Manage compute on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
           `,
           attachTo: {
             element: function() {
               // Target the Infra column header (th element with "Infra" text and sortable class)
-              const infraHeader = Array.from(document.querySelectorAll('th.sortable')).find(th => 
+              const infraHeader = Array.from(document.querySelectorAll('th.sortable')).find(th =>
                 th.textContent && th.textContent.trim() === 'Infra'
               );
               if (infraHeader) {
                 return infraHeader;
               }
               // Fallback: find any th with "Infra" text
-              return Array.from(document.querySelectorAll('th')).find(th => 
+              return Array.from(document.querySelectorAll('th')).find(th =>
                 th.textContent && th.textContent.trim() === 'Infra'
               ) || 'th';
             },
             on: 'bottom',
+            offset: { skidding: 0, distance: 0 },
           },
           beforeShowPromise: function() {
             // Navigate to clusters page if not already there
@@ -157,7 +159,7 @@ export function useTour() {
         {
             text: `
             <p><strong>Launch your first cluster</strong></p>
-            <p>SkyPilot is natively <strong>infra-agnostic</strong>: spin up on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
+            <p>You can spin up compute using the Python SDK or the CLI.</p>
             <div class="space-y-2">
               <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
                 <div class="flex items-center justify-between">
@@ -247,6 +249,7 @@ export function useTour() {
                 return document.querySelector('a[href="/dashboard/jobs"]') || 'a[href="/dashboard/jobs"]';
               },
             on: 'bottom',
+            offset: { skidding: 0, distance: -16 },
           },
           buttons: [
             {
@@ -281,6 +284,7 @@ export function useTour() {
                 return document.querySelector('a[href="/dashboard/infra"]') || 'a[href="/dashboard/infra"]';
               },
             on: 'bottom',
+            offset: { skidding: 0, distance: -16 },
           },
           buttons: [
             {
@@ -306,6 +310,7 @@ export function useTour() {
           attachTo: {
             element: 'a[href="/dashboard/workspaces"]',
             on: 'bottom',
+            offset: { skidding: 0, distance: -16 },
           },
           buttons: [
             {
@@ -331,6 +336,7 @@ export function useTour() {
               attachTo: {
                   element: 'a[href="/dashboard/users"]',
                   on: 'bottom',
+                  offset: { skidding: 0, distance: -16 },
               },
               buttons: [
                   {
@@ -402,4 +408,4 @@ export function useTour() {
     completeTour,
     tour: tourRef.current,
   };
-} 
+}
