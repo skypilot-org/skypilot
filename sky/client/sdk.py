@@ -74,6 +74,7 @@ _LINE_PROCESSED_KEY = 'line_processed'
 
 
 def reload_config() -> None:
+    """Reloads the client-side config."""
     skypilot_config.safe_reload_config()
 
 
