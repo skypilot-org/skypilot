@@ -716,7 +716,7 @@ def exec(  # pylint: disable=redefined-builtin
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-@rest.retry_on_server_unavailable()
+@rest.retry_transient_errors()
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
