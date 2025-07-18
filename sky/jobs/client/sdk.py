@@ -192,7 +192,7 @@ def cancel(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@rest.retry_on_server_unavailable()
+@rest.retry_transient_errors()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,
