@@ -38,6 +38,11 @@ metadata:
     {{- if ne .Values.ingress.path "/" }}
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     skypilot.co/ingress-path: {{ .Values.ingress.path }}
+    nginx.ingress.kubernetes.io/server-snippet: |
+      # Redirect dashboard path without trailing slash to with trailing slash
+      location = {{ .Values.ingress.path }}/dashboard {
+        return 301 $scheme://$host{{ .Values.ingress.path }}/dashboard/;
+      }
     {{- end }}
     nginx.ingress.kubernetes.io/configuration-snippet: |
       {{- if index .Values.ingress "oauth2-proxy" "enabled" }}

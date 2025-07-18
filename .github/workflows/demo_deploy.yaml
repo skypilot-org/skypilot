@@ -1,0 +1,313 @@
+name: demo-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_target:
+        description: 'Target deployment (staging or demo)'
+        required: true
+        type: choice
+        options:
+          - 'skypilot-demo'
+          - 'skypilot-demo-staging'
+        default: 'skypilot-demo-staging'
+      gke_cluster_name:
+        description: 'GKE cluster name'
+        required: false
+        type: string
+        default: 'skypilot-demo-2'
+      skip_rebase:
+        description: 'Skip rebase with upstream skypilot master'
+        required: false
+        type: boolean
+        default: false
+      clean_deploy:
+        description: 'Delete namespace before deployment for clean install'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: us-central1-docker.pkg.dev
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CLUSTER_NAME: ${{ inputs.gke_cluster_name || 'skypilot-demo-2' }}
+  CLUSTER_ZONE: us-central1-a
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout selected branch from current repository
+        if: ${{ inputs.deployment_target == 'skypilot-demo-staging' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git and merge with upstream master
+        if: ${{ inputs.deployment_target == 'skypilot-demo-staging' && !inputs.skip_rebase }}
+        run: |
+          # Configure git
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          # Add upstream remote
+          git remote add upstream https://github.com/skypilot-org/skypilot.git
+          # Fetch upstream master
+          git fetch upstream master
+          # Rebase demo branch on top of upstream master
+          echo "Rebasing demo branch on upstream/master..."
+          if ! git rebase upstream/master; then
+            echo "❌ Rebase failed! There may be conflicts that need manual resolution."
+            echo "Please resolve conflicts manually and update the demo branch."
+            exit 1
+          fi
+          # Show current status
+          echo "✅ Rebase completed successfully!"
+          echo "Current branch and commit:"
+          git branch -v
+          git log --oneline -5
+      - name: Download source code for demo deployment
+        if: ${{ inputs.deployment_target == 'skypilot-demo' }}
+        run: |
+          # Checkout the staging-deployed branch that contains the verified code
+          git clone https://github.com/${{ github.repository }}.git .
+          git checkout staging-deployed-latest || {
+            echo "❌ No staging deployment found. Please run skypilot-demo-staging first."
+            exit 1
+          }
+          echo "✅ Using verified code from staging deployment"
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        id: auth
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_NAME }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: 'latest'
+
+      - name: Install GKE gcloud auth plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Configure Docker for Google Cloud
+        run: |
+          gcloud auth configure-docker ${{ env.REGISTRY }}
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Configure kubectl for cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} --zone=${{ env.CLUSTER_ZONE }} --project=${{ secrets.GCP_PROJECT_ID }}
+      - name: Determine image tag and repository
+        id: version
+        run: |
+          # Always build new image for each deployment target
+          TAG=$(date +%Y%m%d)
+
+          if [ "${{ inputs.deployment_target }}" == "skypilot-demo-staging" ]; then
+            REPO="skypilot-demo-staging"
+          else
+            REPO="skypilot-demo"
+          fi
+
+          DOCKER_IMAGE="${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/$REPO/demo:$TAG"
+          echo "Repository: $REPO, Tag: $TAG"
+          echo "Docker image: $DOCKER_IMAGE"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "docker_image=$DOCKER_IMAGE" >> $GITHUB_OUTPUT
+      - name: Build and push Docker image
+        run: |
+          DOCKER_IMAGE="${{ steps.version.outputs.docker_image }}"
+          echo "Building and pushing Docker image: $DOCKER_IMAGE"
+          # Set the appropriate basePath for each deployment target
+          if [ "${{ inputs.deployment_target }}" == "skypilot-demo-staging" ]; then
+            BASE_PATH="/staging/dashboard"
+            echo "Building staging image with basePath: $BASE_PATH"
+          elif [ "${{ inputs.deployment_target }}" == "skypilot-demo" ]; then
+            BASE_PATH="/demo/dashboard"
+            echo "Building demo image with basePath: $BASE_PATH"
+          else
+            echo "Unknown deployment target: ${{ inputs.deployment_target }}"
+            exit 1
+          fi
+          # Use regular docker build and push to avoid buildx issues
+          docker build -t $DOCKER_IMAGE -f Dockerfile --build-arg NEXT_BASE_PATH=$BASE_PATH .
+          docker push $DOCKER_IMAGE
+      - name: Save source code for demo deployment
+        if: ${{ inputs.deployment_target == 'skypilot-demo-staging' }}
+        run: |
+          # Create a branch to store the verified code
+          BRANCH_NAME="staging-deployed-latest"
+          echo "Creating/updating branch: $BRANCH_NAME"
+
+          # Configure git
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          # Create and push the branch
+          git checkout -b "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME" --force
+
+          echo "✅ Source code saved to branch: $BRANCH_NAME"
+          echo "This branch will be used for demo deployment"
+      - name: Build Helm dependencies
+        run: |
+          # Build main skypilot chart dependencies first
+          cd charts/skypilot
+          helm dependency build
+          # Build demo chart dependencies
+          cd ../../demo/charts/skypilot-demo
+          helm dependency build
+      - name: Check deployment mode
+        run: |
+          if [ "${{ inputs.clean_deploy }}" == "true" ]; then
+            echo "🧹 Clean deploy mode: Will delete existing namespace"
+          else
+            echo "🔄 Upgrade mode: Will preserve existing namespace and upgrade in place"
+          fi
+      - name: Clean up existing namespace
+        if: ${{ inputs.clean_deploy }}
+        run: |
+          echo "Clean deploy enabled - deleting existing namespace: ${{ inputs.deployment_target }}"
+          # Clean up validatingwebhookconfiguration for staging deployment
+          if [ "${{ inputs.deployment_target }}" == "skypilot-demo-staging" ]; then
+            echo "Cleaning up validatingwebhookconfiguration for staging deployment..."
+            kubectl delete validatingwebhookconfiguration skypilot-demo-staging-ingress-nginx-admission --ignore-not-found=true
+          fi
+          kubectl delete namespace ${{ inputs.deployment_target }} --ignore-not-found=true
+          # Wait for namespace to be fully deleted
+          kubectl wait --for=delete namespace/${{ inputs.deployment_target }} --timeout=300s || true
+      - name: Deploy to Kubernetes using Helm
+        run: |
+          # Use the built image
+          DOCKER_IMAGE="${{ steps.version.outputs.docker_image }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          echo "Deploying to cluster: ${{ env.CLUSTER_NAME }}"
+          echo "Using Docker image: $DOCKER_IMAGE"
+          echo "Namespace: ${{ inputs.deployment_target }}"
+          echo "Release: ${{ inputs.deployment_target }}"
+          # Configure Helm values based on deployment target
+          if [ "${{ inputs.deployment_target }}" == "skypilot-demo-staging" ]; then
+            # First deployment - deploy with ingress-nginx controller
+            echo "🚀 Deploying skypilot-demo-staging with ingress-nginx controller..."
+            helm upgrade --install skypilot-demo-staging ./demo/charts/skypilot-demo \
+              --namespace ${{ inputs.deployment_target }} \
+              --values demo/charts/skypilot-demo/values.yaml \
+              --set skypilot.apiService.image=$DOCKER_IMAGE \
+              --set skypilot.apiService.skipResourceCheck=true \
+              --set skypilot.ingress-nginx.enabled=true \
+              --set skypilot.ingress.path=/staging \
+              --set "skypilot.apiService.extraVolumes[0].configMap.name=skypilot-demo-staging-demo-users" \
+              --set "skypilot.apiService.extraVolumes[1].configMap.name=skypilot-demo-staging-demo-clusters" \
+              --set "skypilot.apiService.extraVolumes[2].configMap.name=skypilot-demo-staging-demo-jobs" \
+              --set "skypilot.apiService.extraVolumes[3].configMap.name=skypilot-demo-staging-demo-cluster-jobs" \
+              --set "skypilot.apiService.extraVolumes[4].configMap.name=skypilot-demo-staging-demo-volumes" \
+              --set "skypilot.apiService.extraVolumes[5].configMap.name=skypilot-demo-staging-demo-workspaces" \
+              --set "skypilot.apiService.extraVolumes[6].configMap.name=skypilot-demo-staging-demo-infrastructure" \
+              --create-namespace \
+              --wait
+          else
+            # Second deployment - reuse existing ingress controller but build new image
+            echo "🚀 Deploying skypilot-demo with newly built image (reusing existing ingress controller)..."
+            helm upgrade --install skypilot-demo ./demo/charts/skypilot-demo \
+              --namespace ${{ inputs.deployment_target }} \
+              --values demo/charts/skypilot-demo/values.yaml \
+              --set skypilot.apiService.image=$DOCKER_IMAGE \
+              --set skypilot.apiService.skipResourceCheck=true \
+              --set skypilot.ingress-nginx.enabled=false \
+              --set skypilot.ingress.path=/demo \
+              --set "skypilot.apiService.extraVolumes[0].configMap.name=skypilot-demo-demo-users" \
+              --set "skypilot.apiService.extraVolumes[1].configMap.name=skypilot-demo-demo-clusters" \
+              --set "skypilot.apiService.extraVolumes[2].configMap.name=skypilot-demo-demo-jobs" \
+              --set "skypilot.apiService.extraVolumes[3].configMap.name=skypilot-demo-demo-cluster-jobs" \
+              --set "skypilot.apiService.extraVolumes[4].configMap.name=skypilot-demo-demo-volumes" \
+              --set "skypilot.apiService.extraVolumes[5].configMap.name=skypilot-demo-demo-workspaces" \
+              --set "skypilot.apiService.extraVolumes[6].configMap.name=skypilot-demo-demo-infrastructure" \
+              --create-namespace \
+              --wait
+          fi
+      - name: Get external access information
+        run: |
+          echo "Getting external IP..."
+          # Set timeout and check interval
+          TIMEOUT=300  # 5 minutes
+          INTERVAL=10  # 10 seconds
+          START_TIME=$(date +%s)
+          # Determine correct service name and namespace based on deployment target
+          if [ "${{ inputs.deployment_target }}" == "skypilot-demo-staging" ]; then
+            SERVICE_NAME="skypilot-demo-staging-ingress-nginx-controller"
+            NAMESPACE="skypilot-demo-staging"
+          else
+            # For skypilot-demo, look for staging controller first (shared), then its own
+            if kubectl get svc skypilot-demo-staging-ingress-nginx-controller -n skypilot-demo-staging >/dev/null 2>&1; then
+              SERVICE_NAME="skypilot-demo-staging-ingress-nginx-controller"
+              NAMESPACE="skypilot-demo-staging"
+            else
+              SERVICE_NAME="skypilot-demo-ingress-nginx-controller"
+              NAMESPACE="skypilot-demo"
+            fi
+          fi
+          if [ "${{ inputs.deployment_target }}" == "skypilot-demo" ]; then
+            ACCESS_PATH="/demo/dashboard"
+          else
+            ACCESS_PATH="/staging/dashboard"
+          fi
+          echo "Getting external IP for ${{ inputs.deployment_target }}..."
+          # Check if service exists
+          if ! kubectl get svc $SERVICE_NAME -n $NAMESPACE >/dev/null 2>&1; then
+            echo "❌ Service $SERVICE_NAME not found in namespace $NAMESPACE"
+            exit 1
+          fi
+          # Event-based polling with timeout
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            # Check if timeout reached
+            if [ $ELAPSED -ge $TIMEOUT ]; then
+              echo "⏰ Timeout reached (${TIMEOUT}s). External IP not available yet."
+              echo "⚠️  You can check later with:"
+              echo "kubectl get svc $SERVICE_NAME -n $NAMESPACE"
+              echo "💡 The service may take longer to get an external IP assigned."
+              echo "❌ Deployment failed: External IP not assigned within timeout period."
+              exit 1
+            fi
+            # Check for external IP
+            EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
+              echo "✅ External IP found: $EXTERNAL_IP (after ${ELAPSED}s)"
+              echo "🚀 Access dashboard at: http://$EXTERNAL_IP$ACCESS_PATH/"
+              break
+            else
+              echo "⏳ Waiting for external IP... (${ELAPSED}s/${TIMEOUT}s)"
+              sleep $INTERVAL
+            fi
+          done
+          echo ""
+          echo "✅ Demo deployment completed successfully!"
+          echo "Cluster: ${{ env.CLUSTER_NAME }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Image: $DOCKER_IMAGE (Built with correct basePath)"
+          echo "Namespace: ${{ inputs.deployment_target }}"
+          echo "Mode: ${{ inputs.clean_deploy && 'Clean deploy' || 'Upgrade deploy' }}"
+          echo "Access via: http://$EXTERNAL_IP$ACCESS_PATH/"
