@@ -237,8 +237,8 @@ export function useTour() {
         {
           title: 'Jobs',
           text: `
-            <p><strong>Managed Jobs</strong> are ideal for long-running programs.</p>
-            <p>They provide automatic life-cycle management and recovery against hardware (e.g., spot instance preemption) or application failures.</p>
+            <p>Use <strong>Managed Jobs</strong> for long-running workloads.</p>
+            <p>They provide automatic recovery against hardware  or application failures, such as recovering from preemptions.</p>
           `,
           attachTo: {
                           element: function() {
