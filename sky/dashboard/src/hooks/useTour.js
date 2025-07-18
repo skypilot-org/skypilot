@@ -1,7 +1,17 @@
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, createContext, useContext } from 'react';
 import { useRouter } from 'next/router';
 import Shepherd from 'shepherd.js';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
+
+const TourContext = createContext(null);
+
+export function useTour() {
+  const context = useContext(TourContext);
+  if (!context) {
+    throw new Error('useTour must be used within a TourProvider');
+  }
+  return context;
+}
 
 // Global function for copying code blocks in tour
 if (typeof window !== 'undefined') {
@@ -19,251 +29,251 @@ if (typeof window !== 'undefined') {
   };
 }
 
-export function useTour() {
-  const tourRef = useRef(null);
-  const router = useRouter();
-  const { markTourCompleted } = useFirstVisit();
-
-  useEffect(() => {
-    // Initialize the tour only once
-    if (!tourRef.current) {
-      tourRef.current = new Shepherd.Tour({
-        useModalOverlay: false,
-        defaultStepOptions: {
-          cancelIcon: {
-            enabled: true,
-          },
-          scrollTo: { behavior: 'smooth', block: 'center' },
-          arrow: false,
-          highlightClass: 'shepherd-highlight',
-          when: {
-            show() {
-              const currentStep = Shepherd.activeTour?.getCurrentStep();
-              const currentStepElement = currentStep?.getElement();
-              const footer = currentStepElement?.querySelector('.shepherd-footer');
-              const progress = document.createElement('span');
-              progress.className = 'shepherd-progress';
-              progress.innerText = `${Shepherd.activeTour?.steps.indexOf(currentStep) + 1} of ${Shepherd.activeTour?.steps.length}`;
-              footer?.insertBefore(progress, footer.firstChild);
-
-              // Add custom highlight styling to the target element
-              const targetElement = currentStep?.getTarget();
-              if (targetElement && targetElement instanceof HTMLElement) {
-                targetElement.style.outline = '3px solid #3b82f6';
-                targetElement.style.outlineOffset = '2px';
-                targetElement.style.borderRadius = '8px';
-                targetElement.style.position = 'relative';
-                targetElement.style.zIndex = '9999';
-                targetElement.setAttribute('data-shepherd-highlighted', 'true');
-              }
+export function TourProvider({ children }) {
+    const tourRef = useRef(null);
+    const router = useRouter();
+    const { markTourCompleted } = useFirstVisit();
+  
+    useEffect(() => {
+      // Initialize the tour only once
+      if (!tourRef.current) {
+        tourRef.current = new Shepherd.Tour({
+          useModalOverlay: false,
+          defaultStepOptions: {
+            cancelIcon: {
+              enabled: true,
             },
-                         hide() {
-               // Remove custom highlight styling when step is hidden
-               const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
-               if (targetElement && targetElement instanceof HTMLElement) {
-                 targetElement.style.outline = '';
-                 targetElement.style.outlineOffset = '';
-                 targetElement.style.borderRadius = '';
-                 targetElement.style.boxShadow = '';
-                 targetElement.style.position = '';
-                 targetElement.style.zIndex = '';
-                 targetElement.removeAttribute('data-shepherd-highlighted');
+            scrollTo: { behavior: 'smooth', block: 'center' },
+            arrow: false,
+            highlightClass: 'shepherd-highlight',
+            when: {
+              show() {
+                const currentStep = Shepherd.activeTour?.getCurrentStep();
+                const currentStepElement = currentStep?.getElement();
+                const footer = currentStepElement?.querySelector('.shepherd-footer');
+                const progress = document.createElement('span');
+                progress.className = 'shepherd-progress';
+                progress.innerText = `${Shepherd.activeTour?.steps.indexOf(currentStep) + 1} of ${Shepherd.activeTour?.steps.length}`;
+                footer?.insertBefore(progress, footer.firstChild);
+
+                // Add custom highlight styling to the target element
+                const targetElement = currentStep?.getTarget();
+                if (targetElement && targetElement instanceof HTMLElement) {
+                  targetElement.style.outline = '3px solid #3b82f6';
+                  targetElement.style.outlineOffset = '2px';
+                  targetElement.style.borderRadius = '8px';
+                  targetElement.style.position = 'relative';
+                  targetElement.style.zIndex = '9999';
+                  targetElement.setAttribute('data-shepherd-highlighted', 'true');
+                }
+              },
+                           hide() {
+                 // Remove custom highlight styling when step is hidden
+                 const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
+                 if (targetElement && targetElement instanceof HTMLElement) {
+                   targetElement.style.outline = '';
+                   targetElement.style.outlineOffset = '';
+                   targetElement.style.borderRadius = '';
+                   targetElement.style.boxShadow = '';
+                   targetElement.style.position = '';
+                   targetElement.style.zIndex = '';
+                   targetElement.removeAttribute('data-shepherd-highlighted');
+                 }
                }
-             }
-          },
-        },
-      });
-
-      // Add global CSS styling for tour
-      const globalStyle = document.createElement('style');
-      globalStyle.id = 'shepherd-global-custom-style';
-      globalStyle.textContent = `
-        .shepherd-element {
-          /* Uniform 1px border using inner box-shadow so corners stay consistent */
-          border: none !important;
-          border-radius: 10px !important;
-          z-index: 30000 !important;
-          box-shadow: 0 0 0 1px #d1d5db inset, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
-          overflow: visible !important;
-          background-clip: padding-box !important;
-        }
-
-        .shepherd-title {
-            font-weight: 600;
-            font-size: 1.125rem;
-            line-height: 1.75rem;
-            color: #111827;
-            margin: 0;
-        }
-        
-        .shepherd-element .shepherd-header {
-            padding: 1rem 1rem 0.5rem 1rem;
-        }
-
-        .shepherd-element .shepherd-text {
-            padding: 0.5rem 1rem 1rem 1rem;
-        }
-      `;
-      if (!document.getElementById('shepherd-global-custom-style')) {
-        document.head.appendChild(globalStyle);
-      }
-
-      // Add tour event listeners
-      tourRef.current.on('complete', () => {
-        // Remove any remaining highlights
-        const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
-        if (targetElement && targetElement instanceof HTMLElement) {
-          targetElement.style.outline = '';
-          targetElement.style.outlineOffset = '';
-          targetElement.style.borderRadius = '';
-          targetElement.style.boxShadow = '';
-          targetElement.style.position = '';
-          targetElement.style.zIndex = '';
-          targetElement.removeAttribute('data-shepherd-highlighted');
-        }
-        // Remove column overlay and related elements
-        const overlay = document.getElementById('shepherd-column-overlay');
-        if (overlay) {
-          overlay.remove();
-        }
-        const anchorPoint = document.getElementById('shepherd-column-anchor');
-        if (anchorPoint) {
-          anchorPoint.remove();
-        }
-        const globalStyle = document.getElementById('shepherd-global-custom-style');
-        if (globalStyle) {
-          globalStyle.remove();
-        }
-        markTourCompleted();
-      });
-
-      tourRef.current.on('cancel', () => {
-        // Remove any remaining highlights when tour is cancelled
-        const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
-        if (targetElement && targetElement instanceof HTMLElement) {
-          targetElement.style.outline = '';
-          targetElement.style.outlineOffset = '';
-          targetElement.style.borderRadius = '';
-          targetElement.style.boxShadow = '';
-          targetElement.style.position = '';
-          targetElement.style.zIndex = '';
-          targetElement.removeAttribute('data-shepherd-highlighted');
-        }
-        // Remove column overlay and related elements
-        const overlay = document.getElementById('shepherd-column-overlay');
-        if (overlay) {
-          overlay.remove();
-        }
-        const anchorPoint = document.getElementById('shepherd-column-anchor');
-        if (anchorPoint) {
-          anchorPoint.remove();
-        }
-        const globalStyle = document.getElementById('shepherd-global-custom-style');
-        if (globalStyle) {
-          globalStyle.remove();
-        }
-        markTourCompleted();
-      });
-
-      // Define tour steps
-      const steps = [
-        // {
-        //     text: `
-        //     <p><strong>Welcome to SkyPilot!</strong></p>
-        //     <p>SkyPilot is a framework for managing AI workloads on any cluster and cloud infrastructure.</p>
-        //   `,
-        //   buttons: [
-        //     {
-        //       text: 'Skip Tour',
-        //       action() {
-        //         this.cancel();
-        //       },
-        //       classes: 'shepherd-button-secondary',
-        //     },
-        //     {
-        //       text: 'Start Tour',
-        //       action() {
-        //         this.next();
-        //       },
-        //     },
-        //   ],
-        // },
-        {
-          title: 'Clusters',
-          text: `
-            <p>Spin up <strong>Sky Clusters</strong> on any infrastructure you have access to.</p>
-            <p>You can SSH into any node, connect an IDE, or queue development jobs on it.</p>
-          `,
-          attachTo: {
-            element: 'a[href="/dashboard/clusters"]',
-            on: 'bottom',
-            offset: { skidding: 0, distance: 10 },
-          },
-          buttons: [
-            {
-              text: 'Back',
-              action() {
-                this.back();
-              },
-              classes: 'shepherd-button-secondary',
             },
-            {
-              text: 'Next',
-              action() {
-                this.next();
+          },
+        });
+
+        // Add global CSS styling for tour
+        const globalStyle = document.createElement('style');
+        globalStyle.id = 'shepherd-global-custom-style';
+        globalStyle.textContent = `
+          .shepherd-element {
+            /* Uniform 1px border using inner box-shadow so corners stay consistent */
+            border: none !important;
+            border-radius: 10px !important;
+            z-index: 30000 !important;
+            box-shadow: 0 0 0 1px #d1d5db inset, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+            overflow: visible !important;
+            background-clip: padding-box !important;
+          }
+
+          .shepherd-title {
+              font-weight: 600;
+              font-size: 1.125rem;
+              line-height: 1.75rem;
+              color: #111827;
+              margin: 0;
+          }
+          
+          .shepherd-element .shepherd-header {
+              padding: 1rem 1rem 0.5rem 1rem;
+          }
+
+          .shepherd-element .shepherd-text {
+              padding: 0.5rem 1rem 1rem 1rem;
+          }
+        `;
+        if (!document.getElementById('shepherd-global-custom-style')) {
+          document.head.appendChild(globalStyle);
+        }
+
+        // Add tour event listeners
+        tourRef.current.on('complete', () => {
+          // Remove any remaining highlights
+          const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
+          if (targetElement && targetElement instanceof HTMLElement) {
+            targetElement.style.outline = '';
+            targetElement.style.outlineOffset = '';
+            targetElement.style.borderRadius = '';
+            targetElement.style.boxShadow = '';
+            targetElement.style.position = '';
+            targetElement.style.zIndex = '';
+            targetElement.removeAttribute('data-shepherd-highlighted');
+          }
+          // Remove column overlay and related elements
+          const overlay = document.getElementById('shepherd-column-overlay');
+          if (overlay) {
+            overlay.remove();
+          }
+          const anchorPoint = document.getElementById('shepherd-column-anchor');
+          if (anchorPoint) {
+            anchorPoint.remove();
+          }
+          const globalStyle = document.getElementById('shepherd-global-custom-style');
+          if (globalStyle) {
+            globalStyle.remove();
+          }
+          markTourCompleted();
+        });
+
+        tourRef.current.on('cancel', () => {
+          // Remove any remaining highlights when tour is cancelled
+          const targetElement = document.querySelector('[data-shepherd-highlighted="true"]');
+          if (targetElement && targetElement instanceof HTMLElement) {
+            targetElement.style.outline = '';
+            targetElement.style.outlineOffset = '';
+            targetElement.style.borderRadius = '';
+            targetElement.style.boxShadow = '';
+            targetElement.style.position = '';
+            targetElement.style.zIndex = '';
+            targetElement.removeAttribute('data-shepherd-highlighted');
+          }
+          // Remove column overlay and related elements
+          const overlay = document.getElementById('shepherd-column-overlay');
+          if (overlay) {
+            overlay.remove();
+          }
+          const anchorPoint = document.getElementById('shepherd-column-anchor');
+          if (anchorPoint) {
+            anchorPoint.remove();
+          }
+          const globalStyle = document.getElementById('shepherd-global-custom-style');
+          if (globalStyle) {
+            globalStyle.remove();
+          }
+          markTourCompleted();
+        });
+
+        // Define tour steps
+        const steps = [
+          {
+            title: 'Welcome to SkyPilot!',
+            text: `
+              <p>SkyPilot is a framework for managing AI workloads on any cluster and cloud infrastructure.</p>
+            `,
+            buttons: [
+              {
+                text: 'Skip Tour',
+                action() {
+                  this.cancel();
+                },
+                classes: 'shepherd-button-secondary',
               },
+              {
+                text: 'Start Tour',
+                action() {
+                  this.next();
+                },
+              },
+            ],
+          },
+          {
+            title: 'Clusters',
+            text: `
+              <p>Spin up <strong>Sky Clusters</strong> on any infrastructure you have access to.</p>
+              <p>You can SSH into any node, connect an IDE, or queue development jobs on it.</p>
+            `,
+            attachTo: {
+              element: 'a[href="/dashboard/clusters"]',
+              on: 'bottom',
+              offset: { skidding: 0, distance: 10 },
             },
-          ],
-        },
-        {
-          title: 'SkyPilot is infra-agnostic',
-          text: `
-            <p>Manage compute on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
-          `,
-          attachTo: {
-            element: function() {
-              // Target the anchor point at the bottom edge of the column highlight
-              const anchorPoint = document.getElementById('shepherd-column-anchor');
-              if (anchorPoint) {
-                return anchorPoint;
-              }
-              
-              // Fallback to the bottom cell of the Infra column
-              const infraHeader = Array.from(document.querySelectorAll('thead th')).find(th =>
-                th.textContent && th.textContent.trim() === 'Infra'
-              );
-              
-              if (infraHeader) {
-                const table = infraHeader.closest('table');
-                const headerRow = infraHeader.parentElement;
-                const columnIndex = Array.from(headerRow.children).indexOf(infraHeader);
+            buttons: [
+              {
+                text: 'Back',
+                action() {
+                  this.back();
+                },
+                classes: 'shepherd-button-secondary',
+              },
+              {
+                text: 'Next',
+                action() {
+                  this.next();
+                },
+              },
+            ],
+          },
+          {
+            title: 'SkyPilot is infra-agnostic',
+            text: `
+              <p>Manage compute on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
+            `,
+            attachTo: {
+              element: function() {
+                // Target the anchor point at the bottom edge of the column highlight
+                const anchorPoint = document.getElementById('shepherd-column-anchor');
+                if (anchorPoint) {
+                  return anchorPoint;
+                }
                 
-                if (table) {
-                  // Find the last row with data in this column
-                  const rows = table.querySelectorAll('tbody tr');
-                  let lastCell = null;
+                // Fallback to the bottom cell of the Infra column
+                const infraHeader = Array.from(document.querySelectorAll('thead th')).find(th =>
+                  th.textContent && th.textContent.trim() === 'Infra'
+                );
+                
+                if (infraHeader) {
+                  const table = infraHeader.closest('table');
+                  const headerRow = infraHeader.parentElement;
+                  const columnIndex = Array.from(headerRow.children).indexOf(infraHeader);
                   
-                  // Iterate through rows to find the last one with a cell in this column
-                  for (let i = rows.length - 1; i >= 0; i--) {
-                    const cell = rows[i].children[columnIndex];
-                    if (cell) {
-                      lastCell = cell;
-                      break;
+                  if (table) {
+                    // Find the last row with data in this column
+                    const rows = table.querySelectorAll('tbody tr');
+                    let lastCell = null;
+                    
+                    // Iterate through rows to find the last one with a cell in this column
+                    for (let i = rows.length - 1; i >= 0; i--) {
+                      const cell = rows[i].children[columnIndex];
+                      if (cell) {
+                        lastCell = cell;
+                        break;
+                      }
+                    }
+                    
+                    if (lastCell) {
+                      return lastCell;
                     }
                   }
                   
-                  if (lastCell) {
-                    return lastCell;
-                  }
+                  // Fallback to header if no data cells found
+                  return infraHeader;
                 }
                 
-                // Fallback to header if no data cells found
-                return infraHeader;
-              }
-              
-              // Fallback to table
-              return document.querySelector('table') || 'body';
-            },
+                // Fallback to table
+                return document.querySelector('table') || 'body';
+              },
             on: 'bottom',
             offset: { skidding: 0, distance: 15 },
           },
@@ -611,9 +621,11 @@ export function useTour() {
     }
   };
 
-  return {
+  const value = {
     startTour,
     completeTour,
     tour: tourRef.current,
   };
+
+  return <TourContext.Provider value={value}>{children}</TourContext.Provider>;
 }
