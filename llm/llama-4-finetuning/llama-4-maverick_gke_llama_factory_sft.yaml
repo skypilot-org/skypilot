@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick_gke_llama_factory_sft_cpu.yaml -c llama4_cpu --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick_gke_llama_factory_sft.yaml -c llama4 --env HF_TOKEN
 #
 # This config uses H200 GPUs with 141GB memory each (much better for LLaMA-4!)
 
@@ -60,7 +60,7 @@ run: |
 
   cd LLaMA-Factory
 
-  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=2 NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_maverick_full_sft_cpu.yaml
+  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=$SKYPILOT_NUM_NODES NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_maverick_full_sft_cpu.yaml
 
 
 

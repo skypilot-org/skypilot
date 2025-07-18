@@ -15,7 +15,7 @@ from sky import global_user_state
 from sky.client.cli import command
 from sky.utils import common
 from sky.utils import controller_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 
 def test_job_nonexist_strategy():

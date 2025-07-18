@@ -5,7 +5,7 @@ import pathlib
 import threading
 from typing import Callable, Optional, Union
 
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 _DB_PATH = None
 _db_init_lock = threading.Lock()

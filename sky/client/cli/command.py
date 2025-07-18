@@ -55,6 +55,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
+from sky.client.cli import git
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -71,6 +72,7 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import git as git_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -151,13 +153,17 @@ def _get_cluster_records_and_set_ssh_config(
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
-            key_path = (cluster_utils.SSHConfigHelper.generate_local_key_file(
-                handle.cluster_name, credentials))
+            escaped_key_path = shlex.quote(
+                (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                    handle.cluster_name, credentials)))
+            escaped_executable_path = shlex.quote(sys.executable)
+            escaped_websocket_proxy_path = shlex.quote(
+                f'{sky.__root_dir__}/templates/websocket_proxy.py')
             # Instead of directly use websocket_proxy.py, we add an
             # additional proxy, so that ssh can use the head pod in the
             # cluster to jump to worker pods.
             proxy_command = (
-                f'ssh -tt -i {key_path} '
+                f'ssh -tt -i {escaped_key_path} '
                 '-o StrictHostKeyChecking=no '
                 '-o UserKnownHostsFile=/dev/null '
                 '-o IdentitiesOnly=yes '
@@ -167,10 +173,10 @@ def _get_cluster_records_and_set_ssh_config(
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\'{sys.executable} {sky.__root_dir__}/templates/'
-                f'websocket_proxy.py '
+                f'\"{escaped_executable_path} '
+                f'{escaped_websocket_proxy_path} '
                 f'{server_common.get_server_url()} '
-                f'{handle.cluster_name}\'')
+                f'{handle.cluster_name}\"')
             credentials['ssh_proxy_command'] = proxy_command
 
         cluster_utils.SSHConfigHelper.add_cluster(
@@ -463,20 +469,21 @@ def _add_click_options(options: List[click.Option]):
 
 
 def _parse_override_params(
-        cloud: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-        gpus: Optional[str] = None,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        instance_type: Optional[str] = None,
-        use_spot: Optional[bool] = None,
-        image_id: Optional[str] = None,
-        disk_size: Optional[int] = None,
-        disk_tier: Optional[str] = None,
-        network_tier: Optional[str] = None,
-        ports: Optional[Tuple[str, ...]] = None,
-        config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    cloud: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    gpus: Optional[str] = None,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    instance_type: Optional[str] = None,
+    use_spot: Optional[bool] = None,
+    image_id: Optional[str] = None,
+    disk_size: Optional[int] = None,
+    disk_tier: Optional[str] = None,
+    network_tier: Optional[str] = None,
+    ports: Optional[Tuple[str, ...]] = None,
+    config_override: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -661,6 +668,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     # job launch specific
     job_recovery: Optional[str] = None,
     config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -668,6 +677,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         A dag iff the entrypoint is YAML and contains more than 1 task.
         Otherwise, a task.
     """
+    if git_url is not None and workdir is not None:
+        raise click.UsageError('Cannot specify both --git-url and --workdir')
+
     entrypoint = ' '.join(entrypoint)
     is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -727,9 +739,10 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.update_envs(env)
         task.update_secrets(secret)
 
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
+    # Update the workdir config from the command line parameters.
+    # And update the envs and secrets from the workdir.
+    _update_task_workdir(task, workdir, git_url, git_ref)
+    _update_task_workdir_and_secrets_from_workdir(task)
 
     # job launch specific.
     if job_recovery is not None:
@@ -742,6 +755,73 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     return task
+
+
+def _update_task_workdir(task: sky.Task, workdir: Optional[str],
+                         git_url: Optional[str], git_ref: Optional[str]):
+    """Updates the task workdir.
+
+    Args:
+        task: The task to update.
+        workdir: The workdir to update.
+        git_url: The git url to update.
+        git_ref: The git ref to update.
+    """
+    if task.workdir is None or isinstance(task.workdir, str):
+        if workdir is not None:
+            task.workdir = workdir
+            return
+        if git_url is not None:
+            task.workdir = {}
+            task.workdir['url'] = git_url
+            if git_ref is not None:
+                task.workdir['ref'] = git_ref
+            return
+        return
+    if git_url is not None:
+        task.workdir['url'] = git_url
+    if git_ref is not None:
+        task.workdir['ref'] = git_ref
+    return
+
+
+def _update_task_workdir_and_secrets_from_workdir(task: sky.Task):
+    """Updates the task secrets from the workdir.
+
+    Args:
+        task: The task to update.
+    """
+    if task.workdir is None:
+        return
+    if not isinstance(task.workdir, dict):
+        return
+    url = task.workdir['url']
+    ref = task.workdir.get('ref', '')
+    token = os.environ.get(git_utils.GIT_TOKEN_ENV_VAR)
+    ssh_key_path = os.environ.get(git_utils.GIT_SSH_KEY_PATH_ENV_VAR)
+    try:
+        git_repo = git.GitRepo(url, ref, token, ssh_key_path)
+        clone_info = git_repo.get_repo_clone_info()
+        if clone_info is None:
+            return
+        task.envs[git_utils.GIT_URL_ENV_VAR] = clone_info.url
+        if ref:
+            ref_type = git_repo.get_ref_type()
+            if ref_type == git.GitRefType.COMMIT:
+                task.envs[git_utils.GIT_COMMIT_HASH_ENV_VAR] = ref
+            elif ref_type == git.GitRefType.BRANCH:
+                task.envs[git_utils.GIT_BRANCH_ENV_VAR] = ref
+            elif ref_type == git.GitRefType.TAG:
+                task.envs[git_utils.GIT_TAG_ENV_VAR] = ref
+        if clone_info.token is None and clone_info.ssh_key is None:
+            return
+        if clone_info.token is not None:
+            task.secrets[git_utils.GIT_TOKEN_ENV_VAR] = clone_info.token
+        if clone_info.ssh_key is not None:
+            task.secrets[git_utils.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+    except exceptions.GitError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{str(e)}') from None
 
 
 class _NaturalOrderGroup(click.Group):
@@ -921,42 +1001,49 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
 def launch(
-        entrypoint: Tuple[str, ...],
-        cluster: Optional[str],
-        dryrun: bool,
-        detach_run: bool,
-        backend_name: Optional[str],
-        name: Optional[str],
-        workdir: Optional[str],
-        infra: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        gpus: Optional[str],
-        cpus: Optional[str],
-        memory: Optional[str],
-        instance_type: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        secret: List[Tuple[str, str]],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        network_tier: Optional[str],
-        ports: Tuple[str, ...],
-        idle_minutes_to_autostop: Optional[int],
-        down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool,
-        yes: bool,
-        no_setup: bool,
-        clone_disk_from: Optional[str],
-        fast: bool,
-        async_call: bool,
-        config_override: Optional[Dict[str, Any]] = None):
+    entrypoint: Tuple[str, ...],
+    cluster: Optional[str],
+    dryrun: bool,
+    detach_run: bool,
+    backend_name: Optional[str],
+    name: Optional[str],
+    workdir: Optional[str],
+    infra: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    ports: Tuple[str, ...],
+    idle_minutes_to_autostop: Optional[int],
+    down: bool,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool,
+    yes: bool,
+    no_setup: bool,
+    clone_disk_from: Optional[str],
+    fast: bool,
+    async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
+):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1004,6 +1091,8 @@ def launch(
         network_tier=network_tier,
         ports=ports,
         config_override=config_override,
+        git_url=git_url,
+        git_ref=git_ref,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1095,34 +1184,42 @@ def launch(
           'and do not stream execution logs.'))
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
                     flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(cluster: Optional[str],
-         cluster_option: Optional[str],
-         entrypoint: Tuple[str, ...],
-         detach_run: bool,
-         name: Optional[str],
-         infra: Optional[str],
-         cloud: Optional[str],
-         region: Optional[str],
-         zone: Optional[str],
-         workdir: Optional[str],
-         gpus: Optional[str],
-         ports: Tuple[str],
-         instance_type: Optional[str],
-         num_nodes: Optional[int],
-         use_spot: Optional[bool],
-         image_id: Optional[str],
-         env_file: Optional[Dict[str, str]],
-         env: List[Tuple[str, str]],
-         secret: List[Tuple[str, str]],
-         cpus: Optional[str],
-         memory: Optional[str],
-         disk_size: Optional[int],
-         disk_tier: Optional[str],
-         network_tier: Optional[str],
-         async_call: bool,
-         config_override: Optional[Dict[str, Any]] = None):
+def exec(
+    cluster: Optional[str],
+    cluster_option: Optional[str],
+    entrypoint: Tuple[str, ...],
+    detach_run: bool,
+    name: Optional[str],
+    infra: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    workdir: Optional[str],
+    gpus: Optional[str],
+    ports: Tuple[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
+):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1221,6 +1318,8 @@ def exec(cluster: Optional[str],
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
         config_override=config_override,
+        git_url=git_url,
+        git_ref=git_ref,
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -4060,6 +4159,10 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -4091,6 +4194,8 @@ def jobs_launch(
     yes: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -4136,6 +4241,8 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
         config_override=config_override,
+        git_url=git_url,
+        git_ref=git_ref,
     )
 
     if not isinstance(task_or_dag, sky.Dag):
@@ -5007,6 +5114,12 @@ def serve_down(
               default=False,
               help='Sync down logs to the local machine. Can be combined with '
               '--controller, --load-balancer, or a replica ID to narrow scope.')
+@click.option(
+    '--tail',
+    default=None,
+    type=int,
+    help='The number of lines to display from the end of the log file. '
+    'Default is None, which means print all lines.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
@@ -5019,6 +5132,7 @@ def serve_logs(
     load_balancer: bool,
     replica_ids: Tuple[int, ...],
     sync_down: bool,
+    tail: Optional[int],
 ):
     """Tail or sync down logs of a service.
 
@@ -5038,12 +5152,26 @@ def serve_logs(
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
         \b
+        # Show the last 100 lines of the controller logs
+        sky serve logs --controller --tail 100 [SERVICE_NAME]
+        \b
         # Sync down all logs of the service (controller, LB, all replicas)
         sky serve logs [SERVICE_NAME] --sync-down
         \b
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
+    if tail is not None:
+        if tail < 0:
+            raise click.UsageError('--tail must be a non-negative integer.')
+        # TODO(arda): We could add ability to tail and follow logs together.
+        if follow:
+            follow = False
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                '--tail and --follow cannot be used together. '
+                f'Changed the mode to --no-follow.{colorama.Style.RESET_ALL}')
+
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
@@ -5078,7 +5206,8 @@ def serve_logs(
             serve_lib.sync_down_logs(service_name,
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
-                                     replica_ids=list(replica_ids))
+                                     replica_ids=list(replica_ids),
+                                     tail=tail)
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Service {service_name} logs: '
@@ -5120,7 +5249,8 @@ def serve_logs(
         serve_lib.tail_logs(service_name,
                             target=target_component,
                             replica_id=target_replica_id,
-                            follow=follow)
+                            follow=follow,
+                            tail=tail)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

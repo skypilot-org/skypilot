@@ -81,12 +81,12 @@ const PROPERTY_OPTIONS = [
     value: 'user',
   },
   {
-    label: 'Infra',
-    value: 'infra',
-  },
-  {
     label: 'Workspace',
     value: 'workspace',
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
   },
 ];
 
@@ -683,7 +683,7 @@ export function ClusterTable({
   return (
     <div>
       <Card>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
@@ -1073,45 +1073,64 @@ const FilterDropdown = ({
   placeholder = 'Filter clusters',
 }) => {
   const inputRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [value, setValue] = useState('');
   const [propertyValue, setPropertValue] = useState('status');
   const [valueOptions, setValueOptions] = useState([]);
 
-  let filteredOptions = [];
+  // Handle clicks outside the dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target) &&
+        inputRef.current &&
+        !inputRef.current.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     let updatedValueOptions = [];
 
-    switch (propertyValue) {
-      case 'status':
-        updatedValueOptions = valueList.status;
-        break;
-
-      case 'user':
-        updatedValueOptions = valueList.user;
-        break;
-
-      case 'cluster':
-        updatedValueOptions = valueList.cluster;
-        break;
-
-      case 'workspace':
-        updatedValueOptions = valueList.workspace;
-        break;
-
-      case 'infra':
-        updatedValueOptions = valueList.infra;
-        break;
-
-      default:
-        break;
+    if (valueList && typeof valueList === 'object') {
+      switch (propertyValue) {
+        case 'status':
+          updatedValueOptions = valueList.status || [];
+          break;
+        case 'user':
+          updatedValueOptions = valueList.user || [];
+          break;
+        case 'cluster':
+          updatedValueOptions = valueList.cluster || [];
+          break;
+        case 'workspace':
+          updatedValueOptions = valueList.workspace || [];
+          break;
+        case 'infra':
+          updatedValueOptions = valueList.infra || [];
+          break;
+        default:
+          break;
+      }
     }
 
-    updatedValueOptions = updatedValueOptions.filter((item) =>
-      item.includes(value.toLowerCase())
-    );
+    // Filter options based on current input value
+    if (value.trim() !== '') {
+      updatedValueOptions = updatedValueOptions.filter(
+        (item) =>
+          item && item.toString().toLowerCase().includes(value.toLowerCase())
+      );
+    }
 
     setValueOptions(updatedValueOptions);
   }, [propertyValue, valueList, value]);
@@ -1126,123 +1145,136 @@ const FilterDropdown = ({
 
   const handleValueChange = (e) => {
     setValue(e.target.value);
+    if (!isOpen) {
+      setIsOpen(true);
+    }
+  };
+
+  const handleInputFocus = () => {
+    setIsOpen(true);
+  };
+
+  const handleOptionSelect = (option) => {
+    setFilters((prevFilters) => {
+      const updatedFilters = [
+        ...prevFilters,
+        {
+          property: getPropertyLabel(propertyValue),
+          operator: ':',
+          value: option,
+        },
+      ];
+
+      updateURLParams(updatedFilters);
+      return updatedFilters;
+    });
+    setIsOpen(false);
+    setValue('');
+    inputRef.current.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && value.trim() !== '') {
+      setFilters((prevFilters) => {
+        const updatedFilters = [
+          ...prevFilters,
+          {
+            property: getPropertyLabel(propertyValue),
+            operator: ':',
+            value: value,
+          },
+        ];
+
+        updateURLParams(updatedFilters);
+        return updatedFilters;
+      });
+      setValue('');
+      setIsOpen(false);
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+      inputRef.current.blur();
+    }
   };
 
   return (
-    <>
-      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-hidden">
-        <div className="border-r border-gray-300">
-          <Select
-            onValueChange={(value) => setPropertValue(value)}
-            value={propertyValue}
+    <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-visible">
+      <div className="border-r border-gray-300">
+        <Select onValueChange={setPropertValue} value={propertyValue}>
+          <SelectTrigger
+            aria-label="Filter Property"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-32 h-8"
           >
-            <SelectTrigger
-              aria-label="Node"
-              className="focus:ring-0 focus:ring-offset-0 border-none rounded-none w-32 h-8"
-            >
-              <SelectValue placeholder="Select Property" />
-            </SelectTrigger>
-            <SelectContent>
-              {propertyList.map((item, index) => (
-                <SelectItem key={`property-item-${index}`} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="relative flex-1">
-          <input
-            type="text"
-            ref={inputRef}
-            placeholder={placeholder}
-            value={value}
-            onChange={(e) => handleValueChange(e)}
-            onFocus={() => setIsOpen(true)}
-            onBlur={() => setIsOpen(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && value !== '') {
-                setFilters((prevFilters) => {
-                  const updatedFilters = [
-                    ...prevFilters,
-                    {
-                      property: getPropertyLabel(propertyValue),
-                      operator: ':',
-                      value: value,
-                    },
-                  ];
-
-                  updateURLParams(updatedFilters);
-
-                  return updatedFilters;
-                });
-                setValue('');
-                setIsOpen(false);
-                inputRef.current.blur();
-              }
-            }}
-            className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-none focus:ring-0 focus:outline-none"
-            autoComplete="off"
-          />
-          {value && (
-            <button
-              onClick={() => {
-                setValue('');
-              }}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear filter"
-              tabIndex={-1}
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-          {isOpen && valueOptions.length > 0 && (
-            <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
-              {valueOptions.map((option, index) => (
-                <div
-                  key={option}
-                  className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setFilters((prevFilters) => {
-                      const updatedFilters = [
-                        ...prevFilters,
-                        {
-                          property: getPropertyLabel(propertyValue),
-                          operator: '=',
-                          value: option,
-                        },
-                      ];
-
-                      updateURLParams(updatedFilters);
-
-                      return updatedFilters;
-                    });
-                    setIsOpen(false);
-                    setValue('');
-                    inputRef.current.blur();
-                  }}
-                >
-                  <span className="text-sm text-gray-600">{option}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+            <SelectValue placeholder="Select Property" />
+          </SelectTrigger>
+          <SelectContent>
+            {propertyList.map((item, index) => (
+              <SelectItem key={`property-item-${index}`} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
-    </>
+      <div className="relative flex-1">
+        <input
+          type="text"
+          ref={inputRef}
+          placeholder={placeholder}
+          value={value}
+          onChange={handleValueChange}
+          onFocus={handleInputFocus}
+          onKeyDown={handleKeyDown}
+          className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          autoComplete="off"
+        />
+        {value && (
+          <button
+            onClick={() => {
+              setValue('');
+              setIsOpen(false);
+            }}
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear filter"
+            tabIndex={-1}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        )}
+        {isOpen && valueOptions.length > 0 && (
+          <div
+            ref={dropdownRef}
+            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            style={{ zIndex: 9999 }}
+          >
+            {valueOptions.map((option, index) => (
+              <div
+                key={`${option}-${index}`}
+                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                  index !== valueOptions.length - 1
+                    ? 'border-b border-gray-100'
+                    : ''
+                }`}
+                onClick={() => handleOptionSelect(option)}
+              >
+                <span className="text-sm text-gray-700">{option}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -1266,7 +1298,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
   return (
     <>
-      <div className="flex items-center gap-4 py-1 px-2">
+      <div className="flex items-center gap-4 py-2 px-2">
         <div className="flex flex-wrap items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem
@@ -1295,8 +1327,8 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center gap-1 text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
-        <div className="flex items-center gap-1 px-2 rounded-l-lg">
+      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+        <div className="flex items-center gap-1 px-2">
           <span>{`${filter.property} `}</span>
           <span>{`${filter.operator} `}</span>
           <span>{` ${filter.value}`}</span>
@@ -1304,7 +1336,7 @@ const FilterItem = ({ filter, onRemove }) => {
 
         <button
           onClick={() => onRemove()}
-          className="p-0.5 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

@@ -371,6 +371,10 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 
 
 def handle_request_error(response: 'requests.Response') -> None:
+    # Keep the original HTTPError if the response code >= 400
+    response.raise_for_status()
+    # Other status codes are not expected neither, e.g. we do not expect to
+    # handle redirection here.
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -706,9 +710,10 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             continue
         if 'workdir' in task_config:
             workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
+            if isinstance(workdir, str):
+                task_config['workdir'] = str(
+                    client_file_mounts_dir /
+                    file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:
