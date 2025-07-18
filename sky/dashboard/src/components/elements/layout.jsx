@@ -2,6 +2,7 @@ import React from 'react';
 import { TopBar, SidebarProvider } from './sidebar';
 import { useMobile } from '@/hooks/useMobile';
 import { WelcomeNotification } from './WelcomeNotification';
+import { TourDevTools } from './TourDevTools';
 
 function LayoutContent({ children, highlighted }) {
   const isMobile = useMobile();
@@ -23,6 +24,8 @@ function LayoutContent({ children, highlighted }) {
 
       {/* Welcome notification for first-time visitors */}
       <WelcomeNotification />
+
+      <TourDevTools />
     </div>
   );
 }

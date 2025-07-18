@@ -26,7 +26,6 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
-import { TourHelpButton } from '@/components/elements/TourHelpButton';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -358,9 +357,6 @@ export function TopBar() {
               />
             </a>
           </CustomTooltip>
-
-          {/* Tour Help Button */}
-          <TourHelpButton showPulse={false} />
 
           <div className="border-l border-gray-200 h-6"></div>
 

@@ -34,10 +34,9 @@ export function useTour() {
       // Define tour steps
       const steps = [
         {
-          title: 'Welcome to SkyPilot Dashboard',
-          text: `
-            <p>This guided tour will show you the key features of your SkyPilot control center.</p>
-            <p>Let's start with the navigation bar.</p>
+            text: `
+            <p><strong>Welcome to SkyPilot!</strong></p>
+            <p>SkyPilot is an open-source framework for running AI workloads on any cloud infrastructure.</p>
           `,
           buttons: [
             {
@@ -55,16 +54,43 @@ export function useTour() {
             },
           ],
         },
+        // {
+        //   title: 'Navigation Bar',
+        //   text: `
+        //     <p>This is your main navigation bar containing all the core sections of SkyPilot.</p>
+        //     <p>Let's explore each section step by step.</p>
+        //   `,
+        //   attachTo: {
+        //     element: '.fixed.top-0.left-0.right-0.bg-white',
+        //     on: 'bottom',
+        //   },
+        //   buttons: [
+        //     {
+        //       text: 'Back',
+        //       action() {
+        //         this.back();
+        //       },
+        //       classes: 'shepherd-button-secondary',
+        //     },
+        //     {
+        //       text: 'Next',
+        //       action() {
+        //         this.next();
+        //       },
+        //     },
+        //   ],
+        // },
         {
-          title: 'Navigation Bar',
+          title: 'Clusters',
           text: `
-            <p>This is your main navigation bar containing all the core sections of SkyPilot.</p>
-            <p>Let's explore each section step by step.</p>
+            <p><strong>Sky Cluster</strong> is SkyPilot's core resource unit – one or more VMs or Kubernetes pods.</p>
+            <p>You can SSH into any node of a cluster, connect an IDE to edit code, or queue development jobs on it.</p>
           `,
           attachTo: {
-            element: '.fixed.top-0.left-0.right-0.bg-white',
-            on: 'bottom',
+            element: 'a[href="/dashboard/clusters"]',
+            on: 'bottom-start',
           },
+          modalOverlayOpeningPadding: 4,
           buttons: [
             {
               text: 'Back',
@@ -82,162 +108,146 @@ export function useTour() {
           ],
         },
         {
-          title: 'Clusters Section',
+          title: 'Infra',
           text: `
-            <p><strong>Clusters</strong> is where you manage your compute resources.</p>
-            <p>Here you can view, create, and manage your cloud clusters across different providers.</p>
+            <p>SkyPilot is natively <strong>infra-agnostic</strong>: spin up on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
           `,
           attachTo: {
             element: function() {
-              // Find the clusters link in the top navigation
-              const clustersLinks = document.querySelectorAll('a[href="/clusters"]');
-              // Return the first one found (should be in the top nav)
-              return clustersLinks[0] || 'a[href="/clusters"]';
+              // Target the Infra column header (th element with "Infra" text and sortable class)
+              const infraHeader = Array.from(document.querySelectorAll('th.sortable')).find(th => 
+                th.textContent && th.textContent.trim() === 'Infra'
+              );
+              if (infraHeader) {
+                return infraHeader;
+              }
+              // Fallback: find any th with "Infra" text
+              return Array.from(document.querySelectorAll('th')).find(th => 
+                th.textContent && th.textContent.trim() === 'Infra'
+              ) || 'th';
             },
-            on: 'bottom',
-          },
-          modalOverlayOpeningPadding: 8,
-          when: {
-            show: function() {
-              // Find all clusters links and highlight the one in the top navigation
-              const clustersLinks = document.querySelectorAll('a[href="/clusters"]');
-              clustersLinks.forEach((link, index) => {
-                if (link instanceof HTMLElement) {
-                  // Apply stronger highlighting with !important
-                  link.style.setProperty('outline', '3px solid #2563eb', 'important');
-                  link.style.setProperty('outline-offset', '2px', 'important');
-                  link.style.setProperty('border-radius', '0.375rem', 'important');
-                  link.style.setProperty('background-color', 'rgba(37, 99, 235, 0.15)', 'important');
-                  link.style.setProperty('position', 'relative', 'important');
-                  link.style.setProperty('z-index', '9999', 'important');
-                  link.style.setProperty('box-shadow', '0 0 0 1px rgba(37, 99, 235, 0.3)', 'important');
-                }
-              });
-            },
-            hide: function() {
-              // Remove highlighting from all clusters links
-              const clustersLinks = document.querySelectorAll('a[href="/clusters"]');
-              clustersLinks.forEach((link) => {
-                if (link instanceof HTMLElement) {
-                  link.style.removeProperty('outline');
-                  link.style.removeProperty('outline-offset');
-                  link.style.removeProperty('border-radius');
-                  link.style.removeProperty('background-color');
-                  link.style.removeProperty('position');
-                  link.style.removeProperty('z-index');
-                  link.style.removeProperty('box-shadow');
-                }
-              });
-            }
-          },
-          buttons: [
-            {
-              text: 'Back',
-              action() {
-                this.back();
-              },
-              classes: 'shepherd-button-secondary',
-            },
-            {
-              text: 'Next',
-              action() {
-                this.next();
-              },
-            },
-          ],
-        },
-        {
-          title: 'Infrastructure Column',
-          text: `
-            <p>In the clusters page, the <strong>Infra</strong> column shows you the underlying infrastructure details.</p>
-            <p>This displays information about instance types, regions, and cloud providers for each cluster.</p>
-          `,
-          attachTo: {
-            element: 'th',
             on: 'bottom',
           },
           beforeShowPromise: function() {
             // Navigate to clusters page if not already there
-            if (window.location.pathname !== '/clusters') {
+            if (window.location.pathname !== '/dashboard/clusters') {
               return new Promise((resolve) => {
-                window.location.href = '/clusters';
+                window.location.href = '/dashboard/clusters';
                 setTimeout(resolve, 1000);
               });
             }
             return Promise.resolve();
           },
-          when: {
-            show: function() {
-              // Try to find the Infra column header after the page loads
-              const infraHeaders = Array.from(document.querySelectorAll('th')).filter(th => 
-                th.textContent.includes('Infra')
-              );
-              if (infraHeaders.length > 0) {
-                // Update the attachment to the actual Infra header
-                this.options.attachTo.element = infraHeaders[0];
+          buttons: [
+            {
+              text: 'Back',
+              action() {
+                this.back();
+              },
+              classes: 'shepherd-button-secondary',
+            },
+            {
+              text: 'Next',
+              action() {
+                this.next();
+              },
+            },
+          ],
+        },
+        {
+            text: `
+            <p><strong>Launch your first cluster</strong></p>
+            <p>SkyPilot is natively <strong>infra-agnostic</strong>: spin up on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
+            <div class="space-y-2">
+              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
+                <div class="flex items-center justify-between">
+                  <pre class="text-sm w-full whitespace-pre-wrap">
+                    <code class="block">sky launch</code>
+                  </pre>
+                  <button class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8 rounded-full" onclick="copyDashboardCodeBlock(this)" title="Copy to clipboard">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy h-4 w-4">
+                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
+                <div class="flex items-center justify-between">
+                  <pre class="text-sm w-full whitespace-pre-wrap">
+                    <code class="block">sky launch --gpus L4:8</code>
+                  </pre>
+                  <button class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8 rounded-full" onclick="copyDashboardCodeBlock(this)" title="Copy to clipboard">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy h-4 w-4">
+                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
+                <div class="flex items-center justify-between">
+                  <pre class="text-sm w-full whitespace-pre-wrap">
+                    <code class="block">sky launch --num-nodes 10 --cpus 32+</code>
+                  </pre>
+                  <button class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8 rounded-full" onclick="copyDashboardCodeBlock(this)" title="Copy to clipboard">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy h-4 w-4">
+                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <script>
+              function copyDashboardCodeBlock(button) {
+                const codeContainer = button.closest('.bg-gray-50').querySelector('pre');
+                const codeBlock = codeContainer.querySelector('code.block');
+                const text = codeBlock.textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                  const originalSvg = button.innerHTML;
+                  button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check h-4 w-4"><path d="m9 12 2 2 4-4"/><path d="m21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.87 0 5.42 1.35 7.07 3.45"/></svg>';
+                  setTimeout(() => {
+                    button.innerHTML = originalSvg;
+                  }, 2000);
+                });
               }
-            }
-          },
-          buttons: [
-            {
-              text: 'Back',
-              action() {
-                this.back();
-              },
-              classes: 'shepherd-button-secondary',
-            },
-            {
-              text: 'Next',
-              action() {
-                this.next();
-              },
-            },
-          ],
+            </script>
+            `,
+            buttons: [
+                {
+                    text: 'Back',
+                    action() {
+                        this.back();
+                    },
+                    classes: 'shepherd-button-secondary',
+                },
+                {
+                    text: 'Next',
+                    action() {
+                        this.next();
+                    },
+                },
+            ],
         },
         {
-          title: 'Jobs Section',
+          title: 'Jobs',
           text: `
-            <p><strong>Jobs</strong> is your job management center.</p>
-            <p>View all submitted jobs, monitor their status and progress, and manage job execution.</p>
+            <p><strong>Managed Jobs</strong> are ideal for long-running programs.</p>
+            <p>They provide automatic life-cycle management and recovery against hardware (e.g., spot instance preemption) or application failures.</p>
           `,
           attachTo: {
-            element: function() {
-              const jobsLinks = document.querySelectorAll('a[href="/jobs"]');
-              return jobsLinks[0] || 'a[href="/jobs"]';
-            },
+                          element: function() {
+                // Target the jobs link with the correct href
+                const jobsLink = document.querySelector('a[href="/dashboard/jobs"]');
+                if (jobsLink) {
+                  return jobsLink;
+                }
+                // Fallback to original selector
+                return document.querySelector('a[href="/dashboard/jobs"]') || 'a[href="/dashboard/jobs"]';
+              },
             on: 'bottom',
           },
-          modalOverlayOpeningPadding: 8,
-          when: {
-            show: function() {
-              const jobsLinks = document.querySelectorAll('a[href="/jobs"]');
-              jobsLinks.forEach((link) => {
-                if (link instanceof HTMLElement) {
-                  link.style.setProperty('outline', '3px solid #2563eb', 'important');
-                  link.style.setProperty('outline-offset', '2px', 'important');
-                  link.style.setProperty('border-radius', '0.375rem', 'important');
-                  link.style.setProperty('background-color', 'rgba(37, 99, 235, 0.15)', 'important');
-                  link.style.setProperty('position', 'relative', 'important');
-                  link.style.setProperty('z-index', '9999', 'important');
-                  link.style.setProperty('box-shadow', '0 0 0 1px rgba(37, 99, 235, 0.3)', 'important');
-                }
-              });
-            },
-            hide: function() {
-              const jobsLinks = document.querySelectorAll('a[href="/jobs"]');
-              jobsLinks.forEach((link) => {
-                if (link instanceof HTMLElement) {
-                  link.style.removeProperty('outline');
-                  link.style.removeProperty('outline-offset');
-                  link.style.removeProperty('border-radius');
-                  link.style.removeProperty('background-color');
-                  link.style.removeProperty('position');
-                  link.style.removeProperty('z-index');
-                  link.style.removeProperty('box-shadow');
-                }
-              });
-            }
-          },
           buttons: [
             {
               text: 'Back',
@@ -255,49 +265,23 @@ export function useTour() {
           ],
         },
         {
-          title: 'Settings',
+          title: 'Infra',
           text: `
-            <p><strong>Settings</strong> allows you to configure your SkyPilot dashboard.</p>
-            <p>Access configuration options and customize your experience.</p>
+            <p>Bring Kubernetes clusters, VMs (on 17+ supported clouds), or SSH nodes into SkyPilot.</p>
+            <p>You can also monitor your infrastructure here.</p>
           `,
           attachTo: {
-            element: function() {
-              const configLinks = document.querySelectorAll('a[href="/config"]');
-              return configLinks[0] || 'a[href="/config"]';
-            },
+                          element: function() {
+                // Target the config link with the correct href
+                const configLink = document.querySelector('a[href="/dashboard/infra"]');
+                if (configLink) {
+                  return configLink;
+                }
+                // Fallback to original selector
+                return document.querySelector('a[href="/dashboard/infra"]') || 'a[href="/dashboard/infra"]';
+              },
             on: 'bottom',
           },
-          modalOverlayOpeningPadding: 8,
-          when: {
-            show: function() {
-              const configLinks = document.querySelectorAll('a[href="/config"]');
-              configLinks.forEach((link) => {
-                if (link instanceof HTMLElement) {
-                  link.style.setProperty('outline', '3px solid #2563eb', 'important');
-                  link.style.setProperty('outline-offset', '2px', 'important');
-                  link.style.setProperty('border-radius', '0.375rem', 'important');
-                  link.style.setProperty('background-color', 'rgba(37, 99, 235, 0.15)', 'important');
-                  link.style.setProperty('position', 'relative', 'important');
-                  link.style.setProperty('z-index', '9999', 'important');
-                  link.style.setProperty('box-shadow', '0 0 0 1px rgba(37, 99, 235, 0.3)', 'important');
-                }
-              });
-            },
-            hide: function() {
-              const configLinks = document.querySelectorAll('a[href="/config"]');
-              configLinks.forEach((link) => {
-                if (link instanceof HTMLElement) {
-                  link.style.removeProperty('outline');
-                  link.style.removeProperty('outline-offset');
-                  link.style.removeProperty('border-radius');
-                  link.style.removeProperty('background-color');
-                  link.style.removeProperty('position');
-                  link.style.removeProperty('z-index');
-                  link.style.removeProperty('box-shadow');
-                }
-              });
-            }
-          },
           buttons: [
             {
               text: 'Back',
@@ -315,18 +299,12 @@ export function useTour() {
           ],
         },
         {
-          title: 'Additional Resources',
+          title: 'Workspaces',
           text: `
-            <p>Don't miss these helpful external resources:</p>
-            <ul>
-              <li><strong>Docs</strong> - Complete documentation</li>
-              <li><strong>GitHub</strong> - Source code and issues</li>
-              <li><strong>Slack</strong> - Community support</li>
-              <li><strong>Feedback</strong> - Report bugs or request features</li>
-            </ul>
+            <p>Use Workspaces to isolate teams or projects.</p>
           `,
           attachTo: {
-            element: 'a[href="https://skypilot.readthedocs.io/en/latest/"]',
+            element: 'a[href="/dashboard/workspaces"]',
             on: 'bottom',
           },
           buttons: [
@@ -345,6 +323,46 @@ export function useTour() {
             },
           ],
         },
+          {
+              title: 'Users',
+              text: `
+            <p>SkyPilot provides user management with RBAC and SSO support.</p>
+          `,
+              attachTo: {
+                  element: 'a[href="/dashboard/users"]',
+                  on: 'bottom',
+              },
+              buttons: [
+                  {
+                      text: 'Back',
+                      action() {
+                          this.back();
+                      },
+                      classes: 'shepherd-button-secondary',
+                  },
+                  {
+                      text: 'Finish',
+                      action() {
+                          this.complete();
+                      },
+                  },
+              ],
+          },
+          {
+            title: 'Happy SkyPilot!',
+            text: `
+              <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/installation.html">Installation</a> and <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
+              <p>To reach out, join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
+            `,
+            buttons: [
+              {
+                text: 'Finish',
+                action() {
+                  this.complete();
+                },
+              },
+            ],
+          },
       ];
 
       // Add steps to the tour

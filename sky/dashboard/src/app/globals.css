@@ -174,7 +174,7 @@
 
 .shepherd-element {
   z-index: 9999 !important;
-  max-width: 380px;
+  max-width: 480px;
   border-radius: 0.5rem;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border: 1px solid #e5e7eb;
@@ -183,11 +183,7 @@
 }
 
 .shepherd-header {
-  background: white;
-  color: #111827;
-  padding: 16px 20px 0;
-  border-radius: 0.5rem 0.5rem 0 0;
-  border-bottom: none;
+  display: none;
 }
 
 .shepherd-title {
@@ -199,9 +195,9 @@
 }
 
 .shepherd-text {
-  padding: 12px 20px 20px;
-  font-size: 14px;
-  line-height: 1.5;
+  padding: 24px;
+  font-size: 16px;
+  line-height: 1.6;
   color: #4b5563;
   background: white;
 }
@@ -213,6 +209,17 @@
 
 .shepherd-text p:last-child {
   margin-bottom: 0;
+}
+
+.shepherd-text p:first-child strong {
+  font-weight: 600;
+  color: #111827;
+}
+
+.shepherd-text hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 16px 0;
 }
 
 .shepherd-text ul {
@@ -231,51 +238,58 @@
 }
 
 .shepherd-footer {
-  background: #f9fafb;
-  padding: 12px 20px 16px;
+  background: white;
+  padding: 12px 24px 20px;
   border-radius: 0 0 0.5rem 0.5rem;
-  border-top: 1px solid #e5e7eb;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .shepherd-button {
-  background: #2563eb;
-  color: white;
-  border: none;
-  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   border-radius: 0.375rem;
   font-size: 14px;
   font-weight: 500;
+  transition: all 0.2s ease;
   cursor: pointer;
-  transition: all 0.15s ease;
-  line-height: 1.25;
+  padding: 8px 16px;
+  min-height: 32px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .shepherd-button:hover {
   background: #1d4ed8;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
 }
 
 .shepherd-button-secondary {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: white;
+  color: #374151;
   border: 1px solid #d1d5db;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .shepherd-button-secondary:hover {
-  background: #e5e7eb;
-  color: #374151;
+  background: #f9fafb;
+  border-color: #9ca3af;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
 }
 
 .shepherd-cancel-icon {
   background: transparent;
   border: none;
   color: #9ca3af;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 0.375rem;
   cursor: pointer;
   position: absolute;
   top: 16px;
@@ -284,7 +298,7 @@
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .shepherd-cancel-icon:hover {
@@ -385,4 +399,32 @@
     opacity: 0.8;
     transform: scale(1.02);
   }
+}
+
+/* Tour code block optimizations */
+.shepherd-element .bg-gray-50 {
+  padding: 8px 12px !important;
+  min-height: auto !important;
+}
+
+.shepherd-element .bg-gray-50 pre {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.4 !important;
+  min-height: auto !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow-x: auto !important;
+}
+
+.shepherd-element .bg-gray-50 code.block {
+  font-size: 14px !important;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace !important;
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 1.4 !important;
+  min-height: auto !important;
+  text-align: left !important;
+  white-space: nowrap !important;
 }
