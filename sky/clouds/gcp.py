@@ -436,15 +436,18 @@ class GCP(clouds.Cloud):
         return cls._get_image_size(image_id)
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='gcp')
 
     @classmethod
@@ -681,7 +684,10 @@ class GCP(clouds.Cloud):
             host_vm_type = GCP.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
+            logger.info(f'host_vm_type: {host_vm_type}')
             if host_vm_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
