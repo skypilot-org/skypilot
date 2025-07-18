@@ -25,10 +25,6 @@ Uploading code and project files or cloning a git repository
 
 ``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``sky launch`` or ``sky exec`` is run with the YAML file. Commands in ``setup`` and ``run`` will be executed under ``~/sky_workdir``.
 
-
-
-
-
 .. tab-set::
 
     .. tab-item:: Local Directory
