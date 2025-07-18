@@ -791,7 +791,21 @@ def get_task_schema():
                 'type': 'string',
             },
             'workdir': {
-                'type': 'string',
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['url'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'ref': {
+                            'type': 'string',
+                        },
+                    },
+                }],
             },
             'event_callback': {
                 'type': 'string',

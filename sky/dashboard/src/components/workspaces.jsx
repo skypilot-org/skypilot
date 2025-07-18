@@ -380,17 +380,13 @@ export function Workspaces() {
       let activeGlobalManagedJobs = 0;
 
       jobs.forEach((job) => {
-        const jobClusterName =
-          job.cluster_name || (job.resources && job.resources.cluster_name);
-        if (jobClusterName) {
-          const wsName = clusterNameToWorkspace[jobClusterName];
-          if (
-            wsName &&
-            workspaceStatsAggregator[wsName] &&
-            activeJobStatuses.has(job.status)
-          ) {
-            workspaceStatsAggregator[wsName].managedJobsCount++;
-          }
+        // Use the direct workspace field from managed jobs
+        const wsName = job.workspace || 'default';
+        if (
+          workspaceStatsAggregator[wsName] &&
+          activeJobStatuses.has(job.status)
+        ) {
+          workspaceStatsAggregator[wsName].managedJobsCount++;
         }
         if (activeJobStatuses.has(job.status)) {
           activeGlobalManagedJobs++;
