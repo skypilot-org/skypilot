@@ -687,7 +687,6 @@ class GCP(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 region=resources.region,
                 zone=resources.zone)
-            logger.info(f'host_vm_type: {host_vm_type}')
             if host_vm_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
