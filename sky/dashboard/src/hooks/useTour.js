@@ -34,7 +34,7 @@ export function useTour() {
             enabled: true,
           },
           scrollTo: { behavior: 'smooth', block: 'center' },
-          arrow: true,
+          arrow: false,
           highlightClass: 'shepherd-highlight',
           when: {
             show() {
@@ -84,11 +84,25 @@ export function useTour() {
           border-radius: 10px !important;
           z-index: 30000 !important;
           box-shadow: 0 0 0 1px #d1d5db inset, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
-          overflow: hidden !important;
+          overflow: visible !important;
           background-clip: padding-box !important;
         }
-        
 
+        .shepherd-title {
+            font-weight: 600;
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            color: #111827;
+            margin: 0;
+        }
+        
+        .shepherd-element .shepherd-header {
+            padding: 1rem 1rem 0.5rem 1rem;
+        }
+
+        .shepherd-element .shepherd-text {
+            padding: 0.5rem 1rem 1rem 1rem;
+        }
       `;
       if (!document.getElementById('shepherd-global-custom-style')) {
         document.head.appendChild(globalStyle);
@@ -175,15 +189,15 @@ export function useTour() {
         //   ],
         // },
         {
+          title: 'Clusters',
           text: `
-            <p><strong>Clusters</strong></p>
             <p>Spin up <strong>Sky Clusters</strong> on any infrastructure you have access to.</p>
             <p>You can SSH into any node, connect an IDE, or queue development jobs on it.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/clusters"]',
             on: 'bottom',
-            offset: { skidding: 0, distance: 0 },
+            offset: { skidding: 0, distance: 10 },
           },
           buttons: [
             {
@@ -202,8 +216,8 @@ export function useTour() {
           ],
         },
         {
+          title: 'SkyPilot is infra-agnostic',
           text: `
-            <p><strong>SkyPilot is infra-agnostic</strong></p>
             <p>Manage compute on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
           `,
           attachTo: {
@@ -251,7 +265,7 @@ export function useTour() {
               return document.querySelector('table') || 'body';
             },
             on: 'bottom',
-            offset: { skidding: 0, distance: 5 },
+            offset: { skidding: 0, distance: 15 },
           },
           beforeShowPromise: function() {
             // Navigate to clusters page if not already there
@@ -365,8 +379,8 @@ export function useTour() {
           ],
         },
         {
+            title: 'Launch your first cluster',
             text: `
-            <p><strong>Launch your first cluster</strong></p>
             <p>Spin up clusters using the Python SDK or the CLI.</p>
             <div class="space-y-2">
               <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
@@ -427,8 +441,8 @@ export function useTour() {
             ],
         },
         {
+          title: 'Jobs',
           text: `
-            <p><strong>Jobs</strong></p>
             <p>Use <strong>Managed Jobs</strong> for long-running workloads.</p>
             <p>They provide automatic recovery against failures, such as recovering from preemptions or GPU errors.</p>
           `,
@@ -443,7 +457,7 @@ export function useTour() {
                 return document.querySelector('a[href="/dashboard/jobs"]') || 'a[href="/dashboard/jobs"]';
               },
             on: 'bottom',
-            offset: { skidding: 0, distance: -16 },
+            offset: { skidding: 0, distance: 10 },
           },
           buttons: [
             {
@@ -462,8 +476,8 @@ export function useTour() {
           ],
         },
         {
+          title: 'Infra',
           text: `
-            <p><strong>Infra</strong></p>
             <p>Bring your Kubernetes clusters, VMs (on 17+ supported clouds), or SSH nodes into SkyPilot.</p>
             <p>You can monitor your infrastructure here.</p>
           `,
@@ -478,7 +492,7 @@ export function useTour() {
                 return document.querySelector('a[href="/dashboard/infra"]') || 'a[href="/dashboard/infra"]';
               },
             on: 'bottom',
-            offset: { skidding: 0, distance: -16 },
+            offset: { skidding: 0, distance: 10 },
           },
           buttons: [
             {
@@ -497,14 +511,14 @@ export function useTour() {
           ],
         },
         {
+          title: 'Workspaces',
           text: `
-            <p><strong>Workspaces</strong></p>
             <p>Use Workspaces to isolate teams or projects.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/workspaces"]',
             on: 'bottom',
-            offset: { skidding: 0, distance: -16 },
+            offset: { skidding: 0, distance: 10 },
           },
           buttons: [
             {
@@ -523,14 +537,14 @@ export function useTour() {
           ],
         },
           {
+              title: 'Users',
               text: `
-            <p><strong>Users</strong></p>
             <p>SkyPilot provides user management with RBAC and SSO support. Admins can manage users in this page.</p>
           `,
               attachTo: {
                   element: 'a[href="/dashboard/users"]',
                   on: 'bottom',
-                  offset: { skidding: 0, distance: -16 },
+                  offset: { skidding: 0, distance: 10 },
               },
               buttons: [
                   {
@@ -549,8 +563,8 @@ export function useTour() {
               ],
           },
           {
+            title: 'Happy SkyPilot!',
             text: `
-              <p><strong>Happy SkyPilot!</strong></p>
               <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/installation.html">Installation</a> and <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
               <p>To reach out, join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
             `,
