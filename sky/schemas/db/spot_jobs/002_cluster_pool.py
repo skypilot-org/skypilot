@@ -21,21 +21,18 @@ depends_on = None
 def upgrade():
     """Add columns for cluster pool."""
     with op.get_context().autocommit_block():
-        db_utils.add_column_to_table_alembic(
-            'job_info',
-            'pool',
-            sa.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_alembic(
-            'job_info',
-            'current_cluster_name',
-            sa.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_alembic(
-            'job_info',
-            'job_id_on_pm',
-            sa.Integer(),
-            default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_alembic('job_info',
+                                             'pool',
+                                             sa.Text(),
+                                             server_default=None)
+        db_utils.add_column_to_table_alembic('job_info',
+                                             'current_cluster_name',
+                                             sa.Text(),
+                                             server_default=None)
+        db_utils.add_column_to_table_alembic('job_info',
+                                             'job_id_on_pm',
+                                             sa.Integer(),
+                                             server_default=None)
 
 
 def downgrade():

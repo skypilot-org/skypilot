@@ -258,7 +258,9 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
             logger.info('=== Checking the job status... ===')
-            statuses = backend.get_job_status(handle,job_ids=job_ids, stream_logs=False)
+            statuses = backend.get_job_status(handle,
+                                              job_ids=job_ids,
+                                              stream_logs=False)
             status = list(statuses.values())[0]
             if status is None:
                 logger.info('No job found.')
