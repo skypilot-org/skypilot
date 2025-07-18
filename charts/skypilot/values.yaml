@@ -114,6 +114,13 @@ apiService:
   #       secretName: my-secret
   extraVolumes: null
 
+  # Extra volume mounts to mount to the API server. Example:
+  # extraVolumeMounts:
+  #   - name: my-volume
+  #     mountPath: /my-path
+  #     subPath: my-file
+  extraVolumeMounts: null
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
