@@ -642,7 +642,7 @@ export function TourProvider({ children }) {
   const startTour = () => {
     if (tourRef.current) {
       // Navigate to clusters page before starting tour
-      router.push('/clusters').then(() => {
+      router.push('/dashboard/clusters').then(() => {
         // Small delay to ensure page is loaded
         setTimeout(() => {
           tourRef.current.start();
