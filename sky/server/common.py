@@ -221,13 +221,17 @@ def make_authenticated_request(method: str,
 
 
 @annotations.lru_cache(scope='global')
-def get_server_url(host: Optional[str] = None,
-                   port: int = DEFAULT_SERVER_PORT) -> str:
-    endpoint = None
+def get_server_url(endpoint: Optional[str] = None) -> str:
+    """Returns the server URL.
 
-    if host is not None:
-        endpoint = f'http://{host}:{port}'
-    else:
+    Args:
+        endpoint: If endpoint is provided, the server port will not be read
+            from the port file.
+
+    Returns:
+        The server URL.
+    """
+    if endpoint is None:
         try:
             with open(server_constants.API_SERVER_PORT_FILE,
                       'r',
@@ -240,6 +244,7 @@ def get_server_url(host: Optional[str] = None,
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
+
     return url.rstrip('/')
 
 
@@ -467,9 +472,9 @@ def _start_api_server(deploy: bool = False,
     Args:
         host: The host to start the server on. A string like '127.0.0.1' or
             'localhost'.
-        port: The port to start the server on.
+        port: The port to bind the server to.
     """
-    server_url = get_server_url(host, port)
+    server_url = get_server_url(f'http://{host}:{port}')
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
@@ -477,7 +482,7 @@ def _start_api_server(deploy: bool = False,
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
         if not is_server_url_local(server_url):
-            raise RuntimeError(f'Cannot start API server: {get_server_url()} '
+            raise RuntimeError(f'Cannot start API server: {server_url} '
                                'is not a local URL')
 
         # Check available memory before starting the server.
@@ -554,14 +559,13 @@ def _start_api_server(deploy: bool = False,
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
                             'Failed to start SkyPilot API server at '
-                            f'{get_server_url(host)}'
+                            f'{server_url}'
                             '\nView logs at: '
                             f'{constants.API_SERVER_LOGS}') from e
                 time.sleep(0.5)
             else:
                 break
 
-        server_url = get_server_url(host)
         dashboard_msg = ''
         api_server_info = get_api_server_status(server_url)
         if api_server_info.version == versions.DEV_VERSION:
@@ -714,6 +718,9 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                           'w',
                           encoding='utf-8') as f:
                     f.write(str(port))
+                # we must clear the cache to make sure the new port is used
+                # in case this function got called before this.
+                get_server_url.cache_clear()
             except (FileNotFoundError, OSError):
                 raise RuntimeError(
                     ('Failed to write port file '
