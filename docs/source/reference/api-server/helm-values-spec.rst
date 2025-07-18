@@ -11,7 +11,7 @@ The SkyPilot API server helm chart provides typical `helm values <https://helm.s
 
       cat <<EOF > values.yaml
       apiService:
-        image: berkeleyskypilot/skypilot:0.9.1
+        image: berkeleyskypilot/skypilot:0.9.2
       EOF
 
       helm install $RELEASE_NAME skypilot/skypilot-nightly --devel --values values.yaml
@@ -20,7 +20,7 @@ The SkyPilot API server helm chart provides typical `helm values <https://helm.s
 
   .. code-block:: bash
 
-      helm install $RELEASE_NAME skypilot/skypilot-nightly --set apiService.image="berkeleyskypilot/skypilot:0.9.1"
+      helm install $RELEASE_NAME skypilot/skypilot-nightly --set apiService.image="berkeleyskypilot/skypilot:0.9.2"
 
 Values
 ------
@@ -34,7 +34,8 @@ Below is the available helm value keys and the default value of each key:
 .. parsed-literal::
 
   :ref:`apiService <helm-values-apiService>`:
-    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.1
+    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.2
+    :ref:`replicas <helm-values-apiService-replicas>`: 1
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
     :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
     :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
@@ -50,6 +51,7 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`: null
     :ref:`enableServiceAccounts <helm-values-apiService-enableServiceAccounts>`: true
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
     :ref:`sshKeySecret <helm-values-apiService-sshKeySecret>`: null
@@ -66,10 +68,15 @@ Below is the available helm value keys and the default value of each key:
       :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
       :ref:`port <helm-values-apiService-metrics-port>`: 9090
     :ref:`terminationGracePeriodSeconds <helm-values-apiService-terminationGracePeriodSeconds>`: 60
+    :ref:`annotations <helm-values-apiService-annotations>`: null
+    :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
+    :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
+    :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
     :ref:`storageClassName <helm-values-storage-storageClassName>`: ""
+    :ref:`accessMode <helm-values-storage-accessMode>`: ReadWriteOnce
     :ref:`size <helm-values-storage-size>`: 10Gi
     :ref:`selector <helm-values-storage-selector>`: {}
     :ref:`volumeName <helm-values-storage-volumeName>`: ""
@@ -79,13 +86,19 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-ingress-enabled>`: true
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: "username:$apr1$encrypted_password"
+    :ref:`host <helm-values-ingress-host>`: null
     :ref:`path <helm-values-ingress-path>`: '/'
+    :ref:`ingressClassName <helm-values-ingress-ingressClassName>`: nginx
+    :ref:`nodePortEnabled <helm-values-ingress-nodePortEnabled>`: null
+    :ref:`httpNodePort <helm-values-ingress-httpNodePort>`: 30050
+    :ref:`httpsNodePort <helm-values-ingress-httpsNodePort>`: 30051
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
       :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
       # Required when enabled:
       :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: null
       :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
       :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
+      :ref:`client-details-from-secret <helm-values-ingress-oauth2-proxy-client-details-from-secret>`: ""
       # Optional settings:
       :ref:`image <helm-values-ingress-oauth2-proxy-image>`: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
       :ref:`use-https <helm-values-ingress-oauth2-proxy-use-https>`: false
@@ -128,6 +141,15 @@ Below is the available helm value keys and the default value of each key:
       - apiGroups: [ "" ]
         resources: [ "events" ]
         verbs: [ "get", "list", "watch" ]
+      - apiGroups: [ "" ]
+        resources: [ "configmaps" ]
+        verbs: [ "get", "patch" ]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "deployments/status"]
+        verbs: ["*"]
+      - apiGroups: [""]
+        resources: ["persistentvolumeclaims"]
+        verbs: ["*"]
     :ref:`clusterRules <helm-values-rbac-clusterRules>`:
       - apiGroups: [ "" ]
         resources: [ "nodes" ]
@@ -164,6 +186,21 @@ Below is the available helm value keys and the default value of each key:
     :ref:`projectId <helm-values-gcpCredentials-projectId>`: null
     :ref:`gcpSecretName <helm-values-gcpCredentials-gcpSecretName>`: gcp-credentials
 
+  :ref:`runpodCredentials <helm-values-runpodCredentials>`:
+    :ref:`enabled <helm-values-runpodCredentials-enabled>`: false
+    :ref:`runpodSecretName <helm-values-runpodCredentials-runpodSecretName>`: runpod-credentials
+
+  :ref:`lambdaCredentials <helm-values-lambdaCredentials>`:
+    :ref:`enabled <helm-values-lambdaCredentials-enabled>`: false
+    :ref:`lambdaSecretName <helm-values-lambdaCredentials-lambdaSecretName>`: lambda-credentials
+
+  :ref:`nebiusCredentials <helm-values-nebiusCredentials>`:
+    :ref:`enabled <helm-values-nebiusCredentials-enabled>`: false
+    :ref:`tenantId <helm-values-nebiusCredentials-tenantId>`: null
+    :ref:`nebiusSecretName <helm-values-nebiusCredentials-nebiusSecretName>`: nebius-credentials
+
+  :ref:`extraInitContainers <helm-values-extraInitContainers>`: null
+
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
 
   :ref:`securityContext <helm-values-securityContext>`:
@@ -172,7 +209,7 @@ Below is the available helm value keys and the default value of each key:
       - ALL
     :ref:`allowPrivilegeEscalation <helm-values-securityContext-allowPrivilegeEscalation>`: false
 
-  :ref:`runtimeClassName <helm-values-runtimeClassName>`: ""
+  :ref:`runtimeClassName <helm-values-runtimeClassName>`: null
 
   :ref:`prometheus <helm-values-prometheus>`:
     :ref:`enabled <helm-values-prometheus-enabled>`: false
@@ -197,12 +234,12 @@ Configuration for the SkyPilot API server deployment.
 
 Docker image to use for the API server.
 
-Default: ``"berkeleyskypilot/skypilot:0.9.1"``
+Default: ``"berkeleyskypilot/skypilot:0.9.2"``
 
 .. code-block:: yaml
 
   apiService:
-    image: berkeleyskypilot/skypilot:0.9.1
+    image: berkeleyskypilot/skypilot:0.9.2
 
 To use a nightly build, find the desired nightly version on `pypi <https://pypi.org/project/skypilot-nightly/#history>`_ and update the ``image`` value:
 
@@ -211,6 +248,20 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
   apiService:
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
+
+.. _helm-values-apiService-replicas:
+
+``apiService.replicas``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Number of replicas to deploy for the API server. Replicas > 1 is not well tested and requires a PVC that supports ReadWriteMany.
+
+Default: ``1``
+
+.. code-block:: yaml
+
+  apiService:
+    replicas: 1
 
 .. _helm-values-apiService-enableUserManagement:
 
@@ -325,6 +376,20 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-dbConnectionSecretName:
+
+``apiService.dbConnectionSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the database connection string for the API server. If this field is set, ``config`` must be null.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    dbConnectionSecretName: my-db-connection-secret
 
 .. _helm-values-apiService-enableServiceAccounts:
 
@@ -492,6 +557,71 @@ Default: ``60``
   apiService:
     terminationGracePeriodSeconds: 300
 
+.. _helm-values-apiService-annotations:
+
+``apiService.annotations``
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Custom annotations for the API server deployment.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    annotations:
+      my-annotation: "my-value"
+
+.. _helm-values-apiService-extraEnvs:
+
+``apiService.extraEnvs``
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Extra environment variables to set before starting the API server.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    extraEnvs:
+      - name: MY_ADDITIONAL_ENV_VAR
+        value: "my_value"
+
+.. _helm-values-apiService-extraVolumes:
+
+``apiService.extraVolumes``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Extra volumes to mount to the API server.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    extraVolumes:
+      - name: my-volume
+        secret:
+          secretName: my-secret
+
+.. _helm-values-apiService-extraVolumeMounts:
+
+``apiService.extraVolumeMounts``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Extra volume mounts to mount to the API server.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    extraVolumeMounts:
+      - name: my-volume
+        mountPath: /my-path
+        subPath: my-file
+
 .. _helm-values-storage:
 
 ``storage``
@@ -524,6 +654,20 @@ Default: ``""``
 
   storage:
     storageClassName: gp2
+
+.. _helm-values-storage-accessMode:
+
+``storage.accessMode``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Access mode for the persistent storage volume. Can be set to ``ReadWriteOnce`` or ``ReadWriteMany`` depending on what is supported by the storage class.
+
+Default: ``ReadWriteOnce``
+
+.. code-block:: yaml
+
+  storage:
+    accessMode: ReadWriteOnce
 
 .. _helm-values-storage-size:
 
@@ -646,6 +790,76 @@ Default: ``'/'``
   ingress:
     path: '/'
 
+.. _helm-values-ingress-host:
+
+``ingress.host``
+^^^^^^^^^^^^^^^^
+
+Host to exclusively accept traffic from (optional). Will respond to all host requests if not set.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    host: api.mycompany.com
+
+.. _helm-values-ingress-ingressClassName:
+
+``ingress.ingressClassName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Ingress class name for newer Kubernetes versions.
+
+Default: ``nginx``
+
+.. code-block:: yaml
+
+  ingress:
+    ingressClassName: nginx
+
+.. _helm-values-ingress-nodePortEnabled:
+
+``ingress.nodePortEnabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Whether to enable an additional NodePort service for the ingress controller. Deprecated: use ``ingress-nginx.controller.service.type=NodePort`` instead.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    nodePortEnabled: false
+
+.. _helm-values-ingress-httpNodePort:
+
+``ingress.httpNodePort``
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Specific nodePort to use for HTTP traffic. Deprecated: use ``ingress-nginx.controller.service.nodePorts.http`` instead.
+
+Default: ``30050``
+
+.. code-block:: yaml
+
+  ingress:
+    httpNodePort: 30050
+
+.. _helm-values-ingress-httpsNodePort:
+
+``ingress.httpsNodePort``
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Specific nodePort to use for HTTPS traffic. Deprecated: use ``ingress-nginx.controller.service.nodePorts.https`` instead.
+
+Default: ``30051``
+
+.. code-block:: yaml
+
+  ingress:
+    httpsNodePort: 30051
+
 .. _helm-values-ingress-oauth2-proxy:
 
 ``ingress.oauth2-proxy``
@@ -666,6 +880,7 @@ Default: see the yaml below.
       oidc-issuer-url: null
       client-id: ""
       client-secret: ""
+      client-details-from-secret: ""
       # Optional settings:
       image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
       use-https: false
@@ -734,6 +949,21 @@ Default: ``""``
   ingress:
     oauth2-proxy:
       client-secret: "abcdef123456"
+
+.. _helm-values-ingress-oauth2-proxy-client-details-from-secret:
+
+``ingress.oauth2-proxy.client-details-from-secret``
+''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Alternative way to get both client ID and client secret from a Kubernetes secret. If set to a secret name, both ``client-id`` and ``client-secret`` values above are ignored. The secret must contain keys named ``client-id`` and ``client-secret``.
+
+Default: ``""``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      client-details-from-secret: "oauth-client-credentials"
 
 .. _helm-values-ingress-oauth2-proxy-image:
 
@@ -951,6 +1181,21 @@ Default: see the yaml below.
       - apiGroups: [ "" ]
         resources: [ "events" ]
         verbs: [ "get", "list", "watch" ]
+      - apiGroups: [ "" ]
+        resources: [ "configmaps" ]
+        verbs: [ "get", "patch" ]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "deployments/status"]
+        verbs: ["*"]
+              - apiGroups: [ "" ]
+          resources: [ "configmaps" ]
+          verbs: [ "get", "patch" ]
+        - apiGroups: ["apps"]
+          resources: ["deployments", "deployments/status"]
+          verbs: ["*"]
+        - apiGroups: [""]
+          resources: ["persistentvolumeclaims"]
+          verbs: ["*"]
 
 .. _helm-values-rbac-clusterRules:
 
@@ -981,7 +1226,7 @@ Default: see the yaml below.
       - apiGroups: [ "networking.k8s.io" ]
         resources: [ "ingressclasses" ]
         verbs: [ "get", "list", "watch" ]
-      - apiGroups: ["" ]
+      - apiGroups: [""]
         resources: ["services"]
         verbs: ["list", "get"]
 
@@ -1182,6 +1427,135 @@ Default: ``gcp-credentials``
   gcpCredentials:
     gcpSecretName: gcp-credentials
 
+.. _helm-values-runpodCredentials:
+
+``runpodCredentials``
+~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-runpodCredentials-enabled:
+
+``runpodCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable RunPod credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  runpodCredentials:
+    enabled: false
+
+.. _helm-values-runpodCredentials-runpodSecretName:
+
+``runpodCredentials.runpodSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the RunPod credentials. Only used if enabled is true.
+
+Default: ``runpod-credentials``
+
+.. code-block:: yaml
+
+  runpodCredentials:
+    runpodSecretName: runpod-credentials
+
+.. _helm-values-lambdaCredentials:
+
+``lambdaCredentials``
+~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-lambdaCredentials-enabled:
+
+``lambdaCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable Lambda credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  lambdaCredentials:
+    enabled: false
+
+.. _helm-values-lambdaCredentials-lambdaSecretName:
+
+``lambdaCredentials.lambdaSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the Lambda credentials. Only used if enabled is true.
+
+Default: ``lambda-credentials``
+
+.. code-block:: yaml
+
+  lambdaCredentials:
+    lambdaSecretName: lambda-credentials
+
+.. _helm-values-nebiusCredentials:
+
+``nebiusCredentials``
+~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-nebiusCredentials-enabled:
+
+``nebiusCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable Nebius credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  nebiusCredentials:
+    enabled: false
+
+.. _helm-values-nebiusCredentials-tenantId:
+
+``nebiusCredentials.tenantId``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Nebius tenant ID. Only used if enabled is true.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  nebiusCredentials:
+    tenantId: null
+
+.. _helm-values-nebiusCredentials-nebiusSecretName:
+
+``nebiusCredentials.nebiusSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the Nebius credentials. Only used if enabled is true.
+
+Default: ``nebius-credentials``
+
+.. code-block:: yaml
+
+  nebiusCredentials:
+    nebiusSecretName: nebius-credentials
+
+.. _helm-values-extraInitContainers:
+
+``extraInitContainers``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Additional init containers to add to the API server pod.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  extraInitContainers:
+    - name: my-init-container
+      image: my-image:latest
+      command: ["/bin/sh", "-c", "echo 'Hello from init container'"]
+
 .. _helm-values-podSecurityContext:
 
 ``podSecurityContext``
@@ -1253,6 +1627,8 @@ Default: (empty)
 
 Configuration for Prometheus helm chart. Refer to the `Prometheus helm chart repository <https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml>`_ for available values.
 
+SkyPilot provides a minimal Prometheus configuration by default. If you want to monitor more resources other than the API server, it is recommended to install and manage Prometheus separately.
+
 .. code-block:: yaml
 
   prometheus:
@@ -1261,6 +1637,24 @@ Configuration for Prometheus helm chart. Refer to the `Prometheus helm chart rep
       persistentVolume:
         enabled: true
         size: 10Gi
+    extraScrapeConfigs: |
+      # Static scrape target for SkyPilot API server GPU metrics
+      - job_name: 'skypilot-api-server-gpu-metrics'
+        static_configs:
+          - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:80']
+        metrics_path: '/gpu-metrics'
+        scrape_interval: 15s
+        scrape_timeout: 10s
+    kube-state-metrics:
+      enabled: true
+      metricLabelsAllowlist:
+        - pods=[skypilot-cluster]
+    prometheus-node-exporter:
+      enabled: false
+    prometheus-pushgateway:
+      enabled: false
+    alertmanager:
+      enabled: false
 
 .. _helm-values-prometheus-enabled:
 
@@ -1283,6 +1677,8 @@ Default: ``false``
 
 Configuration for Grafana helm chart. Refer to the `Grafana helm chart documentation <https://github.com/grafana/helm-charts/blob/main/charts/grafana/README.md>`_ for available values.
 
+By default, Grafana is configured to work with the ingress controller and auth proxy for seamless authentication.
+
 .. code-block:: yaml
 
   grafana:
@@ -1290,6 +1686,50 @@ Configuration for Grafana helm chart. Refer to the `Grafana helm chart documenta
     persistence:
       enabled: true
       size: 10Gi
+    ingress:
+      enabled: false
+      enableAuthedIngress: true
+      path: "/grafana"
+      ingressClassName: nginx
+      hosts: null
+    grafana.ini:
+      server:
+        domain: localhost
+        root_url: "%(protocol)s://%(domain)s/grafana"
+        enforce_domain: false
+        serve_from_sub_path: true
+      security:
+        allow_embedding: true
+      auth.proxy:
+        enabled: true
+        header_name: "X-WEBAUTH-USER"
+        header_property: "username"
+        auto_sign_up: true
+      auth:
+        disable_login_form: true
+        disable_signout_menu: true
+      auth.anonymous:
+        enabled: false
+      auth.basic:
+        enabled: false
+    sidecar:
+      datasources:
+        enabled: true
+      dashboards:
+        enabled: true
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+        - name: 'default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          allowUiUpdates: false
+          updateIntervalSeconds: 30
+          options:
+            path: /var/lib/grafana/dashboards/default
 
 .. _helm-values-grafana-enabled:
 
