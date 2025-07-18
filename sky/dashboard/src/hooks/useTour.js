@@ -107,8 +107,8 @@ export function useTour() {
         //   ],
         // },
         {
-          title: 'Clusters',
           text: `
+            <p><strong>Clusters</strong></p>
             <p>Spin up <strong>Sky Clusters</strong> on any infrastructure you have access to.</p>
             <p>You can SSH into any node, connect an IDE, or queue development jobs on it.</p>
           `,
@@ -134,8 +134,8 @@ export function useTour() {
           ],
         },
         {
-          title: 'SkyPilot is infra-agnostic',
           text: `
+            <p><strong>SkyPilot is infra-agnostic</strong></p>
             <p>Manage compute on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
           `,
           attachTo: {
@@ -244,8 +244,8 @@ export function useTour() {
             ],
         },
         {
-          title: 'Jobs',
           text: `
+            <p><strong>Jobs</strong></p>
             <p>Use <strong>Managed Jobs</strong> for long-running workloads.</p>
             <p>They provide automatic recovery against failures, such as recovering from preemptions or GPU errors.</p>
           `,
@@ -279,8 +279,8 @@ export function useTour() {
           ],
         },
         {
-          title: 'Infra',
           text: `
+            <p><strong>Infra</strong></p>
             <p>Bring your Kubernetes clusters, VMs (on 17+ supported clouds), or SSH nodes into SkyPilot.</p>
             <p>You can monitor your infrastructure here.</p>
           `,
@@ -314,8 +314,8 @@ export function useTour() {
           ],
         },
         {
-          title: 'Workspaces',
           text: `
+            <p><strong>Workspaces</strong></p>
             <p>Use Workspaces to isolate teams or projects.</p>
           `,
           attachTo: {
@@ -340,8 +340,8 @@ export function useTour() {
           ],
         },
           {
-              title: 'Users',
               text: `
+            <p><strong>Users</strong></p>
             <p>SkyPilot provides user management with RBAC and SSO support.</p>
           `,
               attachTo: {
@@ -366,8 +366,8 @@ export function useTour() {
               ],
           },
           {
-            title: 'Happy SkyPilot!',
             text: `
+              <p><strong>Happy SkyPilot!</strong></p>
               <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/installation.html">Installation</a> and <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
               <p>To reach out, join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
             `,
