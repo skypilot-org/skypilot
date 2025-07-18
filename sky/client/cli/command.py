@@ -5114,6 +5114,12 @@ def serve_down(
               default=False,
               help='Sync down logs to the local machine. Can be combined with '
               '--controller, --load-balancer, or a replica ID to narrow scope.')
+@click.option(
+    '--tail',
+    default=None,
+    type=int,
+    help='The number of lines to display from the end of the log file. '
+    'Default is None, which means print all lines.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
@@ -5126,6 +5132,7 @@ def serve_logs(
     load_balancer: bool,
     replica_ids: Tuple[int, ...],
     sync_down: bool,
+    tail: Optional[int],
 ):
     """Tail or sync down logs of a service.
 
@@ -5145,12 +5152,26 @@ def serve_logs(
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
         \b
+        # Show the last 100 lines of the controller logs
+        sky serve logs --controller --tail 100 [SERVICE_NAME]
+        \b
         # Sync down all logs of the service (controller, LB, all replicas)
         sky serve logs [SERVICE_NAME] --sync-down
         \b
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
+    if tail is not None:
+        if tail < 0:
+            raise click.UsageError('--tail must be a non-negative integer.')
+        # TODO(arda): We could add ability to tail and follow logs together.
+        if follow:
+            follow = False
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                '--tail and --follow cannot be used together. '
+                f'Changed the mode to --no-follow.{colorama.Style.RESET_ALL}')
+
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
@@ -5185,7 +5206,8 @@ def serve_logs(
             serve_lib.sync_down_logs(service_name,
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
-                                     replica_ids=list(replica_ids))
+                                     replica_ids=list(replica_ids),
+                                     tail=tail)
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Service {service_name} logs: '
@@ -5227,7 +5249,8 @@ def serve_logs(
         serve_lib.tail_logs(service_name,
                             target=target_component,
                             replica_id=target_replica_id,
-                            follow=follow)
+                            follow=follow,
+                            tail=tail)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
