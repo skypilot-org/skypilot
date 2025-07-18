@@ -335,7 +335,7 @@
   color: #6b7280;
 }
 
-/* Arrow styling with blue theme for better visibility */
+/* Arrow styling to match tooltip background */
 .shepherd-arrow {
   width: 0;
   height: 0;
@@ -345,8 +345,8 @@
 }
 
 .shepherd-element[data-popper-placement^='top'] .shepherd-arrow {
-  border-width: 0 6px 6px 6px;
-  border-color: transparent transparent #2563eb transparent;
+  border-width: 6px 6px 0 6px;
+  border-color: white transparent transparent transparent;
   bottom: -6px;
   left: 50%;
   transform: translateX(-50%);
@@ -354,23 +354,23 @@
 
 .shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
   border-width: 0 6px 6px 6px;
-  border-color: transparent transparent #2563eb transparent;
+  border-color: transparent transparent white transparent;
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
 }
 
 .shepherd-element[data-popper-placement^='left'] .shepherd-arrow {
-  border-width: 6px 6px 6px 0;
-  border-color: transparent #2563eb transparent transparent;
+  border-width: 6px 0 6px 6px;
+  border-color: transparent transparent transparent white;
   right: -6px;
   top: 50%;
   transform: translateY(-50%);
 }
 
 .shepherd-element[data-popper-placement^='right'] .shepherd-arrow {
-  border-width: 6px 0 6px 6px;
-  border-color: transparent transparent transparent #2563eb;
+  border-width: 6px 6px 6px 0;
+  border-color: transparent white transparent transparent;
   left: -6px;
   top: 50%;
   transform: translateY(-50%);
