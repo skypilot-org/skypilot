@@ -322,25 +322,75 @@
   color: #6b7280;
 }
 
-/* Arrow colors to match header */
-.shepherd-element.shepherd-theme-arrows::before {
-  border-color: white;
+/* Arrow styling with borders for better visibility */
+.shepherd-element .shepherd-arrow::before {
+  border-color: #e5e7eb;
+}
+
+.shepherd-element .shepherd-arrow::after {
+  content: '';
+  position: absolute;
+  border: inherit;
 }
 
 .shepherd-element[data-popper-placement^='top'] .shepherd-arrow::before {
+  border-top-color: #e5e7eb;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+
+.shepherd-element[data-popper-placement^='top'] .shepherd-arrow::after {
+  top: 1px;
   border-top-color: white;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
 }
 
 .shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::before {
+  border-bottom-color: #e5e7eb;
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+
+.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::after {
+  bottom: 1px;
   border-bottom-color: white;
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
 }
 
 .shepherd-element[data-popper-placement^='left'] .shepherd-arrow::before {
+  border-left-color: #e5e7eb;
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+}
+
+.shepherd-element[data-popper-placement^='left'] .shepherd-arrow::after {
+  left: 1px;
   border-left-color: white;
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-right-color: transparent;
 }
 
 .shepherd-element[data-popper-placement^='right'] .shepherd-arrow::before {
+  border-right-color: #e5e7eb;
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}
+
+.shepherd-element[data-popper-placement^='right'] .shepherd-arrow::after {
+  right: 1px;
   border-right-color: white;
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
 }
 
 /* Fix arrow positioning for bottom-positioned tooltips */

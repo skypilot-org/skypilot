@@ -332,9 +332,9 @@ export function useTour() {
               classes: 'shepherd-button-secondary',
             },
             {
-              text: 'Finish',
+              text: 'Next',
               action() {
-                this.complete();
+                this.next();
               },
             },
           ],
@@ -342,7 +342,7 @@ export function useTour() {
           {
               text: `
             <p><strong>Users</strong></p>
-            <p>SkyPilot provides user management with RBAC and SSO support.</p>
+            <p>SkyPilot provides user management with RBAC and SSO support. Admins can manage users in this page.</p>
           `,
               attachTo: {
                   element: 'a[href="/dashboard/users"]',
@@ -358,9 +358,9 @@ export function useTour() {
                       classes: 'shepherd-button-secondary',
                   },
                   {
-                      text: 'Finish',
+                      text: 'Next',
                       action() {
-                          this.complete();
+                          this.next();
                       },
                   },
               ],
