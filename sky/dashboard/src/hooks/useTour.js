@@ -642,11 +642,11 @@ export function TourProvider({ children }) {
   const startTour = () => {
     if (tourRef.current) {
       // Navigate to clusters page before starting tour
-      router.push('/dashboard/clusters').then(() => {
+      router.push('/clusters').then(() => {
         // Small delay to ensure page is loaded
         setTimeout(() => {
           tourRef.current.start();
-        }, 500);
+        }, 100);
       });
     }
   };
