@@ -180,8 +180,9 @@
   border: 1px solid #e5e7eb;
   background: white;
   font-family: inherit;
-  margin-left: 16px;
-  margin-right: 16px;
+  margin: 8px;
+  position: relative;
+  overflow: visible;
 }
 
 .shepherd-header {
@@ -322,86 +323,45 @@
   color: #6b7280;
 }
 
-/* Arrow styling with borders for better visibility */
-.shepherd-element .shepherd-arrow::before {
-  border-color: #e5e7eb;
-}
-
-.shepherd-element .shepherd-arrow::after {
-  content: '';
+/* Arrow styling with blue theme for better visibility */
+.shepherd-arrow {
+  width: 0;
+  height: 0;
+  border-style: solid;
   position: absolute;
-  border: inherit;
+  z-index: 10000;
 }
 
-.shepherd-element[data-popper-placement^='top'] .shepherd-arrow::before {
-  border-top-color: #e5e7eb;
-  border-bottom-color: transparent;
-  border-left-color: transparent;
-  border-right-color: transparent;
+.shepherd-element[data-popper-placement^='top'] .shepherd-arrow {
+  border-width: 0 6px 6px 6px;
+  border-color: transparent transparent #2563eb transparent;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
-.shepherd-element[data-popper-placement^='top'] .shepherd-arrow::after {
-  top: 1px;
-  border-top-color: white;
-  border-bottom-color: transparent;
-  border-left-color: transparent;
-  border-right-color: transparent;
-}
-
-.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::before {
-  border-bottom-color: #e5e7eb;
-  border-top-color: transparent;
-  border-left-color: transparent;
-  border-right-color: transparent;
-}
-
-.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::after {
-  bottom: 1px;
-  border-bottom-color: white;
-  border-top-color: transparent;
-  border-left-color: transparent;
-  border-right-color: transparent;
-}
-
-.shepherd-element[data-popper-placement^='left'] .shepherd-arrow::before {
-  border-left-color: #e5e7eb;
-  border-top-color: transparent;
-  border-bottom-color: transparent;
-  border-right-color: transparent;
-}
-
-.shepherd-element[data-popper-placement^='left'] .shepherd-arrow::after {
-  left: 1px;
-  border-left-color: white;
-  border-top-color: transparent;
-  border-bottom-color: transparent;
-  border-right-color: transparent;
-}
-
-.shepherd-element[data-popper-placement^='right'] .shepherd-arrow::before {
-  border-right-color: #e5e7eb;
-  border-top-color: transparent;
-  border-bottom-color: transparent;
-  border-left-color: transparent;
-}
-
-.shepherd-element[data-popper-placement^='right'] .shepherd-arrow::after {
-  right: 1px;
-  border-right-color: white;
-  border-top-color: transparent;
-  border-bottom-color: transparent;
-  border-left-color: transparent;
-}
-
-/* Fix arrow positioning for bottom-positioned tooltips */
 .shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
-  top: -4px;
-  transform: none;
+  border-width: 0 6px 6px 6px;
+  border-color: transparent transparent #2563eb transparent;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
-.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::before {
-  border-bottom-color: white;
-  border-top-color: transparent;
+.shepherd-element[data-popper-placement^='left'] .shepherd-arrow {
+  border-width: 6px 6px 6px 0;
+  border-color: transparent #2563eb transparent transparent;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.shepherd-element[data-popper-placement^='right'] .shepherd-arrow {
+  border-width: 6px 0 6px 6px;
+  border-color: transparent transparent transparent #2563eb;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* Help button styles - matching sidebar icon style */

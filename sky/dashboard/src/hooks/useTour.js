@@ -34,6 +34,7 @@ export function useTour() {
             enabled: true,
           },
           scrollTo: { behavior: 'smooth', block: 'center' },
+          arrow: true,
           when: {
             show() {
               const currentStep = Shepherd.activeTour?.getCurrentStep();
