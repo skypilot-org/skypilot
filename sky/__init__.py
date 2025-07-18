@@ -111,6 +111,7 @@ from sky.client.sdk import storage_delete
 from sky.client.sdk import storage_ls
 from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
+from sky.client.sdk import reload_config
 from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
@@ -185,6 +186,7 @@ __all__ = [
     'optimize',
     'launch',
     'exec',
+    'reload_config',
     # core APIs
     'status',
     'start',
