@@ -1,6 +1,7 @@
 import React from 'react';
 import { TopBar, SidebarProvider } from './sidebar';
 import { useMobile } from '@/hooks/useMobile';
+import { WelcomeNotification } from './WelcomeNotification';
 
 function LayoutContent({ children, highlighted }) {
   const isMobile = useMobile();
@@ -19,6 +20,9 @@ function LayoutContent({ children, highlighted }) {
       >
         <main className="p-6">{children}</main>
       </div>
+
+      {/* Welcome notification for first-time visitors */}
+      <WelcomeNotification />
     </div>
   );
 }

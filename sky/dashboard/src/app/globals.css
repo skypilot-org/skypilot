@@ -161,3 +161,228 @@
   content: '';
   font-size: 1.25rem;
 }
+
+/* Shepherd.js Tour Styles - isolated to avoid affecting existing styles */
+
+/* Shepherd.js Tour Styles */
+@import 'shepherd.js/dist/css/shepherd.css';
+
+/* Custom Shepherd.js Theme to match SkyPilot dashboard design */
+.shepherd-modal-overlay-container {
+  z-index: 9998 !important;
+}
+
+.shepherd-element {
+  z-index: 9999 !important;
+  max-width: 380px;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e5e7eb;
+  background: white;
+  font-family: inherit;
+}
+
+.shepherd-header {
+  background: white;
+  color: #111827;
+  padding: 16px 20px 0;
+  border-radius: 0.5rem 0.5rem 0 0;
+  border-bottom: none;
+}
+
+.shepherd-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.shepherd-text {
+  padding: 12px 20px 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #4b5563;
+  background: white;
+}
+
+.shepherd-text p {
+  margin-bottom: 12px;
+  color: #6b7280;
+}
+
+.shepherd-text p:last-child {
+  margin-bottom: 0;
+}
+
+.shepherd-text ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.shepherd-text li {
+  margin-bottom: 4px;
+  color: #6b7280;
+}
+
+.shepherd-text strong {
+  color: #374151;
+  font-weight: 500;
+}
+
+.shepherd-footer {
+  background: #f9fafb;
+  padding: 12px 20px 16px;
+  border-radius: 0 0 0.5rem 0.5rem;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.shepherd-button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 0.375rem;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.25;
+}
+
+.shepherd-button:hover {
+  background: #1d4ed8;
+}
+
+.shepherd-button-secondary {
+  background: #f3f4f6;
+  color: #6b7280;
+  border: 1px solid #d1d5db;
+}
+
+.shepherd-button-secondary:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.shepherd-cancel-icon {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.shepherd-cancel-icon:hover {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+/* Arrow colors to match header */
+.shepherd-element.shepherd-theme-arrows::before {
+  border-color: white;
+}
+
+.shepherd-element[data-popper-placement^='top'] .shepherd-arrow::before {
+  border-top-color: white;
+}
+
+.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow::before {
+  border-bottom-color: white;
+}
+
+.shepherd-element[data-popper-placement^='left'] .shepherd-arrow::before {
+  border-left-color: white;
+}
+
+.shepherd-element[data-popper-placement^='right'] .shepherd-arrow::before {
+  border-right-color: white;
+}
+
+/* Help button styles - matching sidebar icon style */
+.tour-help-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 50%;
+  background: transparent;
+  color: #6b7280;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: auto;
+  height: auto;
+}
+
+.tour-help-button:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.tour-help-button:active {
+  background: #e5e7eb;
+}
+
+/* Subtle pulse animation for the help button */
+.tour-help-button.pulse {
+  animation: subtle-pulse 2s infinite;
+}
+
+@keyframes subtle-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+/* Shepherd.js target highlighting */
+.shepherd-target-highlight {
+  position: relative;
+  z-index: 9997;
+}
+
+.shepherd-target-highlight::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border: 2px solid #2563eb;
+  border-radius: 0.5rem;
+  background: rgba(37, 99, 235, 0.1);
+  z-index: -1;
+  animation: highlight-pulse 2s ease-in-out infinite;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
+}
