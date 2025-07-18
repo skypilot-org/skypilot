@@ -6,7 +6,7 @@ Syncing Code and Artifacts
 SkyPilot simplifies transferring code, data, and artifacts to and
 from cloud clusters:
 
-- To :ref:`upload code and project files <upload-code-and-project-files>` - use :code:`workdir`
+- To :ref:`upload code and project files or clone a git repository <upload-code-and-project-files-git>` - use :code:`workdir`
 
 - To :ref:`upload files outside of workdir <file-mounts-example>` (e.g., dotfiles) - use :code:`file_mounts`
 
@@ -18,49 +18,115 @@ Here, "upload" means uploading files from your local machine (or a cloud object
 storage) to a SkyPilot cluster, while "download" means the reverse direction.  The same
 mechanisms work for both files and directories.
 
-.. _upload-code-and-project-files:
+.. _upload-code-and-project-files-git:
 
-Uploading code and project files
---------------------------------------
-SkyPilot **automatically syncs a local working directory to a cluster** on every
-:code:`sky launch` and :code:`sky exec`.  The workdir contains a project's
-code and other files, and is typically a Git folder.
+Uploading code and project files or cloning a git repository
+------------------------------------------------------------
 
-The working directory can be configured either
+``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``sky launch`` or ``sky exec`` is run with the YAML file. Commands in ``setup`` and ``run`` will be executed under ``~/sky_workdir``.
 
-(1) by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec>`, or
-(2) by the command line option :code:`--workdir`:
 
-.. code-block:: console
 
-  $ # Assuming task.yaml has a 'workdir: <path>' field, these commands
-  $ # sync the workdir to the cluster:
-  $ sky launch -c dev task.yaml
-  $ sky exec dev task.yaml
 
-  $ # Add a --workdir flag if the yaml doesn't contain the field, or
-  $ # to override it.
 
-These commands sync the working directory to :code:`~/sky_workdir` on the remote
-VMs.  The task is invoked under that working directory (so that it can call
-scripts, access checkpoints, etc.).
+.. tab-set::
 
-.. note::
-  To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
+    .. tab-item:: Local Directory
+        :sync: local-directory-tab
 
-.. note::
+        If ``workdir`` is a local path, the entire directory is synced to the remote cluster. To exclude files from syncing, see :ref:`exclude-uploading-files`.
 
-  You can keep and edit code in one central place---the local machine where
-  :code:`sky` is used---and have them transparently synced to multiple remote
-  clusters for execution:
+        If a relative path is used, it's evaluated relative to the location from which ``sky`` is called.
 
-  .. code-block:: console
+        The working directory can be configured either
 
-    $ sky exec cluster0 task.yaml
+        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`, or
+        2. by the command line option :code:`--workdir`:
 
-    $ # Make local edits to the workdir...
-    $ # cluster1 will get the updated code.
-    $ sky exec cluster1 task.yaml
+        .. code-block:: console
+
+          $ # Assuming task.yaml has a 'workdir: <path>' field
+          $ # workdir: ~/my-task-code
+
+          $ # Sync the workdir to the ~/sky_workdir of the cluster:
+          $ sky launch -c dev task.yaml
+          $ sky exec dev task.yaml
+
+          $ # Add a --workdir flag if the yaml doesn't contain the field, or
+          $ # to override it.
+
+        .. note::
+          To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
+
+        .. note::
+
+          You can keep and edit code in one central place---the local machine where
+          :code:`sky` is used---and have them transparently synced to multiple remote
+          clusters for execution:
+
+          .. code-block:: console
+
+            $ sky exec cluster0 task.yaml
+
+            $ # Make local edits to the workdir...
+            $ # cluster1 will get the updated code.
+            $ sky exec cluster1 task.yaml
+
+    .. tab-item:: Git Repository
+        :sync: git-repository-tab
+
+        If ``workdir`` is a git repository, the ``workdir.url`` field is required and can be in one of the following formats:
+
+        * HTTPS: ``https://github.com/skypilot-org/skypilot.git``
+        * SSH: ``ssh://git@github.com/skypilot-org/skypilot.git``
+        * SCP: ``git@github.com:skypilot-org/skypilot.git``
+
+        The ``workdir.ref`` field specifies the git reference to checkout, which can be:
+
+        * A branch name (e.g., ``main``, ``develop``)
+        * A tag name (e.g., ``v1.0.0``)
+        * A commit hash (e.g., ``abc123def456``)
+
+        **Authentication for Private Repositories**:
+
+        *For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+        *For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+        1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+        2. SSH key configured in ``~/.ssh/config`` for the git host
+        3. Default SSH key at ``~/.ssh/id_rsa``
+        4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
+
+        The working directory can be configured either
+
+        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`, or
+        2. by the command line option :code:`--git-url`, :code:`--git-ref`:
+
+        .. code-block:: console
+
+          $ # Assuming task.yaml has 'workdir' field with a git repository URL
+          $ # workdir:
+          $ #   url: https://github.com/skypilot-org/skypilot.git
+          $ #   ref: main, these commands
+
+          $ # Clone the git repository to the ~/sky_workdir of the cluster:
+          $ sky launch -c dev task.yaml
+          $ sky exec dev task.yaml
+
+          $ # Add a --git-url and --git-ref flag if the yaml doesn't contain the fields, or
+          $ # to override them.
+
+        .. note::
+
+          You can use different git references for different ``exec`` or ``launch`` commands to run the tasks with different code:
+
+          .. code-block:: console
+
+            $ sky exec cluster0 --git-ref main task.yaml
+
+            $ # Use a different git reference for the same cluster.
+            $ sky exec cluster0 --git-ref develop task.yaml
 
 .. _file-mounts-example:
 
