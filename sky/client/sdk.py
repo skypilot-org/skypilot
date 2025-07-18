@@ -29,7 +29,6 @@ import colorama
 import filelock
 
 from sky import admin_policy
-from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -64,6 +63,7 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
+    from sky import backends
 else:
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -377,7 +377,7 @@ def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -535,7 +535,7 @@ def _launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -644,7 +644,7 @@ def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
 ) -> server_common.RequestId:
     """Executes a task on an existing cluster.
 
