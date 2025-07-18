@@ -28,13 +28,23 @@ export function useTour() {
     // Initialize the tour only once
     if (!tourRef.current) {
       tourRef.current = new Shepherd.Tour({
-        useModalOverlay: true,
+        useModalOverlay: false,
         defaultStepOptions: {
           cancelIcon: {
             enabled: true,
           },
           scrollTo: { behavior: 'smooth', block: 'center' },
-          modalOverlayOpeningPadding: 4,
+          when: {
+            show() {
+              const currentStep = Shepherd.activeTour?.getCurrentStep();
+              const currentStepElement = currentStep?.getElement();
+              const footer = currentStepElement?.querySelector('.shepherd-footer');
+              const progress = document.createElement('span');
+              progress.className = 'shepherd-progress';
+              progress.innerText = `${Shepherd.activeTour?.steps.indexOf(currentStep) + 1} of ${Shepherd.activeTour?.steps.length}`;
+              footer?.insertBefore(progress, footer.firstChild);
+            }
+          },
         },
       });
 
@@ -107,7 +117,6 @@ export function useTour() {
             on: 'bottom',
             offset: { skidding: 0, distance: 0 },
           },
-          modalOverlayOpeningPadding: 8,
           buttons: [
             {
               text: 'Back',
@@ -175,7 +184,7 @@ export function useTour() {
         {
             text: `
             <p><strong>Launch your first cluster</strong></p>
-            <p>You can spin up compute using the Python SDK or the CLI.</p>
+            <p>Spin up clusters using the Python SDK or the CLI.</p>
             <div class="space-y-2">
               <div class="rounded-lg border text-card-foreground shadow-sm p-3 bg-gray-50">
                 <div class="flex items-center justify-between">
@@ -238,7 +247,7 @@ export function useTour() {
           title: 'Jobs',
           text: `
             <p>Use <strong>Managed Jobs</strong> for long-running workloads.</p>
-            <p>They provide automatic recovery against hardware  or application failures, such as recovering from preemptions.</p>
+            <p>They provide automatic recovery against failures, such as recovering from preemptions or GPU errors.</p>
           `,
           attachTo: {
                           element: function() {
@@ -272,8 +281,8 @@ export function useTour() {
         {
           title: 'Infra',
           text: `
-            <p>Bring Kubernetes clusters, VMs (on 17+ supported clouds), or SSH nodes into SkyPilot.</p>
-            <p>You can also monitor your infrastructure here.</p>
+            <p>Bring your Kubernetes clusters, VMs (on 17+ supported clouds), or SSH nodes into SkyPilot.</p>
+            <p>You can monitor your infrastructure here.</p>
           `,
           attachTo: {
                           element: function() {

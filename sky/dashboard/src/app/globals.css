@@ -180,6 +180,8 @@
   border: 1px solid #e5e7eb;
   background: white;
   font-family: inherit;
+  margin-left: 16px;
+  margin-right: 16px;
 }
 
 .shepherd-header {
@@ -245,9 +247,20 @@
   padding: 12px 24px 20px;
   border-radius: 0 0 0.5rem 0.5rem;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.shepherd-progress {
+  font-size: 0.8rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Push the first button to the right, keeping subsequent buttons grouped */
+.shepherd-footer .shepherd-button:first-of-type {
+  margin-left: auto;
 }
 
 .shepherd-button {
