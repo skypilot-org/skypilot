@@ -953,7 +953,7 @@ Default: ``""``
 .. _helm-values-ingress-oauth2-proxy-client-details-from-secret:
 
 ``ingress.oauth2-proxy.client-details-from-secret``
-''''''''''''''''''''''''''''''''''''''''''''''''''
+'''''''''''''''''''''''''''''''''''''''''''''''''''
 
 Alternative way to get both client ID and client secret from a Kubernetes secret. If set to a secret name, both ``client-id`` and ``client-secret`` values above are ignored. The secret must contain keys named ``client-id`` and ``client-secret``.
 
