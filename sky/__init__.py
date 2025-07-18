@@ -104,6 +104,7 @@ from sky.client.sdk import job_status
 from sky.client.sdk import launch
 from sky.client.sdk import optimize
 from sky.client.sdk import queue
+from sky.client.sdk import reload_config
 from sky.client.sdk import start
 from sky.client.sdk import status
 from sky.client.sdk import stop
@@ -111,7 +112,6 @@ from sky.client.sdk import storage_delete
 from sky.client.sdk import storage_ls
 from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
-from sky.client.sdk import reload_config
 from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
