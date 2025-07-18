@@ -317,8 +317,8 @@ def is_api_server_local(server_url: Optional[str] = None) -> bool:
     except (FileNotFoundError, OSError):
         return False
 
-    # This should be true unless the port file was never created due to the API
-    # server being killed or if we are ssh port forwarding.
+    # If this is true, it indicates that the server available at :port is
+    # actually a local server started by the current user.
     return port == int(port_file_port)
 
 
