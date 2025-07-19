@@ -248,6 +248,8 @@ def get_cloud_config_value_from_dict(
     region_key = None
     if cloud == 'kubernetes':
         region_key = 'context_configs'
+    if cloud == 'nebius':
+        region_key = 'region_configs'
 
     per_context_config = None
     if region is not None and region_key is not None:
@@ -255,6 +257,17 @@ def get_cloud_config_value_from_dict(
             keys=(cloud, region_key, region) + keys,
             default_value=None,
             override_configs=override_configs)
+        if not per_context_config and cloud == 'nebius':
+            # TODO (kyuds): remove later when this back-compat is not needed.
+            per_context_config = input_config.get_nested(
+                keys=(cloud, region) + keys,
+                default_value=None,
+                override_configs=override_configs)
+            logger.info(
+                'Legacy configuration yaml format for Nebius used.\n'
+                'While this is currently ok, please visit '
+                '`https://docs.skypilot.co/en/latest/reference/config.html#nebius` '  # pylint: disable=line-too-long
+                'for more information.')
     # if no override found for specified region
     general_config = input_config.get_nested(keys=(cloud,) + keys,
                                              default_value=default_value,
