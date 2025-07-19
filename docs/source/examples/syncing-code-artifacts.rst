@@ -6,13 +6,13 @@ Syncing Code, Git, and Files
 SkyPilot simplifies transferring code, data, and artifacts to and
 from cloud clusters:
 
-- To :ref:`sync code and project files from a local directory or git repository <sync-code-and-project-files-git>` - use :code:`workdir`
+- To :ref:`sync code from a local directory or a git repository <sync-code-and-project-files-git>`: use :code:`workdir`
 
-- To :ref:`upload files outside of workdir <file-mounts-example>` (e.g., dotfiles) - use :code:`file_mounts`
+- To :ref:`upload files outside of workdir <file-mounts-example>` (e.g., dotfiles): use :code:`file_mounts`
 
-- To :ref:`upload/reuse large files <uploading-or-reusing-large-files>` (e.g., datasets) - use :ref:`SkyPilot bucket mounting <sky-storage>`
+- To :ref:`upload/reuse large files <uploading-or-reusing-large-files>` (e.g., datasets): use :ref:`SkyPilot bucket mounting <sky-storage>`
 
-- To :ref:`download files and artifacts from a cluster <downloading-files-and-artifacts>` - use :ref:`SkyPilot bucket mounting <sky-storage>` or :code:`rsync`
+- To :ref:`download files and artifacts from a cluster <downloading-files-and-artifacts>`: use :ref:`SkyPilot bucket mounting <sky-storage>` or :code:`rsync`
 
 Here, "upload" means uploading files from your local machine (or a cloud object
 storage) to a SkyPilot cluster, while "download" means the reverse direction.  The same
@@ -20,10 +20,14 @@ mechanisms work for both files and directories.
 
 .. _sync-code-and-project-files-git:
 
-Sync code and project files from a local directory or git repository
+Sync code from a local directory or a git repository
 --------------------------------------------------------------------
 
-``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``sky launch`` or ``sky exec`` is run with the YAML file. Commands in ``setup`` and ``run`` will be executed under ``~/sky_workdir``.
+Use ``workdir`` to **automatically sync a local working directory or a Git repo
+URL** to a remote cluster on every ``sky launch`` and ``sky exec``.
+
+``workdir`` is synced/cloned to ``~/sky_workdir`` on the remote cluster. Commands in ``setup`` and
+``run`` will be executed under ``~/sky_workdir``.
 
 .. tab-set::
 
@@ -36,78 +40,64 @@ Sync code and project files from a local directory or git repository
 
         The working directory can be configured either:
 
-        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
+        1. By the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
 
-        .. code-block:: console
+        .. code-block:: yaml
 
           # task.yaml
-          workdir: ~/my-task-code
+          workdir: ~/my-code
 
-          $ # Sync the workdir to the ~/sky_workdir of the cluster:
-          $ sky launch -c dev task.yaml
-          $ sky exec dev task.yaml
-
-        2. by the command line option :code:`--workdir` if the yaml doesn't contain the field, or
-           to override it:
+        2. By the CLI option :code:`--workdir`
 
         .. code-block:: console
 
-          $ sky launch -c dev --workdir ~/my-task-code task.yaml
-          $ sky exec dev --workdir ~/my-task-code task.yaml
+          $ sky launch -c dev --workdir ~/my-code task.yaml
+          $ sky exec dev --workdir ~/my-code task.yaml
 
         .. note::
           To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
 
-        .. note::
-
-          You can keep and edit code in one central place---the local machine where
-          :code:`sky` is used---and have them transparently synced to multiple remote
-          clusters for execution:
-
-          .. code-block:: console
-
-            $ sky exec cluster0 task.yaml
-
-            $ # Make local edits to the workdir...
-            $ # cluster1 will get the updated code.
-            $ sky exec cluster1 task.yaml
-
     .. tab-item:: Git Repository
         :sync: git-repository-tab
 
-        If ``workdir`` is a git repository, the ``workdir.url`` field is required and the ``workdir.ref`` field specifies the git reference to checkout, refer to :ref:`task YAML file <yaml-spec-workdir>` for more details.
+        To set ``workdir`` to a git repository, specify the ``workdir.url``
+        field (repo URL) and the ``workdir.ref`` field (git reference to
+        checkout).
 
         The working directory can be configured either:
 
-        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
+        1. By the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
 
-        .. code-block:: console
+        .. code-block:: yaml
 
           # task.yaml
           workdir:
             url: https://github.com/skypilot-org/skypilot.git
             ref: main
 
-          $ # Clone the git repository to the ~/sky_workdir of the cluster:
-          $ sky launch -c dev task.yaml
-          $ sky exec dev task.yaml
-
-        2. by the command line option :code:`--git-url`, :code:`--git-ref` if the yaml doesn't contain the fields, or
-           to override them:
+        2. By the CLI options :code:`--git-url` and :code:`--git-ref`
 
         .. code-block:: console
 
-          $ # Clone the git repository to the ~/sky_workdir of the cluster:
           $ sky launch -c dev --git-url https://github.com/skypilot-org/skypilot.git --git-ref main task.yaml
           $ sky exec dev --git-url https://github.com/skypilot-org/skypilot.git --git-ref main task.yaml
 
+        You can use different git references for different ``exec`` or ``launch`` commands to run the tasks with different code:
+
+        .. code-block:: console
+
+          $ sky exec cluster0 --git-ref <commit-1> task.yaml
+          $ sky exec cluster0 --git-ref <commit-2> task.yaml
+
+        Refer to :ref:`the reference <yaml-spec-workdir>` for more details.
+
         .. note::
 
-          **Authentication for Private Repositories**:
+          **Authentication for Private Repositories**
 
-          *For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+          **For HTTPS URLs**: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
 
-          *For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+          **For SSH/SCP URLs**: SkyPilot will attempt to authenticate using SSH keys in the following order:
 
           1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
           2. SSH key configured in ``~/.ssh/config`` for the git host
@@ -116,14 +106,7 @@ Sync code and project files from a local directory or git repository
 
         .. note::
 
-          You can use different git references for different ``exec`` or ``launch`` commands to run the tasks with different code:
 
-          .. code-block:: console
-
-            $ sky exec cluster0 --git-ref main task.yaml
-
-            $ # Use a different git reference for the same cluster.
-            $ sky exec cluster0 --git-ref develop task.yaml
 
 .. _file-mounts-example:
 
@@ -160,7 +143,7 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
 
 .. note::
 
-    Items listed in a :code:`.skyignore` file under the local file_mount source 
+    Items listed in a :code:`.skyignore` file under the local file_mount source
     are also ignored (the same behavior as handling ``workdir``).
 
 .. note::
