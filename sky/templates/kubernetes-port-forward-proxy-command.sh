@@ -15,7 +15,7 @@ while getopts ":c:n:" opt; do
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
-      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+      echo "Usage: $0 <resource/name> [-c kube_context] [-n kube_namespace]" >&2
       exit 1
       ;;
     :)
@@ -25,16 +25,16 @@ while getopts ":c:n:" opt; do
   esac
 done
 
-# Shift the processed options away so that $1 becomes the pod name
+# Shift the processed options away so that $1 becomes the resource name
 shift $((OPTIND -1))
 
-# Check if pod name is passed as an argument
+# Check if resource name is passed as an argument
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+  echo "Usage: $0 <resource/name> [-c kube_context] [-n kube_namespace]" >&2
   exit 1
 fi
 
-POD_NAME="$1"  # The first positional argument is the name of the pod
+POD_NAME="$1"  # The first positional argument is the resource name
 
 # Checks if socat is installed
 if ! command -v socat > /dev/null; then
@@ -46,6 +46,18 @@ fi
 if ! command -v nc > /dev/null; then
   echo "Using 'port-forward' mode to run ssh session on Kubernetes instances requires 'nc' to be installed. Please install 'nc' (netcat)." >&2
   exit
+fi
+
+# Check if the resource name already contains a type prefix (e.g., "pod/").
+# If it doesn't contain a "/", assume it's a pod name and prepend "pod/" for backward compatibility.
+# If it does contain a "/", use it as is.
+RESOURCE_IDENTIFIER=""
+if [[ "$POD_NAME" == */* ]]; then
+  # Input already has a prefix, like "pod/my-pod" or "deployment/my-deploy"
+  RESOURCE_IDENTIFIER="$POD_NAME"
+else
+  # Input is just a name, like "my-pod", prepend "pod/" for backward compatibility
+  RESOURCE_IDENTIFIER="pod/$POD_NAME"
 fi
 
 # Establishes connection between local port and the ssh jump pod using kube port-forward
@@ -67,7 +79,8 @@ if [ -n "$KUBE_NAMESPACE" ]; then
   KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
 fi
 
-kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+# Use the new RESOURCE_IDENTIFIER variable for the port-forward command
+kubectl "${KUBECTL_ARGS[@]}" port-forward "${RESOURCE_IDENTIFIER}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!
