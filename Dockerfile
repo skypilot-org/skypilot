@@ -33,23 +33,26 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 
 # Install Nebius CLI
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
+    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        echo "Installing NPM and Node.js for dashboard build" && \
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+        apt-get install -y nodejs && \
+        npm install -g npm@latest; \
+    fi
+
 
 # Add source code
 COPY . /skypilot
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ~/.local/bin/uv pip install --prerelease allow azure-cli --system
 
 # Install SkyPilot and set up dashboard based on installation method
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
         ~/.local/bin/uv pip install -e ".[all]" --system && \
-        echo "Installing NPM and Node.js for dashboard build" && \
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-        apt-get install -y nodejs && \
-        npm install -g npm@latest && \
         echo "Building dashboard" && \
         npm --prefix sky/dashboard install && npm --prefix sky/dashboard run build; \
     else \
