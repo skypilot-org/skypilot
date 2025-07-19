@@ -57,8 +57,8 @@ def test_file_mounts(generic_cloud: str):
     extra_flags = ''
     if generic_cloud in 'kubernetes':
         # Kubernetes does not support multi-node
-        # NOTE: This test will fail if you have a Kubernetes cluster running on
-        #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
+        # NOTE: S3 mounting now works on all architectures including ARM64
+        #  (uses rclone fallback for ARM64, goofys for x86_64).
         extra_flags = '--num-nodes 1'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
@@ -282,8 +282,8 @@ def test_azure_storage_mounts_with_stop():
 @pytest.mark.kubernetes
 def test_kubernetes_storage_mounts():
     # Tests bucket mounting on k8s, assuming S3 is configured.
-    # This test will fail if run on non x86_64 architecture, since goofys is
-    # built for x86_64 only.
+    # S3 mounting now works on all architectures including ARM64
+    # (uses rclone fallback for ARM64, goofys for x86_64).
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
 
