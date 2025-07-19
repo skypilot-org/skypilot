@@ -47,6 +47,9 @@ spec:
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
+        {{- if .Values.apiService.extraEnvs }}
+        {{- toYaml .Values.apiService.extraEnvs | nindent 8 }}
+        {{- end }}
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
@@ -248,6 +251,9 @@ spec:
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
         {{- end }}
+        {{- if .Values.apiService.extraVolumeMounts }}
+        {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
+        {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
@@ -420,4 +426,7 @@ spec:
         secret:
           secretName: {{ .Values.apiService.sshKeySecret }}
           defaultMode: 0600 
+      {{- end }}
+      {{- if .Values.apiService.extraVolumes }}
+      {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}
       {{- end }}

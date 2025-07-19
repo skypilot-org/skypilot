@@ -101,10 +101,12 @@ def get_hourly_cost(instance_type: str,
                                        region, zone)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
 
@@ -127,7 +129,8 @@ def get_default_instance_type(
 
     logger.debug(f'# get_default_instance_type: {df}')
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
-                                                      memory_gb_or_ratio)
+                                                      memory_gb_or_ratio,
+                                                      region, zone)
 
 
 def get_accelerators_from_instance_type(

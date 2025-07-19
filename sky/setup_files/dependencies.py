@@ -68,6 +68,7 @@ install_requires = [
     'pyjwt',
     'gitpython',
     'types-paramiko',
+    'alembic',
 ]
 
 server_dependencies = [
