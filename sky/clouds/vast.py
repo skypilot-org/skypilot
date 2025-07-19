@@ -29,8 +29,6 @@ class Vast(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is currently not supported in '
              f'{_REPR}.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            ('Opening ports is currently not supported on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Vast.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
@@ -49,6 +47,7 @@ class Vast(clouds.Cloud):
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
 
     @classmethod
     def _unsupported_features_for_resources(
