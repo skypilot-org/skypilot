@@ -27,7 +27,6 @@ document.addEventListener('DOMContentLoaded', function () {
 document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
-        { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
         { selector: '.toctree-l1 > a', text: 'Examples' },
         { selector: '.toctree-l1 > a', text: 'Workspaces: Isolating Teams' },

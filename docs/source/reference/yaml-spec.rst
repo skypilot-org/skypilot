@@ -134,7 +134,7 @@ Task name (optional), used for display purposes.
 ``workdir``
 ~~~~~~~~~~~
 
-``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``launch`` or ``exec`` is run with the YAML file.
+``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``sky launch`` or ``sky exec`` is run with the YAML file.
 
 **Local Directory**:
 
