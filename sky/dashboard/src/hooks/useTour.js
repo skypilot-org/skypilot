@@ -103,9 +103,7 @@ export function TourProvider({ children }) {
           }
 
           .shepherd-title {
-              font-weight: 600;
-              font-size: 1.125rem;
-              line-height: 1.75rem;
+              font-weight: bold;
               color: #111827;
               margin: 0;
           }
@@ -117,6 +115,9 @@ export function TourProvider({ children }) {
           .shepherd-element .shepherd-text {
               padding: 0.5rem 1rem 1rem 1rem;
           }
+
+
+
         `;
       if (!document.getElementById('shepherd-global-custom-style')) {
         document.head.appendChild(globalStyle);
@@ -296,81 +297,95 @@ export function TourProvider({ children }) {
             offset: { skidding: 0, distance: 15 },
           },
           beforeShowPromise: function () {
-            // Navigate to clusters page if not already there
-            if (window.location.pathname !== '/dashboard/clusters') {
-              return new Promise((resolve) => {
-                window.location.href = '/dashboard/clusters';
-                setTimeout(resolve, 1500); // Increased timeout to ensure table loads
-              });
-            }
-            return Promise.resolve();
+            return new Promise((resolve) => {
+              const setupElements = () => {
+                // Find the Infra column and create a unified column highlight
+                const infraHeader = Array.from(
+                  document.querySelectorAll('thead th')
+                ).find(
+                  (th) => th.textContent && th.textContent.trim() === 'Infra'
+                );
+
+                if (infraHeader && infraHeader instanceof HTMLElement) {
+                  const table = infraHeader.closest('table');
+                  if (table) {
+                    const headerRow = infraHeader.parentElement;
+                    const columnIndex = Array.from(headerRow.children).indexOf(
+                      infraHeader
+                    );
+                    const headerRect = infraHeader.getBoundingClientRect();
+                    const rows = table.querySelectorAll('tbody tr');
+                    let lastCellRect = headerRect;
+
+                    rows.forEach((row) => {
+                      const cell = row.children[columnIndex];
+                      if (cell) {
+                        lastCellRect = cell.getBoundingClientRect();
+                      }
+                    });
+
+                    // Create a single overlay for the entire column
+                    const overlay = document.createElement('div');
+                    overlay.id = 'shepherd-column-overlay';
+                    overlay.style.position = 'fixed';
+                    overlay.style.left = `${headerRect.left - 4}px`;
+                    overlay.style.top = `${headerRect.top - 4}px`;
+                    overlay.style.width = `${headerRect.width + 8}px`;
+                    overlay.style.height = `${
+                      lastCellRect.bottom - headerRect.top + 8
+                    }px`;
+                    overlay.style.outline = '3px solid #3b82f6';
+                    overlay.style.outlineOffset = '2px';
+                    overlay.style.borderRadius = '8px';
+                    overlay.style.zIndex = '9998';
+                    overlay.style.pointerEvents = 'none';
+                    overlay.style.backgroundColor = 'transparent';
+                    document.body.appendChild(overlay);
+
+                    // Create invisible anchor point at the bottom edge of the highlighted column
+                    const overlayBottom = lastCellRect.bottom + 5; // +4 padding, +2 offset, +3 outline
+                    const anchorPoint = document.createElement('div');
+                    anchorPoint.id = 'shepherd-column-anchor';
+                    anchorPoint.style.position = 'fixed';
+                    anchorPoint.style.left = `${
+                      headerRect.left + headerRect.width / 2
+                    }px`;
+                    anchorPoint.style.top = `${overlayBottom}px`;
+                    anchorPoint.style.width = '1px';
+                    anchorPoint.style.height = '1px';
+                    anchorPoint.style.zIndex = '9999';
+                    anchorPoint.style.pointerEvents = 'none';
+                    anchorPoint.style.backgroundColor = 'transparent';
+                    anchorPoint.style.transform = 'translate(-50%, -50%)';
+                    document.body.appendChild(anchorPoint);
+                  }
+                }
+                resolve();
+              };
+
+              // Navigate to clusters page if not already there, then set up elements
+              if (window.location.pathname !== '/dashboard/clusters') {
+                router.push('/dashboard/clusters').then(() => {
+                  setTimeout(setupElements, 500); // Wait for page to render
+                });
+              } else {
+                setupElements(); // Page is already loaded
+              }
+            });
           },
           when: {
             show() {
-              // Find the Infra column and create a unified column highlight
-              const infraHeader = Array.from(
-                document.querySelectorAll('thead th')
-              ).find(
-                (th) => th.textContent && th.textContent.trim() === 'Infra'
-              );
-
-              if (infraHeader && infraHeader instanceof HTMLElement) {
-                const table = infraHeader.closest('table');
-                const headerRow = infraHeader.parentElement;
-                const columnIndex = Array.from(headerRow.children).indexOf(
-                  infraHeader
-                );
-
-                if (table) {
-                  // Calculate the bounding box for the entire column
-                  const headerRect = infraHeader.getBoundingClientRect();
-                  const tableRect = table.getBoundingClientRect();
-
-                  // Find all data cells in this column
-                  const rows = table.querySelectorAll('tbody tr');
-                  let lastCellRect = headerRect;
-
-                  rows.forEach((row) => {
-                    const cell = row.children[columnIndex];
-                    if (cell) {
-                      lastCellRect = cell.getBoundingClientRect();
-                    }
-                  });
-
-                  // Create a single overlay for the entire column
-                  const overlay = document.createElement('div');
-                  overlay.id = 'shepherd-column-overlay';
-                  overlay.style.position = 'fixed';
-                  overlay.style.left = `${headerRect.left - 4}px`;
-                  overlay.style.top = `${headerRect.top - 4}px`;
-                  overlay.style.width = `${headerRect.width + 8}px`;
-                  overlay.style.height = `${lastCellRect.bottom - headerRect.top + 8}px`;
-                  overlay.style.outline = '3px solid #3b82f6';
-                  overlay.style.outlineOffset = '2px';
-                  overlay.style.borderRadius = '8px';
-                  overlay.style.zIndex = '9998';
-                  overlay.style.pointerEvents = 'none';
-                  overlay.style.backgroundColor = 'transparent';
-
-                  document.body.appendChild(overlay);
-
-                  // Create invisible anchor point at the bottom edge of the highlighted column
-                  const overlayBottom = lastCellRect.bottom + 8 + 2 + 3; // +8 for overlay padding, +2 for outline offset, +3 for outline width
-                  const anchorPoint = document.createElement('div');
-                  anchorPoint.id = 'shepherd-column-anchor';
-                  anchorPoint.style.position = 'fixed';
-                  anchorPoint.style.left = `${headerRect.left + headerRect.width / 2}px`;
-                  anchorPoint.style.top = `${overlayBottom}px`;
-                  anchorPoint.style.width = '1px';
-                  anchorPoint.style.height = '1px';
-                  anchorPoint.style.zIndex = '9999';
-                  anchorPoint.style.pointerEvents = 'none';
-                  anchorPoint.style.backgroundColor = 'transparent';
-                  anchorPoint.style.transform = 'translate(-50%, -50%)';
-
-                  document.body.appendChild(anchorPoint);
-                }
-              }
+              // Add progress indicator (same as default behavior)
+              const currentStep = Shepherd.activeTour?.getCurrentStep();
+              const currentStepElement = currentStep?.getElement();
+              const footer =
+                currentStepElement?.querySelector('.shepherd-footer');
+              const progress = document.createElement('span');
+              progress.className = 'shepherd-progress';
+              progress.innerText = `${
+                Shepherd.activeTour?.steps.indexOf(currentStep) + 1
+              } of ${Shepherd.activeTour?.steps.length}`;
+              footer?.insertBefore(progress, footer.firstChild);
             },
             hide() {
               // Remove the column overlay
