@@ -394,7 +394,7 @@ export function TourProvider({ children }) {
               <p>Easily SSH into any node, connect an IDE, or queue development jobs.</p>
             `,
           attachTo: {
-            element: 'a[href="/dashboard/clusters"]',
+            element: 'a[href="/clusters"]',
             on: 'bottom',
             offset: { skidding: 0, distance: 10 },
           },
@@ -642,8 +642,8 @@ export function TourProvider({ children }) {
               };
 
               // Navigate to clusters page if not already there, then set up elements
-              if (window.location.pathname !== '/dashboard/clusters') {
-                router.push('/dashboard/clusters').then(() => {
+              if (window.location.pathname !== '/clusters') {
+                router.push('/clusters').then(() => {
                   setTimeout(setupElements, 500); // Wait for page to render
                 });
               } else {
@@ -861,15 +861,15 @@ export function TourProvider({ children }) {
             element: function () {
               // Target the jobs link with the correct href
               const jobsLink = document.querySelector(
-                'a[href="/dashboard/jobs"]'
+                'a[href="/jobs"]'
               );
               if (jobsLink) {
                 return jobsLink;
               }
               // Fallback to original selector
               return (
-                document.querySelector('a[href="/dashboard/jobs"]') ||
-                'a[href="/dashboard/jobs"]'
+                document.querySelector('a[href="/jobs"]') ||
+                'a[href="/jobs"]'
               );
             },
             on: 'bottom',
@@ -937,15 +937,15 @@ export function TourProvider({ children }) {
             element: function () {
               // Target the config link with the correct href
               const configLink = document.querySelector(
-                'a[href="/dashboard/infra"]'
+                'a[href="/infra"]'
               );
               if (configLink) {
                 return configLink;
               }
               // Fallback to original selector
               return (
-                document.querySelector('a[href="/dashboard/infra"]') ||
-                'a[href="/dashboard/infra"]'
+                document.querySelector('a[href="/infra"]') ||
+                'a[href="/infra"]'
               );
             },
             on: 'bottom',
@@ -1009,7 +1009,7 @@ export function TourProvider({ children }) {
             <p>Admins can use Workspaces to isolate teams or projects.</p>
           `,
           attachTo: {
-            element: 'a[href="/dashboard/workspaces"]',
+            element: 'a[href="/workspaces"]',
             on: 'bottom',
             offset: { skidding: 0, distance: 10 },
           },
@@ -1071,7 +1071,7 @@ export function TourProvider({ children }) {
             <p>SkyPilot provides user management with RBAC and SSO support. Admins can manage users in this page.</p>
           `,
           attachTo: {
-            element: 'a[href="/dashboard/users"]',
+            element: 'a[href="/users"]',
             on: 'bottom',
             offset: { skidding: 0, distance: 10 },
           },
