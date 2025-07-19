@@ -101,6 +101,26 @@ apiService:
       cpu: "4"
       memory: "8Gi"
 
+  # Extra environment variables to set before starting the API server. Example:
+  # extraEnvs:
+  #   - name: MY_ADDITIONAL_ENV_VAR
+  #     value: "my_value"
+  extraEnvs: null
+
+  # Extra volumes to mount to the API server. Example:
+  # extraVolumes:
+  #   - name: my-volume
+  #     secret:
+  #       secretName: my-secret
+  extraVolumes: null
+
+  # Extra volume mounts to mount to the API server. Example:
+  # extraVolumeMounts:
+  #   - name: my-volume
+  #     mountPath: /my-path
+  #     subPath: my-file
+  extraVolumeMounts: null
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
@@ -280,6 +300,9 @@ rbac:
   # You can disable this if you do not need additional capabilities of system components like
   # object store mounting or you manage system components manually, i.e. outside of SkyPilot.
   manageSystemComponents: true
+
+  # Custom annotations for the API server service account.
+  serviceAccountAnnotations: null
 
 # kubernetesCredentials add additional kubernetes cluster permissions to the API server.
 kubernetesCredentials:
