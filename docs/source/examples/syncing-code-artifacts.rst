@@ -1,6 +1,6 @@
 .. _sync-code-artifacts:
 
-Syncing Code and Artifacts
+Syncing Code, Git, and Files
 ====================================
 
 SkyPilot simplifies transferring code, data, and artifacts to and
@@ -34,22 +34,26 @@ Sync code and project files from a local directory or git repository
 
         If a relative path is used, it's evaluated relative to the location from which ``sky`` is called.
 
-        The working directory can be configured either
+        The working directory can be configured either:
 
-        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`, or
-        2. by the command line option :code:`--workdir`:
+        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
 
         .. code-block:: console
 
-          $ # Assuming task.yaml has a 'workdir: <path>' field
-          $ # workdir: ~/my-task-code
+          # task.yaml
+          workdir: ~/my-task-code
 
           $ # Sync the workdir to the ~/sky_workdir of the cluster:
           $ sky launch -c dev task.yaml
           $ sky exec dev task.yaml
 
-          $ # Add a --workdir flag if the yaml doesn't contain the field, or
-          $ # to override it.
+        2. by the command line option :code:`--workdir` if the yaml doesn't contain the field, or
+           to override it:
+
+        .. code-block:: console
+
+          $ sky launch -c dev --workdir ~/my-task-code task.yaml
+          $ sky exec dev --workdir ~/my-task-code task.yaml
 
         .. note::
           To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
@@ -71,47 +75,44 @@ Sync code and project files from a local directory or git repository
     .. tab-item:: Git Repository
         :sync: git-repository-tab
 
-        If ``workdir`` is a git repository, the ``workdir.url`` field is required and can be in one of the following formats:
+        If ``workdir`` is a git repository, the ``workdir.url`` field is required and the ``workdir.ref`` field specifies the git reference to checkout, refer to :ref:`task YAML file <yaml-spec-workdir>` for more details.
 
-        * HTTPS: ``https://github.com/skypilot-org/skypilot.git``
-        * SSH: ``ssh://git@github.com/skypilot-org/skypilot.git``
-        * SCP: ``git@github.com:skypilot-org/skypilot.git``
+        The working directory can be configured either:
 
-        The ``workdir.ref`` field specifies the git reference to checkout, which can be:
-
-        * A branch name (e.g., ``main``, ``develop``)
-        * A tag name (e.g., ``v1.0.0``)
-        * A commit hash (e.g., ``abc123def456``)
-
-        **Authentication for Private Repositories**:
-
-        *For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
-
-        *For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
-
-        1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
-        2. SSH key configured in ``~/.ssh/config`` for the git host
-        3. Default SSH key at ``~/.ssh/id_rsa``
-        4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
-
-        The working directory can be configured either
-
-        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`, or
-        2. by the command line option :code:`--git-url`, :code:`--git-ref`:
+        1. by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
 
         .. code-block:: console
 
-          $ # Assuming task.yaml has 'workdir' field with a git repository URL
-          $ # workdir:
-          $ #   url: https://github.com/skypilot-org/skypilot.git
-          $ #   ref: main, these commands
+          # task.yaml
+          workdir:
+            url: https://github.com/skypilot-org/skypilot.git
+            ref: main
 
           $ # Clone the git repository to the ~/sky_workdir of the cluster:
           $ sky launch -c dev task.yaml
           $ sky exec dev task.yaml
 
-          $ # Add a --git-url and --git-ref flag if the yaml doesn't contain the fields, or
-          $ # to override them.
+        2. by the command line option :code:`--git-url`, :code:`--git-ref` if the yaml doesn't contain the fields, or
+           to override them:
+
+        .. code-block:: console
+
+          $ # Clone the git repository to the ~/sky_workdir of the cluster:
+          $ sky launch -c dev --git-url https://github.com/skypilot-org/skypilot.git --git-ref main task.yaml
+          $ sky exec dev --git-url https://github.com/skypilot-org/skypilot.git --git-ref main task.yaml
+
+        .. note::
+
+          **Authentication for Private Repositories**:
+
+          *For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+          *For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+          1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+          2. SSH key configured in ``~/.ssh/config`` for the git host
+          3. Default SSH key at ``~/.ssh/id_rsa``
+          4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
         .. note::
 
