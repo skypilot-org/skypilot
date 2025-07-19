@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, createContext, useContext } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  createContext,
+  useContext,
+  useState,
+} from 'react';
 import { useRouter } from 'next/router';
 import Shepherd from 'shepherd.js';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
@@ -34,6 +40,7 @@ export function TourProvider({ children }) {
   const tourRef = useRef(null);
   const router = useRouter();
   const { isFirstVisit, markTourCompleted } = useFirstVisit();
+  const [tourAutoStarted, setTourAutoStarted] = useState(false);
 
   useEffect(() => {
     // Initialize the tour only once
@@ -221,6 +228,17 @@ export function TourProvider({ children }) {
             element: 'a[href="/dashboard/clusters"]',
             on: 'bottom',
             offset: { skidding: 0, distance: 10 },
+          },
+          beforeShowPromise: function () {
+            return new Promise((resolve) => {
+              if (router.pathname !== '/clusters') {
+                router.push('/clusters').then(() => {
+                  setTimeout(resolve, 500); // Wait for page to render
+                });
+              } else {
+                resolve();
+              }
+            });
           },
           buttons: [
             {
@@ -647,8 +665,9 @@ export function TourProvider({ children }) {
       });
     }
 
-    if (isFirstVisit) {
+    if (isFirstVisit && !tourAutoStarted) {
       startTour();
+      setTourAutoStarted(true);
     }
 
     return () => {
@@ -657,21 +676,14 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
-  }, [isFirstVisit, markTourCompleted]);
+  }, [isFirstVisit, markTourCompleted, tourAutoStarted]);
 
   const startTour = () => {
     if (tourRef.current) {
-      const start = () => {
-        setTimeout(() => {
-          tourRef.current.start();
-        }, 100);
-      };
-      // Navigate to clusters page before starting tour
-      if (router.pathname !== '/clusters') {
-        router.push('/clusters').then(start);
-      } else {
-        start();
-      }
+      // Small delay to ensure page is loaded
+      setTimeout(() => {
+        tourRef.current.start();
+      }, 100);
     }
   };
 
