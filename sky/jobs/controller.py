@@ -30,6 +30,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -60,12 +61,13 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
-    def __init__(self, job_id: int, dag_yaml: str) -> None:
+    def __init__(self, job_id: int, dag_yaml: str, pool: Optional[str]) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        self._pool = pool
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -122,6 +124,12 @@ class JobsController:
             managed_job_state.set_local_log_file(self._job_id, task_id,
                                                  log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
+    def _cleanup_cluster(self, cluster_name: str) -> None:
+        if self._pool is None:
+            managed_job_utils.terminate_cluster(cluster_name)
+        else:
+            serve_utils.release_cluster_name(self._pool, cluster_name)
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -194,9 +202,10 @@ class JobsController:
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
+            task.name, self._job_id) if self._pool is None else ''
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id)
+            cluster_name, self._backend, task, self._job_id, task_id,
+            self._pool)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -226,6 +235,13 @@ class JobsController:
         if not is_resume:
             remote_job_submitted_at = self._strategy_executor.launch()
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+        if self._pool is None:
+            job_id_on_pm = None
+        else:
+            # Update the cluster name when using cluster pool.
+            cluster_name, job_id_on_pm = (
+                managed_job_state.get_pool_submit_info(self._job_id))
+            assert cluster_name is not None, (cluster_name, job_id_on_pm)
 
         if not is_resume:
             managed_job_state.set_started(job_id=self._job_id,
@@ -279,7 +295,7 @@ class JobsController:
             if not force_transit_to_recovering:
                 try:
                     job_status = managed_job_utils.get_job_status(
-                        self._backend, cluster_name)
+                        self._backend, cluster_name, job_id=job_id_on_pm)
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -316,7 +332,7 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                managed_job_utils.terminate_cluster(cluster_name=cluster_name)
+                self._cleanup_cluster(cluster_name)
                 return True
 
             # For single-node jobs, non-terminated job_status indicates a
@@ -457,7 +473,7 @@ class JobsController:
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    managed_job_utils.terminate_cluster(cluster_name)
+                    self._cleanup_cluster(cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
@@ -467,6 +483,10 @@ class JobsController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
+            if self._pool is not None:
+                cluster_name, job_id_on_pm = (
+                    managed_job_state.get_pool_submit_info(self._job_id))
+                assert cluster_name is not None
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
@@ -541,11 +561,11 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-def _run_controller(job_id: int, dag_yaml: str):
+def _run_controller(job_id: int, dag_yaml: str, pool: Optional[str]):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    jobs_controller = JobsController(job_id, dag_yaml)
+    jobs_controller = JobsController(job_id, dag_yaml, pool)
     jobs_controller.run()
 
 
@@ -577,7 +597,7 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
-def _cleanup(job_id: int, dag_yaml: str):
+def _cleanup(job_id: int, dag_yaml: str, pool: Optional[str]):
     """Clean up the cluster(s) and storages.
 
     (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -595,9 +615,19 @@ def _cleanup(job_id: int, dag_yaml: str):
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, job_id)
-        managed_job_utils.terminate_cluster(cluster_name)
+        if pool is None:
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task.name, job_id)
+            managed_job_utils.terminate_cluster(cluster_name)
+        else:
+            cluster_name, job_id_on_pm = (
+                managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is not None:
+                serve_utils.release_cluster_name(pool, cluster_name)
+                if job_id_on_pm is not None:
+                    core.cancel(cluster_name=cluster_name,
+                                job_ids=[job_id_on_pm],
+                                _try_cancel_if_cluster_is_init=True)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -629,7 +659,7 @@ def _cleanup(job_id: int, dag_yaml: str):
                     f'Failed to clean up file mount {file_mount}: {e}')
 
 
-def start(job_id, dag_yaml):
+def start(job_id, dag_yaml, pool):
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -643,7 +673,8 @@ def start(job_id, dag_yaml):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml))
+                                                     args=(job_id, dag_yaml,
+                                                           pool))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
@@ -679,7 +710,7 @@ def start(job_id, dag_yaml):
         # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster job_state.
-        _cleanup(job_id, dag_yaml=dag_yaml)
+        _cleanup(job_id, dag_yaml=dag_yaml, pool=pool)
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
@@ -717,8 +748,13 @@ if __name__ == '__main__':
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
+    parser.add_argument('--pool',
+                        required=False,
+                        default=None,
+                        type=str,
+                        help='The pool to use for the controller job.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml)
+    start(args.job_id, args.dag_yaml, args.pool)

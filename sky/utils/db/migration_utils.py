@@ -18,7 +18,7 @@ SKYPILOT_CONFIG_VERSION = '001'
 SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '001'
+SPOT_JOBS_VERSION = '002'
 SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 
 

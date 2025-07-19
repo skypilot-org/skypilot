@@ -4159,6 +4159,18 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
+@click.option('--pool',
+              '-p',
+              default=None,
+              type=str,
+              required=False,
+              help='Which pool to use for batch jobs submission.')
+@click.option('--batch-size',
+              '-b',
+              default=None,
+              type=int,
+              required=False,
+              help='Batch size for batch jobs submission.')
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -4192,6 +4204,8 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
+    pool: Optional[str],
+    batch_size: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -4211,6 +4225,11 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
+    if pool is None and batch_size is not None:
+        raise click.UsageError('Cannot specify --batch-size without --pool.')
+    if pool is not None and batch_size is None:
+        raise click.UsageError('Cannot specify --pool without --batch-size.')
+
     if cluster is not None:
         if name is not None and name != cluster:
             raise click.UsageError('Cannot specify both --name and --cluster. '
@@ -4261,22 +4280,38 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
+    if pool is not None:
+        click.secho(
+            f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
+            f'{colorama.Style.RESET_ALL} with batch size '
+            f'{colorama.Fore.CYAN}{batch_size}{colorama.Style.RESET_ALL}.')
+
     # Optimize info is only show if _need_confirmation.
     if not yes:
         click.secho(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    request_id = managed_jobs.launch(dag,
+                                     name,
+                                     pool,
+                                     batch_size,
+                                     _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
-    if not async_call and not detach_run:
-        job_id = job_id_handle[0]
-        returncode = managed_jobs.tail_logs(name=None,
-                                            job_id=job_id,
-                                            follow=True,
-                                            controller=False)
-        sys.exit(returncode)
+    if pool is None:
+        if not async_call and not detach_run:
+            job_id = job_id_handle[0]
+            returncode = managed_jobs.tail_logs(name=None,
+                                                job_id=job_id,
+                                                follow=True,
+                                                controller=False)
+            sys.exit(returncode)
+    else:
+        batch_ids = job_id_handle[0]
+        bids = ','.join(map(str, batch_ids))
+        click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
+                    f'{colorama.Style.RESET_ALL}.')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4586,6 +4621,12 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
+
+    if task.service.pool:
+        if task.service.ports is not None or ports:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify ports in a cluster pool.')
+        return task
 
     # NOTE(yi): we only allow one service port now.
     service_port: Optional[int] = int(

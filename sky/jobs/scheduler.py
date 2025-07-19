@@ -43,6 +43,7 @@ import os
 import sys
 import time
 import typing
+from typing import Optional
 
 import filelock
 
@@ -51,6 +52,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -80,18 +82,21 @@ LAUNCHES_PER_CPU = 4
 
 @lru_cache(maxsize=1)
 def _get_lock_path() -> str:
+    # TODO(tian): Per pool lock.
     path = os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
 
 
-def _start_controller(job_id: int, dag_yaml_path: str,
-                      env_file_path: str) -> None:
+def _start_controller(job_id: int, dag_yaml_path: str, env_file_path: str,
+                      pool: Optional[str]) -> None:
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
     source_environment_cmd = (f'source {env_file_path};'
                               if env_file_path else '')
-    run_controller_cmd = (f'{sys.executable} -u -m sky.jobs.controller '
-                          f'{dag_yaml_path} --job-id {job_id};')
+    maybe_pool_arg = (f'--pool {pool}' if pool is not None else '')
+    run_controller_cmd = (
+        f'{sys.executable} -u -m sky.jobs.controller '
+        f'{dag_yaml_path} --job-id {job_id} {maybe_pool_arg};')
 
     # If the command line here is changed, please also update
     # utils._controller_process_alive. The substring `--job-id X`
@@ -111,7 +116,7 @@ def _start_controller(job_id: int, dag_yaml_path: str,
     logger.debug(f'Job {job_id} started with pid {pid}')
 
 
-def maybe_schedule_next_jobs() -> None:
+def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
     """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
     Here, "schedule" means to select job that is waiting, and allow it to
@@ -149,10 +154,11 @@ def maybe_schedule_next_jobs() -> None:
         # releasing the lock.
         with filelock.FileLock(_get_lock_path(), blocking=False):
             while True:
-                maybe_next_job = state.get_waiting_job()
+                maybe_next_job = state.get_waiting_job(pool)
                 if maybe_next_job is None:
                     # Nothing left to start, break from scheduling loop
                     break
+                pool = maybe_next_job['pool']
 
                 current_state = maybe_next_job['schedule_state']
 
@@ -171,7 +177,7 @@ def maybe_schedule_next_jobs() -> None:
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
-                    if not _can_start_new_job():
+                    if not _can_start_new_job(pool):
                         # Can't schedule anything, break from scheduling loop.
                         break
 
@@ -187,7 +193,8 @@ def maybe_schedule_next_jobs() -> None:
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
                     env_file_path = maybe_next_job['env_file_path']
 
-                    _start_controller(job_id, dag_yaml_path, env_file_path)
+                    _start_controller(job_id, dag_yaml_path, env_file_path,
+                                      pool)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -196,7 +203,7 @@ def maybe_schedule_next_jobs() -> None:
 
 
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
-               env_file_path: str, priority: int) -> None:
+               env_file_path: str, priority: int, pool: Optional[str]) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -213,9 +220,9 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
                                                 common_utils.get_user_hash(),
                                                 priority)
     if is_resume:
-        _start_controller(job_id, dag_yaml_path, env_file_path)
+        _start_controller(job_id, dag_yaml_path, env_file_path, pool)
     else:
-        maybe_schedule_next_jobs()
+        maybe_schedule_next_jobs(pool)
 
 
 @contextlib.contextmanager
@@ -251,6 +258,7 @@ def scheduled_launch(job_id: int):
         while (state.get_job_schedule_state(job_id) !=
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
+    pool = state.get_pool_from_job_id(job_id)
 
     try:
         yield
@@ -264,7 +272,7 @@ def scheduled_launch(job_id: int):
         with filelock.FileLock(_get_lock_path()):
             state.scheduler_set_alive(job_id)
     finally:
-        maybe_schedule_next_jobs()
+        maybe_schedule_next_jobs(pool)
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -279,17 +287,19 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
+    pool = state.get_pool_from_job_id(job_id)
 
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs()
+    maybe_schedule_next_jobs(pool)
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
-    maybe_schedule_next_jobs()
+    pool = state.get_pool_from_job_id(job_id)
+    maybe_schedule_next_jobs(pool)
 
 
 def _get_job_parallelism() -> int:
@@ -305,11 +315,23 @@ def _get_launch_parallelism() -> int:
     return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
 
 
-def _can_start_new_job() -> bool:
+def _can_start_new_job(pool: Optional[str]) -> bool:
     launching_jobs = state.get_num_launching_jobs()
     alive_jobs = state.get_num_alive_jobs()
-    return launching_jobs < _get_launch_parallelism(
-    ) and alive_jobs < _get_job_parallelism()
+
+    # Check basic resource limits
+    if not (launching_jobs < _get_launch_parallelism() and
+            alive_jobs < _get_job_parallelism()):
+        return False
+
+    # Check if there are available replicas in the pool
+    if pool is not None:
+        alive_jobs_in_pool = state.get_num_alive_jobs(pool)
+        if alive_jobs_in_pool >= serve_utils.num_replicas(pool):
+            logger.debug(f'No replicas available in pool {pool}')
+            return False
+
+    return True
 
 
 def _can_lauch_in_alive_job() -> bool:
@@ -332,6 +354,11 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
+    parser.add_argument('--pool',
+                        type=str,
+                        required=False,
+                        default=None,
+                        help='The pool to use for the controller job.')
     parser.add_argument(
         '--priority',
         type=int,
@@ -341,4 +368,4 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
-               args.priority)
+               args.priority, args.pool)

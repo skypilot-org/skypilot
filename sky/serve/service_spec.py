@@ -43,6 +43,7 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        pool: Optional[bool] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -96,6 +97,7 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._pool: Optional[bool] = pool
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -115,7 +117,7 @@ class SkyServiceSpec:
 
         service_config: Dict[str, Any] = {}
 
-        readiness_section = config['readiness_probe']
+        readiness_section = config.get('readiness_probe', '/')
         if isinstance(readiness_section, str):
             service_config['readiness_path'] = readiness_section
             initial_delay_seconds = None
@@ -193,6 +195,10 @@ class SkyServiceSpec:
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
 
+        pool_config = config.get('pool', None)
+        if pool_config is not None:
+            service_config['pool'] = pool_config
+
         tls_section = config.get('tls', None)
         if tls_section is not None:
             service_config['tls_credential'] = serve_utils.TLSCredential(
@@ -263,6 +269,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('pool', None, self._pool)
         add_if_not_none('ports', None, int(self.ports) if self.ports else None)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
@@ -340,6 +347,7 @@ class SkyServiceSpec:
             TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
             Load Balancing Policy:            {self.load_balancing_policy}
+            Is cluster pool:                  {self.pool}
         """)
 
     @property
@@ -420,3 +428,7 @@ class SkyServiceSpec:
     def load_balancing_policy(self) -> str:
         return lb_policies.LoadBalancingPolicy.make_policy_name(
             self._load_balancing_policy)
+
+    @property
+    def pool(self) -> bool:
+        return bool(self._pool)

@@ -33,6 +33,8 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    pool: Optional[str] = None,
+    batch_size: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -67,8 +69,11 @@ def launch(
             dag, at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
-            request_id = sdk.optimize(dag)
-            sdk.stream_and_get(request_id)
+            if pool is None:
+                request_id = sdk.optimize(dag)
+                sdk.stream_and_get(request_id)
+            else:
+                click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
             prompt = f'Launching a managed job {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
@@ -81,6 +86,8 @@ def launch(
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
+            pool=pool,
+            batch_size=batch_size,
         )
         response = server_common.make_authenticated_request(
             'POST',

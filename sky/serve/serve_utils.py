@@ -22,6 +22,8 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import serve_state
@@ -46,6 +48,18 @@ if typing.TYPE_CHECKING:
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
+
+logger = sky_logging.init_logger(__name__)
+
+
+def _get_pm_filelock_path(pool: Optional[str]) -> str:
+    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR)
+    if pool is not None:
+        path = path / pool
+    path = path / 'pm.lock'
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
 
 
 @annotations.lru_cache(scope='request')
@@ -244,6 +258,14 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
+    # _check_consolidation_mode_consistency(consolidation_mode)
+    return consolidation_mode
+
+
 def validate_service_task(task: 'sky.Task') -> None:
     """Validate the task for Sky Serve.
 
@@ -300,7 +322,7 @@ def validate_service_task(task: 'sky.Task') -> None:
                 raise ValueError(
                     '`spot_placer` is only supported for spot resources. '
                     'Please explicitly specify `use_spot: true` in resources.')
-        if task.service.ports is None:
+        if not task.service.pool and task.service.ports is None:
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
             if len(requested_ports) != 1:
@@ -320,6 +342,11 @@ def validate_service_task(task: 'sky.Task') -> None:
                         f'Got multiple ports: {service_port} and '
                         f'{replica_ingress_port} in different resources. '
                         'Please specify the same port instead.')
+        if task.service.pool:
+            if (task.service.ports is not None or
+                    requested_resources.ports is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify ports in a cluster pool.')
 
 
 def generate_service_name():
@@ -426,6 +453,9 @@ def set_service_status_and_active_versions_from_replica(
 
 
 def update_service_status() -> None:
+    if is_consolidation_mode():
+        # TODO(tian): PID-based tracking.
+        return
     services = serve_state.get_services()
     for record in services:
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
@@ -521,10 +551,17 @@ def _get_service_status(
     if record is None:
         return None
     if with_replica_info:
-        record['replica_info'] = [
-            info.to_info_dict(with_handle=True)
-            for info in serve_state.get_replica_infos(service_name)
-        ]
+        if record['pool']:
+            record['replica_info'] = [{
+                'used_by': jid,
+                **info.to_info_dict(with_handle=True, with_url=False)
+            } for info, jid in serve_state.get_replica_infos_and_job_ids(
+                service_name)]
+        else:
+            record['replica_info'] = [
+                info.to_info_dict(with_handle=True)
+                for info in serve_state.get_replica_infos(service_name)
+            ]
     return record
 
 
@@ -577,6 +614,92 @@ def add_version_encoded(service_name: str) -> str:
 
 def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
+
+
+def num_replicas(service_name: str) -> int:
+    logger.info(f'Get number of replicas for pool {service_name!r}')
+    return len(serve_state.get_replica_infos(service_name))
+
+
+def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
+    """Get the next available cluster name from idle replicas.
+
+    Args:
+        service_name: The name of the service.
+        job_id: Optional job ID to associate with the acquired cluster.
+                If None, a placeholder will be used.
+
+    Returns:
+        The cluster name if an idle replica is found, None otherwise.
+    """
+    with filelock.FileLock(_get_pm_filelock_path(service_name)):
+        logger.info(f'Get next cluster name for pool {service_name!r}')
+        # Check if service exists
+        service_status = _get_service_status(service_name,
+                                             with_replica_info=False)
+        if service_status is None:
+            logger.error(f'Service {service_name!r} does not exist.')
+            return None
+        if not service_status['pool']:
+            logger.error(f'Service {service_name!r} is not a cluster pool.')
+            return None
+
+        # Get idle replicas using database
+        idle_replicas = [
+            (info, jid)
+            for info, jid in serve_state.get_replica_infos_and_job_ids(
+                service_name)
+            if info.status == serve_state.ReplicaStatus.READY and jid is None
+        ]
+        if not idle_replicas:
+            logger.info(f'No idle replicas found for pool {service_name!r}')
+            return None
+
+        # Select the first idle replica
+        # TODO(tian): "Load balancing" policy.
+        ri = idle_replicas[0][0]
+        logger.info(f'Selected replica {ri.replica_id} with cluster '
+                    f'{ri.cluster_name!r} for job {job_id!r} in pool '
+                    f'{service_name!r}')
+        serve_state.set_replica_job_id(service_name, ri.replica_id, job_id)
+        return ri.cluster_name
+
+
+def release_cluster_name(service_name: str, cluster_name: str) -> None:
+    """Release a cluster back to the pool by setting job id to NULL.
+
+    Args:
+        service_name: The name of the service.
+        cluster_name: The name of the cluster to release.
+
+    Returns:
+        A success message.
+    """
+    with filelock.FileLock(_get_pm_filelock_path(service_name)):
+        logger.info(
+            f'Release cluster {cluster_name!r} for pool {service_name!r}')
+        if not cluster_name:
+            logger.info('Skip clean up dummy cluster.')
+            return
+        # Check if service exists
+        service_status = _get_service_status(service_name,
+                                             with_replica_info=False)
+        if service_status is None:
+            logger.error(f'Service {service_name!r} does not exist.')
+            return
+        if not service_status['pool']:
+            logger.error(f'Service {service_name!r} is not a cluster pool.')
+            return
+
+        # Release the cluster using database
+        rid = int(cluster_name.split('-')[-1])
+        current_jid = serve_state.get_replica_job_id(service_name, rid)
+        if current_jid is None:
+            logger.info(f'Skip releasing cluster {cluster_name!r}: '
+                        f'cluster not in use.')
+            return
+        serve_state.set_replica_job_id(service_name, rid, None)
+        logger.info(f'Cluster {cluster_name!r} released successfully.')
 
 
 def _terminate_failed_services(
@@ -694,32 +817,35 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     start_time = time.time()
     setup_completed = False
     while True:
-        job_status = job_lib.get_status(job_id)
-        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
-            # Wait for the controller process to finish setting up. It can be
-            # slow if a lot cloud dependencies are being installed.
-            if (time.time() - start_time >
-                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Failed to start the controller '
-                        f'process for the service {service_name!r} '
-                        f'within '
-                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
-                    )
-            # No need to check the service status as the controller process
-            # is still setting up.
-            time.sleep(1)
-            continue
+        # TODO(tian): PID-based tracking.
+        if not is_consolidation_mode():
+            job_status = job_lib.get_status(job_id)
+            if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+                # Wait for the controller process to finish setting up. It
+                # can be slow if a lot cloud dependencies are being installed.
+                if (time.time() - start_time >
+                        constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            f'Failed to start the controller process for '
+                            f'the service {service_name!r} within '
+                            f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
+                            f' seconds.')
+                # No need to check the service status as the controller process
+                # is still setting up.
+                time.sleep(1)
+                continue
 
-        if not setup_completed:
-            setup_completed = True
-            # Reset the start time to wait for the service to be registered.
-            start_time = time.time()
+            if not setup_completed:
+                setup_completed = True
+                # Reset the start time to wait for the service to be registered.
+                start_time = time.time()
 
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
-            if job_id != record['controller_job_id']:
+            # TODO(tian): PID-based tracking.
+            if (not is_consolidation_mode() and
+                    job_id != record['controller_job_id']):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'The service {service_name!r} is already running. '
@@ -1065,7 +1191,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT', 'IS_POOL'
     ]
     if show_all:
         service_columns.extend([
@@ -1102,6 +1228,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             status_str,
             replicas,
             endpoint,
+            'Yes' if record.get('pool', False) else 'No',
         ]
         if show_all:
             service_values.extend(
@@ -1122,7 +1249,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
 
     replica_columns = [
         'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'INFRA',
-        'RESOURCES', 'STATUS'
+        'RESOURCES', 'STATUS', 'USED_BY'
     ]
     replica_table = log_utils.create_table(replica_columns)
 
@@ -1143,6 +1270,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         resources_str = '-'
         replica_status = record['status']
         status_str = replica_status.colored_str()
+        used_by = record.get('used_by', None)
+        used_by_str = str(used_by) if used_by is not None else '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
@@ -1160,6 +1289,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             infra,
             resources_str,
             status_str,
+            used_by_str,
         ]
         replica_table.add_row(replica_values)
 
