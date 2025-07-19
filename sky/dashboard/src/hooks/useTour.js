@@ -42,6 +42,15 @@ export function TourProvider({ children }) {
   const { isFirstVisit, markTourCompleted } = useFirstVisit();
   const [tourAutoStarted, setTourAutoStarted] = useState(false);
 
+  const startTour = () => {
+    if (tourRef.current) {
+      // Small delay to ensure page is loaded
+      setTimeout(() => {
+        tourRef.current.start();
+      }, 100);
+    }
+  };
+
   useEffect(() => {
     // Initialize the tour only once
     if (!tourRef.current) {
@@ -1154,15 +1163,6 @@ export function TourProvider({ children }) {
       }
     };
   }, [isFirstVisit, markTourCompleted, tourAutoStarted]);
-
-  const startTour = () => {
-    if (tourRef.current) {
-      // Small delay to ensure page is loaded
-      setTimeout(() => {
-        tourRef.current.start();
-      }, 100);
-    }
-  };
 
   const completeTour = () => {
     if (tourRef.current) {
