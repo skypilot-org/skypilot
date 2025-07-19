@@ -1,0 +1,33 @@
+resources:
+  cpus: 1+
+
+envs:
+  DATA_BUCKET_NAME: sky-demo-data-test
+  DATA_BUCKET_STORE_TYPE: s3
+  GCP_SERVICE_ACCOUNT_JSON_PATH: null
+
+file_mounts:
+  /data:
+    name: $DATA_BUCKET_NAME
+    store: $DATA_BUCKET_STORE_TYPE
+  /tmp/gcp-service-account.json: $GCP_SERVICE_ACCOUNT_JSON_PATH
+
+setup: |
+  echo "Setting up dependencies for data preprocessing..."
+
+  curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+  tar -xf google-cloud-cli-linux-x86_64.tar.gz
+
+  ./google-cloud-sdk/install.sh --quiet --path-update true
+  source ~/.bashrc
+  gcloud auth activate-service-account --key-file=/tmp/gcp-service-account.json
+
+run: |
+  echo "Running data preprocessing on behalf of $(gcloud auth list --filter=status:ACTIVE --format="value(account)")..."
+
+  # Generate few files with random data to simulate data preprocessing
+  for i in {0..9}; do
+      dd if=/dev/urandom of=/data/file_$i bs=1M count=10
+  done
+
+  echo "Data preprocessing completed, wrote to $DATA_BUCKET_NAME"
