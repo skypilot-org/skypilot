@@ -33,7 +33,7 @@ if (typeof window !== 'undefined') {
 export function TourProvider({ children }) {
   const tourRef = useRef(null);
   const router = useRouter();
-  const { markTourCompleted } = useFirstVisit();
+  const { isFirstVisit, markTourCompleted } = useFirstVisit();
 
   useEffect(() => {
     // Initialize the tour only once
@@ -628,6 +628,7 @@ export function TourProvider({ children }) {
           text: `
               <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/installation.html">Installation</a> and <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
               <p>To reach out, join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
+              <p>To restart the tour, click the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block h-4 w-4 align-middle"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg> icon in the bottom right corner.</p>
             `,
           buttons: [
             {
@@ -646,23 +647,31 @@ export function TourProvider({ children }) {
       });
     }
 
+    if (isFirstVisit) {
+      startTour();
+    }
+
     return () => {
       // Cleanup tour on unmount
       if (tourRef.current) {
         tourRef.current.complete();
       }
     };
-  }, [markTourCompleted]);
+  }, [isFirstVisit, markTourCompleted]);
 
   const startTour = () => {
     if (tourRef.current) {
-      // Navigate to clusters page before starting tour
-      router.push('/clusters').then(() => {
-        // Small delay to ensure page is loaded
+      const start = () => {
         setTimeout(() => {
           tourRef.current.start();
         }, 100);
-      });
+      };
+      // Navigate to clusters page before starting tour
+      if (router.pathname !== '/clusters') {
+        router.push('/clusters').then(start);
+      } else {
+        start();
+      }
     }
   };
 
