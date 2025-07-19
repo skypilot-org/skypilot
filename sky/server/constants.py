@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 11
+API_VERSION = 12
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -57,6 +57,8 @@ API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 # The path to the dashboard build output
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
                              'out')
+
+API_SERVER_PORT_FILE = os.path.expanduser('~/.sky/api_server/port')
 
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
