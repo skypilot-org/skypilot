@@ -114,7 +114,7 @@ export function TourProvider({ children }) {
               color: #111827;
               margin: 0;
           }
-          
+
           .shepherd-element .shepherd-header {
               padding: 1rem 1rem 0.5rem 1rem;
           }
@@ -198,9 +198,9 @@ export function TourProvider({ children }) {
       // Define tour steps
       const steps = [
         {
-          title: 'Welcome to SkyPilot!',
+          title: '👋 Welcome to SkyPilot!',
           text: `
-              <p>SkyPilot is a framework for managing AI workloads on any cluster and cloud infrastructure.</p>
+              <p>SkyPilot is a system for managing AI workloads on any cluster and cloud infrastructure.</p>
             `,
           buttons: [
             {
@@ -222,7 +222,7 @@ export function TourProvider({ children }) {
           title: 'Clusters',
           text: `
               <p>Spin up <strong>Sky Clusters</strong> on any infrastructure you have access to.</p>
-              <p>You can SSH into any node, connect an IDE, or queue development jobs on it.</p>
+              <p>Easily SSH into any node, connect an IDE, or queue development jobs.</p>
             `,
           attachTo: {
             element: 'a[href="/dashboard/clusters"]',
@@ -259,7 +259,7 @@ export function TourProvider({ children }) {
         {
           title: 'SkyPilot is infra-agnostic',
           text: `
-              <p>Manage compute on any hyperscaler, neocloud, or Kubernetes cluster using a unified interface.</p>
+              <p>Run compute on any hyperscaler, neocloud, or Kubernetes cluster — all within a unified system.</p>
             `,
           attachTo: {
             element: function () {
@@ -448,7 +448,7 @@ export function TourProvider({ children }) {
           ],
         },
         {
-          title: 'Launch your first cluster',
+          title: 'Spin up compute in seconds',
           text: `
             <p>Spin up clusters using the Python SDK or the CLI.</p>
             <div class="space-y-2">
@@ -550,10 +550,10 @@ export function TourProvider({ children }) {
           ],
         },
         {
-          title: 'Infra',
+          title: 'Bring one or many infrastructure',
           text: `
-            <p>Bring your Kubernetes clusters, VMs (on 17+ supported clouds), or SSH nodes into SkyPilot.</p>
-            <p>You can monitor your infrastructure here.</p>
+            <p>SkyPilot combines your Kubernetes clusters, VMs (17+ supported clouds), or SSH nodes into a unified pool.</p>
+            <p>You can monitor them in this page.</p>
           `,
           attachTo: {
             element: function () {
@@ -592,7 +592,7 @@ export function TourProvider({ children }) {
         {
           title: 'Workspaces',
           text: `
-            <p>Use Workspaces to isolate teams or projects.</p>
+            <p>Admins can use Workspaces to isolate teams or projects.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/workspaces"]',
@@ -642,11 +642,11 @@ export function TourProvider({ children }) {
           ],
         },
         {
-          title: 'Happy SkyPilot!',
+          title: '🎉 Happy SkyPilot!',
           text: `
-              <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/installation.html">Installation</a> and <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
-              <p>To reach out, join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
-              <p>To restart the tour, click the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block h-4 w-4 align-middle"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg> icon in the bottom right corner.</p>
+              <p>We invite you to to click around and explore the dashboard.</p>
+              <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs and join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
+              <p>Restart the tour by clicking the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block h-4 w-4 align-middle"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg> icon in the bottom right corner.</p>
             `,
           buttons: [
             {
