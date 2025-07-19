@@ -68,8 +68,11 @@ export function TourProvider({ children }) {
               // Set CSS custom property for dialog height to help mobile menu positioning
               if (currentStepElement) {
                 const dialogHeight = currentStepElement.offsetHeight;
-                document.documentElement.style.setProperty('--shepherd-dialog-height', `${dialogHeight + 20}px`);
-                
+                document.documentElement.style.setProperty(
+                  '--shepherd-dialog-height',
+                  `${dialogHeight + 20}px`
+                );
+
                 // Programmatically adjust mobile menu height for better reliability
                 if (window.innerWidth < 768) {
                   // Try multiple ways to find the mobile menu
@@ -79,35 +82,49 @@ export function TourProvider({ children }) {
                     'div.fixed.w-64.bg-white.border-r',
                     '.fixed.w-64.transform',
                     '[class*="fixed"][class*="w-64"][class*="bg-white"]',
-                    'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]'
+                    'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
                   ];
-                  
+
                   for (const selector of selectors) {
                     mobileMenu = document.querySelector(selector);
                     if (mobileMenu) break;
                   }
-                  
+
                   // If still not found, try finding by position and size
                   if (!mobileMenu) {
                     const allDivs = document.querySelectorAll('div.fixed');
                     for (const div of allDivs) {
                       const rect = div.getBoundingClientRect();
-                      if (rect.width === 256 && rect.left === 0 && rect.top >= 50) { // w-64 = 256px
+                      if (
+                        rect.width === 256 &&
+                        rect.left === 0 &&
+                        rect.top >= 50
+                      ) {
+                        // w-64 = 256px
                         mobileMenu = div;
                         break;
                       }
                     }
                   }
-                  
+
                   if (mobileMenu && mobileMenu instanceof HTMLElement) {
                     // Calculate available height from top bar to dialog top
-                    const dialogRect = currentStepElement.getBoundingClientRect();
+                    const dialogRect =
+                      currentStepElement.getBoundingClientRect();
                     const topBarHeight = 56;
                     const availableHeight = dialogRect.top - topBarHeight;
-                    
+
                     // Use direct pixel height instead of calc() to avoid calc issues
-                    mobileMenu.style.setProperty('height', `${availableHeight}px`, 'important');
-                    mobileMenu.style.setProperty('max-height', `${availableHeight}px`, 'important');
+                    mobileMenu.style.setProperty(
+                      'height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
+                    mobileMenu.style.setProperty(
+                      'max-height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
                   }
                 }
               }
@@ -137,15 +154,20 @@ export function TourProvider({ children }) {
                 targetElement.style.zIndex = '';
                 targetElement.removeAttribute('data-shepherd-highlighted');
               }
-              
+
               // Clean up CSS custom property for dialog height
-              document.documentElement.style.removeProperty('--shepherd-dialog-height');
-              
+              document.documentElement.style.removeProperty(
+                '--shepherd-dialog-height'
+              );
+
               // Restore mobile menu height
-              const mobileMenu = document.querySelector('.fixed.top-14.left-0.w-64') || 
-                                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
-                                document.querySelector('.fixed.w-64.transform') ||
-                                document.querySelector('[class*="fixed"][class*="w-64"][class*="bg-white"]');
+              const mobileMenu =
+                document.querySelector('.fixed.top-14.left-0.w-64') ||
+                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('.fixed.w-64.transform') ||
+                document.querySelector(
+                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                );
               if (mobileMenu && mobileMenu instanceof HTMLElement) {
                 mobileMenu.style.removeProperty('height');
                 mobileMenu.style.removeProperty('max-height');
@@ -263,18 +285,23 @@ export function TourProvider({ children }) {
           globalStyle.remove();
         }
         // Clean up CSS custom property for dialog height
-        document.documentElement.style.removeProperty('--shepherd-dialog-height');
-        
+        document.documentElement.style.removeProperty(
+          '--shepherd-dialog-height'
+        );
+
         // Restore mobile menu height
-        const mobileMenu = document.querySelector('.fixed.top-14.left-0.w-64') || 
-                          document.querySelector('div.fixed.w-64.bg-white.border-r') ||
-                          document.querySelector('.fixed.w-64.transform') ||
-                          document.querySelector('[class*="fixed"][class*="w-64"][class*="bg-white"]');
+        const mobileMenu =
+          document.querySelector('.fixed.top-14.left-0.w-64') ||
+          document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+          document.querySelector('.fixed.w-64.transform') ||
+          document.querySelector(
+            '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+          );
         if (mobileMenu && mobileMenu instanceof HTMLElement) {
           mobileMenu.style.removeProperty('height');
           mobileMenu.style.removeProperty('max-height');
         }
-        
+
         markTourCompleted();
       });
 
@@ -308,18 +335,23 @@ export function TourProvider({ children }) {
           globalStyle.remove();
         }
         // Clean up CSS custom property for dialog height
-        document.documentElement.style.removeProperty('--shepherd-dialog-height');
-        
+        document.documentElement.style.removeProperty(
+          '--shepherd-dialog-height'
+        );
+
         // Restore mobile menu height
-        const mobileMenu = document.querySelector('.fixed.top-14.left-0.w-64') || 
-                          document.querySelector('div.fixed.w-64.bg-white.border-r') ||
-                          document.querySelector('.fixed.w-64.transform') ||
-                          document.querySelector('[class*="fixed"][class*="w-64"][class*="bg-white"]');
+        const mobileMenu =
+          document.querySelector('.fixed.top-14.left-0.w-64') ||
+          document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+          document.querySelector('.fixed.w-64.transform') ||
+          document.querySelector(
+            '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+          );
         if (mobileMenu && mobileMenu instanceof HTMLElement) {
           mobileMenu.style.removeProperty('height');
           mobileMenu.style.removeProperty('max-height');
         }
-        
+
         markTourCompleted();
       });
 
@@ -362,14 +394,19 @@ export function TourProvider({ children }) {
               const setupClustersStep = () => {
                 // Check if we're on mobile by looking for hamburger menu
                 const isMobile = window.innerWidth < 768; // Tailwind md breakpoint
-                const hamburgerButton = document.querySelector('[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]');
-                
+                const hamburgerButton = document.querySelector(
+                  '[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]'
+                );
+
                 if (isMobile && hamburgerButton) {
                   // Check if menu is already expanded
-                  const isExpanded = hamburgerButton.getAttribute('aria-expanded') === 'true' ||
-                                   hamburgerButton.classList.contains('open') ||
-                                   document.querySelector('nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]');
-                  
+                  const isExpanded =
+                    hamburgerButton.getAttribute('aria-expanded') === 'true' ||
+                    hamburgerButton.classList.contains('open') ||
+                    document.querySelector(
+                      'nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]'
+                    );
+
                   if (!isExpanded) {
                     // Click hamburger to expand menu
                     if (hamburgerButton instanceof HTMLElement) {
@@ -484,21 +521,34 @@ export function TourProvider({ children }) {
                     // Check if the infra column is visible and scroll if needed
                     const headerRect = infraHeader.getBoundingClientRect();
                     const viewportWidth = window.innerWidth;
-                    const scrollContainer = table.closest('.overflow-x-auto, .overflow-auto, [style*="overflow"]') || table.parentElement;
-                    
+                    const scrollContainer =
+                      table.closest(
+                        '.overflow-x-auto, .overflow-auto, [style*="overflow"]'
+                      ) || table.parentElement;
+
                     // If the column is not fully visible (cut off on the right)
-                    if (headerRect.right > viewportWidth || headerRect.left < 0) {
-                      if (scrollContainer && scrollContainer instanceof HTMLElement) {
+                    if (
+                      headerRect.right > viewportWidth ||
+                      headerRect.left < 0
+                    ) {
+                      if (
+                        scrollContainer &&
+                        scrollContainer instanceof HTMLElement
+                      ) {
                         // Calculate how much to scroll to center the column
-                        const containerRect = scrollContainer.getBoundingClientRect();
-                        const targetScrollLeft = infraHeader.offsetLeft - (containerRect.width / 2) + (headerRect.width / 2);
-                        
+                        const containerRect =
+                          scrollContainer.getBoundingClientRect();
+                        const targetScrollLeft =
+                          infraHeader.offsetLeft -
+                          containerRect.width / 2 +
+                          headerRect.width / 2;
+
                         // Smooth scroll to make the column visible
                         scrollContainer.scrollTo({
                           left: Math.max(0, targetScrollLeft),
-                          behavior: 'smooth'
+                          behavior: 'smooth',
                         });
-                        
+
                         // Wait for scroll animation to complete before proceeding
                         setTimeout(() => {
                           setupInfraColumnOverlay();
@@ -506,28 +556,32 @@ export function TourProvider({ children }) {
                         return;
                       }
                     }
-                    
+
                     setupInfraColumnOverlay();
                   }
                 } else {
                   resolve();
                 }
-                
+
                 function setupInfraColumnOverlay() {
                   const infraHeaderUpdated = Array.from(
                     document.querySelectorAll('thead th')
                   ).find(
                     (th) => th.textContent && th.textContent.trim() === 'Infra'
                   );
-                  
-                  if (infraHeaderUpdated && infraHeaderUpdated instanceof HTMLElement) {
+
+                  if (
+                    infraHeaderUpdated &&
+                    infraHeaderUpdated instanceof HTMLElement
+                  ) {
                     const table = infraHeaderUpdated.closest('table');
                     if (table) {
                       const headerRow = infraHeaderUpdated.parentElement;
-                      const columnIndex = Array.from(headerRow.children).indexOf(
-                        infraHeaderUpdated
-                      );
-                      const headerRect = infraHeaderUpdated.getBoundingClientRect();
+                      const columnIndex = Array.from(
+                        headerRow.children
+                      ).indexOf(infraHeaderUpdated);
+                      const headerRect =
+                        infraHeaderUpdated.getBoundingClientRect();
                       const rows = table.querySelectorAll('tbody tr');
                       let lastCellRect = headerRect;
 
@@ -601,12 +655,15 @@ export function TourProvider({ children }) {
                 Shepherd.activeTour?.steps.indexOf(currentStep) + 1
               } of ${Shepherd.activeTour?.steps.length}`;
               footer?.insertBefore(progress, footer.firstChild);
-              
+
               // Set CSS custom property for dialog height to help mobile menu positioning
               if (currentStepElement) {
                 const dialogHeight = currentStepElement.offsetHeight;
-                document.documentElement.style.setProperty('--shepherd-dialog-height', `${dialogHeight + 20}px`);
-                
+                document.documentElement.style.setProperty(
+                  '--shepherd-dialog-height',
+                  `${dialogHeight + 20}px`
+                );
+
                 // Programmatically adjust mobile menu height for better reliability
                 if (window.innerWidth < 768) {
                   // Try multiple ways to find the mobile menu
@@ -616,35 +673,49 @@ export function TourProvider({ children }) {
                     'div.fixed.w-64.bg-white.border-r',
                     '.fixed.w-64.transform',
                     '[class*="fixed"][class*="w-64"][class*="bg-white"]',
-                    'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]'
+                    'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
                   ];
-                  
+
                   for (const selector of selectors) {
                     mobileMenu = document.querySelector(selector);
                     if (mobileMenu) break;
                   }
-                  
+
                   // If still not found, try finding by position and size
                   if (!mobileMenu) {
                     const allDivs = document.querySelectorAll('div.fixed');
                     for (const div of allDivs) {
                       const rect = div.getBoundingClientRect();
-                      if (rect.width === 256 && rect.left === 0 && rect.top >= 50) { // w-64 = 256px
+                      if (
+                        rect.width === 256 &&
+                        rect.left === 0 &&
+                        rect.top >= 50
+                      ) {
+                        // w-64 = 256px
                         mobileMenu = div;
                         break;
                       }
                     }
                   }
-                  
+
                   if (mobileMenu && mobileMenu instanceof HTMLElement) {
                     // Calculate available height from top bar to dialog top
-                    const dialogRect = currentStepElement.getBoundingClientRect();
+                    const dialogRect =
+                      currentStepElement.getBoundingClientRect();
                     const topBarHeight = 56;
                     const availableHeight = dialogRect.top - topBarHeight;
-                    
+
                     // Use direct pixel height instead of calc() to avoid calc issues
-                    mobileMenu.style.setProperty('height', `${availableHeight}px`, 'important');
-                    mobileMenu.style.setProperty('max-height', `${availableHeight}px`, 'important');
+                    mobileMenu.style.setProperty(
+                      'height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
+                    mobileMenu.style.setProperty(
+                      'max-height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
                   }
                 }
               }
@@ -667,13 +738,18 @@ export function TourProvider({ children }) {
               }
 
               // Clean up CSS custom property for dialog height
-              document.documentElement.style.removeProperty('--shepherd-dialog-height');
-              
+              document.documentElement.style.removeProperty(
+                '--shepherd-dialog-height'
+              );
+
               // Restore mobile menu height
-              const mobileMenu = document.querySelector('.fixed.top-14.left-0.w-64') || 
-                                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
-                                document.querySelector('.fixed.w-64.transform') ||
-                                document.querySelector('[class*="fixed"][class*="w-64"][class*="bg-white"]');
+              const mobileMenu =
+                document.querySelector('.fixed.top-14.left-0.w-64') ||
+                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('.fixed.w-64.transform') ||
+                document.querySelector(
+                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                );
               if (mobileMenu && mobileMenu instanceof HTMLElement) {
                 mobileMenu.style.removeProperty('height');
                 mobileMenu.style.removeProperty('max-height');
@@ -795,14 +871,19 @@ export function TourProvider({ children }) {
               const setupJobsStep = () => {
                 // Check if we're on mobile by looking for hamburger menu
                 const isMobile = window.innerWidth < 768; // Tailwind md breakpoint
-                const hamburgerButton = document.querySelector('[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]');
-                
+                const hamburgerButton = document.querySelector(
+                  '[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]'
+                );
+
                 if (isMobile && hamburgerButton) {
                   // Check if menu is already expanded
-                  const isExpanded = hamburgerButton.getAttribute('aria-expanded') === 'true' ||
-                                   hamburgerButton.classList.contains('open') ||
-                                   document.querySelector('nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]');
-                  
+                  const isExpanded =
+                    hamburgerButton.getAttribute('aria-expanded') === 'true' ||
+                    hamburgerButton.classList.contains('open') ||
+                    document.querySelector(
+                      'nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]'
+                    );
+
                   if (!isExpanded) {
                     // Click hamburger to expand menu
                     if (hamburgerButton instanceof HTMLElement) {
@@ -817,7 +898,7 @@ export function TourProvider({ children }) {
                 }
                 resolve();
               };
-              
+
               setupJobsStep();
             });
           },
@@ -866,14 +947,19 @@ export function TourProvider({ children }) {
               const setupInfraStep = () => {
                 // Check if we're on mobile by looking for hamburger menu
                 const isMobile = window.innerWidth < 768; // Tailwind md breakpoint
-                const hamburgerButton = document.querySelector('[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]');
-                
+                const hamburgerButton = document.querySelector(
+                  '[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]'
+                );
+
                 if (isMobile && hamburgerButton) {
                   // Check if menu is already expanded
-                  const isExpanded = hamburgerButton.getAttribute('aria-expanded') === 'true' ||
-                                   hamburgerButton.classList.contains('open') ||
-                                   document.querySelector('nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]');
-                  
+                  const isExpanded =
+                    hamburgerButton.getAttribute('aria-expanded') === 'true' ||
+                    hamburgerButton.classList.contains('open') ||
+                    document.querySelector(
+                      'nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]'
+                    );
+
                   if (!isExpanded) {
                     // Click hamburger to expand menu
                     if (hamburgerButton instanceof HTMLElement) {
@@ -888,7 +974,7 @@ export function TourProvider({ children }) {
                 }
                 resolve();
               };
-              
+
               setupInfraStep();
             });
           },
@@ -923,14 +1009,19 @@ export function TourProvider({ children }) {
               const setupWorkspacesStep = () => {
                 // Check if we're on mobile by looking for hamburger menu
                 const isMobile = window.innerWidth < 768; // Tailwind md breakpoint
-                const hamburgerButton = document.querySelector('[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]');
-                
+                const hamburgerButton = document.querySelector(
+                  '[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]'
+                );
+
                 if (isMobile && hamburgerButton) {
                   // Check if menu is already expanded
-                  const isExpanded = hamburgerButton.getAttribute('aria-expanded') === 'true' ||
-                                   hamburgerButton.classList.contains('open') ||
-                                   document.querySelector('nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]');
-                  
+                  const isExpanded =
+                    hamburgerButton.getAttribute('aria-expanded') === 'true' ||
+                    hamburgerButton.classList.contains('open') ||
+                    document.querySelector(
+                      'nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]'
+                    );
+
                   if (!isExpanded) {
                     // Click hamburger to expand menu
                     if (hamburgerButton instanceof HTMLElement) {
@@ -945,7 +1036,7 @@ export function TourProvider({ children }) {
                 }
                 resolve();
               };
-              
+
               setupWorkspacesStep();
             });
           },
@@ -980,14 +1071,19 @@ export function TourProvider({ children }) {
               const setupUsersStep = () => {
                 // Check if we're on mobile by looking for hamburger menu
                 const isMobile = window.innerWidth < 768; // Tailwind md breakpoint
-                const hamburgerButton = document.querySelector('[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]');
-                
+                const hamburgerButton = document.querySelector(
+                  '[data-testid="mobile-menu-button"], button[aria-label*="menu"], button[aria-label*="Menu"], .mobile-menu-button, [role="button"][aria-expanded]'
+                );
+
                 if (isMobile && hamburgerButton) {
                   // Check if menu is already expanded
-                  const isExpanded = hamburgerButton.getAttribute('aria-expanded') === 'true' ||
-                                   hamburgerButton.classList.contains('open') ||
-                                   document.querySelector('nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]');
-                  
+                  const isExpanded =
+                    hamburgerButton.getAttribute('aria-expanded') === 'true' ||
+                    hamburgerButton.classList.contains('open') ||
+                    document.querySelector(
+                      'nav[data-state="open"], .mobile-menu.open, [data-mobile-menu="true"]'
+                    );
+
                   if (!isExpanded) {
                     // Click hamburger to expand menu
                     if (hamburgerButton instanceof HTMLElement) {
@@ -1002,7 +1098,7 @@ export function TourProvider({ children }) {
                 }
                 resolve();
               };
-              
+
               setupUsersStep();
             });
           },
