@@ -104,10 +104,6 @@ URL** to a remote cluster on every ``sky launch`` and ``sky exec``.
           3. Default SSH key at ``~/.ssh/id_rsa``
           4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
-        .. note::
-
-
-
 .. _file-mounts-example:
 
 Uploading files outside of workdir
