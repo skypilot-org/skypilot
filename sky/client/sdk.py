@@ -10,19 +10,14 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
-import base64
-import binascii
 from http import cookiejar
 import json
 import logging
 import os
-import pathlib
 import subprocess
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
-import webbrowser
 
 import click
 import colorama
@@ -57,7 +52,12 @@ from sky.utils import ux_utils
 from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
+    import base64
+    import binascii
     import io
+    import pathlib
+    import time
+    import webbrowser
 
     import psutil
     import requests
@@ -65,6 +65,14 @@ if typing.TYPE_CHECKING:
     import sky
     from sky import backends
 else:
+    # only used in api_login()
+    base64 = adaptors_common.LazyImport('base64')
+    binascii = adaptors_common.LazyImport('binascii')
+    pathlib = adaptors_common.LazyImport('pathlib')
+    time = adaptors_common.LazyImport('time')
+    # only used in dashboard() and api_login()
+    webbrowser = adaptors_common.LazyImport('webbrowser')
+    # only used in api_stop()
     psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
