@@ -518,7 +518,9 @@ export function TourProvider({ children }) {
               }
 
               // Add custom highlight styling to the target element after navigation
-              const targetElement = document.querySelector('a[href="/dashboard/clusters"]');
+              const targetElement = document.querySelector(
+                'a[href="/dashboard/clusters"]'
+              );
               if (targetElement && targetElement instanceof HTMLElement) {
                 targetElement.style.outline = '3px solid #3b82f6';
                 targetElement.style.outlineOffset = '2px';
@@ -793,9 +795,9 @@ export function TourProvider({ children }) {
                   const table = infraHeader.closest('table');
                   if (table) {
                     const headerRow = infraHeader.parentElement;
-                    const columnIndex = Array.from(
-                      headerRow.children
-                    ).indexOf(infraHeader);
+                    const columnIndex = Array.from(headerRow.children).indexOf(
+                      infraHeader
+                    );
                     const headerRect = infraHeader.getBoundingClientRect();
                     const rows = table.querySelectorAll('tbody tr');
                     let lastCellRect = headerRect;
