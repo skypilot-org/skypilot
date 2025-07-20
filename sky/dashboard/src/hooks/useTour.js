@@ -223,25 +223,25 @@ export function TourProvider({ children }) {
               height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
               max-height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
             }
-            
+
             /* Target the mobile menu by its exact class combination from the HTML */
             .fixed.w-64.bg-white.border-r.border-gray-200.shadow-lg.z-50.transform,
             .fixed[class*="w-64"][class*="bg-white"][class*="border-r"][class*="shadow-lg"][class*="z-50"][class*="transform"] {
               height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
             }
-            
+
             /* Even more specific - target by multiple class combinations */
             .fixed.top-14.left-0[class*="w-64"],
             div.fixed[class*="top-14"][class*="left-0"][class*="w-64"] {
               height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
             }
-            
+
             /* Super aggressive approach - use high specificity to override Tailwind */
             body div.fixed.w-64:not(.shepherd-element),
             html body div.fixed.w-64:not(.shepherd-element) {
               height: calc(100vh - 56px - var(--shepherd-dialog-height, 200px)) !important;
             }
-            
+
             /* Fallback selectors for other mobile menu patterns */
             nav[data-state="open"],
             .mobile-menu.open,
@@ -249,7 +249,7 @@ export function TourProvider({ children }) {
               height: calc(100vh - var(--shepherd-dialog-height, 200px)) !important;
               max-height: calc(100vh - var(--shepherd-dialog-height, 200px)) !important;
             }
-            
+
             /* Ensure mobile menu content flows properly */
             .fixed.w-64 nav,
             .fixed[class*="w-64"] nav {
@@ -1006,7 +1006,7 @@ export function TourProvider({ children }) {
         {
           title: 'Workspaces',
           text: `
-            <p>Admins can use Workspaces to isolate teams or projects.</p>
+            <p>For team deployments, admins can use Workspaces to isolate teams or projects.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/workspaces"]',
@@ -1130,7 +1130,7 @@ export function TourProvider({ children }) {
         {
           title: '🎉 Happy SkyPilot!',
           text: `
-              <p>We invite you to to click around and explore the dashboard.</p>
+              <p>We invite you to to explore the rest of the dashboard.</p>
               <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs and join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
               <p>Restart the tour by clicking the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block h-4 w-4 align-middle"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg> icon in the bottom right corner.</p>
             `,
