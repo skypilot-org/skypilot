@@ -431,11 +431,12 @@ export function TourProvider({ children }) {
                 resolve();
               };
 
-              if (router.pathname !== '/clusters') {
-                router.push('/clusters').then(() => {
+              if (router.pathname !== '/dashboard/clusters') {
+                router.push('clusters').then(() => {
                   setTimeout(setupClustersStep, 500); // Wait for page to render
                 });
               } else {
+                // Already on the right page, setup immediately without navigation delay
                 setupClustersStep();
               }
             });
@@ -643,11 +644,12 @@ export function TourProvider({ children }) {
 
               // Navigate to clusters page if not already there, then set up elements
               if (window.location.pathname !== '/dashboard/clusters') {
-                router.push('/dashboard/clusters').then(() => {
+                router.push('clusters').then(() => {
                   setTimeout(setupElements, 500); // Wait for page to render
                 });
               } else {
-                setupElements(); // Page is already loaded
+                // Already on the right page, setup immediately without navigation delay
+                setupElements();
               }
             });
           },
