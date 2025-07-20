@@ -1198,6 +1198,19 @@ def get_config_schema():
                         'type': 'null',
                     }],
                 },
+                'post_provision_runcmd': {
+                    'type': 'array',
+                    'items': {
+                        'oneOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string'
+                            }
+                        }]
+                    },
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },

@@ -803,6 +803,12 @@ def write_cluster_config(
                 'volume_name_on_cloud': vol.volume_config.name_on_cloud,
             })
 
+    runcmd = skypilot_config.get_effective_region_config(
+        cloud=str(to_provision.cloud).lower(),
+        region=to_provision.region,
+        keys=('post_provision_runcmd',),
+        default_value=None)
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -838,7 +844,7 @@ def write_cluster_config(
                 # User-supplied remote_identity
                 'remote_identity': remote_identity,
                 # The reservation pools that specified by the user. This is
-                # currently only used by GCP.
+                # currently only used by AWS and GCP.
                 'specific_reservations': specific_reservations,
 
                 # Conda setup
@@ -901,6 +907,10 @@ def write_cluster_config(
 
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
+
+                # runcmd to append to the cloud-init cloud config passed to the
+                # machine's UserData. This is currently only used by AWS.
+                'runcmd': runcmd,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
