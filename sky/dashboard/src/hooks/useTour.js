@@ -1128,16 +1128,17 @@ export function TourProvider({ children }) {
           ],
         },
         {
-          title: '🎉 Happy SkyPilot!',
+          title: '🎉 Tour finished',
           text: `
               <p>We invite you to to explore the rest of the dashboard.</p>
-              <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs and join the <a href="https://skypilot.slack.com">SkyPilot Slack</a> to chat with the community.</p>
-              <p>Restart the tour by clicking the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block h-4 w-4 align-middle"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg> icon in the bottom right corner.</p>
+              <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
+              <p>Have questions? Join Slack to directly chat with the SkyPilot team.</p>
             `,
           buttons: [
             {
-              text: 'Finish',
+              text: 'Join Slack',
               action() {
+                window.open('https://slack.skypilot.co/', '_blank');
                 this.complete();
               },
             },
