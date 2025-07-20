@@ -44,10 +44,8 @@ export function TourProvider({ children }) {
 
   const startTour = () => {
     if (tourRef.current) {
-      // Small delay to ensure page is loaded
-      setTimeout(() => {
-        tourRef.current.start();
-      }, 100);
+      // Remove delay for immediate tour start since first step doesn't require setup
+      tourRef.current.start();
     }
   };
 
@@ -433,7 +431,7 @@ export function TourProvider({ children }) {
 
               if (router.pathname !== '/dashboard/clusters') {
                 router.push('clusters').then(() => {
-                  setTimeout(setupClustersStep, 500); // Wait for page to render
+                  setTimeout(setupClustersStep, 200); // Reduced delay for faster response
                 });
               } else {
                 // Already on the right page, setup immediately without navigation delay
@@ -562,7 +560,7 @@ export function TourProvider({ children }) {
                         // Wait for scroll animation to complete before proceeding
                         setTimeout(() => {
                           setupInfraColumnOverlay();
-                        }, 500);
+                        }, 300);
                         return;
                       }
                     }
@@ -645,7 +643,7 @@ export function TourProvider({ children }) {
               // Navigate to clusters page if not already there, then set up elements
               if (window.location.pathname !== '/dashboard/clusters') {
                 router.push('clusters').then(() => {
-                  setTimeout(setupElements, 500); // Wait for page to render
+                  setTimeout(setupElements, 200); // Reduced delay for faster response
                 });
               } else {
                 // Already on the right page, setup immediately without navigation delay
@@ -1130,7 +1128,7 @@ export function TourProvider({ children }) {
           ],
         },
         {
-          title: '🎉 Tour finished',
+          title: '🎉 Tour complete',
           text: `
               <p>We invite you to to explore the rest of the dashboard.</p>
               <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
