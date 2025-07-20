@@ -439,6 +439,129 @@ export function TourProvider({ children }) {
               }
             });
           },
+          when: {
+            show() {
+              // Add progress indicator (same as default behavior)
+              const currentStep = Shepherd.activeTour?.getCurrentStep();
+              const currentStepElement = currentStep?.getElement();
+              const footer =
+                currentStepElement?.querySelector('.shepherd-footer');
+              const progress = document.createElement('span');
+              progress.className = 'shepherd-progress';
+              progress.innerText = `${
+                Shepherd.activeTour?.steps.indexOf(currentStep) + 1
+              } of ${Shepherd.activeTour?.steps.length}`;
+              footer?.insertBefore(progress, footer.firstChild);
+
+              // Set CSS custom property for dialog height to help mobile menu positioning
+              if (currentStepElement) {
+                const dialogHeight = currentStepElement.offsetHeight;
+                document.documentElement.style.setProperty(
+                  '--shepherd-dialog-height',
+                  `${dialogHeight + 20}px`
+                );
+
+                // Programmatically adjust mobile menu height for better reliability
+                if (window.innerWidth < 768) {
+                  // Try multiple ways to find the mobile menu
+                  let mobileMenu = null;
+                  const selectors = [
+                    '.fixed.top-14.left-0.w-64',
+                    'div.fixed.w-64.bg-white.border-r',
+                    '.fixed.w-64.transform',
+                    '[class*="fixed"][class*="w-64"][class*="bg-white"]',
+                    'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
+                  ];
+
+                  for (const selector of selectors) {
+                    mobileMenu = document.querySelector(selector);
+                    if (mobileMenu) break;
+                  }
+
+                  // If still not found, try finding by position and size
+                  if (!mobileMenu) {
+                    const allDivs = document.querySelectorAll('div.fixed');
+                    for (const div of allDivs) {
+                      const rect = div.getBoundingClientRect();
+                      if (
+                        rect.width === 256 &&
+                        rect.left === 0 &&
+                        rect.top >= 50
+                      ) {
+                        // w-64 = 256px
+                        mobileMenu = div;
+                        break;
+                      }
+                    }
+                  }
+
+                  if (mobileMenu && mobileMenu instanceof HTMLElement) {
+                    // Calculate available height from top bar to dialog top
+                    const dialogRect =
+                      currentStepElement.getBoundingClientRect();
+                    const topBarHeight = 56;
+                    const availableHeight = dialogRect.top - topBarHeight;
+
+                    // Use direct pixel height instead of calc() to avoid calc issues
+                    mobileMenu.style.setProperty(
+                      'height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
+                    mobileMenu.style.setProperty(
+                      'max-height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
+                  }
+                }
+              }
+
+              // Add custom highlight styling to the target element after navigation
+              const targetElement = document.querySelector('a[href="/dashboard/clusters"]');
+              if (targetElement && targetElement instanceof HTMLElement) {
+                targetElement.style.outline = '3px solid #3b82f6';
+                targetElement.style.outlineOffset = '2px';
+                targetElement.style.borderRadius = '8px';
+                targetElement.style.position = 'relative';
+                targetElement.style.zIndex = '9999';
+                targetElement.setAttribute('data-shepherd-highlighted', 'true');
+              }
+            },
+            hide() {
+              // Remove custom highlight styling when step is hidden
+              const targetElement = document.querySelector(
+                '[data-shepherd-highlighted="true"]'
+              );
+              if (targetElement && targetElement instanceof HTMLElement) {
+                targetElement.style.outline = '';
+                targetElement.style.outlineOffset = '';
+                targetElement.style.borderRadius = '';
+                targetElement.style.boxShadow = '';
+                targetElement.style.position = '';
+                targetElement.style.zIndex = '';
+                targetElement.removeAttribute('data-shepherd-highlighted');
+              }
+
+              // Clean up CSS custom property for dialog height
+              document.documentElement.style.removeProperty(
+                '--shepherd-dialog-height'
+              );
+
+              // Restore mobile menu height
+              const mobileMenu =
+                document.querySelector('.fixed.top-14.left-0.w-64') ||
+                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('.fixed.w-64.transform') ||
+                document.querySelector(
+                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                );
+              if (mobileMenu && mobileMenu instanceof HTMLElement) {
+                mobileMenu.style.removeProperty('height');
+                mobileMenu.style.removeProperty('max-height');
+              }
+            },
+          },
           buttons: [
             {
               text: 'Back',
@@ -516,7 +639,7 @@ export function TourProvider({ children }) {
           beforeShowPromise: function () {
             return new Promise((resolve) => {
               const setupElements = () => {
-                // Find the Infra column and create a unified column highlight
+                // Find the Infra column and scroll if needed, but don't create overlay yet
                 const infraHeader = Array.from(
                   document.querySelectorAll('thead th')
                 ).find(
@@ -559,85 +682,14 @@ export function TourProvider({ children }) {
 
                         // Wait for scroll animation to complete before proceeding
                         setTimeout(() => {
-                          setupInfraColumnOverlay();
+                          resolve();
                         }, 300);
                         return;
                       }
                     }
-
-                    setupInfraColumnOverlay();
                   }
-                } else {
-                  resolve();
                 }
-
-                function setupInfraColumnOverlay() {
-                  const infraHeaderUpdated = Array.from(
-                    document.querySelectorAll('thead th')
-                  ).find(
-                    (th) => th.textContent && th.textContent.trim() === 'Infra'
-                  );
-
-                  if (
-                    infraHeaderUpdated &&
-                    infraHeaderUpdated instanceof HTMLElement
-                  ) {
-                    const table = infraHeaderUpdated.closest('table');
-                    if (table) {
-                      const headerRow = infraHeaderUpdated.parentElement;
-                      const columnIndex = Array.from(
-                        headerRow.children
-                      ).indexOf(infraHeaderUpdated);
-                      const headerRect =
-                        infraHeaderUpdated.getBoundingClientRect();
-                      const rows = table.querySelectorAll('tbody tr');
-                      let lastCellRect = headerRect;
-
-                      rows.forEach((row) => {
-                        const cell = row.children[columnIndex];
-                        if (cell) {
-                          lastCellRect = cell.getBoundingClientRect();
-                        }
-                      });
-
-                      // Create a single overlay for the entire column
-                      const overlay = document.createElement('div');
-                      overlay.id = 'shepherd-column-overlay';
-                      overlay.style.position = 'fixed';
-                      overlay.style.left = `${headerRect.left - 4}px`;
-                      overlay.style.top = `${headerRect.top - 4}px`;
-                      overlay.style.width = `${headerRect.width + 8}px`;
-                      overlay.style.height = `${
-                        lastCellRect.bottom - headerRect.top + 8
-                      }px`;
-                      overlay.style.outline = '3px solid #3b82f6';
-                      overlay.style.outlineOffset = '2px';
-                      overlay.style.borderRadius = '8px';
-                      overlay.style.zIndex = '9998';
-                      overlay.style.pointerEvents = 'none';
-                      overlay.style.backgroundColor = 'transparent';
-                      document.body.appendChild(overlay);
-
-                      // Create invisible anchor point at the bottom edge of the highlighted column
-                      const overlayBottom = lastCellRect.bottom + 5; // +4 padding, +2 offset, +3 outline
-                      const anchorPoint = document.createElement('div');
-                      anchorPoint.id = 'shepherd-column-anchor';
-                      anchorPoint.style.position = 'fixed';
-                      anchorPoint.style.left = `${
-                        headerRect.left + headerRect.width / 2
-                      }px`;
-                      anchorPoint.style.top = `${overlayBottom}px`;
-                      anchorPoint.style.width = '1px';
-                      anchorPoint.style.height = '1px';
-                      anchorPoint.style.zIndex = '9999';
-                      anchorPoint.style.pointerEvents = 'none';
-                      anchorPoint.style.backgroundColor = 'transparent';
-                      anchorPoint.style.transform = 'translate(-50%, -50%)';
-                      document.body.appendChild(anchorPoint);
-                    }
-                  }
-                  resolve();
-                }
+                resolve();
               };
 
               // Navigate to clusters page if not already there, then set up elements
@@ -728,6 +780,70 @@ export function TourProvider({ children }) {
                   }
                 }
               }
+
+              // Create the infra column overlay AFTER dialog is positioned and layout has settled
+              setTimeout(() => {
+                const infraHeader = Array.from(
+                  document.querySelectorAll('thead th')
+                ).find(
+                  (th) => th.textContent && th.textContent.trim() === 'Infra'
+                );
+
+                if (infraHeader && infraHeader instanceof HTMLElement) {
+                  const table = infraHeader.closest('table');
+                  if (table) {
+                    const headerRow = infraHeader.parentElement;
+                    const columnIndex = Array.from(
+                      headerRow.children
+                    ).indexOf(infraHeader);
+                    const headerRect = infraHeader.getBoundingClientRect();
+                    const rows = table.querySelectorAll('tbody tr');
+                    let lastCellRect = headerRect;
+
+                    rows.forEach((row) => {
+                      const cell = row.children[columnIndex];
+                      if (cell) {
+                        lastCellRect = cell.getBoundingClientRect();
+                      }
+                    });
+
+                    // Create a single overlay for the entire column
+                    const overlay = document.createElement('div');
+                    overlay.id = 'shepherd-column-overlay';
+                    overlay.style.position = 'fixed';
+                    overlay.style.left = `${headerRect.left - 4}px`;
+                    overlay.style.top = `${headerRect.top - 4}px`;
+                    overlay.style.width = `${headerRect.width + 8}px`;
+                    overlay.style.height = `${
+                      lastCellRect.bottom - headerRect.top + 8
+                    }px`;
+                    overlay.style.outline = '3px solid #3b82f6';
+                    overlay.style.outlineOffset = '2px';
+                    overlay.style.borderRadius = '8px';
+                    overlay.style.zIndex = '9998';
+                    overlay.style.pointerEvents = 'none';
+                    overlay.style.backgroundColor = 'transparent';
+                    document.body.appendChild(overlay);
+
+                    // Create invisible anchor point at the bottom edge of the highlighted column
+                    const overlayBottom = lastCellRect.bottom + 5; // +4 padding, +2 offset, +3 outline
+                    const anchorPoint = document.createElement('div');
+                    anchorPoint.id = 'shepherd-column-anchor';
+                    anchorPoint.style.position = 'fixed';
+                    anchorPoint.style.left = `${
+                      headerRect.left + headerRect.width / 2
+                    }px`;
+                    anchorPoint.style.top = `${overlayBottom}px`;
+                    anchorPoint.style.width = '1px';
+                    anchorPoint.style.height = '1px';
+                    anchorPoint.style.zIndex = '9999';
+                    anchorPoint.style.pointerEvents = 'none';
+                    anchorPoint.style.backgroundColor = 'transparent';
+                    anchorPoint.style.transform = 'translate(-50%, -50%)';
+                    document.body.appendChild(anchorPoint);
+                  }
+                }
+              }, 100); // Small delay to ensure layout has fully settled
             },
             hide() {
               // Remove the column overlay
