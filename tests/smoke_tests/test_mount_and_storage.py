@@ -199,6 +199,41 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
 
 
 @pytest.mark.aws
+def test_aws_storage_mounts_arm64():
+    """Test S3 storage mounting on ARM64 architecture using rclone."""
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'aws'
+    storage_name = f'sky-test-arm64-{int(time.time())}'
+    ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        # Reuse the existing storage mounts command generator
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, False, False)
+
+        # Modify the sky launch command to force ARM64 instance
+        for i, cmd in enumerate(test_commands):
+            if cmd.startswith('sky launch') and '--infra aws' in cmd:
+                # Insert ARM64 instance type before the YAML file path
+                test_commands[i] = cmd.replace(
+                    'sky launch', 'sky launch --instance-type m6g.large')
+                break
+
+        # Add ARM64-specific verification
+        test_commands.append(
+            f'sky exec {name} -- "echo \\"ARM64 architecture: $(uname -m)\\" && cat /mount_private_mount/hello.txt"'
+        )
+
+        test = smoke_tests_utils.Test(
+            'aws_storage_mounts_arm64',
+            test_commands,
+            clean_command,
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
