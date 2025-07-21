@@ -225,12 +225,31 @@ fi
 # Fix OAuth2 proxy configuration for kind cluster environment
 echo "Fixing OAuth2 proxy ingress configuration for kind cluster..."
 # Remove problematic snippet annotations that cause "risky annotation" warnings
-# and configure the ingresses properly for localhost access
+# and configure the ingresses properly for both localhost and container access
 kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
       {
         "host": "localhost",
+        "http": {
+          "paths": [
+            {
+              "path": "/",
+              "pathType": "Prefix",
+              "backend": {
+                "service": {
+                  "name": "skypilot-api-service",
+                  "port": {
+                    "number": 80
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "host": "host.docker.internal",
         "http": {
           "paths": [
             {
@@ -260,12 +279,31 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   }
 }'
 
-# Also fix the OAuth2 proxy ingress to use localhost host instead of wildcard
+# Also fix the OAuth2 proxy ingress to accept both localhost and host.docker.internal
 kubectl patch ingress skypilot-oauth2-proxy -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
       {
         "host": "localhost",
+        "http": {
+          "paths": [
+            {
+              "path": "/oauth2",
+              "pathType": "Prefix",
+              "backend": {
+                "service": {
+                  "name": "skypilot-oauth2-proxy",
+                  "port": {
+                    "number": 4180
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "host": "host.docker.internal",
         "http": {
           "paths": [
             {
