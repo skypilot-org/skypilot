@@ -1553,7 +1553,7 @@ export function TourProvider({ children }) {
         {
           title: 'Workspaces',
           text: `
-            <p>For team deployments, admins can use Workspaces to isolate teams or projects.</p>
+            <p>For team deployments, admins can use Workspaces to manage teams or projects.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/workspaces"]',
