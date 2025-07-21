@@ -286,11 +286,15 @@ export function TourProvider({ children }) {
           anchorPoint.remove();
         }
         // Remove user column overlay and related elements
-        const userOverlay = document.getElementById('shepherd-user-column-overlay');
+        const userOverlay = document.getElementById(
+          'shepherd-user-column-overlay'
+        );
         if (userOverlay) {
           userOverlay.remove();
         }
-        const userAnchorPoint = document.getElementById('shepherd-user-column-anchor');
+        const userAnchorPoint = document.getElementById(
+          'shepherd-user-column-anchor'
+        );
         if (userAnchorPoint) {
           userAnchorPoint.remove();
         }
@@ -345,11 +349,15 @@ export function TourProvider({ children }) {
           anchorPoint.remove();
         }
         // Remove user column overlay and related elements
-        const userOverlay = document.getElementById('shepherd-user-column-overlay');
+        const userOverlay = document.getElementById(
+          'shepherd-user-column-overlay'
+        );
         if (userOverlay) {
           userOverlay.remove();
         }
-        const userAnchorPoint = document.getElementById('shepherd-user-column-anchor');
+        const userAnchorPoint = document.getElementById(
+          'shepherd-user-column-anchor'
+        );
         if (userAnchorPoint) {
           userAnchorPoint.remove();
         }
