@@ -146,6 +146,7 @@ Below is the available helm value keys and the default value of each key:
         verbs: ["list", "get"]
     :ref:`manageRbacPolicies <helm-values-rbac-manageRbacPolicies>`: true
     :ref:`manageSystemComponents <helm-values-rbac-manageSystemComponents>`: true
+    :ref:`serviceAccountAnnotations <helm-values-rbac-serviceAccountAnnotations>`: null
 
   :ref:`kubernetesCredentials <helm-values-kubernetesCredentials>`:
     :ref:`useApiServerCluster <helm-values-kubernetesCredentials-useApiServerCluster>`: true
@@ -1017,6 +1018,22 @@ Default: ``true``
   rbac:
     manageSystemComponents: true
 
+.. _helm-values-rbac-serviceAccountAnnotations:
+
+``rbac.serviceAccountAnnotations``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Custom annotations for the API server service account. This is useful for cloud provider integrations that require specific annotations on service accounts, such as AWS IAM roles for service accounts (IRSA) or GCP Workload Identity.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  rbac:
+    serviceAccountAnnotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/MyServiceAccountRole"
+      iam.gke.io/gcp-service-account: "my-gcp-service-account@my-project.iam.gserviceaccount.com"
+
 .. _helm-values-kubernetesCredentials:
 
 ``kubernetesCredentials``
@@ -1210,7 +1227,12 @@ Default: ``false``
 ``r2Credentials.r2SecretName``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Name of the secret containing the R2 credentials. Only used if enabled is true.
+Name of the secret containing the R2 credentials. Only used if enabled is true. The secret should contain the following keys:
+
+- ``r2.credentials``: R2 credentials file
+- ``accountid``: R2 account ID file
+
+Refer to :ref:`Cloudflare R2 installation <cloudflare-r2-installation>` for more details.
 
 Default: ``r2-credentials``
 

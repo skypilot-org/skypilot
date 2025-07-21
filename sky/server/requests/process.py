@@ -202,6 +202,9 @@ class BurstableExecutor:
                  burst_workers: int = 0,
                  **kwargs):
         if garanteed_workers > 0:
+            self._guaranteed_workers = garanteed_workers
+            self._guaranteed_pool_kwargs = kwargs
+            self._guaranteed_pool_lock = threading.Lock()
             self._executor = PoolExecutor(max_workers=garanteed_workers,
                                           **kwargs)
         if burst_workers > 0:
@@ -225,8 +228,7 @@ class BurstableExecutor:
 
         while True:
             if self._executor is not None and self._executor.has_idle_workers():
-                logger.info('Submitting to the guaranteed pool')
-                return self._executor.submit(fn, *args, **kwargs)
+                return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
             if (self._burst_executor is not None and
                     self._burst_executor.has_idle_workers()):
                 try:
@@ -238,10 +240,51 @@ class BurstableExecutor:
             if self._executor is not None:
                 # No idle workers in either pool, still queue the request
                 # to the guaranteed pool to keep behavior consistent.
-                return self._executor.submit(fn, *args, **kwargs)
+                return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
             logger.debug('No guaranteed pool set and the burst pool is full, '
                          'retry later.')
             time.sleep(0.1)
+
+    def _submit_to_guaranteed_pool(self, fn, *args,
+                                   **kwargs) -> concurrent.futures.Future:
+        """Submit to the guaranteed pool with retry.
+
+        The concurrent.futures.ProcessPoolExecutor will terminate all child
+        processes and reject new tasks if any of the child process died, e.g.
+        OOM killed. So when the pool is broken, we have to rebuild a new pool
+        to execute tasks.
+
+        Alternatives considered:
+        - multiprocessing.Pool: individual process failure does not affect the
+            pool, but it lacks of lazy-init support and does not handle process
+            failure gracefully.
+        - inherit from concurrent.futures.ProcessPoolExecutor: If a child
+            process dies when executing a task, we have to set an exception
+            in the Future object of the task. But there is a race condition
+            that the child process may dies exactly after get the task from
+            queue so there is no (obviously) safe way to record process PID
+            to task mapping in the current architecture of
+            ProcessPoolExecutor. It is more feasible to implement a custom
+            ProcessPoolExecutor with an new architecture.
+        - a custom ProcessPoolExecutor: non-trivial to implement, keep for
+            future improvement as BrokenProcessPool is not expected to be
+            a common case, i.e. it usually indicates there a bug elsewhere
+            when this happens.
+        """
+        with self._guaranteed_pool_lock:
+            assert self._executor is not None
+            try:
+                return self._executor.submit(fn, *args, **kwargs)
+            except concurrent.futures.process.BrokenProcessPool as e:
+                logger.warning('The guaranteed pool is broken, '
+                               f'replacing the pool and retrying. Error: {e}')
+                broken_pool = self._executor
+                threading.Thread(target=broken_pool.shutdown,
+                                 daemon=True).start()
+                self._executor = PoolExecutor(
+                    max_workers=self._guaranteed_workers,
+                    **self._guaranteed_pool_kwargs)
+        return self._submit_to_guaranteed_pool(fn, *args, **kwargs)
 
     def shutdown(self) -> None:
         """Shutdown the executor."""

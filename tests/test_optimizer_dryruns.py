@@ -227,7 +227,7 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # Choose General Purpose instance types
     assert 'm6i.2xlarge' in stdout  # AWS, 8 vCPUs, 32 GB memory
     assert 'Standard_D8s_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
-    assert 'n2-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
+    assert 'n4-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
 
     _test_resources_launch(memory=32)
     stdout, _ = capfd.readouterr()
@@ -235,14 +235,14 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # is specified
     assert 'r6i.xlarge' in stdout  # AWS, 4 vCPUs, 32 GB memory
     assert 'Standard_E4s_v5' in stdout  # Azure, 4 vCPUs, 32 GB memory
-    assert 'n2-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
+    assert 'n4-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
 
     _test_resources_launch(memory='64+')
     stdout, _ = capfd.readouterr()
     # Choose memory-optimized instance types
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
-    assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
+    assert 'n4-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
     assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
 
     _test_resources_launch(cpus='4+', memory='4+')
@@ -843,3 +843,27 @@ def test_accelerator_cloud_filtering(capfd, enable_all_clouds):
     spec = {'accelerators': 'nvidia:32GB+'}
     _test_resources_from_yaml(spec)
     stdout, _ = capfd.readouterr()
+
+
+def test_candidate_logging(enable_all_clouds, capfd):
+    """
+    Verifies that the optimizer candidate log outputs the correct chosen/cheapest resource.
+    """
+    with sky.Dag() as dag:
+        task = sky.Task('test_candidate_logging')
+        task.set_resources([
+            sky.Resources(accelerators={'L4': 1},
+                          use_spot=True,
+                          cloud=sky.AWS()),
+            # Other more expensive GPUs
+            sky.Resources(accelerators={'A100': 1}, use_spot=True),
+            sky.Resources(accelerators={'H100': 1}, use_spot=True),
+            sky.Resources(accelerators={'H200': 1}, use_spot=True),
+        ])
+    sky.optimize(dag)
+    sky.stream_and_get(sky.launch(dag, dryrun=True))
+    stdout, _ = capfd.readouterr()
+    l4_section = any(
+        'L4:1' in line and '✔' in line for line in stdout.splitlines())
+    assert l4_section, 'Expected L4:1 to be chosen.'
+    assert f'Multiple {sky.AWS()} instances satisfy L4:1. The cheapest [spot](gpus=L4:1' in stdout, 'Expected L4:1 to be marked as cheapest.'
