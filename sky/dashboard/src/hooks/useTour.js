@@ -51,7 +51,7 @@ export function TourProvider({ children }) {
       setTourJustStarted(true);
       // Remove delay for immediate tour start since first step doesn't require setup
       tourRef.current.start();
-      
+
       // Clear the "just started" flag after a delay to allow for initial setup
       setTimeout(() => {
         setTourJustStarted(false);
@@ -1754,7 +1754,8 @@ export function TourProvider({ children }) {
     // Warn on page refresh/close
     const handleBeforeUnload = (e) => {
       e.preventDefault();
-      e.returnValue = 'The tour is currently in progress. Are you sure you want to leave?';
+      e.returnValue =
+        'The tour is currently in progress. Are you sure you want to leave?';
       return e.returnValue;
     };
 
