@@ -111,7 +111,7 @@ sky launch -c maverick-torchtune llama-4-maverick-sft.yaml \
 ## Alternative Approaches
 
 ### LoRA Fine-tuning (Lower Resource Requirements)
-For users with limited GPU resources, LoRA (Low-Rank Adaptation) provides an efficient alternative:
+For users with limited GPU resources, LoRA (Low-Rank Adaptation) provides an efficient alternative that can run on 16 H100s:
 
 ```bash
 # LoRA finetuning - requires fewer resources
