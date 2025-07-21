@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -493,4 +494,4 @@ GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
 
 # The directory for file locks.
-SKY_LOCKS_DIR = '~/.sky/locks'
+SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
