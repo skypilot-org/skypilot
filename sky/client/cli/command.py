@@ -2935,7 +2935,7 @@ def _down_or_stop_clusters(
                 else:
                     click.echo('Since --purge is set, errors will be ignored '
                                'and controller will be removed from '
-                               'local state.\nSkipping confirmation...')
+                               'local state.\nSkipping confirmation.')
                 no_confirm = True
         names += controllers
 
