@@ -503,6 +503,8 @@ Here is an example of configuration within the credential file:
 
 After configuring the vSphere credentials, ensure that the necessary preparations for vSphere are completed. Please refer to this guide for more information: :ref:`Cloud Preparation for vSphere <cloud-prepare-vsphere>`
 
+.. _cloudflare-r2-installation:
+
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 

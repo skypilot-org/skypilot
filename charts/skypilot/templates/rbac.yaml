@@ -9,6 +9,10 @@ kind: ServiceAccount
 metadata:
   name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
+  {{- if .Values.rbac.serviceAccountAnnotations }}
+  annotations:
+    {{- toYaml .Values.rbac.serviceAccountAnnotations | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

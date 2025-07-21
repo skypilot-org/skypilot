@@ -5549,19 +5549,27 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
         columns.append('Cluster')
     columns.extend(['Created', 'Status'])
     table = log_utils.create_table(columns)
-    for request in request_list:
-        r_id = request.request_id
-        if not verbose:
-            r_id = common_utils.truncate_long_string(r_id, 36)
-        req_status = requests.RequestStatus(request.status)
-        row = [r_id, request.user_name, request.name]
+    if len(request_list) > 0:
+        for request in request_list:
+            r_id = request.request_id
+            if not verbose:
+                r_id = common_utils.truncate_long_string(r_id, 36)
+            req_status = requests.RequestStatus(request.status)
+            row = [r_id, request.user_name, request.name]
+            if verbose:
+                row.append(request.cluster_name)
+            row.extend([
+                log_utils.readable_time_duration(request.created_at),
+                req_status.colored_str()
+            ])
+            table.add_row(row)
+    else:
+        # add dummy data for when api server is down.
+        dummy_row = ['-'] * 5
         if verbose:
-            row.append(request.cluster_name)
-        row.extend([
-            log_utils.readable_time_duration(request.created_at),
-            req_status.colored_str()
-        ])
-        table.add_row(row)
+            dummy_row.append('-')
+        table.add_row(dummy_row)
+        click.echo()
     click.echo(table)
 
 

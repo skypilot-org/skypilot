@@ -15,6 +15,7 @@ from typing import Callable, Optional, Union
 import filelock
 
 from sky.utils import common_utils
+from sky.utils import locks
 
 _events = []
 
@@ -74,6 +75,46 @@ class Event:
 
 def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
     return common_utils.make_decorator(Event, name_or_fn, message=message)
+
+
+class DistributedLockEvent:
+    """Serve both as a distributed lock and event for the lock."""
+
+    def __init__(self, lock_id: str, timeout: Optional[float] = None):
+        self._lock_id = lock_id
+        self._lock = locks.get_lock(lock_id, timeout)
+        self._hold_lock_event = Event(f'[DistributedLock.hold]:{lock_id}')
+
+    def acquire(self):
+        was_locked = self._lock.is_locked
+        with Event(f'[DistributedLock.acquire]:{self._lock_id}'):
+            self._lock.acquire()
+        if not was_locked and self._lock.is_locked:
+            # start holding the lock after initial acquiring
+            self._hold_lock_event.begin()
+
+    def release(self):
+        was_locked = self._lock.is_locked
+        self._lock.release()
+        if was_locked and not self._lock.is_locked:
+            # stop holding the lock after initial releasing
+            self._hold_lock_event.end()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+    def __call__(self, f):
+
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            with self:
+                return f(*args, **kwargs)
+
+        return wrapper
 
 
 class FileLockEvent:

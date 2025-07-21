@@ -1,5 +1,45 @@
-export const ENDPOINT = '/internal/dashboard';
-export const BASE_PATH = '/dashboard';
+// Runtime detection of the current path to construct the correct API endpoint
+function getApiEndpoint() {
+  if (typeof window !== 'undefined') {
+    // Browser environment - detect from current path
+    const currentPath = window.location.pathname;
+
+    // Extract the base path (everything before /dashboard)
+    const dashboardIndex = currentPath.indexOf('/dashboard');
+    if (dashboardIndex !== -1) {
+      const basePath = currentPath.substring(0, dashboardIndex);
+      return `${basePath}/internal/dashboard`;
+    }
+
+    // Fallback to root if no /dashboard found
+    return '/internal/dashboard';
+  }
+
+  // Server-side rendering or build time - use environment variable or default
+  return process.env.SKYPILOT_API_SERVER_ENDPOINT || '/internal/dashboard';
+}
+
+function getBasePath() {
+  if (typeof window !== 'undefined') {
+    // Browser environment - detect from current path
+    const currentPath = window.location.pathname;
+
+    // Extract the base path (everything before and including /dashboard)
+    const dashboardIndex = currentPath.indexOf('/dashboard');
+    if (dashboardIndex !== -1) {
+      return currentPath.substring(0, dashboardIndex + '/dashboard'.length);
+    }
+
+    // Fallback to /dashboard if no /dashboard found
+    return '/dashboard';
+  }
+
+  // Server-side rendering or build time - use environment variable or default
+  return process.env.NEXT_BASE_PATH || '/dashboard';
+}
+
+export const ENDPOINT = getApiEndpoint();
+export const BASE_PATH = getBasePath();
 export const TIMEOUT = 10000;
 export const API_URL = '/api/v1';
 export const WS_API_URL = API_URL.replace(/^http/, 'ws');

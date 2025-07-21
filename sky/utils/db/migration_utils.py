@@ -24,7 +24,7 @@ SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 
 @contextlib.contextmanager
 def db_lock(db_name: str):
-    lock_path = f'~/.sky/locks/.{db_name}.lock'
+    lock_path = os.path.expanduser(f'~/.sky/locks/.{db_name}.lock')
     try:
         with filelock.FileLock(lock_path, timeout=DB_INIT_LOCK_TIMEOUT_SECONDS):
             yield
