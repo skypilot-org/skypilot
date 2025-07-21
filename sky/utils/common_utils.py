@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import typing
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
@@ -703,7 +704,7 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     """
     if use_bracket:
         return f'[{class_fullname(e.__class__)}] {e}'
-    return f'{class_fullname(e.__class__)}: {e}'
+    return f'{class_fullname(e.__class__)}: {traceback.format_exception(e)}'
 
 
 def remove_color(s: str):

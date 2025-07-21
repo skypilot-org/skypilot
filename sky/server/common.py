@@ -607,8 +607,6 @@ def check_server_healthy(
 def get_skypilot_version_on_disk() -> str:
     """Get the version of the SkyPilot code on disk."""
     current_file_path = pathlib.Path(__file__)
-    assert str(current_file_path).endswith(
-        'server/common.py'), current_file_path
     sky_root = current_file_path.parent.parent
     with open(sky_root / '__init__.py', 'r', encoding='utf-8') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',

@@ -2,6 +2,7 @@
 import concurrent.futures
 import logging
 import multiprocessing
+import sys
 import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
@@ -201,6 +202,7 @@ class BurstableExecutor:
                  garanteed_workers: int,
                  burst_workers: int = 0,
                  **kwargs):
+        garanteed_workers = min(garanteed_workers, 61 if sys.platform == "win32" else garanteed_workers)
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
             self._guaranteed_pool_kwargs = kwargs

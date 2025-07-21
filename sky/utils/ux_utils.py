@@ -18,8 +18,8 @@ from sky.utils import rich_console_utils
 if typing.TYPE_CHECKING:
     import pathlib
 
-INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
-INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
+INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}' if sys.platform != 'win32' else '|-- '
+INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}' if sys.platform != 'win32' else '`-- '
 
 # Console formatting constants
 BOLD = '\033[1m'
