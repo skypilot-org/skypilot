@@ -35,6 +35,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server.requests.requests import kill_managed_job_requests
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -1556,6 +1557,8 @@ class ManagedJobCodeGen:
     def cancel_jobs_by_id(cls,
                           job_ids: Optional[List[int]],
                           all_users: bool = False) -> str:
+        kill_managed_job_requests(job_ids)
+
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:

@@ -726,3 +726,4 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+    managed_job_id: Optional[int] = None

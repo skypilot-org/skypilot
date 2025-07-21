@@ -354,6 +354,7 @@ def launch(
                                             stream_logs=stream_logs,
                                             retry_until_up=True,
                                             fast=True,
+                                            _managed_job_id=job_id,
                                             _disable_controller_check=True)
                 # Manually launch the scheduler process in consolidation mode.
                 local_handle = backend_utils.is_controller_accessible(

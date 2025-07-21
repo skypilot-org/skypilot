@@ -2,6 +2,7 @@
 
 import fastapi
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.jobs.server import core
 from sky.server import common as server_common
@@ -21,8 +22,8 @@ router = fastapi.APIRouter()
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
     import sky.jobs.utils as managed_job_utils  # pylint: disable=import-outside-toplevel
-    import sky.jobs.state as jobs_state  # pylint: disable=import-outside-toplevel
     if (managed_job_utils.is_consolidation_mode()):
+        import sky.jobs.state as jobs_state  # pylint: disable=import-outside-toplevel
         job_id = jobs_state.reserve_job_id()
         logger.debug(f'Reserved job id: {job_id}')
         jobs_launch_body_internal = payloads.JobsLaunchBodyInternal(
@@ -31,8 +32,9 @@ async def launch(request: fastapi.Request,
             name=jobs_launch_body.name,
         )
     else:
+        managed_job_id = global_user_state.atomic_increment_managed_job_id()
         jobs_launch_body_internal = payloads.JobsLaunchBodyInternal(
-            job_id=1,
+            job_id=managed_job_id,
             task=jobs_launch_body.task,
             name=jobs_launch_body.name,
         )

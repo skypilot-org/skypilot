@@ -26,9 +26,11 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 import yaml
 
+import sky
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+import sky.exceptions
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -47,6 +49,8 @@ logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
+
+_MANAGED_JOB_ID_KEY = 'sky_managed_job_id_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 
@@ -1129,6 +1133,89 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
         rows = session.query(cluster_table).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
     return [row.name for row in rows]
+
+
+def get_job_ids() -> List[int]:
+    import sky.backends
+    from sky.backends import backend_utils
+    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+    from sky.jobs import utils as managed_job_utils
+    from sky.jobs.server.core import _maybe_restart_controller
+
+    try:
+        handle = _maybe_restart_controller(True,
+                                           stopped_message='',
+                                           spinner_message='Finding '
+                                           'largest managed job id')
+        backend = backend_utils.get_backend_from_handle(handle)
+    except sky.exceptions.ClusterDoesNotExist:
+        raise
+
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    returncode, job_table_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    if returncode != 0:
+        logger.error(job_table_payload + stderr)
+        raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                           f'{returncode}.\n{job_table_payload + stderr}')
+
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    return [job['job_id'] for job in jobs]
+
+@_init_db
+def initialize_managed_job_id() -> int:
+    """Initialize the managed job ID.
+
+    We must already own the managed job id lock
+
+    Returns:
+        The initialized managed job ID as an integer.
+    """
+    try:
+        jobs = get_job_ids()
+    except sky.exceptions.ClusterDoesNotExist:
+        return None
+
+    if jobs:
+        highest_job_id = max(jobs)
+    else:
+        highest_job_id = 0
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(config_table.insert().values(key=_MANAGED_JOB_ID_KEY,
+                                                     value=highest_job_id + 1))
+        session.commit()
+        return highest_job_id + 1
+
+
+@_init_db
+def atomic_increment_managed_job_id() -> int:
+    """Atomically increment and return the next managed job ID.
+
+    Returns:
+        The next managed job ID as an integer.
+    """
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Lock row for atomic update
+        row = session.query(config_table).filter_by(
+            key=_MANAGED_JOB_ID_KEY).with_for_update().first()
+
+        if row is None:
+            # Initialize to 0 if not set
+            return initialize_managed_job_id()
+
+        # Increment the ID
+        next_id = int(row.value) + 1
+        session.execute(config_table.update().where(
+            config_table.c.key == _MANAGED_JOB_ID_KEY).values(
+                value=str(next_id)))
+        session.commit()
+        return next_id
 
 
 @_init_db
