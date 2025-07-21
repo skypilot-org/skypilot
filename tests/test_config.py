@@ -956,3 +956,156 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     assert len(contexts) == 2
     assert contexts[0] == 'contextA'
     assert contexts[1] == 'contextB'
+
+
+def test_nebius_region_configs(monkeypatch, tmp_path) -> None:
+    """Test that nested per-region nebius config works"""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        nebius:
+            use_internal_ips: true
+            ssh_proxy_command:
+                eu-north1: ssh -W %h:%p user@host
+            region_configs:
+                eu-north1:
+                    project_id: project-e00
+                    fabric: fabric-3
+                eu-west1:
+                    project_id: project-e01
+                    fabric: fabric-5
+                    filesystems:
+                        - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                          mount_path: /mnt/fsnew
+                          attach_mode: READ_WRITE
+                        - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                          mount_path: /mnt/fsnew2
+                          attach_mode: READ_ONLY
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'region_configs.yaml')
+    skypilot_config.reload_config()
+
+    # test project_id property
+    eu_n1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('project_id',))
+    assert eu_n1_proj == 'project-e00'
+    eu_w1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('project_id',))
+    assert eu_w1_proj == 'project-e01'
+
+    # test fabric property
+    eu_n1_fabric = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('fabric',))
+    assert eu_n1_fabric == 'fabric-3'
+    eu_w1_fabric = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('fabric',))
+    assert eu_w1_fabric == 'fabric-5'
+
+    # test use_internal_ips property
+    eu_n1_ip = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('use_internal_ips',))
+    assert eu_n1_ip == True
+    eu_w1_ip = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('use_internal_ips',))
+    assert eu_w1_ip == True
+    generic = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('use_internal_ips',))
+    assert generic == True
+
+    # test ssh_proxy_command defaults
+    ssh_proxy = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('ssh_proxy_command',))
+    assert ssh_proxy['eu-north1'] == 'ssh -W %h:%p user@host'
+    assert 'eu-west1' not in ssh_proxy
+
+    # test filesystems
+    no_filesystem = skypilot_config.get_effective_region_config(
+        cloud='nebius',
+        region='eu-north1',
+        keys=('filesystems',),
+        default_value=[])
+    assert len(no_filesystem) == 0
+
+    filesystems = skypilot_config.get_effective_region_config(
+        cloud='nebius',
+        region='eu-west1',
+        keys=('filesystems',),
+        default_value=[])
+    assert len(filesystems) == 2
+
+
+def test_nebius_region_configs_back_compat(monkeypatch, tmp_path) -> None:
+    """Test that nested per-region nebius config works with legacy yaml"""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        nebius:
+            use_internal_ips: true
+            ssh_proxy_command:
+                eu-north1: ssh -W %h:%p user@host
+            eu-north1:
+                project_id: project-e00
+                fabric: fabric-3
+            eu-west1:
+                project_id: project-e01
+                fabric: fabric-5
+                filesystems:
+                    - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                      mount_path: /mnt/fsnew
+                      attach_mode: READ_WRITE
+                    - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                      mount_path: /mnt/fsnew2
+                      attach_mode: READ_ONLY
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'region_configs.yaml')
+    skypilot_config.reload_config()
+
+    # test project_id property
+    eu_n1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('project_id',))
+    assert eu_n1_proj == 'project-e00'
+    eu_w1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('project_id',))
+    assert eu_w1_proj == 'project-e01'
+
+    # test fabric property
+    eu_n1_fabric = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('fabric',))
+    assert eu_n1_fabric == 'fabric-3'
+    eu_w1_fabric = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('fabric',))
+    assert eu_w1_fabric == 'fabric-5'
+
+    # test use_internal_ips property
+    eu_n1_ip = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('use_internal_ips',))
+    assert eu_n1_ip == True
+    eu_w1_ip = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('use_internal_ips',))
+    assert eu_w1_ip == True
+    generic = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('use_internal_ips',))
+    assert generic == True
+
+    # test ssh_proxy_command defaults
+    ssh_proxy = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('ssh_proxy_command',))
+    assert ssh_proxy['eu-north1'] == 'ssh -W %h:%p user@host'
+    assert 'eu-west1' not in ssh_proxy
+
+    # test filesystems
+    no_filesystem = skypilot_config.get_effective_region_config(
+        cloud='nebius',
+        region='eu-north1',
+        keys=('filesystems',),
+        default_value=[])
+    assert len(no_filesystem) == 0
+
+    filesystems = skypilot_config.get_effective_region_config(
+        cloud='nebius',
+        region='eu-west1',
+        keys=('filesystems',),
+        default_value=[])
+    assert len(filesystems) == 2

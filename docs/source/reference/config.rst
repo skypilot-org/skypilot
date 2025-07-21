@@ -1274,7 +1274,7 @@ Advanced Nebius configuration (optional).
 
       Defaults to ``/mnt/filesystem-skypilot-<index>``.
 
-The configuration must be specified in region-specific sections.
+The configuration must be specified in the per-region config section: ``region_configs``.
 
 Example:
 
@@ -1287,23 +1287,24 @@ Example:
           eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
         tenant_id: tenant-1234567890
         # Region-specific configuration
-        eu-north1:
-            # Project identifier for this region
-            # Optional: Uses first available project if not specified
-            project_id: project-e00......
-            # GPU cluster fabric identifier
-            # Optional: GPU cluster disabled if not specified
-            fabric: fabric-3
-        eu-west1:
-            project_id: project-e01...
-            fabric: fabric-5
-            filesystems:
-              - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
-                mount_path: /mnt/fsnew
-                attach_mode: READ_WRITE
-              - filesystem_id: computefilesystem-e00ccccc02dddddddd
-                mount_path: /mnt/fsnew2
-                attach_mode: READ_ONLY
+        region_configs:
+            eu-north1:
+                # Project identifier for this region
+                # Optional: Uses first available project if not specified
+                project_id: project-e00......
+                # GPU cluster fabric identifier
+                # Optional: GPU cluster disabled if not specified
+                fabric: fabric-3
+            eu-west1:
+                project_id: project-e01...
+                fabric: fabric-5
+                filesystems:
+                  - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                    mount_path: /mnt/fsnew
+                    attach_mode: READ_WRITE
+                  - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                    mount_path: /mnt/fsnew2
+                    attach_mode: READ_ONLY
 
 
 .. _config-yaml-nebius-use-internal-ips:
