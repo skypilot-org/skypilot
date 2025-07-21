@@ -481,6 +481,7 @@ async def cleanup_upload_ids():
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
+    # Run background tasks for each server process.
     # Startup: Run background tasks
     for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
         try:
@@ -1083,10 +1084,6 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
-    if state.get_block_requests():
-        raise fastapi.HTTPException(
-            status_code=503,
-            detail='Server is shutting down, please try again later.')
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -1464,6 +1461,13 @@ async def stream(
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
+        if (request_task.host_uuid is not None and
+                request_task.host_uuid != state.get_host_uuid()):
+            # Ask the ingress-controller to retry next upstream
+            raise fastapi.HTTPException(
+                status_code=502,
+                detail=f'Request {request_id!r} is not local, try next upstream'
+            )
         log_path_to_stream = request_task.log_path
         if not log_path_to_stream.exists():
             # The log file might be deleted by the request GC daemon but the
@@ -1473,6 +1477,8 @@ async def stream(
                 detail=f'Log of request {request_id!r} has been deleted')
     else:
         assert log_path is not None, (request_id, log_path)
+        # TODO(aylei): log_path may not exist locally, should associate log
+        # with the request ID, e.g. sky logs <request_id> --provision-logs
         if log_path == constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
                 constants.API_SERVER_LOGS).expanduser()
@@ -1758,6 +1764,19 @@ async def root():
     return fastapi.responses.RedirectResponse(url='/dashboard/')
 
 
+def submit_request_daemon(daemon: requests_lib.InternalRequestDaemon):
+    # Delete any legacy requests that may be left by unclean shutdowns.
+    requests_lib.delete_requests([daemon.get_unique_id()])
+    executor.schedule_request(
+        request_id=daemon.get_unique_id(),
+        request_name=daemon.name,
+        request_body=payloads.RequestBody(),
+        func=daemon.run_event,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        is_skypilot_system=True,
+    )
+
+
 if __name__ == '__main__':
     import uvicorn
 
@@ -1798,6 +1817,10 @@ if __name__ == '__main__':
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
+        # Request daemons should be submitted to the executor to get executed in
+        # separate processes.
+        subprocess_utils.run_in_parallel(submit_request_daemon,
+                                         requests_lib.INTERNAL_REQUEST_DAEMONS)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request

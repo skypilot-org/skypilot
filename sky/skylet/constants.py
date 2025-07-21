@@ -492,5 +492,10 @@ DEFAULT_PRIORITY = 0
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
 
+# The environment variable for the UUID of the API server. This is usually set
+# by the orchestration system where different UUID identifies different
+# API server instances.
+APISERVER_UUID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}APISERVER_UUID'
+
 # The directory for file locks.
 SKY_LOCKS_DIR = '~/.sky/locks'

@@ -713,3 +713,4 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+    host_uuid: Optional[str] = None
