@@ -81,12 +81,12 @@ const PROPERTY_OPTIONS = [
     value: 'user',
   },
   {
-    label: 'Infra',
-    value: 'infra',
-  },
-  {
     label: 'Workspace',
     value: 'workspace',
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
   },
 ];
 
@@ -354,7 +354,7 @@ export function Clusters() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
           <Link
             href="/clusters"
@@ -363,7 +363,16 @@ export function Clusters() {
             Sky Clusters
           </Link>
 
-          <div className="flex items-center ml-6 space-x-3">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter clusters"
+          />
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
             <label className="flex items-center cursor-pointer">
               <input
                 type="checkbox"
@@ -387,30 +396,22 @@ export function Clusters() {
               </span>
             </label>
           </div>
-
-          <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
-            valueList={optionValues}
-            setFilters={setFilters}
-            updateURLParams={updateURLParams}
-            placeholder="Filter clusters"
-          />
-        </div>
-        <div className="flex items-center">
-          {loading && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+          <div className="flex items-center">
+            {loading && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -682,7 +683,7 @@ export function ClusterTable({
   return (
     <div>
       <Card>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
@@ -785,7 +786,7 @@ export function ClusterTable({
                       <TableCell className="hidden md:table-cell">
                         <Link
                           href="/workspaces"
-                          className="text-blue-600 hover:underline"
+                          className="text-gray-700 hover:text-blue-600 hover:underline"
                         >
                           {item.workspace || 'default'}
                         </Link>
@@ -1072,168 +1073,208 @@ const FilterDropdown = ({
   placeholder = 'Filter clusters',
 }) => {
   const inputRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [value, setValue] = useState('');
-  const [propertyValue, setPropertValue] = useState('cluster');
+  const [propertyValue, setPropertValue] = useState('status');
   const [valueOptions, setValueOptions] = useState([]);
 
-  let filteredOptions = [];
+  // Handle clicks outside the dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target) &&
+        inputRef.current &&
+        !inputRef.current.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     let updatedValueOptions = [];
 
-    switch (propertyValue) {
-      case 'status':
-        updatedValueOptions = valueList.status;
-        break;
-
-      case 'user':
-        updatedValueOptions = valueList.user;
-        break;
-
-      case 'cluster':
-        updatedValueOptions = valueList.cluster;
-        break;
-
-      case 'workspace':
-        updatedValueOptions = valueList.workspace;
-        break;
-
-      case 'infra':
-        updatedValueOptions = valueList.infra;
-        break;
-
-      default:
-        break;
+    if (valueList && typeof valueList === 'object') {
+      switch (propertyValue) {
+        case 'status':
+          updatedValueOptions = valueList.status || [];
+          break;
+        case 'user':
+          updatedValueOptions = valueList.user || [];
+          break;
+        case 'cluster':
+          updatedValueOptions = valueList.cluster || [];
+          break;
+        case 'workspace':
+          updatedValueOptions = valueList.workspace || [];
+          break;
+        case 'infra':
+          updatedValueOptions = valueList.infra || [];
+          break;
+        default:
+          break;
+      }
     }
 
-    updatedValueOptions = updatedValueOptions.filter((item) =>
-      item.includes(value.toLowerCase())
-    );
+    // Filter options based on current input value
+    if (value.trim() !== '') {
+      updatedValueOptions = updatedValueOptions.filter(
+        (item) =>
+          item && item.toString().toLowerCase().includes(value.toLowerCase())
+      );
+    }
 
     setValueOptions(updatedValueOptions);
   }, [propertyValue, valueList, value]);
 
+  // Helper function to get the capitalized label for a property value
+  const getPropertyLabel = (propertyValue) => {
+    const propertyItem = propertyList.find(
+      (item) => item.value === propertyValue
+    );
+    return propertyItem ? propertyItem.label : propertyValue;
+  };
+
   const handleValueChange = (e) => {
     setValue(e.target.value);
+    if (!isOpen) {
+      setIsOpen(true);
+    }
+  };
+
+  const handleInputFocus = () => {
+    setIsOpen(true);
+  };
+
+  const handleOptionSelect = (option) => {
+    setFilters((prevFilters) => {
+      const updatedFilters = [
+        ...prevFilters,
+        {
+          property: getPropertyLabel(propertyValue),
+          operator: ':',
+          value: option,
+        },
+      ];
+
+      updateURLParams(updatedFilters);
+      return updatedFilters;
+    });
+    setIsOpen(false);
+    setValue('');
+    inputRef.current.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && value.trim() !== '') {
+      setFilters((prevFilters) => {
+        const updatedFilters = [
+          ...prevFilters,
+          {
+            property: getPropertyLabel(propertyValue),
+            operator: ':',
+            value: value,
+          },
+        ];
+
+        updateURLParams(updatedFilters);
+        return updatedFilters;
+      });
+      setValue('');
+      setIsOpen(false);
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+      inputRef.current.blur();
+    }
   };
 
   return (
-    <>
-      <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md">
-        <div className="border-r">
-          <Select
-            onValueChange={(value) => setPropertValue(value)}
-            value={propertyValue}
+    <div className="flex flex-row ml-4 mr-2 border border-gray-300 rounded-md overflow-visible">
+      <div className="border-r border-gray-300">
+        <Select onValueChange={setPropertValue} value={propertyValue}>
+          <SelectTrigger
+            aria-label="Filter Property"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-32 h-8"
           >
-            <SelectTrigger
-              aria-label="Node"
-              className="focus:ring-0 focus:ring-offset-0 border-none w-36"
-            >
-              <SelectValue placeholder="Select Property" />
-            </SelectTrigger>
-            <SelectContent>
-              {propertyList.map((item, index) => (
-                <SelectItem key={`property-item-${index}`} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="relative">
-          <input
-            type="text"
-            ref={inputRef}
-            placeholder={placeholder}
-            value={value}
-            onChange={(e) => handleValueChange(e)}
-            onFocus={() => setIsOpen(true)}
-            onBlur={() => setIsOpen(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && value !== '') {
-                setFilters((prevFilters) => {
-                  const updatedFilters = [
-                    ...prevFilters,
-                    {
-                      property: propertyValue,
-                      operator: ':',
-                      value: value,
-                    },
-                  ];
-
-                  updateURLParams(updatedFilters);
-
-                  return updatedFilters;
-                });
-                setValue('');
-                setIsOpen(false);
-                inputRef.current.blur();
-              }
-            }}
-            className="h-10 w-32 sm:w-96 px-3 pr-8 text-sm rounded-md outline-none my-auto"
-            autoComplete="off"
-          />
-          {value && (
-            <button
-              onClick={() => {
-                setValue('');
-              }}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear filter"
-              tabIndex={-1}
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-          {isOpen && valueOptions.length > 0 && (
-            <div className="flex flex-col absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg">
-              {valueOptions.map((option, index) => (
-                <div
-                  key={option}
-                  className={`flex flex-col pl-7 py-2 cursor-pointer hover:bg-sky-50 text-sm ${index != filteredOptions.length - 1} && border-b`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setFilters((prevFilters) => {
-                      const updatedFilters = [
-                        ...prevFilters,
-                        {
-                          property: propertyValue,
-                          operator: '=',
-                          value: option,
-                        },
-                      ];
-
-                      updateURLParams(updatedFilters);
-
-                      return updatedFilters;
-                    });
-                    setIsOpen(false);
-                    setValue('');
-                    inputRef.current.blur();
-                  }}
-                >
-                  <span className="text-sm text-gray-600">{option}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+            <SelectValue placeholder="Select Property" />
+          </SelectTrigger>
+          <SelectContent>
+            {propertyList.map((item, index) => (
+              <SelectItem key={`property-item-${index}`} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
-    </>
+      <div className="relative flex-1">
+        <input
+          type="text"
+          ref={inputRef}
+          placeholder={placeholder}
+          value={value}
+          onChange={handleValueChange}
+          onFocus={handleInputFocus}
+          onKeyDown={handleKeyDown}
+          className="h-8 w-32 sm:w-96 px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          autoComplete="off"
+        />
+        {value && (
+          <button
+            onClick={() => {
+              setValue('');
+              setIsOpen(false);
+            }}
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear filter"
+            tabIndex={-1}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        )}
+        {isOpen && valueOptions.length > 0 && (
+          <div
+            ref={dropdownRef}
+            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            style={{ zIndex: 9999 }}
+          >
+            {valueOptions.map((option, index) => (
+              <div
+                key={`${option}-${index}`}
+                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                  index !== valueOptions.length - 1
+                    ? 'border-b border-gray-100'
+                    : ''
+                }`}
+                onClick={() => handleOptionSelect(option)}
+              >
+                <span className="text-sm text-gray-700">{option}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -1257,7 +1298,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
   return (
     <>
-      <div className="flex items-center gap-4 p-2">
+      <div className="flex items-center gap-4 py-2 px-2">
         <div className="flex flex-wrap items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem
@@ -1269,10 +1310,9 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
           {filters.length > 0 && (
             <>
-              <div className="border border-gray-400 h-8"></div>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-blue-600 bg-blue-100 hover:bg-blue-200"
+                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
               >
                 Clear filters
               </button>
@@ -1287,15 +1327,16 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center gap-2 text-blue-600 bg-blue-100 px-2 rounded-full">
-        <div className="flex items-center gap-1 px-2 py-1 rounded-l-lg">
+      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+        <div className="flex items-center gap-1 px-2">
           <span>{`${filter.property} `}</span>
-          <span className="font-bold">{`${filter.operator} ${filter.value}`}</span>
+          <span>{`${filter.operator} `}</span>
+          <span>{` ${filter.value}`}</span>
         </div>
 
         <button
           onClick={() => onRemove()}
-          className="p-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

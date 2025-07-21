@@ -9,12 +9,12 @@ import json
 import os
 import pathlib
 import sqlite3
-import threading
 import time
 import typing
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 import urllib.parse
 
+from alembic import command as alembic_command
 import colorama
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -29,7 +29,8 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
@@ -45,7 +46,6 @@ logger = sky_logging.init_logger(__name__)
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_ASYNC: Optional[sql_async.AsyncEngine] = None
-_DB_INIT_LOCK = threading.Lock()
 
 _DB_RETRY_TIMES = 30
 
@@ -142,111 +142,11 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
-    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, engine)
-
-    # Backward compatibility: add columns that not exist in older databases
-    with orm.Session(engine) as session:
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot',
-                                                'failure_reason',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'spot_job_id',
-                                                sqlalchemy.Integer(),
-                                                copy_from='job_id')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'task_id',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0',
-            value_to_replace_existing_entries=0)
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'task_name',
-                                                sqlalchemy.Text(),
-                                                copy_from='job_name')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'specs',
-            sqlalchemy.Text(),
-            value_to_replace_existing_entries=json.dumps({
-                'max_restarts_on_errors': 0,
-            }))
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'local_log_file',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'metadata',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'{}\'',
-            value_to_replace_existing_entries='{}')
-
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'schedule_state',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'controller_pid',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'dag_yaml_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'env_file_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'user_hash', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'workspace',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries='default')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'priority',
-            sqlalchemy.Integer(),
-            value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'entrypoint', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'original_user_yaml_path',
-                                                sqlalchemy.Text())
-        session.commit()
-
-
-def initialize_and_get_db_async(
-        recursive: bool = False) -> sql_async.AsyncEngine:
-    global _SQLALCHEMY_ENGINE_ASYNC
-    if _SQLALCHEMY_ENGINE_ASYNC is not None or recursive:
-        return _SQLALCHEMY_ENGINE_ASYNC
-    _SQLALCHEMY_ENGINE_ASYNC = _initialize_and_get_db(
-        sql_async.create_async_engine, initialize_and_get_db_async, True)
-    initialize_and_get_db()  # this is just to initialize the database
-    return _SQLALCHEMY_ENGINE_ASYNC
-
-
-def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
-    global _SQLALCHEMY_ENGINE
-    if _SQLALCHEMY_ENGINE is not None or recursive:
-        return _SQLALCHEMY_ENGINE
-    _SQLALCHEMY_ENGINE = _initialize_and_get_db(sqlalchemy.create_engine,
-                                                initialize_and_get_db, False)
-    create_table(_SQLALCHEMY_ENGINE)
-    return _SQLALCHEMY_ENGINE
+    # Get alembic config for spot jobs db and run migrations
+    alembic_config = migration_utils.get_alembic_config(
+        engine, migration_utils.SPOT_JOBS_DB_NAME)
+    alembic_config.config_ini_section = migration_utils.SPOT_JOBS_DB_NAME
+    alembic_command.upgrade(alembic_config, migration_utils.SPOT_JOBS_VERSION)
 
 
 def force_no_postgres() -> bool:
@@ -266,11 +166,30 @@ def force_no_postgres() -> bool:
         if ((parsed.hostname == 'localhost' or
              ipaddress.ip_address(parsed.hostname).is_loopback) and
                 not consolidation_mode):
-
-            logger.debug('force no postgres')
-
             return True
     return False
+
+
+def initialize_and_get_db_async(
+        recursive: bool = False) -> sql_async.AsyncEngine:
+    global _SQLALCHEMY_ENGINE_ASYNC
+    if _SQLALCHEMY_ENGINE_ASYNC is not None or recursive:
+        return _SQLALCHEMY_ENGINE_ASYNC
+    _SQLALCHEMY_ENGINE_ASYNC = _initialize_and_get_db(
+        sql_async.create_async_engine, initialize_and_get_db_async, True)
+    # to create the table in case an async function gets called first
+    initialize_and_get_db()
+    return _SQLALCHEMY_ENGINE_ASYNC
+
+
+def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
+    global _SQLALCHEMY_ENGINE
+    if _SQLALCHEMY_ENGINE is not None or recursive:
+        return _SQLALCHEMY_ENGINE
+    _SQLALCHEMY_ENGINE = _initialize_and_get_db(sqlalchemy.create_engine,
+                                                initialize_and_get_db, False)
+    create_table(_SQLALCHEMY_ENGINE)
+    return _SQLALCHEMY_ENGINE
 
 
 def _initialize_and_get_db(
@@ -278,7 +197,7 @@ def _initialize_and_get_db(
     get_engine: Callable[[bool], Any],
     async_override: bool,
 ) -> sqlalchemy.engine.Engine:
-    with _DB_INIT_LOCK:
+    with migration_utils.db_lock(migration_utils.SPOT_JOBS_DB_NAME):
         # recursive is used to avoid infinite recursion when initializing the
         # database. we use the get_engine function in order to not reinitalize
         # it in a multithreadded setting.

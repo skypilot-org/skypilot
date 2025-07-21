@@ -491,6 +491,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
+                # Request deamon should be retried if the process pool is
+                # broken.
+                retryable=True,
             )
         except exceptions.RequestAlreadyExistsError:
             # Lifespan will be executed in each uvicorn worker process, we

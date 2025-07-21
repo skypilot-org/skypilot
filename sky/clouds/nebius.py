@@ -175,16 +175,19 @@ class Nebius(clouds.Cloud):
         return isinstance(other, Nebius)
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for Nebius."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='nebius')
 
     @classmethod
@@ -219,10 +222,12 @@ class Nebius(clouds.Cloud):
             acc_dict)
         platform, _ = resources.instance_type.split('_')
 
-        if platform in ('cpu-d3', 'cpu-e2'):
-            image_family = 'ubuntu22.04-driverless'
-        elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
-            image_family = 'ubuntu22.04-cuda12'
+        # Selecting image_family by platform
+        # https://docs.nebius.com/compute/storage/boot-disk-images
+        if platform.startswith('cpu'):
+            image_family = 'ubuntu24.04-driverless'
+        elif platform.startswith('gpu'):
+            image_family = 'ubuntu24.04-cuda12'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
@@ -318,7 +323,9 @@ class Nebius(clouds.Cloud):
             default_instance_type = Nebius.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
