@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -38,6 +39,7 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -64,6 +66,9 @@ JOB_STATUS_CHECK_GAP_SECONDS = 20
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
+
+_JOB_STATUS_FETCH_MAX_RETRIES = 3
+_JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -128,9 +133,15 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
-def _check_consolidation_mode_consistency(
+def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
-    """Check the consistency of the consolidation mode."""
+    """Validate the consolidation mode config."""
+    if (current_is_consolidation_mode and
+            not env_options.Options.IS_DEVELOPER.get() and
+            server_common.is_api_server_local()):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
@@ -176,7 +187,7 @@ def _check_consolidation_mode_consistency(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _check_consolidation_mode_consistency(consolidation_mode)
+    _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 
@@ -242,19 +253,31 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-    status = None
-    try:
-        logger.info('=== Checking the job status... ===')
-        statuses = backend.get_job_status(handle, stream_logs=False)
-        status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-    except exceptions.CommandError:
-        logger.info('Failed to connect to the cluster.')
-    logger.info('=' * 34)
-    return status
+    for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
+        try:
+            logger.info('=== Checking the job status... ===')
+            statuses = backend.get_job_status(handle, stream_logs=False)
+            status = list(statuses.values())[0]
+            if status is None:
+                logger.info('No job found.')
+            else:
+                logger.info(f'Job status: {status}')
+            logger.info('=' * 34)
+            return status
+        except exceptions.CommandError as e:
+            # Retry on k8s transient network errors. This is useful when using
+            # coreweave which may have transient network issue sometimes.
+            if (e.detailed_reason is not None and
+                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
+                logger.info('Failed to connect to the cluster. Retrying '
+                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                logger.info('=' * 34)
+                time.sleep(1)
+            else:
+                logger.info(f'Failed to get job status: {e.detailed_reason}')
+                logger.info('=' * 34)
+                return None
+    return None
 
 
 def _controller_process_alive(pid: int, job_id: int) -> bool:

@@ -16,7 +16,7 @@ import sqlalchemy
 from sky import global_user_state
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 logger = logging.getLogger(__name__)
 

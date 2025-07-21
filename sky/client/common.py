@@ -272,7 +272,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
     upload_list = []
     for task_ in dag.tasks:
         task_.file_mounts_mapping = {}
-        if task_.workdir:
+        if task_.workdir and isinstance(task_.workdir, str):
             workdir = task_.workdir
             assert os.path.isabs(workdir)
             upload_list.append(workdir)

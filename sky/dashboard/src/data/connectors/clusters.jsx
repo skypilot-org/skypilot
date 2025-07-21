@@ -234,6 +234,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         infra: '',
         logs: '',
         workspace: workspace || 'default',
+        git_commit: job.metadata?.git_commit || '-',
       };
     });
     return jobData;

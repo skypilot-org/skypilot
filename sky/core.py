@@ -878,8 +878,10 @@ def cancel(
         f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
+    user_hash: Optional[str] = common_utils.get_current_user().id
 
     if all_users:
+        user_hash = None
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
@@ -904,7 +906,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_current_user().id)
+                        user_hash=user_hash)
 
 
 @usage_lib.entrypoint
@@ -942,7 +944,12 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    return backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    # Although tail_logs returns an int when require_outputs=False (default),
+    # we need to check returnval as an int to avoid type checking errors.
+    returnval = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    assert isinstance(returnval,
+                      int), (f'returnval must be an int, but got {returnval}')
+    return returnval
 
 
 @usage_lib.entrypoint

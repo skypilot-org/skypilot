@@ -35,11 +35,11 @@ from sky.server.requests.serializers import encoders
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import db_utils
 from sky.utils import env_options
 from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 

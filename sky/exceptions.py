@@ -646,3 +646,8 @@ class RequestInterruptedError(Exception):
 class RestfulPolicyError(Exception):
     """Raised when failed to call a RESTful policy."""
     pass
+
+
+class GitError(Exception):
+    """Raised when a git operation fails."""
+    pass
