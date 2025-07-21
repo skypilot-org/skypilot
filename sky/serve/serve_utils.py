@@ -349,8 +349,9 @@ def validate_service_task(task: 'sky.Task') -> None:
                     raise ValueError('Cannot specify ports in a cluster pool.')
 
 
-def generate_service_name():
-    return f'sky-service-{uuid.uuid4().hex[:4]}'
+def generate_service_name(pool: bool = False):
+    noun = 'pool' if pool else 'service'
+    return f'sky-{noun}-{uuid.uuid4().hex[:4]}'
 
 
 def generate_remote_service_dir_name(service_name: str) -> str:
@@ -470,11 +471,14 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service_encoded(service_name: str, version: int, mode: str) -> str:
-    service_status = _get_service_status(service_name)
+def update_service_encoded(service_name: str, version: int, mode: str,
+                           pool: bool) -> str:
+    noun = 'pool' if pool else 'service'
+    capnoun = noun.capitalize()
+    service_status = _get_service_status(service_name, pool=pool)
     if service_status is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
+            raise ValueError(f'{capnoun} {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
@@ -485,27 +489,30 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         })
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
+            # This only happens for services since pool is added after the
+            # update feature is introduced.
             raise ValueError(
                 'The service is up-ed in an old version and does not '
                 'support update. Please `sky serve down` '
                 'it first and relaunch the service. ')
     elif resp.status_code == 400:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Client error during service update: {resp.text}')
+            raise ValueError(f'Client error during {noun} update: {resp.text}')
     elif resp.status_code == 500:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Server error during service update: {resp.text}')
+                f'Server error during {noun} update: {resp.text}')
     elif resp.status_code != 200:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to update service: {resp.text}')
+            raise ValueError(f'Failed to update {noun}: {resp.text}')
 
     service_msg = resp.json()['message']
     return message_utils.encode_payload(service_msg)
 
 
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
-    service_status = _get_service_status(service_name)
+    # TODO(tian): Currently pool does not support terminating replica.
+    service_status = _get_service_status(service_name, pool=False)
     if service_status is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist.')
@@ -536,6 +543,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
 
 def _get_service_status(
         service_name: str,
+        pool: bool,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
@@ -549,6 +557,8 @@ def _get_service_status(
     """
     record = serve_state.get_service_from_name(service_name)
     if record is None:
+        return None
+    if record['pool'] != pool:
         return None
     if with_replica_info:
         if record['pool']:
@@ -565,13 +575,14 @@ def _get_service_status(
     return record
 
 
-def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
+def get_service_status_encoded(service_names: Optional[List[str]],
+                               pool: bool) -> str:
     service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        service_status = _get_service_status(service_name)
+        service_status = _get_service_status(service_name, pool=pool)
         if service_status is None:
             continue
         service_statuses.append({
@@ -636,6 +647,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.info(f'Get next cluster name for pool {service_name!r}')
         # Check if service exists
         service_status = _get_service_status(service_name,
+                                             pool=True,
                                              with_replica_info=False)
         if service_status is None:
             logger.error(f'Service {service_name!r} does not exist.')
@@ -683,6 +695,7 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
             return
         # Check if service exists
         service_status = _get_service_status(service_name,
+                                             pool=True,
                                              with_replica_info=False)
         if service_status is None:
             logger.error(f'Service {service_name!r} does not exist.')
@@ -741,13 +754,19 @@ def _terminate_failed_services(
             f'controller: {remaining_identity}{colorama.Style.RESET_ALL}')
 
 
-def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
+def terminate_services(service_names: Optional[List[str]], purge: bool,
+                       pool: bool) -> str:
+    noun = 'pool' if pool else 'service'
+    capnoun = noun.capitalize()
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names: List[str] = []
     messages: List[str] = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
+                                             pool=pool,
                                              with_replica_info=False)
+        if service_status is None:
+            continue
         if (service_status is not None and service_status['status']
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
@@ -759,10 +778,11 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
         # This is a safeguard for a rare case, that is accidentally abort
         # between `serve_state.add_service` and
         # `serve_state.add_or_update_version` in service.py.
-        if (service_status is None or service_status['status']
+        purge_cmd = (f'sky jobs delete-pool {service_name} --purge'
+                     if pool else f'sky serve down {service_name} --purge')
+        if (service_status['status']
                 in serve_state.ServiceStatus.failed_statuses()):
-            failed_status = (service_status['status']
-                             if service_status is not None else None)
+            failed_status = service_status['status']
             if purge:
                 message = _terminate_failed_services(service_name,
                                                      failed_status)
@@ -770,11 +790,10 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     messages.append(message)
             else:
                 messages.append(
-                    f'{colorama.Fore.YELLOW}Service {service_name!r} is in '
+                    f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} is in '
                     f'failed status ({failed_status}). Skipping '
                     'its termination as it could lead to a resource leak. '
-                    f'(Use `sky serve down {service_name} --purge` to '
-                    'forcefully terminate the service.)'
+                    f'(Use `{purge_cmd}` to forcefully terminate the {noun}.)'
                     f'{colorama.Style.RESET_ALL}')
                 # Don't add to terminated_service_names since it's not
                 # actually terminated.
@@ -791,12 +810,12 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
     if not terminated_service_names:
-        messages.append('No service to terminate.')
+        messages.append(f'No {noun} to terminate.')
     else:
-        identity_str = f'Service {terminated_service_names[0]} is'
+        identity_str = f'{capnoun} {terminated_service_names[0]} is'
         if len(terminated_service_names) > 1:
             terminated_service_names_str = ', '.join(terminated_service_names)
-            identity_str = f'Services {terminated_service_names_str} are'
+            identity_str = f'{capnoun}s {terminated_service_names_str} are'
         messages.append(f'{identity_str} scheduled to be terminated.')
     return '\n'.join(messages)
 
@@ -1185,18 +1204,25 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def format_service_table(service_records: List[Dict[str, Any]],
-                         show_all: bool) -> str:
+def format_service_table(service_records: List[Dict[str, Any]], show_all: bool,
+                         pool: bool) -> str:
+    noun = 'pool' if pool else 'service'
     if not service_records:
-        return 'No existing services.'
+        return f'No existing {noun}s.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT', 'IS_POOL'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS',
+        'REPLICAS' if not pool else 'WORKERS'
     ]
+    if not pool:
+        service_columns.append('ENDPOINT')
     if show_all:
         service_columns.extend([
             'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
         ])
+        if pool:
+            # Remove the load balancing policy column for pools.
+            service_columns.pop(-2)
     service_table = log_utils.create_table(service_columns)
 
     replica_infos: List[Dict[str, Any]] = []
@@ -1227,36 +1253,44 @@ def format_service_table(service_records: List[Dict[str, Any]],
             uptime,
             status_str,
             replicas,
-            endpoint,
-            'Yes' if record.get('pool', False) else 'No',
         ]
+        if not pool:
+            service_values.append(endpoint)
         if show_all:
             service_values.extend(
                 [policy, load_balancing_policy, requested_resources_str])
+            if pool:
+                service_values.pop(-2)
         service_table.add_row(service_values)
 
-    replica_table = _format_replica_table(replica_infos, show_all)
+    replica_table = _format_replica_table(replica_infos, show_all, pool)
+    replica_noun = 'Pool Workers' if pool else 'Service Replicas'
     return (f'{service_table}\n'
             f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
+            f'{replica_noun}{colorama.Style.RESET_ALL}\n'
             f'{replica_table}')
 
 
-def _format_replica_table(replica_records: List[Dict[str, Any]],
-                          show_all: bool) -> str:
+def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
+                          pool: bool) -> str:
+    noun = 'worker' if pool else 'replica'
     if not replica_records:
-        return 'No existing replicas.'
+        return f'No existing {noun}s.'
 
     replica_columns = [
-        'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'INFRA',
-        'RESOURCES', 'STATUS', 'USED_BY'
+        'POOL_NAME' if pool else 'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT',
+        'LAUNCHED', 'INFRA', 'RESOURCES', 'STATUS'
     ]
+    if pool:
+        replica_columns.append('USED_BY')
+        # Remove the endpoint column for pool workers.
+        replica_columns.pop(3)
     replica_table = log_utils.create_table(replica_columns)
 
     truncate_hint = ''
     if not show_all:
         if len(replica_records) > _REPLICA_TRUNC_NUM:
-            truncate_hint = '\n... (use --all to show all replicas)'
+            truncate_hint = f'\n... (use --all to show all {noun}s)'
         replica_records = replica_records[:_REPLICA_TRUNC_NUM]
 
     for record in replica_records:
@@ -1289,8 +1323,10 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             infra,
             resources_str,
             status_str,
-            used_by_str,
         ]
+        if pool:
+            replica_values.append(used_by_str)
+            replica_values.pop(3)
         replica_table.add_row(replica_values)
 
     return f'{replica_table}{truncate_hint}'
@@ -1318,10 +1354,11 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def get_service_status(cls, service_names: Optional[List[str]]) -> str:
+    def get_service_status(cls, service_names: Optional[List[str]],
+                           pool: bool) -> str:
         code = [
-            f'msg = serve_utils.get_service_status_encoded({service_names!r})',
-            'print(msg, end="", flush=True)'
+            f'msg = serve_utils.get_service_status_encoded({service_names!r},'
+            f'pool={pool})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
@@ -1334,11 +1371,11 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def terminate_services(cls, service_names: Optional[List[str]],
-                           purge: bool) -> str:
+    def terminate_services(cls, service_names: Optional[List[str]], purge: bool,
+                           pool: bool) -> str:
         code = [
             f'msg = serve_utils.terminate_services({service_names!r}, '
-            f'purge={purge})', 'print(msg, end="", flush=True)'
+            f'purge={purge}, pool={pool})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
@@ -1395,10 +1432,11 @@ class ServeCodeGen:
                 f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod
-    def update_service(cls, service_name: str, version: int, mode: str) -> str:
+    def update_service(cls, service_name: str, version: int, mode: str,
+                       pool: bool) -> str:
         code = [
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, mode={mode!r})',
+            f'{version}, mode={mode!r}, pool={pool})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)

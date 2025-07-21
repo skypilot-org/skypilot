@@ -737,8 +737,15 @@ class Task:
 
         service = config.pop('service', None)
         if service is not None:
+            service['pool'] = False
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
-        task.set_service(service)
+            task.set_service(service)
+
+        pool = config.pop('pool', None)
+        if pool is not None:
+            pool['pool'] = True
+            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
+            task.set_service(pool)
 
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:
@@ -1566,7 +1573,8 @@ class Task:
         add_if_not_none('resources', tmp_resource_config)
 
         if self.service is not None:
-            add_if_not_none('service', self.service.to_yaml_config())
+            add_if_not_none('pool' if self.service.pool else 'service',
+                            self.service.to_yaml_config())
 
         add_if_not_none('num_nodes', self.num_nodes)
 

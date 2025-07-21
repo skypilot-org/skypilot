@@ -6,6 +6,7 @@ from typing import List, Optional, Union
 import click
 
 from sky.client import common as client_common
+from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -18,19 +19,18 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
-    from sky.serve import serve_utils
 
 
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def up(
-    task: Union['sky.Task', 'sky.Dag'],
-    service_name: str,
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False
-) -> server_common.RequestId:
+        task: Union['sky.Task', 'sky.Dag'],
+        service_name: str,
+        # Internal only:
+        # pylint: disable=invalid-name
+        _is_pool: bool = False,
+        _need_confirmation: bool = False) -> server_common.RequestId:
     """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
@@ -52,6 +52,8 @@ def up(
 
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    if _is_pool and not serve_utils.is_consolidation_mode():
+        raise click.UsageError('Pool is only supported in consolidation mode.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
@@ -60,7 +62,8 @@ def up(
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)
         if _need_confirmation:
-            prompt = f'Launching a new service {service_name!r}. Proceed?'
+            noun = 'pool' if _is_pool else 'service'
+            prompt = f'Launching a new {noun} {service_name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
                               default=True,
@@ -89,6 +92,7 @@ def update(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
     mode: 'serve_utils.UpdateMode',
+    pool: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
@@ -114,6 +118,7 @@ def update(
     """
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    noun = 'pool' if pool else 'service'
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
@@ -122,7 +127,7 @@ def update(
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)
         if _need_confirmation:
-            click.confirm(f'Updating service {service_name!r}. Proceed?',
+            click.confirm(f'Updating {noun} {service_name!r}. Proceed?',
                           default=True,
                           abort=True,
                           show_default=True)
@@ -133,6 +138,7 @@ def update(
             task=dag_str,
             service_name=service_name,
             mode=mode,
+            pool=pool,
         )
 
         response = server_common.make_authenticated_request(
@@ -148,7 +154,8 @@ def update(
 def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
-    purge: bool = False
+    purge: bool = False,
+    pool: bool = False,
 ) -> server_common.RequestId:
     """Tears down a service.
 
@@ -159,6 +166,7 @@ def down(
         all: Whether to terminate all services.
         purge: Whether to terminate services in a failed status. These services
           may potentially lead to resource leaks.
+        pool: Whether to terminate a pool or service.
 
     Returns:
         The request ID of the down request.
@@ -175,6 +183,7 @@ def down(
         service_names=service_names,
         all=all,
         purge=purge,
+        pool=pool,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -221,8 +230,9 @@ def terminate_replica(service_name: str, replica_id: int,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def status(
-        service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+    service_names: Optional[Union[str, List[str]]],
+    pool: bool = False,
+) -> server_common.RequestId:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -281,7 +291,7 @@ def status(
         RuntimeError: if failed to get the service status.
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
-    body = payloads.ServeStatusBody(service_names=service_names,)
+    body = payloads.ServeStatusBody(service_names=service_names, pool=pool)
     response = server_common.make_authenticated_request(
         'POST',
         '/serve/status',

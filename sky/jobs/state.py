@@ -102,6 +102,11 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('original_user_yaml_path',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('pool', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('current_cluster_name',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('job_id_on_pm', sqlalchemy.Integer, server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(

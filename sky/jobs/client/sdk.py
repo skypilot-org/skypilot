@@ -74,7 +74,9 @@ def launch(
                 sdk.stream_and_get(request_id)
             else:
                 click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
-            prompt = f'Launching a managed job {dag.name!r}. Proceed?'
+                job_identity = ('a managed job' if batch_size is None else
+                                f'{batch_size} managed jobs')
+            prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
                               default=True,

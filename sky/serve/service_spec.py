@@ -269,7 +269,6 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
-        add_if_not_none('pool', None, self._pool)
         add_if_not_none('ports', None, int(self.ports) if self.ports else None)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
@@ -314,9 +313,10 @@ class SkyServiceSpec:
 
     def autoscaling_policy_str(self):
         # TODO(MaoZiming): Update policy_str
+        noun = 'worker' if self.pool else 'replica'
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
-            return f'Fixed {self.min_replicas} replica{min_plural}'
+            return f'Fixed {self.min_replicas} {noun}{min_plural}'
         # Already checked in __init__.
         assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
@@ -326,8 +326,8 @@ class SkyServiceSpec:
             overprovision_str = (
                 f' with {self.num_overprovision} overprovisioned replicas')
         return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
-                f'replica{max_plural}{overprovision_str} (target QPS per '
-                f'replica: {self.target_qps_per_replica})')
+                f'{noun}{max_plural}{overprovision_str} (target QPS per '
+                f'{noun}: {self.target_qps_per_replica})')
 
     def set_ports(self, ports: str) -> None:
         self._ports = ports
@@ -339,6 +339,11 @@ class SkyServiceSpec:
                 f'Certfile: {self.tls_credential.certfile}')
 
     def __repr__(self) -> str:
+        if self.pool:
+            return textwrap.dedent(f"""\
+                Worker autoscaling policy:  {self.autoscaling_policy_str()}
+                Spot Policy:                {self.spot_policy_str()}
+            """)
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
@@ -347,7 +352,6 @@ class SkyServiceSpec:
             TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
             Load Balancing Policy:            {self.load_balancing_policy}
-            Is cluster pool:                  {self.pool}
         """)
 
     @property

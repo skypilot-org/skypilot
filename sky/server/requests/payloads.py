@@ -533,6 +533,7 @@ class ServeUpdateBody(RequestBody):
     task: str
     service_name: str
     mode: serve.UpdateMode
+    pool: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -551,6 +552,7 @@ class ServeDownBody(RequestBody):
     service_names: Optional[Union[str, List[str]]]
     all: bool = False
     purge: bool = False
+    pool: bool = False
 
 
 class ServeLogsBody(RequestBody):
@@ -575,6 +577,7 @@ class ServeDownloadLogsBody(RequestBody):
 class ServeStatusBody(RequestBody):
     """The request body for the serve status endpoint."""
     service_names: Optional[Union[str, List[str]]]
+    pool: bool = False
 
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):

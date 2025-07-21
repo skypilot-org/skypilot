@@ -827,6 +827,9 @@ def get_task_schema():
             'service': {
                 'type': 'object',
             },
+            'pool': {
+                'type': 'object',
+            },
             'setup': {
                 'type': 'string',
             },

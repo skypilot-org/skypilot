@@ -76,7 +76,8 @@ def _get_all_replica_targets(
     handle: backends.CloudVmRayResourceHandle
 ) -> Set[serve_utils.ServiceComponentTarget]:
     """Helper function to get targets for all live replicas."""
-    code = serve_utils.ServeCodeGen.get_service_status([service_name])
+    code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                       pool=False)
     returncode, serve_status_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -125,8 +126,12 @@ def up(
         endpoint: str; The service endpoint.
     """
     task.validate()
+    serve_utils.validate_service_task(task)
+    assert task.service is not None
+    noun = 'pool' if task.service.pool else 'service'
+    capnoun = noun.capitalize()
     if service_name is None:
-        service_name = serve_utils.generate_service_name()
+        service_name = serve_utils.generate_service_name(task.service.pool)
 
     # The service name will be used as:
     # 1. controller cluster name: 'sky-serve-controller-<service_name>'
@@ -134,12 +139,11 @@ def up(
     # In both cases, service name shares the same regex with cluster name.
     if re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, service_name) is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service name {service_name!r} is invalid: '
+            raise ValueError(f'{capnoun} name {service_name!r} is invalid: '
                              f'ensure it is fully matched by regex (e.g., '
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    serve_utils.validate_service_task(task)
     dag = dag_utils.convert_entrypoint_to_dag(task)
     dag.resolve_and_validate_volumes()
     # Always apply the policy again here, even though it might have been applied
@@ -154,7 +158,7 @@ def up(
         task.run = 'echo "setup done"'
 
     with rich_utils.safe_status(
-            ux_utils.spinner_message('Initializing service')):
+            ux_utils.spinner_message(f'Initializing {noun}')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
             task, task_type='serve')
 
@@ -219,8 +223,6 @@ def up(
         # to set it to a smaller value to support a larger number of services.
         controller_task.service_name = service_name
 
-        print(f'{colorama.Fore.YELLOW}Launching controller for '
-              f'{service_name!r}...{colorama.Style.RESET_ALL}')
         # We directly submit the request to the controller and let the
         # controller to check name conflict. Suppose we have multiple
         # sky.serve.up() with same service name, the first one will
@@ -234,6 +236,8 @@ def up(
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
         if not serve_utils.is_consolidation_mode():
+            print(f'{colorama.Fore.YELLOW}Launching controller for '
+                  f'{service_name!r}...{colorama.Style.RESET_ALL}')
             with common.with_server_user():
                 with skypilot_config.local_active_workspace_ctx(
                         constants.SKYPILOT_DEFAULT_WORKSPACE):
@@ -277,7 +281,7 @@ def up(
         # change after the first time, so there is no consistency issue.
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    'Waiting for the service to register')):
+                    f'Waiting for the {noun} to register')):
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
@@ -294,9 +298,15 @@ def up(
                 stream_logs=False)
         try:
             subprocess_utils.handle_returncode(
-                returncode, code, 'Failed to wait for service initialization',
+                returncode, code, f'Failed to wait for {noun} initialization',
                 lb_port_payload)
         except exceptions.CommandError:
+            if serve_utils.is_consolidation_mode():
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to wait for {noun} initialization. '
+                        'Please check the logs above for more details.'
+                    ) from None
             statuses = backend.get_job_status(controller_handle,
                                               [controller_job_id],
                                               stream_logs=False)
@@ -343,44 +353,64 @@ def up(
                 'http://', '')
             endpoint = f'{protocol}://{socket_endpoint}'
 
-        logger.info(
-            f'{fore.CYAN}Service name: '
-            f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
-            f'\n{fore.CYAN}Endpoint URL: '
-            f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
-            f'\n📋 Useful Commands'
-            f'\n{ux_utils.INDENT_SYMBOL}To check service status:\t'
-            f'{ux_utils.BOLD}sky serve status {service_name} '
-            f'[--endpoint]{ux_utils.RESET_BOLD}'
-            f'\n{ux_utils.INDENT_SYMBOL}To teardown the service:\t'
-            f'{ux_utils.BOLD}sky serve down {service_name}'
-            f'{ux_utils.RESET_BOLD}'
-            f'\n{ux_utils.INDENT_SYMBOL}To see replica logs:\t'
-            f'{ux_utils.BOLD}sky serve logs {service_name} [REPLICA_ID]'
-            f'{ux_utils.RESET_BOLD}'
-            f'\n{ux_utils.INDENT_SYMBOL}To see load balancer logs:\t'
-            f'{ux_utils.BOLD}sky serve logs --load-balancer {service_name}'
-            f'{ux_utils.RESET_BOLD}'
-            f'\n{ux_utils.INDENT_SYMBOL}To see controller logs:\t'
-            f'{ux_utils.BOLD}sky serve logs --controller {service_name}'
-            f'{ux_utils.RESET_BOLD}'
-            f'\n{ux_utils.INDENT_SYMBOL}To monitor the status:\t'
-            f'{ux_utils.BOLD}watch -n10 sky serve status {service_name}'
-            f'{ux_utils.RESET_BOLD}'
-            f'\n{ux_utils.INDENT_LAST_SYMBOL}To send a test request:\t'
-            f'{ux_utils.BOLD}curl {endpoint}'
-            f'{ux_utils.RESET_BOLD}'
-            '\n\n' +
-            ux_utils.finishing_message('Service is spinning up and replicas '
-                                       'will be ready shortly.'))
+        if task.service.pool:
+            logger.info(
+                f'{fore.CYAN}Pool name: '
+                f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
+                f'\n📋 Useful Commands'
+                f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
+                f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
+                f'--batch-size 10 <run-command>{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
+                f'{ux_utils.BOLD}sky jobs query-pool {service_name}'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To delete the pool:\t\t'
+                f'{ux_utils.BOLD}sky jobs delete-pool {service_name}'
+                f'{ux_utils.RESET_BOLD}'
+                '\n\n' +
+                ux_utils.finishing_message('Pool is initializing and '
+                                           'workers will be ready shortly.'))
+        else:
+            logger.info(
+                f'{fore.CYAN}Service name: '
+                f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
+                f'\n{fore.CYAN}Endpoint URL: '
+                f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
+                f'\n📋 Useful Commands'
+                f'\n{ux_utils.INDENT_SYMBOL}To check service status:\t'
+                f'{ux_utils.BOLD}sky serve status {service_name} '
+                f'[--endpoint]{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To teardown the service:\t'
+                f'{ux_utils.BOLD}sky serve down {service_name}'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To see replica logs:\t'
+                f'{ux_utils.BOLD}sky serve logs {service_name} [REPLICA_ID]'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To see load balancer logs:\t'
+                f'{ux_utils.BOLD}sky serve logs --load-balancer {service_name}'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To see controller logs:\t'
+                f'{ux_utils.BOLD}sky serve logs --controller {service_name}'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To monitor the status:\t'
+                f'{ux_utils.BOLD}watch -n10 sky serve status {service_name}'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To send a test request:\t'
+                f'{ux_utils.BOLD}curl {endpoint}'
+                f'{ux_utils.RESET_BOLD}'
+                '\n\n' + ux_utils.finishing_message(
+                    'Service is spinning up and replicas '
+                    'will be ready shortly.'))
         return service_name, endpoint
 
 
 @usage_lib.entrypoint
 def update(
-        task: 'sky.Task',
-        service_name: str,
-        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
+    task: 'sky.Task',
+    service_name: str,
+    mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+    pool: bool = False,
+) -> None:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -422,7 +452,8 @@ def update(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.get_service_status([service_name])
+    code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                       pool=pool)
     returncode, serve_status_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -518,7 +549,8 @@ def update(
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
                                                        current_version,
-                                                       mode=mode.value)
+                                                       mode=mode.value,
+                                                       pool=pool)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,
@@ -545,6 +577,7 @@ def down(
     service_names: Optional[Union[str, List[str]]] = None,
     all: bool = False,
     purge: bool = False,
+    pool: bool = False,
 ) -> None:
     """Tears down a service.
 
@@ -561,26 +594,28 @@ def down(
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
+    noun = 'pool' if pool else 'service'
     if service_names is None:
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='All services should have terminated.')
+        stopped_message=f'All {noun}s should have terminated.')
 
     service_names_str = ','.join(service_names)
     if sum([bool(service_names), all]) != 1:
-        argument_str = (f'service_names={service_names_str}'
+        argument_str = (f'{noun}_names={service_names_str}'
                         if service_names else '')
         argument_str += ' all' if all else ''
-        raise ValueError('Can only specify one of service_names or all. '
+        raise ValueError(f'Can only specify one of {noun}_names or all. '
                          f'Provided {argument_str!r}.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     service_names = None if all else service_names
-    code = serve_utils.ServeCodeGen.terminate_services(service_names, purge)
+    code = serve_utils.ServeCodeGen.terminate_services(service_names, purge,
+                                                       pool)
 
     try:
         returncode, stdout, _ = backend.run_on_head(handle,
@@ -652,8 +687,9 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 
 @usage_lib.entrypoint
 def status(
-    service_names: Optional[Union[str,
-                                  List[str]]] = None) -> List[Dict[str, Any]]:
+    service_names: Optional[Union[str, List[str]]] = None,
+    pool: bool = False,
+) -> List[Dict[str, Any]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -729,7 +765,7 @@ def status(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.get_service_status(service_names)
+    code = serve_utils.ServeCodeGen.get_service_status(service_names, pool=pool)
     returncode, serve_status_payload, stderr = backend.run_on_head(
         handle,
         code,
