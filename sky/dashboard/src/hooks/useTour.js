@@ -710,14 +710,63 @@ export function TourProvider({ children }) {
 
                         // Wait for scroll animation to complete before proceeding
                         setTimeout(() => {
+                          createAnchorPoint();
                           resolve();
                         }, 300);
                         return;
                       }
                     }
+
+                    // Create anchor point if no scrolling needed
+                    createAnchorPoint();
                   }
                 }
                 resolve();
+              };
+
+              const createAnchorPoint = () => {
+                const infraHeader = Array.from(
+                  document.querySelectorAll('thead th')
+                ).find(
+                  (th) => th.textContent && th.textContent.trim() === 'Infra'
+                );
+
+                if (infraHeader && infraHeader instanceof HTMLElement) {
+                  const table = infraHeader.closest('table');
+                  if (table) {
+                    const headerRow = infraHeader.parentElement;
+                    const columnIndex = Array.from(headerRow.children).indexOf(
+                      infraHeader
+                    );
+                    const headerRect = infraHeader.getBoundingClientRect();
+                    const rows = table.querySelectorAll('tbody tr');
+                    let lastCellRect = headerRect;
+
+                    rows.forEach((row) => {
+                      const cell = row.children[columnIndex];
+                      if (cell) {
+                        lastCellRect = cell.getBoundingClientRect();
+                      }
+                    });
+
+                    // Create invisible anchor point below the highlighted column
+                    const overlayBottom = lastCellRect.bottom + 4; // Position similar to other dialogs
+                    const anchorPoint = document.createElement('div');
+                    anchorPoint.id = 'shepherd-column-anchor';
+                    anchorPoint.style.position = 'fixed';
+                    anchorPoint.style.left = `${
+                      headerRect.left + headerRect.width / 2
+                    }px`;
+                    anchorPoint.style.top = `${overlayBottom}px`;
+                    anchorPoint.style.width = '1px';
+                    anchorPoint.style.height = '1px';
+                    anchorPoint.style.zIndex = '9999';
+                    anchorPoint.style.pointerEvents = 'none';
+                    anchorPoint.style.backgroundColor = 'transparent';
+                    anchorPoint.style.transform = 'translate(-50%, -50%)';
+                    document.body.appendChild(anchorPoint);
+                  }
+                }
               };
 
               // Navigate to clusters page if not already there, then set up elements
@@ -852,23 +901,6 @@ export function TourProvider({ children }) {
                     overlay.style.pointerEvents = 'none';
                     overlay.style.backgroundColor = 'transparent';
                     document.body.appendChild(overlay);
-
-                    // Create invisible anchor point at the bottom edge of the highlighted column
-                    const overlayBottom = lastCellRect.bottom + 5; // +4 padding, +2 offset, +3 outline
-                    const anchorPoint = document.createElement('div');
-                    anchorPoint.id = 'shepherd-column-anchor';
-                    anchorPoint.style.position = 'fixed';
-                    anchorPoint.style.left = `${
-                      headerRect.left + headerRect.width / 2
-                    }px`;
-                    anchorPoint.style.top = `${overlayBottom}px`;
-                    anchorPoint.style.width = '1px';
-                    anchorPoint.style.height = '1px';
-                    anchorPoint.style.zIndex = '9999';
-                    anchorPoint.style.pointerEvents = 'none';
-                    anchorPoint.style.backgroundColor = 'transparent';
-                    anchorPoint.style.transform = 'translate(-50%, -50%)';
-                    document.body.appendChild(anchorPoint);
                   }
                 }
               }, 100); // Small delay to ensure layout has fully settled
@@ -1038,14 +1070,63 @@ export function TourProvider({ children }) {
 
                         // Wait for scroll animation to complete before proceeding
                         setTimeout(() => {
+                          createUserAnchorPoint();
                           resolve();
                         }, 300);
                         return;
                       }
                     }
+
+                    // Create anchor point if no scrolling needed
+                    createUserAnchorPoint();
                   }
                 }
                 resolve();
+              };
+
+              const createUserAnchorPoint = () => {
+                const userHeader = Array.from(
+                  document.querySelectorAll('thead th')
+                ).find(
+                  (th) => th.textContent && th.textContent.trim() === 'User'
+                );
+
+                if (userHeader && userHeader instanceof HTMLElement) {
+                  const table = userHeader.closest('table');
+                  if (table) {
+                    const headerRow = userHeader.parentElement;
+                    const columnIndex = Array.from(headerRow.children).indexOf(
+                      userHeader
+                    );
+                    const headerRect = userHeader.getBoundingClientRect();
+                    const rows = table.querySelectorAll('tbody tr');
+                    let lastCellRect = headerRect;
+
+                    rows.forEach((row) => {
+                      const cell = row.children[columnIndex];
+                      if (cell) {
+                        lastCellRect = cell.getBoundingClientRect();
+                      }
+                    });
+
+                    // Create invisible anchor point below the highlighted column
+                    const overlayBottom = lastCellRect.bottom + 4; // Position similar to other dialogs
+                    const anchorPoint = document.createElement('div');
+                    anchorPoint.id = 'shepherd-user-column-anchor';
+                    anchorPoint.style.position = 'fixed';
+                    anchorPoint.style.left = `${
+                      headerRect.left + headerRect.width / 2
+                    }px`;
+                    anchorPoint.style.top = `${overlayBottom}px`;
+                    anchorPoint.style.width = '1px';
+                    anchorPoint.style.height = '1px';
+                    anchorPoint.style.zIndex = '9999';
+                    anchorPoint.style.pointerEvents = 'none';
+                    anchorPoint.style.backgroundColor = 'transparent';
+                    anchorPoint.style.transform = 'translate(-50%, -50%)';
+                    document.body.appendChild(anchorPoint);
+                  }
+                }
               };
 
               // Navigate to clusters page if not already there, then set up elements
@@ -1180,23 +1261,6 @@ export function TourProvider({ children }) {
                     overlay.style.pointerEvents = 'none';
                     overlay.style.backgroundColor = 'transparent';
                     document.body.appendChild(overlay);
-
-                    // Create invisible anchor point at the bottom edge of the highlighted column
-                    const overlayBottom = lastCellRect.bottom + 5; // +4 padding, +2 offset, +3 outline
-                    const anchorPoint = document.createElement('div');
-                    anchorPoint.id = 'shepherd-user-column-anchor';
-                    anchorPoint.style.position = 'fixed';
-                    anchorPoint.style.left = `${
-                      headerRect.left + headerRect.width / 2
-                    }px`;
-                    anchorPoint.style.top = `${overlayBottom}px`;
-                    anchorPoint.style.width = '1px';
-                    anchorPoint.style.height = '1px';
-                    anchorPoint.style.zIndex = '9999';
-                    anchorPoint.style.pointerEvents = 'none';
-                    anchorPoint.style.backgroundColor = 'transparent';
-                    anchorPoint.style.transform = 'translate(-50%, -50%)';
-                    document.body.appendChild(anchorPoint);
                   }
                 }
               }, 100); // Small delay to ensure layout has fully settled
