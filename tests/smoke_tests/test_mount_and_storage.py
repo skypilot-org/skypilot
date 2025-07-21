@@ -178,13 +178,15 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         # the mounted directory
         f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
     ]
-    if include_mount_cached and cloud != 'kubernetes':
+    if include_mount_cached:
         if cloud == 'aws':
             rclone_stores = data_utils.Rclone.RcloneStores.S3
         elif cloud == 'gcp':
             rclone_stores = data_utils.Rclone.RcloneStores.GCS
         elif cloud == 'azure':
             rclone_stores = data_utils.Rclone.RcloneStores.AZURE
+        elif cloud == 'kubernetes':
+            rclone_stores = data_utils.Rclone.RcloneStores.S3
         else:
             raise ValueError(f'Invalid cloud provider: {cloud}')
         rclone_profile_name = rclone_stores.get_profile_name(storage_name)
@@ -310,7 +312,7 @@ def test_kubernetes_storage_mounts():
     ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, 'kubernetes', False, False)
+            f, name, storage_name, ls_hello_command, 'kubernetes', False, True)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
