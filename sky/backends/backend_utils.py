@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
 import colorama
-import filelock
 from packaging import version
 from typing_extensions import Literal
 
@@ -45,6 +44,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -110,17 +110,12 @@ _TEST_IP_LIST = ['https://8.8.8.8', 'https://1.1.1.1']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Filelocks for the cluster status change.
-CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Time that must elapse since the last status check before we should re-check if
 # the cluster has been terminated or autostopped.
 _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
-# Filelocks for updating cluster's file_mounts.
-CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
-    '~/.sky/.{}_file_mounts.lock')
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
@@ -2294,8 +2289,7 @@ def refresh_cluster_record(
 
         # The loop logic allows us to notice if the status was updated in the
         # global_user_state by another process and stop trying to get the lock.
-        # The core loop logic is adapted from FileLock's implementation.
-        lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+        lock = locks.get_lock(cluster_status_lock_id(cluster_name))
         start_time = time.perf_counter()
 
         # Loop until we have an up-to-date status or until we acquire the lock.
@@ -2319,7 +2313,8 @@ def refresh_cluster_record(
                         return record
                     # Update and return the cluster status.
                     return _update_cluster_status(cluster_name)
-            except filelock.Timeout:
+
+            except locks.LockTimeout:
                 # lock.acquire() will throw a Timeout exception if the lock is not
                 # available and we have blocking=False.
                 pass
@@ -3197,3 +3192,13 @@ def get_endpoints(cluster: str,
         return {
             port_num: urls[0].url() for port_num, urls in port_details.items()
         }
+
+
+def cluster_status_lock_id(cluster_name: str) -> str:
+    """Get the lock ID for cluster status operations."""
+    return f'{cluster_name}_status'
+
+
+def cluster_file_mounts_lock_id(cluster_name: str) -> str:
+    """Get the lock ID for cluster file mounts operations."""
+    return f'{cluster_name}_file_mounts'
