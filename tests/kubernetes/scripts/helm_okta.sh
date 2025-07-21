@@ -197,6 +197,7 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --set apiService.resources.requests.memory=4Gi \
     --set apiService.resources.limits.cpu=2 \
     --set apiService.resources.limits.memory=4Gi \
+    --set apiService.skipResourceCheck=true \
     --set ingress.oauth2-proxy.enabled=true \
     --set ingress.oauth2-proxy.oidc-issuer-url="$OKTA_ISSUER_URL" \
     --set ingress.oauth2-proxy.client-id="$OKTA_CLIENT_ID" \
