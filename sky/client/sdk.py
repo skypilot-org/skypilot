@@ -1854,6 +1854,17 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
     return server_common.get_request_id(response)
 
 
+def _local_api_server_running() -> bool:
+    """Checks if the local api server is running."""
+    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
+        cmdline = process.info['cmdline']
+        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            subprocess_utils.kill_children_processes(parent_pids=[process.pid],
+                                                     force=True)
+            return True
+    return False
+
+
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
@@ -1872,6 +1883,10 @@ def api_status(
     Returns:
         A list of request payloads.
     """
+    if server_common.is_api_server_local() and not _local_api_server_running():
+        logger.info('SkyPilot API server is not running.')
+        return []
+
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
     response = server_common.make_authenticated_request(
@@ -1992,13 +2007,7 @@ def api_stop() -> None:
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
 
-    found = False
-    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
-        cmdline = process.info['cmdline']
-        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
-            subprocess_utils.kill_children_processes(parent_pids=[process.pid],
-                                                     force=True)
-            found = True
+    found = _local_api_server_running()
 
     # Remove the database for requests.
     server_common.clear_local_api_server_database()

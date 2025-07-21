@@ -5503,6 +5503,8 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
     if not request_ids:
         request_ids = None
     request_list = sdk.api_status(request_ids, all_status)
+    if not request_list:
+        return
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
