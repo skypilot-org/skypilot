@@ -18,7 +18,7 @@ Choose the right recipe for your needs:
 | **Recipe** | **Requirements** | **Description** |
 |------------------------|------------------|-----------------|
 | 🌟 **llama-4-maverick-sft.yaml** | **4 nodes**<br>32x H200 GPUs<br>1000+ GB CPU memory per node | Full finetuning using torchtune with CPU offloading with 400B model. Recommended if you have 32 or more H200s. |
-| 🎯 **llama-4-maverick-lora.yaml** | **2 nodes**<br>16x H100 GPUs<br>1000+ GB CPU memory | **Memory efficient** - LoRA fine-tuning with lower resource requirements. Great for limited GPU resources. |
+| 🎯 **llama-4-maverick-lora.yaml** | **2 nodes**<br>16x H100 GPUs<br>1000+ GB CPU memory per node | **Memory efficient** - LoRA fine-tuning with lower resource requirements. Great for limited GPU resources. |
 | 🚀 **llama-4-scout-sft.yaml** | **2 nodes**<br>16x H100 GPUs<br>1000+ GB CPU memory per node | Full finetuning using torchtune with 109B model. Good start for users with H100s. |
 
 ## Full finetuning with CPU offloading
