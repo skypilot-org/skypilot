@@ -13,6 +13,15 @@ metadata:
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: nginx
     {{- end }}
+    {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+    # Enable session affinity and retry on 502 for RollingUpdate strategy
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "SKYPILOT_ROUTEID"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
+    nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
+    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
+    {{- end }}
     {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
     # OAuth2 Proxy authentication for browser-based access
     # Bearer token requests bypass OAuth2 proxy and go directly to the application

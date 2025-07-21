@@ -368,9 +368,8 @@ def decode_rich_status(
                     continue
 
                 if control == Control.RETRY:
-                    raise exceptions.ServerTemporarilyUnavailableError(
-                        'The server is temporarily unavailable. Please try '
-                        'again.')
+                    raise exceptions.RequestInterruptedError(
+                        'Streaming interrupted. Please retry.')
                 # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():
                     yield None
