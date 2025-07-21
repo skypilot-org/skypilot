@@ -1151,7 +1151,9 @@ export function ManagedJobsTable({
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
                         <TableCell>{item.pool || '-'}</TableCell>
-                        <TableCell>{item.current_cluster_name || '-'}</TableCell>
+                        <TableCell>
+                          {item.current_cluster_name || '-'}
+                        </TableCell>
                         <TableCell>{item.job_id_on_pm || '-'}</TableCell>
                         <TableCell>
                           {item.details ? (
