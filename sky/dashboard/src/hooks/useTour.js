@@ -1699,7 +1699,7 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
-  }, [isFirstVisit, tourAutoStarted]);
+  }, [isFirstVisit]);
 
   const completeTour = () => {
     if (tourRef.current) {
