@@ -9,6 +9,7 @@ import click
 from sky import sky_logging
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
@@ -23,6 +24,7 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
+    from sky.serve import serve_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -336,3 +338,58 @@ def dashboard() -> None:
     url = f'{api_server_url}/jobs/dashboard?{params}'
     logger.info(f'Opening dashboard in browser: {url}')
     webbrowser.open(url)
+
+
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def create_pool(
+    task: Union['sky.Task', 'sky.Dag'],
+    pool_name: str,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False
+) -> server_common.RequestId:
+    """Spins up a pool."""
+    return impl.up(task,
+                   pool_name,
+                   pool=True,
+                   _need_confirmation=_need_confirmation)
+
+
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def update_pool(
+    task: Union['sky.Task', 'sky.Dag'],
+    pool_name: str,
+    mode: 'serve_utils.UpdateMode',
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False
+) -> server_common.RequestId:
+    """Update a pool."""
+    return impl.update(task,
+                       pool_name,
+                       mode,
+                       pool=True,
+                       _need_confirmation=_need_confirmation)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def delete_pool(
+    pool_names: Optional[Union[str, List[str]]],
+    all: bool = False,  # pylint: disable=redefined-builtin
+    purge: bool = False,
+) -> server_common.RequestId:
+    """Delete a pool."""
+    return impl.down(pool_names, all, purge, pool=True)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def query_pool(
+    pool_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
+    """Query a pool."""
+    return impl.status(pool_names, pool=True)

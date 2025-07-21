@@ -24,6 +24,8 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
+from sky.serve import serve_utils
+from sky.serve.server import impl
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -788,3 +790,41 @@ def download_logs(
                                               job_name=name,
                                               controller=controller,
                                               local_dir=local_dir)
+
+
+@usage_lib.entrypoint
+def create_pool(
+    task: 'sky.Task',
+    pool_name: Optional[str] = None,
+) -> Tuple[str, str]:
+    """Spins up a pool."""
+    return impl.up(task, pool_name, pool=True)
+
+
+@usage_lib.entrypoint
+def update_pool(
+    task: 'sky.Task',
+    pool_name: str,
+    mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+) -> None:
+    """Update a pool."""
+    return impl.update(task, pool_name, mode, pool=True)
+
+
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def delete_pool(
+    pool_names: Optional[Union[str, List[str]]] = None,
+    all: bool = False,
+    purge: bool = False,
+) -> None:
+    """Delete a pool."""
+    return impl.down(pool_names, all, purge, pool=True)
+
+
+@usage_lib.entrypoint
+def query_pool(
+    pool_names: Optional[Union[str,
+                               List[str]]] = None,) -> List[Dict[str, Any]]:
+    """Query a pool."""
+    return impl.status(pool_names, pool=True)

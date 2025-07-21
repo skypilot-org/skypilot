@@ -1767,7 +1767,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         service_status_request_id = serve_lib.status(service_names=None)
     show_pools = show_pools and not any([clusters, ip, endpoints])
     if show_pools:
-        pool_status_request_id = serve_lib.status(service_names=None, pool=True)
+        pool_status_request_id = managed_jobs.query_pool(pool_names=None)
 
     workspace_request_id = None
     if ip or show_endpoints:
@@ -4633,26 +4633,6 @@ def jobs_create_pool(
     """Launch a cluster pool for managed jobs submission.
 
     POOL_YAML must point to a valid YAML file.
-
-    A regular task YAML can be turned into a pool YAML by adding a `pool`
-    field. E.g.,
-
-    .. code-block:: yaml
-
-        # pool.yaml
-        pool:
-          replicas: 1
-
-        resources:
-          cpus: 2+
-
-        run: python -m http.server 8080
-
-    Example:
-
-    .. code-block:: bash
-
-        sky serve up service.yaml
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
@@ -4695,10 +4675,9 @@ def jobs_create_pool(
     with sky.Dag() as dag:
         dag.add(task)
 
-    request_id = serve_lib.up(task,
-                              pool_name,
-                              _is_pool=True,
-                              _need_confirmation=not yes)
+    request_id = managed_jobs.create_pool(task,
+                                          pool_name,
+                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.create-pool')
 
 
@@ -4736,8 +4715,7 @@ def jobs_update_pool(
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
         yes: bool, async_call: bool):
-    """Update a cluster pool.
-    """
+    """Update a cluster pool."""
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task = _generate_task_with_service(
@@ -4775,11 +4753,10 @@ def jobs_update_pool(
     with sky.Dag() as dag:
         dag.add(task)
 
-    request_id = serve_lib.update(task,
-                                  pool_name,
-                                  mode=serve_lib.UpdateMode(mode),
-                                  pool=True,
-                                  _need_confirmation=not yes)
+    request_id = managed_jobs.update_pool(task,
+                                          pool_name,
+                                          mode=serve_lib.UpdateMode(mode),
+                                          _need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.update-pool')
 
 
@@ -4800,8 +4777,7 @@ def jobs_query_pool(verbose: bool, pool_names: List[str]):
         pool_names_to_query = None
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking pools[/]'):
-        pool_status_request_id = serve_lib.status(pool_names_to_query,
-                                                  pool=True)
+        pool_status_request_id = managed_jobs.query_pool(pool_names_to_query)
         _, msg = _handle_services_request(pool_status_request_id,
                                           service_names=pool_names_to_query,
                                           show_all=verbose,
@@ -4859,10 +4835,7 @@ def jobs_delete_pool(
                       abort=True,
                       show_default=True)
 
-    request_id = serve_lib.down(service_names=pool_names,
-                                all=all,
-                                purge=purge,
-                                pool=True)
+    request_id = managed_jobs.delete_pool(pool_names, all=all, purge=purge)
     _async_call_or_wait(request_id, async_call, 'sky.jobs.delete-pool')
 
 

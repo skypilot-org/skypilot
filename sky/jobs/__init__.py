@@ -2,11 +2,15 @@
 import pathlib
 
 from sky.jobs.client.sdk import cancel
+from sky.jobs.client.sdk import create_pool
 from sky.jobs.client.sdk import dashboard
+from sky.jobs.client.sdk import delete_pool
 from sky.jobs.client.sdk import download_logs
 from sky.jobs.client.sdk import launch
+from sky.jobs.client.sdk import query_pool
 from sky.jobs.client.sdk import queue
 from sky.jobs.client.sdk import tail_logs
+from sky.jobs.client.sdk import update_pool
 from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH
 from sky.jobs.constants import JOBS_CONTROLLER_LOGS_DIR
 from sky.jobs.constants import JOBS_CONTROLLER_TEMPLATE
