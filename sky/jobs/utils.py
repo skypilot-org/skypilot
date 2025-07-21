@@ -274,11 +274,12 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
             if (e.detailed_reason is not None and
                     _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
                 job_logger.info('Failed to connect to the cluster. Retrying '
-                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                                f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 job_logger.info('=' * 34)
                 time.sleep(1)
             else:
-                job_logger.info(f'Failed to get job status: {e.detailed_reason}')
+                job_logger.info(
+                    f'Failed to get job status: {e.detailed_reason}')
                 job_logger.info('=' * 34)
                 return None
     return None

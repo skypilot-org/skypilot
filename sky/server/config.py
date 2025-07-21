@@ -71,7 +71,7 @@ class ServerConfig:
     queue_backend: QueueBackend
 
 
-def compute_server_config(deploy: bool) -> ServerConfig:
+def compute_server_config(deploy: bool, quiet: bool = False) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment
@@ -136,15 +136,17 @@ def compute_server_config(deploy: bool) -> ServerConfig:
             # permanently because it never exits.
             max_parallel_for_long = 0
             max_parallel_for_short = 0
-            logger.warning(
-                'SkyPilot API server will run in low resource mode because '
-                'the available memory is less than '
-                f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
-    logger.info(
-        f'SkyPilot API server will start {num_server_workers} server processes '
-        f'with {max_parallel_for_long} background workers for long requests '
-        f'and will allow at max {max_parallel_for_short} short requests in '
-        f'parallel.')
+            if not quiet:
+                logger.warning(
+                    'SkyPilot API server will run in low resource mode because '
+                    'the available memory is less than '
+                    f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
+    if not quiet:
+        logger.info(
+            f'SkyPilot API server will start {num_server_workers} server '
+            f'processes with {max_parallel_for_long} background workers for '
+            f'long requests and will allow at max {max_parallel_for_short} '
+            'short requests in parallel.')
     return ServerConfig(
         num_server_workers=num_server_workers,
         queue_backend=queue_backend,

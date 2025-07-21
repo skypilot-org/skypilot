@@ -301,6 +301,9 @@ rbac:
   # object store mounting or you manage system components manually, i.e. outside of SkyPilot.
   manageSystemComponents: true
 
+  # Custom annotations for the API server service account.
+  serviceAccountAnnotations: null
+
 # kubernetesCredentials add additional kubernetes cluster permissions to the API server.
 kubernetesCredentials:
   # Enable/disable using the API server's cluster for workloads
@@ -346,6 +349,11 @@ nebiusCredentials:
   tenantId: null
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
+
+r2Credentials:
+  enabled: false
+  # Name of the secret containing the r2 credentials. Only used if enabled is true.
+  r2SecretName: r2-credentials
 
 # Extra init containers to run before the api container
 extraInitContainers:
