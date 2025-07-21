@@ -193,6 +193,10 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --create-namespace \
     --set apiService.image=$DOCKER_IMAGE \
     --set imagePullPolicy=Never \
+    --set apiService.resources.requests.cpu=2 \
+    --set apiService.resources.requests.memory=4Gi \
+    --set apiService.resources.limits.cpu=2 \
+    --set apiService.resources.limits.memory=4Gi \
     --set ingress.oauth2-proxy.enabled=true \
     --set ingress.oauth2-proxy.oidc-issuer-url="$OKTA_ISSUER_URL" \
     --set ingress.oauth2-proxy.client-id="$OKTA_CLIENT_ID" \
@@ -219,9 +223,23 @@ if ! kubectl wait --namespace $NAMESPACE \
     --for=condition=ready pod \
     --selector=app=skypilot-api \
     --timeout=600s; then
-    echo "Warning: Pod readiness check timed out. Checking pod status for debugging..."
+    echo "Warning: Pod readiness check timed out. Checking pod status and cluster resources for debugging..."
+
+    echo "=== Pod Status ==="
     kubectl describe pods -n $NAMESPACE -l app=skypilot-api
+
+    echo "=== Pod Logs ==="
     kubectl logs -n $NAMESPACE -l app=skypilot-api
+
+    echo "=== Cluster Node Resources ==="
+    kubectl describe nodes
+
+    echo "=== Events ==="
+    kubectl get events -n $NAMESPACE --sort-by=.metadata.creationTimestamp
+
+    echo "=== Resource Usage ==="
+    kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+
     exit 1
 fi
 
