@@ -42,13 +42,20 @@ export function TourProvider({ children }) {
   const { isFirstVisit, markTourCompleted } = useFirstVisit();
   const [tourAutoStarted, setTourAutoStarted] = useState(false);
   const [isTourActive, setIsTourActive] = useState(false);
+  const [tourJustStarted, setTourJustStarted] = useState(false);
   const tourNavigatingRef = useRef(false);
 
   const startTour = () => {
     if (tourRef.current) {
       setIsTourActive(true);
+      setTourJustStarted(true);
       // Remove delay for immediate tour start since first step doesn't require setup
       tourRef.current.start();
+      
+      // Clear the "just started" flag after a delay to allow for initial setup
+      setTimeout(() => {
+        setTourJustStarted(false);
+      }, 1000);
     }
   };
 
@@ -326,6 +333,7 @@ export function TourProvider({ children }) {
         }
 
         setIsTourActive(false);
+        setTourJustStarted(false);
         markTourCompleted();
       });
 
@@ -390,6 +398,7 @@ export function TourProvider({ children }) {
         }
 
         setIsTourActive(false);
+        setTourJustStarted(false);
         markTourCompleted();
       });
 
@@ -1721,7 +1730,7 @@ export function TourProvider({ children }) {
 
   // Block navigation during tour
   useEffect(() => {
-    if (!isTourActive) return;
+    if (!isTourActive || tourJustStarted) return;
 
     // Block router navigation unless it's tour-initiated
     const handleRouteChangeStart = (url) => {
@@ -1756,12 +1765,13 @@ export function TourProvider({ children }) {
       router.events.off('routeChangeStart', handleRouteChangeStart);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isTourActive, router]);
+  }, [isTourActive, tourJustStarted, router]);
 
   const completeTour = () => {
     if (tourRef.current) {
       tourRef.current.complete();
     }
+    setTourJustStarted(false);
   };
 
   const value = {
