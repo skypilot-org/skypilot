@@ -51,3 +51,44 @@ tests:
           content:
             name: KUBECONFIG
             value: /root/.kube/config:/var/skypilot/kubeconfig/config
+
+  - it: should mount r2 credentials correctly when r2Credentials is enabled
+    set:
+      r2Credentials.enabled: true
+      r2Credentials.r2SecretName: my-r2-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: r2-credentials
+            mountPath: /root/.cloudflare
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-credentials
+            secret:
+              secretName: my-r2-secret
+
+  - it: should not mount r2 credentials when r2Credentials is disabled
+    set:
+      r2Credentials.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: r2-credentials
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-credentials
+
+  - it: should use default r2SecretName when not specified
+    set:
+      r2Credentials.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: r2-credentials
+            secret:
+              secretName: r2-credentials
