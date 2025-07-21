@@ -1600,10 +1600,10 @@ export function TourProvider({ children }) {
           ],
         },
         {
-          title: '🎉 Tour complete',
+          title: '🎉 Tour complete!',
           text: `
               <p>We invite you to to explore the rest of the dashboard.</p>
-              <p>To get started, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
+              <p>To get started with SkyPilot, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
               <p>Have questions? Join Slack to directly chat with the SkyPilot team.</p>
             `,
           buttons: [
