@@ -43,7 +43,7 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { statusGroups } from './jobs'; // Import statusGroups
 import yaml from 'js-yaml';
-import { CLOUD_CONONICATIONS } from '@/data/connectors/constants';
+import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUsers } from '@/data/connectors/users';
 
 // Success display component
@@ -93,7 +93,7 @@ const WorkspaceConfigDescription = ({
     }
 
     const cloudName =
-      CLOUD_CONONICATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
+      CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud.toUpperCase();
     const isActuallyEnabled = enabledCloudsSet.has(cloudName?.toLowerCase());
 
     if (cloudConfig?.disabled === true) {
@@ -180,13 +180,13 @@ const WorkspaceConfigDescription = ({
 const WorkspaceBadge = ({ isPrivate }) => {
   if (isPrivate) {
     return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
         Private
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
       Public
     </span>
   );
@@ -799,7 +799,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           <Button
                             onClick={handleSave}
                             disabled={saving || yamlError || loading}
-                            className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
+                            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
                           >
                             <SaveIcon className="w-4 h-4 mr-1.5" />
                             {saving ? 'Applying...' : 'Apply'}

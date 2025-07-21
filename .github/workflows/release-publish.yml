@@ -114,6 +114,8 @@ jobs:
           fetch-depth: 0
 
       - name: Create and push tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
@@ -128,6 +130,7 @@ jobs:
           tag_name: "v${{ needs.extract-version.outputs.version }}"
           generate_release_notes: true
           draft: true
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
   cleanup-branches:
     needs: extract-version

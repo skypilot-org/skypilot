@@ -1,66 +1,108 @@
 .. _sync-code-artifacts:
 
-Syncing Code and Artifacts
+Syncing Code, Git, and Files
 ====================================
 
 SkyPilot simplifies transferring code, data, and artifacts to and
 from cloud clusters:
 
-- To :ref:`upload code and project files <upload-code-and-project-files>` - use :code:`workdir`
+- To :ref:`sync code from a local directory or a git repository <sync-code-and-project-files-git>`: use :code:`workdir`
 
-- To :ref:`upload files outside of workdir <file-mounts-example>` (e.g., dotfiles) - use :code:`file_mounts`
+- To :ref:`upload files outside of workdir <file-mounts-example>` (e.g., dotfiles): use :code:`file_mounts`
 
-- To :ref:`upload/reuse large files <uploading-or-reusing-large-files>` (e.g., datasets) - use :ref:`SkyPilot bucket mounting <sky-storage>`
+- To :ref:`upload/reuse large files <uploading-or-reusing-large-files>` (e.g., datasets): use :ref:`SkyPilot bucket mounting <sky-storage>`
 
-- To :ref:`download files and artifacts from a cluster <downloading-files-and-artifacts>` - use :ref:`SkyPilot bucket mounting <sky-storage>` or :code:`rsync`
+- To :ref:`download files and artifacts from a cluster <downloading-files-and-artifacts>`: use :ref:`SkyPilot bucket mounting <sky-storage>` or :code:`rsync`
 
 Here, "upload" means uploading files from your local machine (or a cloud object
 storage) to a SkyPilot cluster, while "download" means the reverse direction.  The same
 mechanisms work for both files and directories.
 
-.. _upload-code-and-project-files:
+.. _sync-code-and-project-files-git:
 
-Uploading code and project files
---------------------------------------
-SkyPilot **automatically syncs a local working directory to a cluster** on every
-:code:`sky launch` and :code:`sky exec`.  The workdir contains a project's
-code and other files, and is typically a Git folder.
+Sync code from a local directory or a git repository
+--------------------------------------------------------------------
 
-The working directory can be configured either
+Use ``workdir`` to **automatically sync a local working directory or a Git repo
+URL** to a remote cluster on every ``sky launch`` and ``sky exec``.
 
-(1) by the :code:`workdir` field in a :ref:`task YAML file <yaml-spec>`, or
-(2) by the command line option :code:`--workdir`:
+``workdir`` is synced/cloned to ``~/sky_workdir`` on the remote cluster. Commands in ``setup`` and
+``run`` will be executed under ``~/sky_workdir``.
 
-.. code-block:: console
+.. tab-set::
 
-  $ # Assuming task.yaml has a 'workdir: <path>' field, these commands
-  $ # sync the workdir to the cluster:
-  $ sky launch -c dev task.yaml
-  $ sky exec dev task.yaml
+    .. tab-item:: Local Directory
+        :sync: local-directory-tab
 
-  $ # Add a --workdir flag if the yaml doesn't contain the field, or
-  $ # to override it.
+        If ``workdir`` is a local path, the entire directory is synced to the remote cluster. To exclude files from syncing, see :ref:`exclude-uploading-files`.
 
-These commands sync the working directory to :code:`~/sky_workdir` on the remote
-VMs.  The task is invoked under that working directory (so that it can call
-scripts, access checkpoints, etc.).
+        If a relative path is used, it's evaluated relative to the location from which ``sky`` is called.
 
-.. note::
-  To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
+        The working directory can be configured either:
 
-.. note::
+        1. By the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
 
-  You can keep and edit code in one central place---the local machine where
-  :code:`sky` is used---and have them transparently synced to multiple remote
-  clusters for execution:
+        .. code-block:: yaml
 
-  .. code-block:: console
+          # task.yaml
+          workdir: ~/my-code
 
-    $ sky exec cluster0 task.yaml
+        2. By the CLI option :code:`--workdir`
 
-    $ # Make local edits to the workdir...
-    $ # cluster1 will get the updated code.
-    $ sky exec cluster1 task.yaml
+        .. code-block:: console
+
+          $ sky launch -c dev --workdir ~/my-code task.yaml
+          $ sky exec dev --workdir ~/my-code task.yaml
+
+        .. note::
+          To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
+
+    .. tab-item:: Git Repository
+        :sync: git-repository-tab
+
+        To set ``workdir`` to a git repository, specify the ``workdir.url``
+        field (repo URL) and the ``workdir.ref`` field (git reference to
+        checkout).
+
+        The working directory can be configured either:
+
+        1. By the :code:`workdir` field in a :ref:`task YAML file <yaml-spec-workdir>`
+
+        .. code-block:: yaml
+
+          # task.yaml
+          workdir:
+            url: https://github.com/skypilot-org/skypilot.git
+            ref: main
+
+        2. By the CLI options :code:`--git-url` and :code:`--git-ref`
+
+        .. code-block:: console
+
+          $ sky launch -c dev --git-url https://github.com/skypilot-org/skypilot.git --git-ref main task.yaml
+          $ sky exec dev --git-url https://github.com/skypilot-org/skypilot.git --git-ref main task.yaml
+
+        You can use different git references for different ``exec`` or ``launch`` commands to run the tasks with different code:
+
+        .. code-block:: console
+
+          $ sky exec cluster0 --git-ref <commit-1> task.yaml
+          $ sky exec cluster0 --git-ref <commit-2> task.yaml
+
+        Refer to :ref:`the reference <yaml-spec-workdir>` for more details.
+
+        .. note::
+
+          **Authentication for Private Repositories**
+
+          **For HTTPS URLs**: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+          **For SSH/SCP URLs**: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+          1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+          2. SSH key configured in ``~/.ssh/config`` for the git host
+          3. Default SSH key at ``~/.ssh/id_rsa``
+          4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
 .. _file-mounts-example:
 
@@ -97,7 +139,7 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
 
 .. note::
 
-    Items listed in a :code:`.skyignore` file under the local file_mount source 
+    Items listed in a :code:`.skyignore` file under the local file_mount source
     are also ignored (the same behavior as handling ``workdir``).
 
 .. note::
