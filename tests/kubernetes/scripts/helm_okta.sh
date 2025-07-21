@@ -230,7 +230,7 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
       {
-        "host": "'$CLUSTER_HOST'",
+        "host": "localhost",
         "http": {
           "paths": [
             {
@@ -253,7 +253,7 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "metadata": {
     "annotations": {
       "nginx.ingress.kubernetes.io/auth-url": "http://skypilot-oauth2-proxy.'$NAMESPACE'.svc.cluster.local:4180/oauth2/auth",
-      "nginx.ingress.kubernetes.io/auth-signin": "http://'$CLUSTER_HOST':'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
+      "nginx.ingress.kubernetes.io/auth-signin": "http://localhost:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
       "nginx.ingress.kubernetes.io/auth-snippet": null,
       "nginx.ingress.kubernetes.io/configuration-snippet": null
     }
@@ -265,7 +265,7 @@ kubectl patch ingress skypilot-oauth2-proxy -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
       {
-        "host": "'$CLUSTER_HOST'",
+        "host": "localhost",
         "http": {
           "paths": [
             {
