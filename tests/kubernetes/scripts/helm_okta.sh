@@ -13,6 +13,9 @@
 # Prerequisites:
 # - Run 'sky local up' first to create the kind cluster with nginx ingress
 # - Set required environment variables: OKTA_CLIENT_ID, OKTA_CLIENT_SECRET, OKTA_TEST_USERNAME, OKTA_TEST_PASSWORD, OKTA_ISSUER_URL
+# - Configure your Okta app with both redirect URIs:
+#   * http://localhost:30082/oauth2/callback (for host access)
+#   * http://host.docker.internal:30082/oauth2/callback (for container access)
 #
 # Usage:
 #   OKTA_CLIENT_ID=your_client_id OKTA_CLIENT_SECRET=your_secret \
@@ -272,7 +275,7 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "metadata": {
     "annotations": {
       "nginx.ingress.kubernetes.io/auth-url": "http://skypilot-oauth2-proxy.'$NAMESPACE'.svc.cluster.local:4180/oauth2/auth",
-      "nginx.ingress.kubernetes.io/auth-signin": "http://localhost:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
+      "nginx.ingress.kubernetes.io/auth-signin": "http://$host:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
       "nginx.ingress.kubernetes.io/auth-snippet": null,
       "nginx.ingress.kubernetes.io/configuration-snippet": null
     }
