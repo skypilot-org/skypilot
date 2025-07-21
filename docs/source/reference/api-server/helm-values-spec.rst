@@ -187,6 +187,9 @@ Below is the available helm value keys and the default value of each key:
     :ref:`projectId <helm-values-gcpCredentials-projectId>`: null
     :ref:`gcpSecretName <helm-values-gcpCredentials-gcpSecretName>`: gcp-credentials
 
+  :ref:`r2Credentials <helm-values-r2Credentials>`:
+    :ref:`enabled <helm-values-r2Credentials-enabled>`: false
+    :ref:`r2SecretName <helm-values-r2Credentials-r2SecretName>`: r2-credentials
   :ref:`runpodCredentials <helm-values-runpodCredentials>`:
     :ref:`enabled <helm-values-runpodCredentials-enabled>`: false
     :ref:`runpodSecretName <helm-values-runpodCredentials-runpodSecretName>`: runpod-credentials
@@ -1443,6 +1446,42 @@ Default: ``gcp-credentials``
 
   gcpCredentials:
     gcpSecretName: gcp-credentials
+
+.. _helm-values-r2Credentials:
+
+``r2Credentials``
+~~~~~~~~~~~~~~~~~
+
+.. _helm-values-r2Credentials-enabled:
+
+``r2Credentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable R2 credentials for the API server.
+
+.. code-block:: yaml
+
+  r2Credentials:
+    enabled: true
+
+.. _helm-values-r2Credentials-r2SecretName:
+
+``r2Credentials.r2SecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the R2 credentials. Only used if enabled is true. The secret should contain the following keys:
+
+- ``r2.credentials``: R2 credentials file
+- ``accountid``: R2 account ID file
+
+Refer to :ref:`Cloudflare R2 installation <cloudflare-r2-installation>` for more details.
+
+Default: ``r2-credentials``
+
+.. code-block:: yaml
+
+  r2Credentials:
+    r2SecretName: your-r2-credentials-secret-name
 
 .. _helm-values-runpodCredentials:
 

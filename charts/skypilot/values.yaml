@@ -350,6 +350,11 @@ nebiusCredentials:
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
 
+r2Credentials:
+  enabled: false
+  # Name of the secret containing the r2 credentials. Only used if enabled is true.
+  r2SecretName: r2-credentials
+
 # Extra init containers to run before the api container
 extraInitContainers:
 
