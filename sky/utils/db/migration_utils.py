@@ -13,7 +13,7 @@ import sqlalchemy
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '001'
+GLOBAL_USER_STATE_VERSION = '002'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
