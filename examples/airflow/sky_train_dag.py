@@ -169,23 +169,24 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
         'DATA_BUCKET_STORE_TYPE': 's3',
     }
 
+    skypilot_api_server_endpoint = "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}"
     preprocess_task = run_sky_task.override(task_id="data_preprocess")(
         base_path,
         # Or data_preprocessing_gcp_sa.yaml if you want to use a custom GCP service account
         'data_preprocessing.yaml',
-        "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}",
+        skypilot_api_server_endpoint,
         gcp_service_account_json=gcp_service_account_json,
         envs_override=common_envs)
     train_task = run_sky_task.override(task_id="train")(
         base_path,
         'train.yaml',
-        "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}",
+        skypilot_api_server_endpoint,
         gcp_service_account_json=None,
         envs_override=common_envs)
     eval_task = run_sky_task.override(task_id="eval")(
         base_path,
         'eval.yaml',
-        "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}",
+        skypilot_api_server_endpoint,
         gcp_service_account_json=None,
         envs_override=common_envs)
 
