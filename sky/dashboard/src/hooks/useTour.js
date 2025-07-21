@@ -285,6 +285,15 @@ export function TourProvider({ children }) {
         if (anchorPoint) {
           anchorPoint.remove();
         }
+        // Remove user column overlay and related elements
+        const userOverlay = document.getElementById('shepherd-user-column-overlay');
+        if (userOverlay) {
+          userOverlay.remove();
+        }
+        const userAnchorPoint = document.getElementById('shepherd-user-column-anchor');
+        if (userAnchorPoint) {
+          userAnchorPoint.remove();
+        }
         const globalStyle = document.getElementById(
           'shepherd-global-custom-style'
         );
@@ -334,6 +343,15 @@ export function TourProvider({ children }) {
         const anchorPoint = document.getElementById('shepherd-column-anchor');
         if (anchorPoint) {
           anchorPoint.remove();
+        }
+        // Remove user column overlay and related elements
+        const userOverlay = document.getElementById('shepherd-user-column-overlay');
+        if (userOverlay) {
+          userOverlay.remove();
+        }
+        const userAnchorPoint = document.getElementById('shepherd-user-column-anchor');
+        if (userAnchorPoint) {
+          userAnchorPoint.remove();
         }
         const globalStyle = document.getElementById(
           'shepherd-global-custom-style'
@@ -859,6 +877,334 @@ export function TourProvider({ children }) {
               // Remove the anchor point
               const anchorPoint = document.getElementById(
                 'shepherd-column-anchor'
+              );
+              if (anchorPoint) {
+                anchorPoint.remove();
+              }
+
+              // Clean up CSS custom property for dialog height
+              document.documentElement.style.removeProperty(
+                '--shepherd-dialog-height'
+              );
+
+              // Restore mobile menu height
+              const mobileMenu =
+                document.querySelector('.fixed.top-14.left-0.w-64') ||
+                document.querySelector('div.fixed.w-64.bg-white.border-r') ||
+                document.querySelector('.fixed.w-64.transform') ||
+                document.querySelector(
+                  '[class*="fixed"][class*="w-64"][class*="bg-white"]'
+                );
+              if (mobileMenu && mobileMenu instanceof HTMLElement) {
+                mobileMenu.style.removeProperty('height');
+                mobileMenu.style.removeProperty('max-height');
+              }
+
+              // Remove custom styles
+              const globalStyle = document.getElementById(
+                'shepherd-global-custom-style'
+              );
+              if (globalStyle) {
+                globalStyle.remove();
+              }
+            },
+          },
+          buttons: [
+            {
+              text: 'Back',
+              action() {
+                this.back();
+              },
+              classes: 'shepherd-button-secondary',
+            },
+            {
+              text: 'Next',
+              action() {
+                this.next();
+              },
+            },
+          ],
+        },
+        {
+          title: 'Multi-user support',
+          text: `
+              <p>SkyPilot supports multiple users in an organization.</p>
+              <p>Each user can have their own clusters and jobs, with proper access controls.</p>
+            `,
+          attachTo: {
+            element: function () {
+              // Target the anchor point at the bottom edge of the User column highlight
+              const anchorPoint = document.getElementById(
+                'shepherd-user-column-anchor'
+              );
+              if (anchorPoint) {
+                return anchorPoint;
+              }
+
+              // Fallback to the bottom cell of the User column
+              const userHeader = Array.from(
+                document.querySelectorAll('thead th')
+              ).find(
+                (th) => th.textContent && th.textContent.trim() === 'User'
+              );
+
+              if (userHeader) {
+                const table = userHeader.closest('table');
+                const headerRow = userHeader.parentElement;
+                const columnIndex = Array.from(headerRow.children).indexOf(
+                  userHeader
+                );
+
+                if (table) {
+                  // Find the last row with data in this column
+                  const rows = table.querySelectorAll('tbody tr');
+                  let lastCell = null;
+
+                  // Iterate through rows to find the last one with a cell in this column
+                  for (let i = rows.length - 1; i >= 0; i--) {
+                    const cell = rows[i].children[columnIndex];
+                    if (cell) {
+                      lastCell = cell;
+                      break;
+                    }
+                  }
+
+                  if (lastCell) {
+                    return lastCell;
+                  }
+                }
+
+                // Fallback to header if no data cells found
+                return userHeader;
+              }
+
+              // Fallback to table
+              return document.querySelector('table') || 'body';
+            },
+            on: 'bottom',
+            offset: { skidding: 0, distance: 15 },
+          },
+          beforeShowPromise: function () {
+            return new Promise((resolve) => {
+              const setupElements = () => {
+                // Find the User column and scroll if needed, but don't create overlay yet
+                const userHeader = Array.from(
+                  document.querySelectorAll('thead th')
+                ).find(
+                  (th) => th.textContent && th.textContent.trim() === 'User'
+                );
+
+                if (userHeader && userHeader instanceof HTMLElement) {
+                  const table = userHeader.closest('table');
+                  if (table) {
+                    // Check if the user column is visible and scroll if needed
+                    const headerRect = userHeader.getBoundingClientRect();
+                    const viewportWidth = window.innerWidth;
+                    const scrollContainer =
+                      table.closest(
+                        '.overflow-x-auto, .overflow-auto, [style*="overflow"]'
+                      ) || table.parentElement;
+
+                    // If the column is not fully visible (cut off on the right)
+                    if (
+                      headerRect.right > viewportWidth ||
+                      headerRect.left < 0
+                    ) {
+                      if (
+                        scrollContainer &&
+                        scrollContainer instanceof HTMLElement
+                      ) {
+                        // Calculate how much to scroll to center the column
+                        const containerRect =
+                          scrollContainer.getBoundingClientRect();
+                        const targetScrollLeft =
+                          userHeader.offsetLeft -
+                          containerRect.width / 2 +
+                          headerRect.width / 2;
+
+                        // Smooth scroll to make the column visible
+                        scrollContainer.scrollTo({
+                          left: Math.max(0, targetScrollLeft),
+                          behavior: 'smooth',
+                        });
+
+                        // Wait for scroll animation to complete before proceeding
+                        setTimeout(() => {
+                          resolve();
+                        }, 300);
+                        return;
+                      }
+                    }
+                  }
+                }
+                resolve();
+              };
+
+              // Navigate to clusters page if not already there, then set up elements
+              if (window.location.pathname !== '/dashboard/clusters') {
+                router.push('clusters').then(() => {
+                  setTimeout(setupElements, 200); // Reduced delay for faster response
+                });
+              } else {
+                // Already on the right page, setup immediately without navigation delay
+                setupElements();
+              }
+            });
+          },
+          when: {
+            show() {
+              // Add progress indicator (same as default behavior)
+              const currentStep = Shepherd.activeTour?.getCurrentStep();
+              const currentStepElement = currentStep?.getElement();
+              const footer =
+                currentStepElement?.querySelector('.shepherd-footer');
+              const progress = document.createElement('span');
+              progress.className = 'shepherd-progress';
+              progress.innerText = `${
+                Shepherd.activeTour?.steps.indexOf(currentStep) + 1
+              } of ${Shepherd.activeTour?.steps.length}`;
+              footer?.insertBefore(progress, footer.firstChild);
+
+              // Set CSS custom property for dialog height to help mobile menu positioning
+              if (currentStepElement) {
+                const dialogHeight = currentStepElement.offsetHeight;
+                document.documentElement.style.setProperty(
+                  '--shepherd-dialog-height',
+                  `${dialogHeight + 20}px`
+                );
+
+                // Programmatically adjust mobile menu height for better reliability
+                if (window.innerWidth < 768) {
+                  // Try multiple ways to find the mobile menu
+                  let mobileMenu = null;
+                  const selectors = [
+                    '.fixed.top-14.left-0.w-64',
+                    'div.fixed.w-64.bg-white.border-r',
+                    '.fixed.w-64.transform',
+                    '[class*="fixed"][class*="w-64"][class*="bg-white"]',
+                    'div[class*="fixed"][class*="top-14"][class*="left-0"][class*="w-64"]',
+                  ];
+
+                  for (const selector of selectors) {
+                    mobileMenu = document.querySelector(selector);
+                    if (mobileMenu) break;
+                  }
+
+                  // If still not found, try finding by position and size
+                  if (!mobileMenu) {
+                    const allDivs = document.querySelectorAll('div.fixed');
+                    for (const div of allDivs) {
+                      const rect = div.getBoundingClientRect();
+                      if (
+                        rect.width === 256 &&
+                        rect.left === 0 &&
+                        rect.top >= 50
+                      ) {
+                        // w-64 = 256px
+                        mobileMenu = div;
+                        break;
+                      }
+                    }
+                  }
+
+                  if (mobileMenu && mobileMenu instanceof HTMLElement) {
+                    // Calculate available height from top bar to dialog top
+                    const dialogRect =
+                      currentStepElement.getBoundingClientRect();
+                    const topBarHeight = 56;
+                    const availableHeight = dialogRect.top - topBarHeight;
+
+                    // Use direct pixel height instead of calc() to avoid calc issues
+                    mobileMenu.style.setProperty(
+                      'height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
+                    mobileMenu.style.setProperty(
+                      'max-height',
+                      `${availableHeight}px`,
+                      'important'
+                    );
+                  }
+                }
+              }
+
+              // Create the user column overlay AFTER dialog is positioned and layout has settled
+              setTimeout(() => {
+                const userHeader = Array.from(
+                  document.querySelectorAll('thead th')
+                ).find(
+                  (th) => th.textContent && th.textContent.trim() === 'User'
+                );
+
+                if (userHeader && userHeader instanceof HTMLElement) {
+                  const table = userHeader.closest('table');
+                  if (table) {
+                    const headerRow = userHeader.parentElement;
+                    const columnIndex = Array.from(headerRow.children).indexOf(
+                      userHeader
+                    );
+                    const headerRect = userHeader.getBoundingClientRect();
+                    const rows = table.querySelectorAll('tbody tr');
+                    let lastCellRect = headerRect;
+
+                    rows.forEach((row) => {
+                      const cell = row.children[columnIndex];
+                      if (cell) {
+                        lastCellRect = cell.getBoundingClientRect();
+                      }
+                    });
+
+                    // Create a single overlay for the entire User column
+                    const overlay = document.createElement('div');
+                    overlay.id = 'shepherd-user-column-overlay';
+                    overlay.style.position = 'fixed';
+                    overlay.style.left = `${headerRect.left - 4}px`;
+                    overlay.style.top = `${headerRect.top - 4}px`;
+                    overlay.style.width = `${headerRect.width + 8}px`;
+                    overlay.style.height = `${
+                      lastCellRect.bottom - headerRect.top + 8
+                    }px`;
+                    overlay.style.outline = '3px solid #3b82f6';
+                    overlay.style.outlineOffset = '2px';
+                    overlay.style.borderRadius = '8px';
+                    overlay.style.zIndex = '9998';
+                    overlay.style.pointerEvents = 'none';
+                    overlay.style.backgroundColor = 'transparent';
+                    document.body.appendChild(overlay);
+
+                    // Create invisible anchor point at the bottom edge of the highlighted column
+                    const overlayBottom = lastCellRect.bottom + 5; // +4 padding, +2 offset, +3 outline
+                    const anchorPoint = document.createElement('div');
+                    anchorPoint.id = 'shepherd-user-column-anchor';
+                    anchorPoint.style.position = 'fixed';
+                    anchorPoint.style.left = `${
+                      headerRect.left + headerRect.width / 2
+                    }px`;
+                    anchorPoint.style.top = `${overlayBottom}px`;
+                    anchorPoint.style.width = '1px';
+                    anchorPoint.style.height = '1px';
+                    anchorPoint.style.zIndex = '9999';
+                    anchorPoint.style.pointerEvents = 'none';
+                    anchorPoint.style.backgroundColor = 'transparent';
+                    anchorPoint.style.transform = 'translate(-50%, -50%)';
+                    document.body.appendChild(anchorPoint);
+                  }
+                }
+              }, 100); // Small delay to ensure layout has fully settled
+            },
+            hide() {
+              // Remove the User column overlay
+              const overlay = document.getElementById(
+                'shepherd-user-column-overlay'
+              );
+              if (overlay) {
+                overlay.remove();
+              }
+
+              // Remove the anchor point
+              const anchorPoint = document.getElementById(
+                'shepherd-user-column-anchor'
               );
               if (anchorPoint) {
                 anchorPoint.remove();
