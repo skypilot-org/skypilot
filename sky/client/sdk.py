@@ -1854,7 +1854,7 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
     return server_common.get_request_id(response)
 
 
-def _local_api_server_running(kill: bool=False) -> bool:
+def _local_api_server_running(kill: bool = False) -> bool:
     """Checks if the local api server is running."""
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
