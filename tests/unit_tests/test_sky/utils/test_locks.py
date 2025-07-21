@@ -7,8 +7,8 @@ import pytest
 
 from sky import global_user_state
 from sky.skylet import constants
-from sky.utils import db_utils
 from sky.utils import locks
+from sky.utils.db import db_utils
 
 
 class TestLockTimeout:
