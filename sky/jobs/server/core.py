@@ -87,7 +87,8 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
-def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
+def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
+                              job_id: Optional[int] = None) -> Optional[int]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -100,19 +101,22 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag') -> Optional[int]:
         return None
 
     # Create local directory for the managed job.
+    # we should have one if we were in consolidation mode
+    assert job_id is not None
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
-    consolidation_mode_job_id = managed_job_state.set_job_info_without_job_id(
-        dag.name,
+    managed_job_state.set_job_info(
+        job_id=job_id,
+        name=dag.name,
         workspace=skypilot_config.get_active_workspace(
             force_user_workspace=True),
         entrypoint=common_utils.get_current_command())
     for task_id, task in enumerate(dag.tasks):
         resources_str = backend_utils.get_task_resources_str(
             task, is_managed_job=True)
-        managed_job_state.set_pending(consolidation_mode_job_id, task_id,
+        managed_job_state.set_pending(job_id, task_id,
                                       task.name, resources_str,
                                       task.metadata_json)
-    return consolidation_mode_job_id
+    return job_id
 
 
 @timeline.event
@@ -121,6 +125,7 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
+    job_id: Optional[int] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a managed job.
@@ -281,7 +286,8 @@ def launch(
             controller=controller,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-        consolidation_mode_job_id = _maybe_submit_job_locally(prefix, dag)
+        consolidation_mode_job_id = _maybe_submit_job_locally(
+            prefix, dag, job_id)
 
         # This is only needed for non-consolidation mode. For consolidation
         # mode, the controller uses the same catalog as API server.

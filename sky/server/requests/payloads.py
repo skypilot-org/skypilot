@@ -470,6 +470,19 @@ class JobsLaunchBody(RequestBody):
         return kwargs
 
 
+class JobsLaunchBodyInternal(RequestBody):
+    """The request body for the jobs launch endpoint."""
+    task: str
+    name: Optional[str]
+    job_id: Optional[int] = None
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        kwargs['task'] = common.process_mounts_in_task_on_api_server(
+            self.task, self.env_vars, workdir_only=False)
+        return kwargs
+
+
 class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False

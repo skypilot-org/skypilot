@@ -20,10 +20,26 @@ router = fastapi.APIRouter()
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
+    import sky.jobs.utils as managed_job_utils  # pylint: disable=import-outside-toplevel
+    import sky.jobs.state as jobs_state  # pylint: disable=import-outside-toplevel
+    if (managed_job_utils.is_consolidation_mode()):
+        job_id = jobs_state.reserve_job_id()
+        logger.debug(f'Reserved job id: {job_id}')
+        jobs_launch_body_internal = payloads.JobsLaunchBodyInternal(
+            job_id=job_id,
+            task=jobs_launch_body.task,
+            name=jobs_launch_body.name,
+        )
+    else:
+        jobs_launch_body_internal = payloads.JobsLaunchBodyInternal(
+            job_id=1,
+            task=jobs_launch_body.task,
+            name=jobs_launch_body.name,
+        )
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.launch',
-        request_body=jobs_launch_body,
+        request_body=jobs_launch_body_internal,
         func=core.launch,
         schedule_type=api_requests.ScheduleType.LONG,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
