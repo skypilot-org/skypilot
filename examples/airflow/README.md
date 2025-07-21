@@ -216,6 +216,7 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
         envs_override=common_envs)
 
     ...
+
     bucket_uuid >> gcp_service_account_json >> preprocess_task >> train_task >> eval_task
 ```
 
