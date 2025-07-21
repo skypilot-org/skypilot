@@ -684,9 +684,13 @@ def test_helm_deploy_gke(request):
 
     helm_version = request.config.getoption('--helm-version')
     package_name = request.config.getoption('--helm-package')
-    test = smoke_tests_utils.Test('helm_deploy_gke', [
-        f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
-    ])
+    test = smoke_tests_utils.Test(
+        'helm_deploy_gke',
+        [
+            f'bash tests/kubernetes/scripts/helm_gcp.sh {package_name} {helm_version}',
+        ],
+        # GKE termination requires longer timeout.
+        timeout=30 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
