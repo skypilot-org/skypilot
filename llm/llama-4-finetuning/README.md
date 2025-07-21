@@ -103,7 +103,14 @@ run: |
     
 </details>
 
+Run the following on your local machine:
+
 ```bash
+# Download the files for Llama 4 finetuning
+git clone https://github.com/skypilot-org/skypilot
+cd skypilot/llm/llama-4-finetuning
+
+export HF_TOKEN=xxxx
 sky launch -c maverick-torchtune llama-4-maverick-sft.yaml \
   --env HF_TOKEN
 ```
