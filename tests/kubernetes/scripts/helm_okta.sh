@@ -93,6 +93,17 @@ if [ -f /.dockerenv ]; then
     echo "ℹ️  Running inside Docker container"
 fi
 
+# Determine the appropriate hostname for accessing the cluster
+if [ -f /.dockerenv ]; then
+    # Running inside Docker container, use host.docker.internal to access host
+    CLUSTER_HOST="host.docker.internal"
+    echo "ℹ️  Using host.docker.internal to access kind cluster from container"
+else
+    # Running on host, use localhost
+    CLUSTER_HOST="localhost"
+    echo "ℹ️  Using localhost to access kind cluster from host"
+fi
+
 # Verify that nginx ingress controller is already running (installed by sky local up)
 echo "Verifying nginx ingress controller is running..."
 if ! kubectl get pods -n ingress-nginx -l app.kubernetes.io/component=controller --no-headers | grep -q "Running"; then
@@ -219,7 +230,7 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
       {
-        "host": "localhost",
+        "host": "'$CLUSTER_HOST'",
         "http": {
           "paths": [
             {
@@ -242,7 +253,7 @@ kubectl patch ingress skypilot-ingress -n $NAMESPACE --type='merge' -p='{
   "metadata": {
     "annotations": {
       "nginx.ingress.kubernetes.io/auth-url": "http://skypilot-oauth2-proxy.'$NAMESPACE'.svc.cluster.local:4180/oauth2/auth",
-      "nginx.ingress.kubernetes.io/auth-signin": "http://localhost:'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
+      "nginx.ingress.kubernetes.io/auth-signin": "http://'$CLUSTER_HOST':'$NODEPORT'/oauth2/start?rd=$escaped_request_uri",
       "nginx.ingress.kubernetes.io/auth-snippet": null,
       "nginx.ingress.kubernetes.io/configuration-snippet": null
     }
@@ -254,7 +265,7 @@ kubectl patch ingress skypilot-oauth2-proxy -n $NAMESPACE --type='merge' -p='{
   "spec": {
     "rules": [
       {
-        "host": "localhost",
+        "host": "'$CLUSTER_HOST'",
         "http": {
           "paths": [
             {
@@ -281,7 +292,7 @@ echo "OAuth2 proxy ingress configuration updated ✓"
 echo "Getting API server URL..."
 # For kind clusters, use localhost with NodePort since LoadBalancer doesn't get external IP
 # The nginx ingress controller service from sky local up is exposed via NodePort
-ENDPOINT=http://localhost:${NODEPORT}
+ENDPOINT=http://${CLUSTER_HOST}:${NODEPORT}
 
 echo "API server endpoint: $ENDPOINT"
 
