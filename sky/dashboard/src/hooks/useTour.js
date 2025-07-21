@@ -462,7 +462,7 @@ export function TourProvider({ children }) {
 
               if (router.pathname !== '/dashboard/clusters') {
                 tourNavigatingRef.current = true;
-                router.push('clusters').then(() => {
+                router.push('/clusters').then(() => {
                   tourNavigatingRef.current = false;
                   setTimeout(setupClustersStep, 200); // Reduced delay for faster response
                 });
@@ -779,7 +779,7 @@ export function TourProvider({ children }) {
               // Navigate to clusters page if not already there, then set up elements
               if (window.location.pathname !== '/dashboard/clusters') {
                 tourNavigatingRef.current = true;
-                router.push('clusters').then(() => {
+                router.push('/clusters').then(() => {
                   tourNavigatingRef.current = false;
                   setTimeout(setupElements, 200); // Reduced delay for faster response
                 });
@@ -1141,7 +1141,7 @@ export function TourProvider({ children }) {
               // Navigate to clusters page if not already there, then set up elements
               if (window.location.pathname !== '/dashboard/clusters') {
                 tourNavigatingRef.current = true;
-                router.push('clusters').then(() => {
+                router.push('/clusters').then(() => {
                   tourNavigatingRef.current = false;
                   setTimeout(setupElements, 200); // Reduced delay for faster response
                 });
