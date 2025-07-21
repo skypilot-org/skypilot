@@ -267,7 +267,8 @@ def get_cloud_config_value_from_dict(
                 'Nebius configuration is using the legacy format. \n'
                 'This format will be deprecated after 0.11.0, refer to '
                 '`https://docs.skypilot.co/en/latest/reference/config.html#nebius` '  # pylint: disable=line-too-long
-                'for the new format. Please use `region_configs` to specify region specific configuration.')
+                'for the new format. Please use `region_configs` to specify region specific configuration.'
+            )
     # if no override found for specified region
     general_config = input_config.get_nested(keys=(cloud,) + keys,
                                              default_value=default_value,
