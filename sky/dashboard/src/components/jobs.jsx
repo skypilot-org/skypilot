@@ -1057,7 +1057,7 @@ export function ManagedJobsTable({
               {loading || isInitialLoad ? (
                 <TableRow>
                   <TableCell
-                    colSpan={12}
+                    colSpan={15}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -1176,7 +1176,7 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={12}
+                          colSpan={15}
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1185,7 +1185,7 @@ export function ManagedJobsTable({
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-6">
+                  <TableCell colSpan={15} className="text-center py-6">
                     <div className="flex flex-col items-center space-y-4">
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
