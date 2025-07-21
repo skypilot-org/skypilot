@@ -227,7 +227,7 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # Choose General Purpose instance types
     assert 'm6i.2xlarge' in stdout  # AWS, 8 vCPUs, 32 GB memory
     assert 'Standard_D8s_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
-    assert 'n2-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
+    assert 'n4-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
 
     _test_resources_launch(memory=32)
     stdout, _ = capfd.readouterr()
@@ -235,14 +235,14 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     # is specified
     assert 'r6i.xlarge' in stdout  # AWS, 4 vCPUs, 32 GB memory
     assert 'Standard_E4s_v5' in stdout  # Azure, 4 vCPUs, 32 GB memory
-    assert 'n2-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
+    assert 'n4-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
 
     _test_resources_launch(memory='64+')
     stdout, _ = capfd.readouterr()
     # Choose memory-optimized instance types
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
-    assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
+    assert 'n4-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
     assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
 
     _test_resources_launch(cpus='4+', memory='4+')

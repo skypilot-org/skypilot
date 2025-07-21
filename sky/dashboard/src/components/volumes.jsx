@@ -292,118 +292,120 @@ function VolumesTable({
   return (
     <div>
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('name')}
-              >
-                Name{getSortDirection('name')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('size')}
-              >
-                Size{getSortDirection('size')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('user_name')}
-              >
-                User{getSortDirection('user_name')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('last_attached_at')}
-              >
-                Last Use{getSortDirection('last_attached_at')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('type')}
-              >
-                Type{getSortDirection('type')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('usedby_clusters')}
-              >
-                Used By{getSortDirection('usedby_clusters')}
-              </TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && isInitialLoad ? (
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
               <TableRow>
-                <TableCell
-                  colSpan={11}
-                  className="text-center py-6 text-gray-500"
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('name')}
                 >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
+                  Name{getSortDirection('name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('status')}
+                >
+                  Status{getSortDirection('status')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('size')}
+                >
+                  Size{getSortDirection('size')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('user_name')}
+                >
+                  User{getSortDirection('user_name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('last_attached_at')}
+                >
+                  Last Use{getSortDirection('last_attached_at')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('type')}
+                >
+                  Type{getSortDirection('type')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('usedby_clusters')}
+                >
+                  Used By{getSortDirection('usedby_clusters')}
+                </TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
-              paginatedData.map((volume) => (
-                <TableRow key={volume.name}>
-                  <TableCell className="font-medium">{volume.name}</TableCell>
-                  <TableCell>{volume.infra || 'N/A'}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={volume.status} />
-                  </TableCell>
-                  <TableCell>{formatSize(volume.size)}</TableCell>
-                  <TableCell>{volume.user_name || 'N/A'}</TableCell>
-                  <TableCell>
-                    {formatTimestamp(volume.last_attached_at)}
-                  </TableCell>
-                  <TableCell>{volume.type || 'N/A'}</TableCell>
-                  <TableCell>
-                    <UsedByCell
-                      clusters={volume.usedby_clusters}
-                      pods={volume.usedby_pods}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onDeleteVolume(volume)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      title="Delete volume"
-                    >
-                      <Trash2Icon className="w-4 h-4" />
-                    </Button>
+            </TableHeader>
+            <TableBody>
+              {loading && isInitialLoad ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={11}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
                   </TableCell>
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={11}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No volumes found
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              ) : paginatedData.length > 0 ? (
+                paginatedData.map((volume) => (
+                  <TableRow key={volume.name}>
+                    <TableCell className="font-medium">{volume.name}</TableCell>
+                    <TableCell>{volume.infra || 'N/A'}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={volume.status} />
+                    </TableCell>
+                    <TableCell>{formatSize(volume.size)}</TableCell>
+                    <TableCell>{volume.user_name || 'N/A'}</TableCell>
+                    <TableCell>
+                      {formatTimestamp(volume.last_attached_at)}
+                    </TableCell>
+                    <TableCell>{volume.type || 'N/A'}</TableCell>
+                    <TableCell>
+                      <UsedByCell
+                        clusters={volume.usedby_clusters}
+                        pods={volume.usedby_pods}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onDeleteVolume(volume)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Delete volume"
+                      >
+                        <Trash2Icon className="w-4 h-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={11}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    No volumes found
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}
