@@ -1635,7 +1635,7 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
-  }, [isFirstVisit, markTourCompleted, tourAutoStarted]);
+  }, [isFirstVisit, tourAutoStarted]);
 
   const completeTour = () => {
     if (tourRef.current) {
