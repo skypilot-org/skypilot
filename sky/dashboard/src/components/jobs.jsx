@@ -1031,6 +1031,24 @@ export function ManagedJobsTable({
                 >
                   Recoveries{getSortDirection('recoveries')}
                 </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('pool')}
+                >
+                  Worker Pool{getSortDirection('pool')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('current_cluster_name')}
+                >
+                  Worker Cluster{getSortDirection('current_cluster_name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('job_id_on_pm')}
+                >
+                  Worker Job ID{getSortDirection('job_id_on_pm')}
+                </TableHead>
                 <TableHead>Details</TableHead>
                 <TableHead>Logs</TableHead>
               </TableRow>
@@ -1132,6 +1150,9 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
+                        <TableCell>{item.pool || '-'}</TableCell>
+                        <TableCell>{item.current_cluster_name || '-'}</TableCell>
+                        <TableCell>{item.job_id_on_pm || '-'}</TableCell>
                         <TableCell>
                           {item.details ? (
                             <TruncatedDetails
