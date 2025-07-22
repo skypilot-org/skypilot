@@ -88,6 +88,7 @@ def run_sky_task(base_path: str,
 
     # Set the SkyPilot API server endpoint
     os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = skypilot_api_server_endpoint
+    sky.reload_config()
     sky.api_login(skypilot_api_server_endpoint)
 
     original_cwd = os.getcwd()
