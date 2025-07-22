@@ -989,6 +989,33 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
 
 
 @_init_db
+def set_pending_cancelled(job_id: int):
+    """Set the job as pending cancelled, if it is in non-terminal states."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Subquery to get the spot_job_ids that match the joined condition
+        subquery = session.query(spot_table.c.job_id).join(
+            job_info_table,
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id).filter(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                sqlalchemy.or_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.WAITING.value,
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.INACTIVE.value,
+                ),
+            ).subquery()
+
+        count = session.query(spot_table).filter(
+            spot_table.c.job_id.in_(subquery)).update(
+                {spot_table.c.status: ManagedJobStatus.CANCELLED.value},
+                synchronize_session=False)
+        session.commit()
+        return count > 0
+
+
+@_init_db
 def set_cancelled(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 

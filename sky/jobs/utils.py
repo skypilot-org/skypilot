@@ -651,6 +651,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
+        elif job_status == managed_job_state.ManagedJobStatus.PENDING:
+            # the if is a short circuit, this will be atomic.
+            cancelled = managed_job_state.set_pending_cancelled(job_id)
+            if cancelled:
+                cancelled_job_ids.append(job_id)
+                continue
 
         update_managed_jobs_statuses(job_id)
 
