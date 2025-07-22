@@ -285,12 +285,10 @@ def test_cookies_set_with_no_file(monkeypatch):
 
     monkeypatch.setattr('sky.server.common.get_api_cookie_jar_path',
                         lambda: temp_cookie_path)
-    cookie = _create_test_cookie(name='test-cookie-2',
-                                          value='test-value-2')
+    cookie = _create_test_cookie(name='test-cookie-2', value='test-value-2')
     cookie_jar = requests.cookies.RequestsCookieJar()
     cookie_jar.set_cookie(cookie)
-    common.set_api_cookie_jar(cookie_jar,
-                              create_if_not_exists=True)
+    common.set_api_cookie_jar(cookie_jar, create_if_not_exists=True)
 
     assert temp_cookie_path.exists()
 
