@@ -1,6 +1,7 @@
 """Constants for the database schemas."""
 
 import contextlib
+import logging
 import os
 
 from alembic import command as alembic_command
@@ -64,6 +65,10 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine,
         alembic_config: Alembic configuration object
         target_revision: Target revision to upgrade to (e.g., '001')
     """
+    # set alembic logger to warning level
+    alembic_logger = logging.getLogger('alembic')
+    alembic_logger.setLevel(logging.WARNING)
+
     current_rev = None
 
     # Get the current revision from the database
