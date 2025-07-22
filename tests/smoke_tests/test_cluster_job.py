@@ -2000,7 +2000,8 @@ def test_remote_server_api_login():
     config_path = skypilot_config._GLOBAL_CONFIG_PATH
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
     # Stop the local API server; this test is for remote server only.
-    # Only one test runs at a time in the container, so stopping the server is safe.
+    # Only one test runs at a time in the container, so stopping the server won't affect other tests
+    # in buildkite env, might affect local env if we run multiple tests locally at the same time.
     subprocess.run(['sky', 'api', 'stop'], check=True)
 
     test = smoke_tests_utils.Test(
