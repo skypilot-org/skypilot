@@ -12,7 +12,6 @@ import subprocess
 import time
 import typing
 import sys
-from importlib import resources
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
@@ -299,23 +298,6 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
     return decorator
 
-
-def _get_binary_path(binary_name: str) -> str:
-    """Returns the path to the binary based on the platform."""
-    if sys.platform == 'win32' and binary_name in ("nc", "socat"):
-        try:
-            # Use importlib.resources.files which returns a Traversable
-            path = (resources.files('sky') / 'binaries' / 'windows' / 'amd64' /
-                    f'{binary_name}.exe')
-            if path.is_file():
-                return str(path)
-        except (ImportError, FileNotFoundError):
-            # Fallback to PATH if 'sky' package resources can't be found
-            # or the file doesn't exist.
-            pass
-        # If bundled binary is not found, fall back to checking the system PATH.
-        return binary_name
-    return binary_name
 
 class GPULabelFormatter:
     """Base class to define a GPU label formatter for a Kubernetes cluster
@@ -2498,8 +2480,8 @@ def check_port_forward_mode_dependencies(
     reasons = []
     required_binaries = []
 
-    socat_cmd = _get_binary_path('socat')
-    nc_cmd = _get_binary_path('nc')
+    socat_cmd = common_utils.get_utility_binary_path('socat')
+    nc_cmd = common_utils.get_utility_binary_path('nc')
 
     # Ensure socat is installed
     try:

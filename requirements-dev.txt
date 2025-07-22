@@ -51,3 +51,4 @@ psycopg2-binary==2.9.10
 # For helm okta test
 selenium==4.33.0
 webdriver-manager==4.0.2
+filelock

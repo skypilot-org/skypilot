@@ -335,7 +335,7 @@ def path_size_megabytes(path: str) -> int:
             # Without quoting rsync fails.
             git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
                 shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
-    rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+    rsync_command = (f'{common_utils.get_utility_binary_path("rsync")} {command_runner.RSYNC_DISPLAY_OPTION} '
                      f'{rsync_filter} '
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
