@@ -1071,3 +1071,4 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
+    Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>
