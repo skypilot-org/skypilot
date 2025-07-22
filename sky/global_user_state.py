@@ -17,7 +17,6 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-from alembic import command as alembic_command
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -243,8 +242,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
         engine, migration_utils.GLOBAL_USER_STATE_DB_NAME)
     # pylint: disable=line-too-long
     alembic_config.config_ini_section = migration_utils.GLOBAL_USER_STATE_DB_NAME
-    alembic_command.upgrade(alembic_config,
-                            migration_utils.GLOBAL_USER_STATE_VERSION)
+    migration_utils.safe_alembic_upgrade(
+        engine, alembic_config, migration_utils.GLOBAL_USER_STATE_VERSION)
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
