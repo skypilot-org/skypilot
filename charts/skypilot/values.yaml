@@ -350,6 +350,12 @@ lambdaCredentials:
   # Name of the secret containing the Lambda credentials. Only used if enabled is true.
   lambdaSecretName: lambda-credentials
 
+# Populate Vast credentials from the secret with key `api_key`
+vastCredentials:
+  enabled: false
+  # Name of the secret containing the Vast credentials. Only used if enabled is true.
+  vastSecretName: vast-credentials
+
 # Populate Nebius credentials from the secret with nebius credentials.
 nebiusCredentials:
   enabled: false

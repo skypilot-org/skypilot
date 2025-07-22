@@ -440,6 +440,43 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
 
+    .. tab-item:: Vast
+        :sync: vast-creds-tab
+
+        SkyPilot API server uses an **API key** to authenticate with Vast. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console and get your **API key**.
+
+        Once the key is obtained, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic vast-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Vast credentials by setting ``vastCredentials.enabled=true``
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set vastCredentials.enabled=true
+
+        .. dropdown:: Use existing Vast credentials
+
+            You can also set the following values to use a secret that already contains your Vast credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set vastCredentials.enabled=true \
+                    --set vastCredentials.vastSecretName=your_secret_name
+
+
     .. tab-item:: SSH Node Pools
         :sync: ssh-node-pools-tab
 
