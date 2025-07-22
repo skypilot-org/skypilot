@@ -252,8 +252,9 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(endpoint: Optional[str] = None):
+    server_url = endpoint if endpoint is not None else get_server_url()
+    return server_url in AVAILABLE_LOCAL_API_SERVER_URLS
 
 
 def _handle_non_200_server_status(
@@ -562,7 +563,7 @@ def check_server_healthy(
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
         msg = api_server_info.error
-        if is_api_server_local():
+        if is_api_server_local(endpoint):
             # For local server, just hint user to restart the server to get
             # a consistent version.
             msg = _LOCAL_API_SERVER_RESTART_HINT
