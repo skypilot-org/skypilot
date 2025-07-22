@@ -131,6 +131,21 @@ Behind the scenes, the `run_sky_task` uses the Airflow native [PythonVirtualenvO
 
 Note: We need to run the task in a virtual environment as there's a dependency conflict between the latest `skypilot` and `airflow` Python package.
 
+```python
+@task.virtualenv(
+    python_version='3.11',
+    requirements=['skypilot-nightly[gcp,aws,kubernetes]'],
+    system_site_packages=False,
+)
+def run_sky_task(base_path: str,
+                 yaml_path: str,
+                 skypilot_api_server_endpoint: str,
+                 gcp_service_account_json: Optional[str] = None,
+                 envs_override: dict = None,
+                 git_branch: str = None):
+  ...
+```
+
 The task YAML files can be sourced in two ways:
 
 1. **From a Git repository** (as shown above):
