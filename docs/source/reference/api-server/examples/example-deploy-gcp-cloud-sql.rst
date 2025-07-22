@@ -18,8 +18,8 @@ Step 1: Create a cloud SQL instance
 - Go to the `Cloud SQL console <https://console.cloud.google.com/sql/instances>`_
 - Click on "Create instance"
 - Select "PostgreSQL" as the database engine
-- Set the instance ID to 'cloud-sql-skypilot-instance'
-- Set the password for the 'postgres' user.
+- Set the instance ID to ``cloud-sql-skypilot-instance``
+- Set the password for the ``postgres`` user.
 - Select the region (and zone if applicable) where you want to create the instance. The region / zone of the database should match that of the GKE cluster.
 - Click on "Create Instance"
 
@@ -50,11 +50,11 @@ Step 3: Create a service account to give access to the cloud SQL instance
 
 In this step, a service account is created to give the API server access to the Cloud SQL instance.
 
-- Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the `IAM and Admin`` console
+- Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the ``IAM and Admin`` console
 - Click on "Create Service Account"
-- Set the service account name and ID to 'skypilot-cloud-sql-access'
+- Set the service account name and ID to ``skypilot-cloud-sql-access``
 - Click on "Create and Continue" to move to the Permissions page.
-- Click on "Select a member" and add "Cloud SQL Client" as the role.
+- Click on "Select a member" and add ``Cloud SQL Client`` as the role.
 - Click on "Continue", then "Done" to create the service account.
 
 Step 4: Add in IAM policy binding to the service account
