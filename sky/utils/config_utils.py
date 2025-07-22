@@ -267,9 +267,9 @@ def get_cloud_config_value_from_dict(
                 override_configs=override_configs)
             if per_context_config is not None:
                 logger.info(
-                    'Nebius configuration is using the legacy format. \n'
+                    f'{cloud} configuration is using the legacy format. \n'
                     'This format will be deprecated after 0.11.0, refer to '
-                    '`https://docs.skypilot.co/en/latest/reference/config.html#nebius` '  # pylint: disable=line-too-long
+                    '`https://docs.skypilot.co/en/latest/reference/config.html` '  # pylint: disable=line-too-long
                     'for the new format. Please use `region_configs` to specify region specific configuration.'
                 )
     # if no override found for specified region
