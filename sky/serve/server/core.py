@@ -83,10 +83,9 @@ def up(
 
 @usage_lib.entrypoint
 def update(
-    task: 'sky.Task',
-    service_name: str,
-    mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
-) -> None:
+        task: 'sky.Task',
+        service_name: str,
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
     """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -174,7 +173,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 @usage_lib.entrypoint
 def status(
     service_names: Optional[Union[str,
-                                  List[str]]] = None,) -> List[Dict[str, Any]]:
+                                  List[str]]] = None) -> List[Dict[str, Any]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -213,7 +212,6 @@ def status(
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
             'endpoint': (str) endpoint of the replica,
-            'used_by': (int) managed job id of the replica,
         }
 
     For possible service statuses and replica statuses, please refer to

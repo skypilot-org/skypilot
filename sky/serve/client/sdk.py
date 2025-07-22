@@ -94,7 +94,7 @@ def update(
 def down(
     service_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
-    purge: bool = False,
+    purge: bool = False
 ) -> server_common.RequestId:
     """Tears down a service.
 
@@ -105,7 +105,6 @@ def down(
         all: Whether to terminate all services.
         purge: Whether to terminate services in a failed status. These services
           may potentially lead to resource leaks.
-        pool: Whether to terminate a pool or service.
 
     Returns:
         The request ID of the down request.
@@ -158,7 +157,8 @@ def terminate_replica(service_name: str, replica_id: int,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def status(
-    service_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
+        service_names: Optional[Union[str,
+                                      List[str]]]) -> server_common.RequestId:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
