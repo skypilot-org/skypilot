@@ -121,7 +121,8 @@ class MutatedUserRequest:
                 dict(self.skypilot_config),)).model_dump_json()
 
     @classmethod
-    def decode(cls, mutated_user_request_body: str, original_request: UserRequest) -> 'MutatedUserRequest':
+    def decode(cls, mutated_user_request_body: str,
+               original_request: UserRequest) -> 'MutatedUserRequest':
         mutated_user_request_body = _MutatedUserRequestBody.model_validate_json(
             mutated_user_request_body)
         task = sky.Task.from_yaml_config(
@@ -248,7 +249,8 @@ class RestfulAdminPolicy(PolicyTemplate):
                     f'{self.policy_url}: {e}') from None
 
         try:
-            mutated_user_request = MutatedUserRequest.decode(response.json(), user_request)
+            mutated_user_request = MutatedUserRequest.decode(
+                response.json(), user_request)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.RestfulPolicyError(
