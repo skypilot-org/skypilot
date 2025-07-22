@@ -2126,11 +2126,6 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
-    if _local_api_server_running():
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Local API server is running. '
-                               'Stop it with `sky api stop` first.')
-
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
