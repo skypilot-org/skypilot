@@ -45,6 +45,7 @@ def _load_task_and_apply_policy(
     This function is copied from tests/unit_tests/test_admin_policy.py
     to avoid import path complexity while reusing the same proven pattern.
     """
+
     os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
