@@ -425,8 +425,8 @@ def _execute_dag(
                 retry_until_up=retry_until_up,
                 skip_unnecessary_provisioning=skip_unnecessary_provisioning)
             if regen_managed_job_id:
-                _managed_job_id = global_user_state.atomic_increment_managed_job_id(
-                )
+                _managed_job_id = (
+                    global_user_state.atomic_increment_managed_job_id())
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '

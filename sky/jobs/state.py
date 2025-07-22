@@ -643,8 +643,8 @@ def reserve_job_id() -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         return session.execute(
-            sqlalchemy.insert(job_info_table).returning(job_info_table.c.spot_job_id)
-        ).scalar()
+            sqlalchemy.insert(job_info_table).returning(
+                job_info_table.c.spot_job_id)).scalar()
 
 
 @_init_db

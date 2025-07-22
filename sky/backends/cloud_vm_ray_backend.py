@@ -3664,18 +3664,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # ssh keep connected after ctrl-c.
                 self.tail_logs(handle, job_id)
 
-    def _add_job(self, handle: CloudVmRayResourceHandle,
-                 job_name: Optional[str], resources_str: str,
-                 metadata: str, managed_job_id: Optional[int] = None
-                ) -> Tuple[int, str]:
+    def _add_job(self,
+                 handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str],
+                 resources_str: str,
+                 metadata: str,
+                 managed_job_id: Optional[int] = None) -> Tuple[int, str]:
         code = job_lib.JobLibCodeGen.add_job(
             job_name=job_name,
             username=common_utils.get_user_hash(),
             run_timestamp=self.run_timestamp,
             resources_str=resources_str,
             metadata=metadata,
-            managed_job_id=managed_job_id
-        )
+            managed_job_id=managed_job_id)
         returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,

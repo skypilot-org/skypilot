@@ -295,15 +295,34 @@ class Request:
             raise
 
 
-def kill_managed_job_requests(managed_job_ids: Optional[List[int]] = None):
+def kill_managed_job_requests(
+    managed_job_ids: Optional[List[int]] = None,
+    all_users: bool = False,
+    name: Optional[str] = None,
+):
     """Kill all pending requests for a managed job."""
-    request_ids = [
-        request_task.request_id for request_task in get_request_tasks(
-            managed_job_ids=managed_job_ids,
-            all_managed_jobs=managed_job_ids is None,
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING])
-    ]
-    kill_requests(request_ids)
+    all_managed_jobs = managed_job_ids is None
+    user_id = common_utils.get_user_hash() if all_users else None
+
+    if name is None:
+        request_ids = [
+            (request_task.request_id, request_task.managed_job_id)
+            for request_task in get_request_tasks(
+                managed_job_ids=managed_job_ids,
+                all_managed_jobs=all_managed_jobs,
+                user_id=user_id,
+                status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+        ]
+    else:
+        request_ids = [
+            (request_task.request_id, request_task.managed_job_id)
+            for request_task in get_request_tasks(
+                status=[RequestStatus.PENDING, RequestStatus.RUNNING])
+            if request_task.cluster_name == name
+        ]
+
+    kill_requests([e[0] for e in request_ids])
+    return [e[1] for e in request_ids]
 
 
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
@@ -521,6 +540,7 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, 'managed_job_id',
                                  'INTEGER')
 
+
 _DB = None
 _init_db_lock = threading.Lock()
 
@@ -675,7 +695,7 @@ def get_request_tasks(
         # TODO: fix this so there can be no SQL injection
         filters.append(f'managed_job_id IN ({managed_job_ids_str})')
     if all_managed_jobs:
-        filters.append(f'managed_job_id IS NOT NULL')
+        filters.append('managed_job_id IS NOT NULL')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()

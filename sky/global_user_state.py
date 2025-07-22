@@ -1136,20 +1136,18 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 
 def get_job_ids() -> List[int]:
-    import sky.backends
+    # pylint: disable=import-outside-toplevel
     from sky.backends import backend_utils
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+    # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
-    from sky.jobs.server.core import _maybe_restart_controller
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs.server import core as managed_job_core
 
-    try:
-        handle = _maybe_restart_controller(True,
-                                           stopped_message='',
-                                           spinner_message='Finding '
-                                           'largest managed job id')
-        backend = backend_utils.get_backend_from_handle(handle)
-    except sky.exceptions.ClusterDoesNotExist:
-        raise
+    handle = managed_job_core._maybe_restart_controller(  # pylint: disable=protected-access
+        True,
+        stopped_message='',
+        spinner_message='Finding largest managed job id')
+    backend = backend_utils.get_backend_from_handle(handle)
 
     code = managed_job_utils.ManagedJobCodeGen.get_job_table()
     returncode, job_table_payload, stderr = backend.run_on_head(
@@ -1167,8 +1165,9 @@ def get_job_ids() -> List[int]:
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
     return [job['job_id'] for job in jobs]
 
+
 @_init_db
-def initialize_managed_job_id() -> int:
+def initialize_managed_job_id() -> Optional[int]:
     """Initialize the managed job ID.
 
     We must already own the managed job id lock
