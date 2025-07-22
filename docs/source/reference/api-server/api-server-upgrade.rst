@@ -167,7 +167,9 @@ Behavior when the API server is being upgraded:
 
 * For critical ongoing requests (e.g., launching a cluster), it waits for them to finish with a timeout.
 * For non-critical ongoing requests (e.g., log tailing), it cancels them and returns an error to ask the client to retry.
-* For new requests, it returns an error to ask the client to retry.
+* For new requests, it returns an error to ask the client to retry. New requests will be served when the new version of the API server is ready.
+
+To futher reduce the waiting time during upgrade, refer to :ref:`rolling update the API server<sky-api-server-upgrade-strategy>`.
 
 SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., log tailing) will automatically resume:
 
@@ -181,6 +183,64 @@ To ensure that all the regular critical requests can complete within the timeout
 
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.terminationGracePeriodSeconds=300
+
+.. _sky-api-server-upgrade-strategy:
+
+Upgrade strategy
+----------------
+
+By default, the API server is upgraded with the ``Recreate`` strategy, which introduces waiting time for new requests during upgrade. To eliminate the waiting time, you can upgrade the API server with the ``RollingUpdate`` strategy.
+
+.. note::
+
+    ``RollingUpdate`` is an experimental feature with the following known limitations:
+
+    * Command that needs file mount might fail during upgrade, e.g. ``sky launch``;
+    * The CLI might not be able to get log of the request during upgrade.
+
+    
+    
+
+The following table compares the two upgrade strategies:
+
+.. list-table:: Upgrade Strategy Comparison
+   :widths: 25 35 40
+   :header-rows: 1
+
+   * - Aspect
+     - Recreate
+     - RollingUpdate
+   * - **Availability**
+     - Brief downtime during upgrade
+     - Zero downtime
+   * - **Request Handling**
+     - New requests wait until upgrade completes
+     - New requests served continuously by available replicas
+   * - **Database Requirements**
+     - Can use local storage
+     - Must use external persistent database
+   * - **Resource Usage**
+     - Terminates old pod before starting new one
+     - Launches new pod before terminating old one
+   * - **Use Cases**
+     - Development environments, simple setups
+     - Production environments requiring high availability
+
+To use the ``RollingUpdate`` strategy, you need to:
+
+* :ref:`Back the API server with a persistent database <api-server-persistence-db>`;
+* Disable local peristence by setting :ref:`storage.enabled <helm-values-storage-enabled>` to ``false``;
+* Set :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` to ``RollingUpdate``;
+
+Here's an example of deploying the API server with the ``RollingUpdate`` strategy:
+
+.. code-block:: bash
+
+    helm install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set apiService.upgradeStrategy=RollingUpdate \
+      --set storage.enabled=false \
+      --set apiService.dbConnectionSecretName=my-db-secret
+
 
 .. _sky-api-server-api-compatibility:
 
