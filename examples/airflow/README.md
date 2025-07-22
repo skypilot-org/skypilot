@@ -127,16 +127,16 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
     bucket_uuid >> preprocess_task >> train_task >> eval_task
 ```
 
-Behind the scenes, the `run_sky_task` uses the Airflow native [PythonVirtualenvOperator](https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/python.html#pythonvirtualenvoperator) (@task.virtualenv), which creates a Python virtual environment with `skypilot` installed. All SkyPilot API calls are made to the remote API server, which is configured using the `SKYPILOT_API_SERVER_ENDPOINT` variable.
-
-Note: We need to run the task in a virtual environment as there's a dependency conflict between the latest `skypilot` and `airflow` Python package.
+Behind the scenes, the `run_sky_task` uses the Airflow native [PythonVirtualenvOperator](https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/python.html#pythonvirtualenvoperator) (@task.virtualenv), which creates a Python virtual environment with `skypilot` installed. We need to run the task in a virtual environment as there's a dependency conflict between the latest `skypilot` and `airflow` Python package.
 
 ```python
 @task.virtualenv(
     python_version='3.11',
     requirements=['skypilot-nightly[gcp,aws,kubernetes]'],
     system_site_packages=False,
-)
+    templates_dict={
+        'SKYPILOT_API_SERVER_ENDPOINT': "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}",
+    })
 def run_sky_task(...):
     ...
 ```

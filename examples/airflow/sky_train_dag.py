@@ -19,13 +19,15 @@ default_args = {
     python_version='3.11',
     requirements=['skypilot-nightly[gcp,aws,kubernetes]'],
     system_site_packages=False,
-)
+    templates_dict={
+        'SKYPILOT_API_SERVER_ENDPOINT': "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}",
+    })
 def run_sky_task(base_path: str,
                  yaml_path: str,
-                 skypilot_api_server_endpoint: str,
                  gcp_service_account_json: Optional[str] = None,
                  envs_override: dict = None,
-                 git_branch: str = None):
+                 git_branch: str = None,
+                 **kwargs):
     """Generic function to run a SkyPilot task.
 
     This is a blocking call that runs the SkyPilot task and streams the logs.
@@ -35,12 +37,10 @@ def run_sky_task(base_path: str,
     Args:
         base_path: Base path (local directory or git repo URL)
         yaml_path: Path to the YAML file (relative to base_path)
-        skypilot_api_server_endpoint: SkyPilot API server endpoint
         gcp_service_account_json: GCP service account JSON-encoded string
         envs_override: Dictionary of environment variables to override in the task config
         git_branch: Optional branch name to checkout (only used if base_path is a git repo)
     """
-    import json
     import os
     import subprocess
     import tempfile
@@ -87,8 +87,9 @@ def run_sky_task(base_path: str,
         return cluster_name
 
     # Set the SkyPilot API server endpoint
-    os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = skypilot_api_server_endpoint
-    sky.api_login(skypilot_api_server_endpoint)
+    if kwargs['templates_dict']:
+        os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = kwargs['templates_dict'][
+            'SKYPILOT_API_SERVER_ENDPOINT']
 
     original_cwd = os.getcwd()
 
@@ -169,24 +170,20 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
         'DATA_BUCKET_STORE_TYPE': 's3',
     }
 
-    skypilot_api_server_endpoint = "{{ var.value.SKYPILOT_API_SERVER_ENDPOINT }}"
     preprocess_task = run_sky_task.override(task_id="data_preprocess")(
         base_path,
         # Or data_preprocessing_gcp_sa.yaml if you want to use a custom GCP service account
         'data_preprocessing.yaml',
-        skypilot_api_server_endpoint,
         gcp_service_account_json=gcp_service_account_json,
         envs_override=common_envs)
     train_task = run_sky_task.override(task_id="train")(
         base_path,
         'train.yaml',
-        skypilot_api_server_endpoint,
         gcp_service_account_json=None,
         envs_override=common_envs)
     eval_task = run_sky_task.override(task_id="eval")(
         base_path,
         'eval.yaml',
-        skypilot_api_server_endpoint,
         gcp_service_account_json=None,
         envs_override=common_envs)
 
