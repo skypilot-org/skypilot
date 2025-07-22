@@ -27,6 +27,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -62,6 +63,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.OCI()),
     str(clouds.Nebius()),
     cloudflare.NAME,
+    tigris.NAME,
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -93,6 +95,19 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         enabled_clouds.append(cloudflare.NAME)
+
+    # Check Tigris credentials similar to R2
+    try:
+        tigris_is_enabled, _ = tigris.check_storage_credentials()
+        if tigris_is_enabled:
+            enabled_clouds.append(tigris.NAME)
+    except ImportError:
+        # Tigris adaptor not available
+        pass
+    except (AttributeError, ValueError, RuntimeError):
+        # Tigris check failed, skip
+        pass
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -126,6 +141,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    TIGRIS = 'TIGRIS'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -883,7 +899,7 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'tigris'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -908,7 +924,9 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://. Got: {source}')
+                        f'r2://, cos://, oci://, nebius://, tigris://. ' \
+                        f'Got: {source}'''
+                    )
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -923,7 +941,9 @@ class Storage(object):
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius']:
+            if prefix in [
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'tigris'
+            ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -1586,7 +1606,7 @@ class S3CompatibleStore(AbstractStore):
                 if self.__class__.get_store_type() != self.config.store_type:
                     assert self.config.verify_bucket(self.name), (
                         f'Source specified as {self.source},'
-                        f'a {self.config.store_type} '
+                        f',a {self.config.store_type} '
                         f'bucket. {self.config.store_type} Bucket should exist.'
                     )
             elif self.source.startswith('gs://'):
@@ -1620,6 +1640,24 @@ class S3CompatibleStore(AbstractStore):
                 raise NotImplementedError(
                     f'Moving data from OCI to {self.source} is ',
                     'currently not supported.')
+            elif self.source.startswith('nebius://'):
+                assert self.name == data_utils.split_nebius_path(
+                    self.source)[0], (
+                        'Nebius Object Storage is specified as path, the name '
+                        'should be the same as R2 bucket.')
+                assert data_utils.verify_nebius_bucket(self.name), (
+                    f'Source specified as {self.source}, a Nebius Object '
+                    f'Storage bucket. Nebius Object Storage Bucket should '
+                    f'exist.')
+            elif self.source.startswith('tigris://'):
+                assert self.name == TigrisStore.split_tigris_path(
+                    self.source)[0], (
+                        'Tigris Object Storage is specified as path, the name '
+                        'should be the same as Tigris bucket.')
+                assert TigrisStore.verify_tigris_bucket(self.name), (
+                    f'Source specified as {self.source}, a Tigris Object '
+                    f'Storage bucket. Tigris Object Storage Bucket should '
+                    f'exist.')
 
         # Validate name
         self.name = self.validate_name(self.name)
@@ -3551,7 +3589,7 @@ class IBMCosStore(AbstractStore):
                         'should be the same as Nebius Object Storage bucket.')
                 assert data_utils.verify_nebius_bucket(self.name), (
                     f'Source specified as {self.source}, a Nebius Object '
-                    f'Storage  bucket. Nebius Object Storage Bucket should '
+                    f'Storage bucket. Nebius Object Storage Bucket should '
                     f'exist.')
             elif self.source.startswith('cos://'):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
@@ -4558,3 +4596,81 @@ class NebiusStore(S3CompatibleStore):
         return mounting_utils.get_nebius_mount_cmd(nebius.NEBIUS_PROFILE_NAME,
                                                    bucket_name, endpoint_url,
                                                    mount_path, bucket_sub_path)
+
+
+@register_s3_compatible_store
+class TigrisStore(S3CompatibleStore):
+    """TigrisStore inherits from S3CompatibleStore and represents the backend
+    for Tigris Object Storage buckets.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for Tigris Object Storage."""
+        return S3CompatibleConfig(
+            store_type='TIGRIS',
+            url_prefix='tigris://',
+            client_factory=lambda region: cls.create_tigris_client(region or
+                                                                   'auto'),
+            resource_factory=lambda name: tigris.resource('s3').Bucket(name),
+            split_path=cls.split_tigris_path,
+            verify_bucket=cls.verify_tigris_bucket,
+            aws_profile=tigris.TIGRIS_PROFILE_NAME,
+            get_endpoint_url=tigris.create_endpoint,
+            cloud_name=tigris.NAME,
+            default_region='auto',
+            mount_cmd_factory=cls._get_tigris_mount_cmd,
+        )
+
+    @staticmethod
+    def create_tigris_client(region: str = 'auto'):
+        """Helper method that connects to Boto3 client for Tigris Object Storage
+
+        Args:
+          region: str; Region for Tigris is set to auto
+        """
+        return tigris.client('s3', region)
+
+    @staticmethod
+    def split_tigris_path(tigris_path: str) -> Tuple[str, str]:
+        """Splits Tigris Path into Bucket name and Relative Path to Bucket
+
+        Args:
+          tigris_path: str; Tigris Path, e.g. tigris://imagenet/train/
+        """
+        path_parts = tigris_path.replace('tigris://', '').split('/')
+        bucket = path_parts.pop(0)
+        key = '/'.join(path_parts)
+        return bucket, key
+
+    @staticmethod
+    def verify_tigris_bucket(name: str) -> bool:
+        """Helper method that checks if the Tigris bucket exists
+
+        Args:
+          name: str; Name of Tigris Object Storage (without tigris:// prefix)
+        """
+        tigris_s = tigris.resource('s3')
+        bucket = tigris_s.Bucket(name)
+        return bucket in tigris_s.buckets.all()
+
+    @classmethod
+    def _get_tigris_mount_cmd(cls, bucket_name: str, mount_path: str,
+                              bucket_sub_path: Optional[str]) -> str:
+        """Factory method for Tigris mount command."""
+        endpoint_url = tigris.create_endpoint()
+        return mounting_utils.get_tigris_mount_cmd(tigris.TIGRIS_PROFILE_NAME,
+                                                   bucket_name, endpoint_url,
+                                                   mount_path, bucket_sub_path)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """Tigris-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.TIGRIS.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.TIGRIS.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)

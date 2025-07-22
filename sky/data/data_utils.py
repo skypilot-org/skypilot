@@ -23,6 +23,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -623,6 +624,7 @@ class Rclone:
         GCS = 'GCS'
         IBM = 'IBM'
         R2 = 'R2'
+        TIGRIS = 'TIGRIS'
         AZURE = 'AZURE'
 
         def get_profile_name(self, bucket_name: str) -> str:
@@ -640,6 +642,7 @@ class Rclone:
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
+                Rclone.RcloneStores.TIGRIS: 'sky-tigris',
                 Rclone.RcloneStores.AZURE: 'sky-azure'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
@@ -714,6 +717,23 @@ class Rclone:
                     [{rclone_profile_name}]
                     type = s3
                     provider = Cloudflare
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint}
+                    region = auto
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.TIGRIS:
+                tigris_session = tigris.session()
+                tigris_credentials = (
+                    tigris.get_tigris_credentials(tigris_session))
+                endpoint = tigris.create_endpoint()
+                access_key_id = tigris_credentials.access_key
+                secret_access_key = tigris_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
                     access_key_id = {access_key_id}
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint}

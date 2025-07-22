@@ -14,6 +14,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.adaptors import tigris
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -430,6 +431,21 @@ def get_cloud_credential_file_mounts(
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
+
+    # Similar handling for Tigris storage credentials
+    try:
+        tigris_is_enabled, _ = tigris.check_storage_credentials()
+        if tigris_is_enabled:
+            # For Tigris, we use AWS credential files
+            # No need to add separate mounts as it uses existing AWS credentials
+            pass
+    except ImportError:
+        # Tigris adaptor not available
+        pass
+    except (AttributeError, ValueError, RuntimeError):
+        # Tigris check failed, skip
+        pass
+
     return file_mounts
 
 
