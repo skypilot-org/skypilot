@@ -5912,6 +5912,12 @@ def api_login(endpoint: Optional[str], relogin: bool,
     sdk.api_login(endpoint, relogin, service_account_token)
 
 
+@api.command('logout', cls=_DocumentedCodeCommand)
+def api_logout():
+    """Logs out of the api server"""
+    sdk.api_logout()
+
+
 @api.command('info', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
