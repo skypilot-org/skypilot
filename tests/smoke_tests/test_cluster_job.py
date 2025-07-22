@@ -2004,6 +2004,8 @@ def test_remote_server_api_login():
         [
             # Backup existing config file if it exists
             f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
+            # Stop local api server
+            f'sky api stop',
             # Run sky api login
             f'sky api login -e {endpoint}',
             # Echo the config file content to see what was written
