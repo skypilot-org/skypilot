@@ -34,6 +34,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -556,6 +557,16 @@ def queue(refresh: bool,
         logger.error(job_table_payload + stderr)
         raise RuntimeError('Failed to fetch managed jobs with returncode: '
                            f'{returncode}.\n{job_table_payload + stderr}')
+
+    queue_requests = requests.get_jobs_queue_requests()
+    try:
+        queue_requests.sort(key=lambda job: int(job['job_id']))
+    except ValueError:
+        pass
+
+    job_table_payload = message_utils.decode_payload(job_table_payload)
+    queue_requests.extend(job_table_payload)
+    job_table_payload = message_utils.encode_payload(queue_requests)
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
 

@@ -295,6 +295,18 @@ class Request:
             raise
 
 
+def get_jobs_queue_requests() -> List[Dict[str, Any]]:
+    """Get the requests for the jobs queue."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    return managed_job_utils.get_jobs_queue_requests([
+        request_task for request_task in get_request_tasks(
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            all_managed_jobs=True)
+    ])
+
+
 def kill_managed_job_requests(
     managed_job_ids: Optional[List[int]] = None,
     all_users: bool = False,

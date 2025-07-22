@@ -1216,6 +1216,42 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+def get_jobs_queue_requests(job_ids: List[Any]) -> list:
+    """Constructs job dicts for a list of managed job IDs, setting status
+    to 'PENDING'."""
+    jobs = []
+    for request in job_ids:
+        # We only have job_id, so fill what we can
+        job = {
+            'job_id': request.managed_job_id,
+            'task_name': '-',
+            'job_name': '-',
+            'user_hash': request.user_id,
+            'task_id': 0,
+            'resources': '-',
+            'user_name': '-',
+            'workspace':
+                skypilot_config.get_active_workspace(force_user_workspace=True),
+            'submitted_at': None,
+            'start_at': None,
+            'end_at': None,
+            'job_duration': 0,
+            'status': 'PENDING',
+            'schedule_state': 'INACTIVE',
+            'cluster_resources': '-',
+            'cluster_resources_full': '-',
+            'cloud': '-',
+            'region': '-',
+            'zone': '-',
+            'details': None,
+            'failure_reason': None,
+            'priority': None,
+            'recovery_count': 0,
+        }
+        jobs.append(job)
+    return jobs
+
+
 def _get_job_status_from_tasks(
     job_tasks: List[Dict[str, Any]]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
