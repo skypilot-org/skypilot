@@ -36,6 +36,7 @@ from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
@@ -1942,6 +1943,7 @@ def api_start(
     metrics: bool = False,
     metrics_port: Optional[int] = None,
     enable_basic_auth: bool = False,
+    port: int = 46580,
 ) -> None:
     """Starts the API server.
 
@@ -1959,6 +1961,7 @@ def api_start(
         metrics_port: The port to export metrics of the API server.
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
+        port: The port to deploy the API server.
     Returns:
         None
     """
@@ -1967,7 +1970,7 @@ def api_start(
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
-    is_local_api_server = server_common.is_api_server_local()
+    is_local_api_server = server_common.is_server_url_local()
     if not is_local_api_server:
         server_url = server_common.get_server_url()
         with ux_utils.print_exception_no_traceback():
@@ -1978,16 +1981,27 @@ def api_start(
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground,
-                                                   metrics, metrics_port,
+                                                   port, metrics, metrics_port,
                                                    enable_basic_auth)
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
-    api_server_url = server_common.get_server_url(host)
-    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
-                f'{api_server_url}\n'
-                f'{ux_utils.INDENT_LAST_SYMBOL}'
-                f'View API server logs at: {constants.API_SERVER_LOGS}')
+    api_server_url = server_common.get_server_url()
+    api_server_parsed = urlparse.urlparse(api_server_url)
+    if api_server_parsed.port != port:
+        logger.warning(f'{ux_utils.INDENT_SYMBOL}{colorama.Fore.YELLOW}'
+                       'SkyPilot API server already running at '
+                       f'{api_server_url}.\n'
+                       f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.YELLOW}'
+                       f'To run on port {port}, run `sky api stop` and '
+                       f'then `sky api start --port={port}`.'
+                       f'{colorama.Style.RESET_ALL}')
+    else:
+        logger.info(
+            f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
+            f'{api_server_url}\n'
+            f'{ux_utils.INDENT_LAST_SYMBOL}'
+            f'View API server logs at: {constants.API_SERVER_LOGS}')
 
 
 @usage_lib.entrypoint
@@ -2002,7 +2016,18 @@ def api_stop() -> None:
     """
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
-    if not server_common.is_api_server_local():
+    api_server_status = server_common.get_api_server_status()
+    try:
+        if (api_server_status.version is not None and
+                int(api_server_status.version) >= 12):
+            is_local = server_common.is_api_server_local(server_url)
+        else:
+            # either old version, or its unhealthy
+            is_local = server_common.is_server_url_local(server_url)
+    except ValueError:
+        is_local = server_common.is_server_url_local(server_url)
+
+    if not is_local:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Cannot kill the API server at {server_url} because it is not '
@@ -2012,6 +2037,12 @@ def api_stop() -> None:
 
     # Remove the database for requests.
     server_common.clear_local_api_server_database()
+
+    if os.path.exists(server_constants.API_SERVER_PORT_FILE):
+        try:
+            os.remove(server_constants.API_SERVER_PORT_FILE)
+        except (FileNotFoundError, OSError):
+            pass
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
