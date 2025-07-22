@@ -17,7 +17,7 @@ default_args = {
 
 @task.virtualenv(
     python_version='3.11',
-    requirements=['skypilot-nightly[gcp,aws,kubernetes]'],
+    requirements=['skypilot-nightly[gcp,aws,kubernetes]==1.0.0.dev20250720'],
     system_site_packages=False,
 )
 def run_sky_task(base_path: str,
