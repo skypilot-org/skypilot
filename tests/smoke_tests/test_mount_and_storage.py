@@ -199,6 +199,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
 
 
 @pytest.mark.aws
+@pytest.mark.skip(reason='Skip due to AWS AMI selection issue')
 def test_aws_storage_mounts_arm64():
     """Test S3 storage mounting on ARM64 architecture using rclone."""
     name = smoke_tests_utils.get_cluster_name()
