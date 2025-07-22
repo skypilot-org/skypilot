@@ -2089,7 +2089,7 @@ def _clear_api_server_config() -> None:
         config = dict(config)
         del config['api_server']
 
-        common_utils.dump_yaml(str(config_path), config)
+        common_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
 
 
@@ -2126,6 +2126,11 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
+    if _local_api_server_running():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Local API server is running. '
+                               'Stop it with `sky api stop` first.')
+
     # Validate and normalize endpoint
     endpoint = _validate_endpoint(endpoint)
 
@@ -2357,7 +2362,7 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
-    if not server_common.is_api_server_local():
+    if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Local api server cannot be logged out. '
                                'Use `sky api stop` instead.')
@@ -2366,3 +2371,5 @@ def api_logout() -> None:
     server_common.set_api_cookie_jar(cookiejar.MozillaCookieJar(),
                                      create_if_not_exists=False)
     _clear_api_server_config()
+    logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
+                f'{colorama.Style.RESET_ALL}')
