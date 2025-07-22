@@ -177,15 +177,10 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
         gcp_service_account_json=gcp_service_account_json,
         envs_override=common_envs)
     train_task = run_sky_task.override(task_id="train")(
-        base_path,
-        'train.yaml',
-        gcp_service_account_json=None,
-        envs_override=common_envs)
-    eval_task = run_sky_task.override(task_id="eval")(
-        base_path,
-        'eval.yaml',
-        gcp_service_account_json=None,
-        envs_override=common_envs)
+        base_path, 'train.yaml', envs_override=common_envs)
+    eval_task = run_sky_task.override(task_id="eval")(base_path,
+                                                      'eval.yaml',
+                                                      envs_override=common_envs)
 
     # Define the workflow
     bucket_uuid >> gcp_service_account_json >> preprocess_task >> train_task >> eval_task
