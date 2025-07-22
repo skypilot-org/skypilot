@@ -77,8 +77,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # Whether the service is a cluster pool.
     db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
                                  'INTEGER DEFAULT 0')
-    db_utils.add_column_to_table(cursor, conn, 'services', 'pool_yaml',
-                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
