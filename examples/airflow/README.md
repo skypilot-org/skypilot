@@ -137,13 +137,8 @@ Note: We need to run the task in a virtual environment as there's a dependency c
     requirements=['skypilot-nightly[gcp,aws,kubernetes]'],
     system_site_packages=False,
 )
-def run_sky_task(base_path: str,
-                 yaml_path: str,
-                 skypilot_api_server_endpoint: str,
-                 gcp_service_account_json: Optional[str] = None,
-                 envs_override: dict = None,
-                 git_branch: str = None):
-  ...
+def run_sky_task(...):
+    ...
 ```
 
 The task YAML files can be sourced in two ways:
