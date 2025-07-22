@@ -27,7 +27,7 @@ from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
-from sky.utils import common
+from sky.utils import common, locks
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import subprocess_utils
@@ -377,6 +377,10 @@ class InternalRequestDaemon:
 
     def run_event(self):
         """Run the event."""
+        with locks.get_lock(self.id):
+            self._run_event()
+
+    def _run_event(self):
         while True:
             with ux_utils.enable_traceback():
                 try:
