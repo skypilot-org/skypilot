@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import enum
 import os
+import tarfile
 import tempfile
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
@@ -56,6 +57,95 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # cloud as controller.
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
+
+# Configuration for file mount compression
+_COMPRESSION_THRESHOLD_FILE_COUNT = 1  # Compress if more than 1 files
+_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = 50  # Compress if total size > 50MB
+_COMPRESSED_FILE_SUFFIX = '.skypilot.tar.gz'
+
+
+def _should_compress_path(path: str) -> bool:
+    """Determine if a path should be compressed based on file count and size."""
+    expanded_path = os.path.abspath(os.path.expanduser(path))
+    if os.path.isfile(expanded_path):
+        return False  # Single files are handled separately
+
+    if not os.path.isdir(expanded_path):
+        return False
+
+    file_count = 0
+    total_size = 0
+
+    try:
+        for root, _, files in os.walk(expanded_path):
+            file_count += len(files)
+            for file in files:
+                file_path = os.path.join(root, file)
+                if os.path.isfile(file_path):
+                    total_size += os.path.getsize(file_path)
+
+            # Early exit if we exceed thresholds
+            if (file_count >= _COMPRESSION_THRESHOLD_FILE_COUNT or total_size >=
+                    _COMPRESSION_THRESHOLD_TOTAL_SIZE_MB * 1024 * 1024):
+                return True
+
+    except (OSError, IOError):
+        # If we can't access files, don't compress
+        return False
+
+    return False
+
+
+def _create_compressed_archive(source_path: str, output_path: str) -> None:
+    """Create a compressed tar.gz archive from a source path."""
+    source_path = os.path.abspath(os.path.expanduser(source_path))
+
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f'Source path does not exist: {source_path}')
+
+    with tarfile.open(output_path, 'w:gz', format=tarfile.PAX_FORMAT) as tar:
+        if os.path.isfile(source_path):
+            tar.add(source_path, arcname=os.path.basename(source_path))
+        elif os.path.isdir(source_path):
+            for root, dirs, files in os.walk(source_path):
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
+                    arcname = os.path.relpath(dir_path, source_path)
+                    try:
+                        tar.add(dir_path, arcname=arcname)
+                    except (FileNotFoundError, PermissionError, OSError,
+                            tarfile.TarError) as e:
+                        logger.warning(f'Skipping directory {dir_path}: {e}')
+
+                for file_name in files:
+                    file_path = os.path.join(root, file_name)
+                    if os.path.isfile(file_path):
+                        arcname = os.path.relpath(file_path, source_path)
+                        try:
+                            tar.add(file_path, arcname=arcname)
+                        except (FileNotFoundError, PermissionError, OSError,
+                                tarfile.TarError) as e:
+                            logger.warning(f'Skipping file {file_path}: {e}')
+
+
+def _get_decompression_commands(compressed_filename: str) -> List[str]:
+    """ Generate shell commands to:
+    - extract the compressed file (assumed to be in the current directory)
+      into a temporary subdirectory under $PWD,
+    - move its contents back to $PWD (flattened),
+    - and clean up the archive and temporary directory.
+    """
+    archive_base = os.path.splitext(
+        os.path.splitext(compressed_filename)[0])[0]  # strip .tar.gz
+    temp_extract_dir = f'tmp_extract_{archive_base}'
+
+    return [
+        f'mkdir -p "{temp_extract_dir}"',
+        f'tar -xzf "{compressed_filename}" -C "{temp_extract_dir}"',
+        f'rm -f "{compressed_filename}"',
+        f'mv "{temp_extract_dir}"/* .',
+        f'rmdir "{temp_extract_dir}"',
+    ]
 
 
 @dataclasses.dataclass
@@ -929,6 +1019,10 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
+    decompression_commands = []  # Commands to run on remote to decompress files
+    temp_files_to_cleanup = []  # Track temporary files for cleanup
+    temp_folders_to_cleanup = []  # Track temporary folders for cleanup
+    workdir = None
     if task.workdir is not None and isinstance(task.workdir, str):
         workdir = task.workdir
         task.workdir = None
@@ -944,93 +1038,280 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if store_type is not None:
             stores = [store_type]
 
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=workdir,
-            persistent=False,
-            mode=storage_lib.StorageMode.COPY,
-            stores=stores,
-            # Set `_is_sky_managed` to False when `bucket_with_prefix` is
-            # specified, so that the storage is not deleted when job finishes,
-            # but only the sub path is deleted.
-            _is_sky_managed=bucket_wth_prefix is None,
-            _bucket_sub_path=bucket_sub_path)
-        new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
-        # Check of the existence of the workdir in file_mounts is done in
-        # the task construction.
-        logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
-                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+        # Check if workdir should be compressed
+        if _should_compress_path(workdir):
+            # Create compressed archive with proper cleanup
+            temp_archive_folder = tempfile.mkdtemp()
+            temp_archive_fd, temp_archive_path = tempfile.mkstemp(
+                suffix=_COMPRESSED_FILE_SUFFIX, dir=temp_archive_folder)
+            os.close(temp_archive_fd)  # Close file descriptor, keep file
+            temp_files_to_cleanup.append(temp_archive_path)
+            temp_folders_to_cleanup.append(temp_archive_folder)
+            try:
+                _create_compressed_archive(workdir, temp_archive_path)
+                storage_obj = storage_lib.Storage(
+                    name=bucket_name,
+                    source=temp_archive_folder,
+                    persistent=False,
+                    mode=storage_lib.StorageMode.COPY,
+                    stores=stores,
+                    _is_sky_managed=bucket_wth_prefix is None,
+                    _bucket_sub_path=bucket_sub_path)
 
+                # Add file mount for the compressed archive
+                new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
+
+                # Add decompression commands
+                decompression_commands.extend(
+                    _get_decompression_commands(
+                        os.path.basename(temp_archive_path)))
+
+                logger.info(
+                    f'  {colorama.Style.DIM}Workdir (compressed): {workdir!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to compress workdir {workdir}: {e}. '
+                               'Falling back to uncompressed upload.')
+                # Remove failed temp file from cleanup list and delete it
+                temp_files_to_cleanup.remove(temp_archive_path)
+                temp_folders_to_cleanup.remove(temp_archive_folder)
+                try:
+                    os.unlink(temp_archive_path)
+                    os.rmdir(temp_archive_folder)
+                except (FileNotFoundError, PermissionError, OSError):
+                    pass
+                # Fall back to original logic
+                storage_obj = storage_lib.Storage(
+                    name=bucket_name,
+                    source=workdir,
+                    persistent=False,
+                    mode=storage_lib.StorageMode.COPY,
+                    stores=stores,
+                    _is_sky_managed=bucket_wth_prefix is None,
+                    _bucket_sub_path=bucket_sub_path)
+                new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
+        else:
+            # Use original logic for small workdirs
+            storage_obj = storage_lib.Storage(
+                name=bucket_name,
+                source=workdir,
+                persistent=False,
+                mode=storage_lib.StorageMode.COPY,
+                stores=stores,
+                # Set `_is_sky_managed` to False when `bucket_with_prefix` is
+                # specified, so that the storage is not deleted when job ends,
+                # but only the sub path is deleted.
+                _is_sky_managed=bucket_wth_prefix is None,
+                _bucket_sub_path=bucket_sub_path)
+            new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
+            # Check of the existence of the workdir in file_mounts is done in
+            # the task construction.
+            logger.info(
+                f'  {colorama.Style.DIM}Workdir: {workdir!r} '
+                f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
     # TODO(zhwu): Optimize this by:
     # 1. Use the same bucket for all the mounts.
     # 2. When the src is the same, use the same bucket.
     copy_mounts_with_file_in_src = {}
+
     for i, (dst, src) in enumerate(copy_mounts.items()):
         assert task.file_mounts is not None
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
+
         bucket_sub_path = _sub_path_join(
             sub_path, constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
         stores = None
         if store_type is not None:
             stores = [store_type]
-        storage_obj = storage_lib.Storage(name=bucket_name,
-                                          source=src,
-                                          persistent=False,
-                                          mode=storage_lib.StorageMode.COPY,
-                                          stores=stores,
-                                          _is_sky_managed=not bucket_wth_prefix,
-                                          _bucket_sub_path=bucket_sub_path)
-        new_storage_mounts[dst] = storage_obj
-        logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
+
+        # Check if folder should be compressed
+        if _should_compress_path(src):
+            # Create compressed archive with proper cleanup
+            temp_archive_folder = tempfile.mkdtemp()
+            temp_archive_fd, temp_archive_path = tempfile.mkstemp(
+                suffix=_COMPRESSED_FILE_SUFFIX, dir=temp_archive_folder)
+            os.close(temp_archive_fd)  # Close file descriptor, keep file
+            temp_files_to_cleanup.append(temp_archive_path)
+            temp_folders_to_cleanup.append(temp_archive_folder)
+            try:
+                _create_compressed_archive(src, temp_archive_path)
+
+                storage_obj = storage_lib.Storage(
+                    name=bucket_name,
+                    source=temp_archive_folder,
+                    persistent=False,
+                    mode=storage_lib.StorageMode.COPY,
+                    stores=stores,
+                    _is_sky_managed=not bucket_wth_prefix,
+                    _bucket_sub_path=bucket_sub_path)
+
+                # Add file mount for the compressed archive
+                new_storage_mounts[dst] = storage_obj
+                # Add decompression commands
+                decompression_commands.extend(
+                    _get_decompression_commands(
+                        os.path.basename(temp_archive_path)))
+
+                logger.info(
+                    f'  {colorama.Style.DIM}Folder (compressed): {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to compress folder {src}: {e}. '
+                               'Falling back to uncompressed upload.')
+                # Remove failed temp file from cleanup list and delete it
+                temp_files_to_cleanup.remove(temp_archive_path)
+                temp_folders_to_cleanup.remove(temp_archive_folder)
+                try:
+                    os.unlink(temp_archive_path)
+                    os.rmdir(temp_archive_folder)
+                except (FileNotFoundError, PermissionError, OSError):
+                    pass
+                # Fall back to original logic
+                storage_obj = storage_lib.Storage(
+                    name=bucket_name,
+                    source=src,
+                    persistent=False,
+                    mode=storage_lib.StorageMode.COPY,
+                    stores=stores,
+                    _is_sky_managed=not bucket_wth_prefix,
+                    _bucket_sub_path=bucket_sub_path)
+                new_storage_mounts[dst] = storage_obj
+                logger.info(
+                    f'  {colorama.Style.DIM}Folder : {src!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+        else:
+            # Use original logic for small folders
+            storage_obj = storage_lib.Storage(
+                name=bucket_name,
+                source=src,
+                persistent=False,
+                mode=storage_lib.StorageMode.COPY,
+                stores=stores,
+                _is_sky_managed=not bucket_wth_prefix,
+                _bucket_sub_path=bucket_sub_path)
+            new_storage_mounts[dst] = storage_obj
+            logger.info(
+                f'  {colorama.Style.DIM}Folder : {src!r} '
+                f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
-    # Hard link the files in src to a temporary directory, and upload folder.
+    # For files, we'll also use compression if there are many files.
     file_mounts_tmp_subpath = _sub_path_join(
         sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
     base_tmp_dir = os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
     os.makedirs(base_tmp_dir, exist_ok=True)
+
     with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
         local_fm_path = os.path.join(
             temp_path, constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
         os.makedirs(local_fm_path, exist_ok=True)
         file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
             task_type)
+
         if copy_mounts_with_file_in_src:
             src_to_file_id = {}
-            for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
-                src_to_file_id[src] = i
-                os.link(os.path.abspath(os.path.expanduser(src)),
-                        os.path.join(local_fm_path, f'file-{i}'))
-            stores = None
-            if store_type is not None:
-                stores = [store_type]
-            storage_obj = storage_lib.Storage(
-                name=bucket_name,
-                source=local_fm_path,
-                persistent=False,
-                mode=storage_lib.DEFAULT_STORAGE_MODE,
-                stores=stores,
-                _is_sky_managed=not bucket_wth_prefix,
-                _bucket_sub_path=file_mounts_tmp_subpath)
 
-            new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+            # Check if we should compress the files
+            should_compress_files = len(copy_mounts_with_file_in_src
+                                       ) >= _COMPRESSION_THRESHOLD_FILE_COUNT
+
+            if should_compress_files:
+                # Create a compressed archive of all files with proper cleanup
+                temp_archive_folder = tempfile.mkdtemp()
+                temp_archive_fd, temp_archive_path = tempfile.mkstemp(
+                    suffix=_COMPRESSED_FILE_SUFFIX)
+                os.close(temp_archive_fd)  # Close file descriptor, keep file
+                temp_files_to_cleanup.append(temp_archive_path)
+                temp_folders_to_cleanup.append(temp_archive_folder)
+                try:
+                    with tarfile.open(temp_archive_path, 'w:gz') as tar:
+                        for i, src in enumerate(
+                                set(copy_mounts_with_file_in_src.values())):
+                            src_to_file_id[src] = i
+                            full_src = os.path.abspath(os.path.expanduser(src))
+                            arcname = f'file-{i}'
+                            tar.add(full_src, arcname=arcname)
+
+                    stores = None
+                    if store_type is not None:
+                        stores = [store_type]
+
+                    storage_obj = storage_lib.Storage(
+                        name=bucket_name,
+                        source=temp_archive_folder,
+                        persistent=False,
+                        mode=storage_lib.DEFAULT_STORAGE_MODE,
+                        stores=stores,
+                        _is_sky_managed=not bucket_wth_prefix,
+                        _bucket_sub_path=file_mounts_tmp_subpath)
+
+                    new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+
+                    # Add decompression command for the file archive
+                    decompression_commands.extend(
+                        _get_decompression_commands(
+                            os.path.basename(temp_archive_path)))
+
+                    len_file = len(copy_mounts_with_file_in_src)
+                    logger.info(
+                        f'{colorama.Style.DIM}Files (compressed): {len_file}'
+                        f'storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(f'Failed to compress files: {e}. '
+                                   'Falling back to uncompressed upload.')
+                    # Remove failed temp file from cleanup list and delete it
+                    temp_files_to_cleanup.remove(temp_archive_path)
+                    temp_folders_to_cleanup.remove(temp_archive_folder)
+                    try:
+                        os.unlink(temp_archive_path)
+                        os.rmdir(temp_archive_folder)
+                    except (FileNotFoundError, PermissionError, OSError):
+                        pass
+                    # Fall back to original logic below
+                    should_compress_files = False
+
+            if not should_compress_files:
+                # Use original logic for few files
+                for i, src in enumerate(
+                        set(copy_mounts_with_file_in_src.values())):
+                    src_to_file_id[src] = i
+                    os.link(os.path.abspath(os.path.expanduser(src)),
+                            os.path.join(local_fm_path, f'file-{i}'))
+
+                stores = None
+                if store_type is not None:
+                    stores = [store_type]
+
+                storage_obj = storage_lib.Storage(
+                    name=bucket_name,
+                    source=local_fm_path,
+                    persistent=False,
+                    mode=storage_lib.DEFAULT_STORAGE_MODE,
+                    stores=stores,
+                    _is_sky_managed=not bucket_wth_prefix,
+                    _bucket_sub_path=file_mounts_tmp_subpath)
+
+                new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+
             if file_mount_remote_tmp_dir in original_storage_mounts:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Failed to translate file mounts, due to the default '
                         f'destination {file_mount_remote_tmp_dir} '
                         'being taken.')
+
             sources = list(src_to_file_id.keys())
             sources_str = '\n    '.join(sources)
-            logger.info(f'  {colorama.Style.DIM}Files (listed below) '
-                        f' -> storage: {bucket_name}:'
-                        f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+            compression_note = ' (compressed)' if should_compress_files else ''
+            logger.info(
+                f'  {colorama.Style.DIM}Files{compression_note} (listed below) '
+                f' -> storage: {bucket_name}:'
+                f'\n    {sources_str}{colorama.Style.RESET_ALL}')
 
         rich_utils.force_update_status(
             ux_utils.spinner_message(
@@ -1148,5 +1429,39 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
+
+    # Step 8: Add decompression commands to the task setup
+    if decompression_commands:
+        current_setup = task.setup or ''
+        if current_setup:
+            current_setup += '\n'
+
+        # Add a comment and the decompression commands
+        decompression_setup = '# SkyPilot: Decompress uploaded file mounts\n'
+        decompression_setup += ' && '.join(decompression_commands)
+
+        task.setup = current_setup + decompression_setup
+
+        logger.info(
+            f'  {colorama.Style.DIM}Added decompression commands to task setup'
+            f'{colorama.Style.RESET_ALL}')
+
     if msg:
         logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))
+
+    # CRITICAL: Always cleanup temporary files
+    for temp_file in temp_files_to_cleanup:
+        try:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+                logger.debug(f'Cleaned up temporary file: {temp_file}')
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.warning(f'Failed to cleanup temporary file {temp_file}: {e}')
+    for temp_folder in temp_folders_to_cleanup:
+        try:
+            if os.path.exists(temp_folder):
+                os.rmdir(temp_folder)
+                logger.debug(f'Cleaned up temporary folder: {temp_folder}')
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.warning(
+                f'Failed to cleanup temporary folder {temp_folder}: {e}')
