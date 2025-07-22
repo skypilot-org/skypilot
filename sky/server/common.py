@@ -192,6 +192,7 @@ def make_authenticated_request(method: str,
     """
     if server_url is None:
         server_url = get_server_url()
+    print(f'server_url: {server_url}')
 
     # Prepare headers and URL for service account authentication
     headers = service_account_auth.get_service_account_headers()
