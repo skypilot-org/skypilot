@@ -1,6 +1,7 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
 import os
+import sys
 import traceback
 from types import ModuleType
 from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
@@ -22,8 +23,8 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
-PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+CHECK_MARK_EMOJI = '\U00002714' if sys.platform != 'win32' else '+'  # Heavy check mark unicode
+PARTY_POPPER_EMOJI = '\U0001F389' if sys.platform != 'win32' else '*'  # Party popper unicode
 
 logger = sky_logging.init_logger(__name__)
 

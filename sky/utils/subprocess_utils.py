@@ -3,7 +3,6 @@ import multiprocessing
 from multiprocessing import pool
 import os
 import random
-import resource
 import shlex
 import subprocess
 import sys
@@ -21,6 +20,7 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import resource
 
 if typing.TYPE_CHECKING:
     import psutil

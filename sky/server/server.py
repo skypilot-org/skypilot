@@ -13,7 +13,6 @@ import os
 import pathlib
 import posixpath
 import re
-import resource
 import shutil
 import sys
 import threading
@@ -26,7 +25,6 @@ import fastapi
 from fastapi.middleware import cors
 from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
-import uvloop
 
 import sky
 from sky import catalog
@@ -66,10 +64,18 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import resource
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
+
+# uvloop isn't strictly necessary on windows, so we use asyncio if we cannot import it
+try:
+    import uvloop
+except (ModuleNotFoundError, ImportError) as exc_info:
+    import asyncio
+    uvloop = asyncio
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):

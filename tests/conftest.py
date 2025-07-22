@@ -1,6 +1,7 @@
-import fcntl
+import filelock
 import json
 import os
+import pathlib
 import subprocess
 import tempfile
 import time
@@ -8,6 +9,8 @@ from typing import List
 
 import pytest
 import requests
+import yaml
+
 from smoke_tests.docker import docker_utils
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -88,6 +91,14 @@ cloud_to_pytest_keyword = {
     'hyperbolic': 'hyperbolic'
 }
 
+def represent_path(dumper: yaml.Dumper, data: pathlib.PurePath) -> yaml.ScalarNode:
+    path_as_string = str(data).replace('\\', '/')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', path_as_string)
+
+
+for path_type in (pathlib.WindowsPath, pathlib.PureWindowsPath):
+    for dumper in (yaml.Dumper, yaml.SafeDumper):
+        dumper.add_representer(path_type, represent_path)
 
 def pytest_addoption(parser):
     # tests marked as `slow` will be skipped by default, use --runslow to run
@@ -117,8 +128,8 @@ def pytest_addoption(parser):
         type=str,
         choices=all_clouds_in_smoke_tests,
         help='Cloud to use for generic tests. If the generic cloud is '
-        'not within the clouds to be run, it will be reset to the first '
-        'cloud in the list of the clouds to be run.')
+             'not within the clouds to be run, it will be reset to the first '
+             'cloud in the list of the clouds to be run.')
 
     parser.addoption('--terminate-on-failure',
                      dest='terminate_on_failure',
@@ -357,155 +368,159 @@ def setup_docker_container(request):
 
     # Create a lockfile and counter file in a temporary directory that all processes can access
     lock_file = os.path.join(tempfile.gettempdir(), 'sky_docker_setup.lock')
-    counter_file = os.path.join(tempfile.gettempdir(), 'sky_docker_workers.txt')
-
-    lock_fd = open(lock_file, 'w')
-    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    counter_file = os.path.join(tempfile.gettempdir(),
+                                'sky_docker_workers.txt')
+    lock = filelock.FileLock(lock_file)
 
     try:
-        try:
-            with open(counter_file, 'r') as f:
-                worker_count = int(f.read().strip())
-        except (FileNotFoundError, ValueError):
-            worker_count = 0
-
-        worker_count += 1
-        with open(counter_file, 'w') as f:
-            f.write(str(worker_count))
-
-        # Check if container is already running (another worker might have started it)
-        try:
-            # Use docker ps with filter to check for running container
-            result = subprocess.run([
-                'docker', 'ps', '--filter',
-                f'name={docker_utils.get_container_name()}', '--format',
-                '{{.Names}}'
-            ],
-                                    check=True,
-                                    capture_output=True,
-                                    text=True)
-            if docker_utils.get_container_name() in result.stdout:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                yield docker_utils.get_container_name()
-                return
-        except subprocess.CalledProcessError:
-            pass
-
-        # Use docker images with filter to check for existing image
-        result = subprocess.run([
-            'docker', 'images', '--filter',
-            f'reference={docker_utils.IMAGE_NAME}', '--format',
-            '{{.Repository}}'
-        ],
-                                check=True,
-                                capture_output=True,
-                                text=True)
-        if docker_utils.IMAGE_NAME in result.stdout:
-            logger.info(
-                f'Docker image {docker_utils.IMAGE_NAME} already exists')
-        else:
-            in_container = docker_utils.is_inside_docker()
-
-            if in_container:
-                # We're inside a container, so we can't build the Docker image
-                raise Exception(
-                    f"Docker image {docker_utils.IMAGE_NAME} must be built on "
-                    f"the host first when running inside a container. Please "
-                    f"run 'docker build -t {docker_utils.IMAGE_NAME} "
-                    f"--build-arg USERNAME={default_user} -f "
-                    f"tests/smoke_tests/docker/Dockerfile_test .' on the host "
-                    f"machine.")
-            else:
-                logger.info(
-                    f'Docker image {docker_utils.IMAGE_NAME} not found, building...'
-                )
-                subprocess.run([
-                    'docker', 'build', '-t', docker_utils.IMAGE_NAME,
-                    '--build-arg', f'USERNAME={default_user}', '-f',
-                    dockerfile_path, '.'
-                ],
-                               check=True)
-                logger.info(
-                    f'Successfully built Docker image {docker_utils.IMAGE_NAME}'
-                )
-
-        # Start new container
-        logger.info(
-            f'Starting Docker container {docker_utils.get_container_name()}...')
-
-        # Use create_and_setup_new_container to create and start the container
-        docker_utils.create_and_setup_new_container(
-            target_container_name=docker_utils.get_container_name(),
-            host_port=docker_utils.get_host_port(),
-            container_port=46580,
-            username=default_user)
-
-        logger.info(f'Container {docker_utils.get_container_name()} started')
-
-        # Wait for container to be ready
-        logger.info('Waiting for container to be ready...')
-        url = docker_utils.get_api_server_endpoint_inside_docker()
-        health_endpoint = f'{url}/api/health'
-        max_retries = 40
-        retry_count = 0
-
-        while retry_count < max_retries:
+        with lock:
+            # This synchronized block handles the initial setup.
             try:
-                response = requests.get(health_endpoint)
-                response.raise_for_status()
+                with open(counter_file, 'r') as f:
+                    worker_count = int(f.read().strip())
+            except (FileNotFoundError, ValueError):
+                worker_count = 0
 
-                # Parse JSON response
-                if response.json().get('status') == 'healthy':
-                    logger.info('Container is ready!')
-                    break
+            worker_count += 1
+            with open(counter_file, 'w') as f:
+                f.write(str(worker_count))
 
-                retry_count += 1
-                time.sleep(1)
-            except Exception as e:
-                logger.error(f'Error connecting to container: {e}, retrying...')
-                retry_count += 1
-                time.sleep(10)
-        else:
-            raise Exception(
-                'Container failed to start properly - health check did not pass'
+            # Check if container is already running (another worker might have started it)
+            try:
+                # Use docker ps with filter to check for running container
+                result = subprocess.run([
+                    'docker', 'ps', '--filter',
+                    f'name={docker_utils.get_container_name()}', '--format',
+                    '{{.Names}}'
+                ],
+                    check=True,
+                    capture_output=True,
+                    text=True)
+                if docker_utils.get_container_name() in result.stdout:
+                    # Container is already up, no need to do more setup.
+                    yield docker_utils.get_container_name()
+                    return
+            except subprocess.CalledProcessError:
+                pass
+
+            # Use docker images with filter to check for existing image
+            result = subprocess.run([
+                'docker', 'images', '--filter',
+                f'reference={docker_utils.IMAGE_NAME}', '--format',
+                '{{.Repository}}'
+            ],
+                check=True,
+                capture_output=True,
+                text=True)
+            if docker_utils.IMAGE_NAME in result.stdout:
+                logger.info(
+                    f'Docker image {docker_utils.IMAGE_NAME} already exists')
+            else:
+                in_container = docker_utils.is_inside_docker()
+
+                if in_container:
+                    # We're inside a container, so we can't build the Docker image
+                    raise Exception(
+                        f'Docker image {docker_utils.IMAGE_NAME} must be built on '
+                        f'the host first when running inside a container. Please '
+                        f'run \'docker build -t {docker_utils.IMAGE_NAME} '
+                        f'--build-arg USERNAME={default_user} -f '
+                        f'tests/smoke_tests/docker/Dockerfile_test .\' on the host '
+                        'machine.')
+                else:
+                    logger.info(
+                        f'Docker image {docker_utils.IMAGE_NAME} not found, building...'
+                    )
+                    subprocess.run([
+                        'docker', 'build', '-t', docker_utils.IMAGE_NAME,
+                        '--build-arg', f'USERNAME={default_user}', '-f',
+                        dockerfile_path, '.'
+                    ],
+                        check=True)
+                    logger.info(
+                        f'Successfully built Docker image {docker_utils.IMAGE_NAME}'
+                    )
+
+            # Start new container
+            logger.info(
+                f'Starting Docker container {docker_utils.get_container_name()}...'
             )
 
-        # Release the lock before yielding
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            # Use create_and_setup_new_container to create and start the container
+            docker_utils.create_and_setup_new_container(
+                target_container_name=docker_utils.get_container_name(),
+                host_port=docker_utils.get_host_port(),
+                container_port=46580,
+                username=default_user)
+
+            logger.info(
+                f'Container {docker_utils.get_container_name()} started')
+
+            # Wait for container to be ready
+            logger.info('Waiting for container to be ready...')
+            url = docker_utils.get_api_server_endpoint_inside_docker()
+            health_endpoint = f'{url}/api/health'
+            max_retries = 40
+            retry_count = 0
+
+            while retry_count < max_retries:
+                try:
+                    response = requests.get(health_endpoint)
+                    response.raise_for_status()
+
+                    # Parse JSON response
+                    if response.json().get('status') == 'healthy':
+                        logger.info('Container is ready!')
+                        break
+
+                    retry_count += 1
+                    time.sleep(1)
+                except Exception as e:
+                    logger.error(
+                        f'Error connecting to container: {e}, retrying...')
+                    retry_count += 1
+                    time.sleep(10)
+            else:
+                raise Exception(
+                    'Container failed to start properly - health check did not pass'
+                )
+
+        # The lock is released before yielding to the tests.
         yield docker_utils.get_container_name()
 
     except Exception as e:
         logger.exception(f'Error in Docker setup: {e}')
         raise
     finally:
-        # Reacquire lock for file operations
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-
-        # Decrement worker counter and cleanup if this is the last worker
-        with open(counter_file, 'r') as f:
-            worker_count = int(f.read().strip())
-        worker_count -= 1
-        with open(counter_file, 'w') as f:
-            f.write(str(worker_count))
-
-        if worker_count == 0:
-            logger.info('Last worker finished, cleaning up container...')
-            subprocess.run([
-                'docker', 'stop', '-t', '600',
-                docker_utils.get_container_name()
-            ],
-                           check=False)
-            subprocess.run(['docker', 'rm',
-                            docker_utils.get_container_name()],
-                           check=False)
+        # This synchronized block handles the final cleanup.
+        with lock:
+            # Decrement worker counter and cleanup if this is the last worker
             try:
-                os.remove(counter_file)
-            except OSError:
-                pass
+                with open(counter_file, 'r') as f:
+                    worker_count = int(f.read().strip())
+            except (FileNotFoundError, ValueError):
+                # If the counter file is gone, assume we are the last one.
+                worker_count = 1
 
-        # Release the lock and close the file
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
+            worker_count -= 1
+            with open(counter_file, 'w') as f:
+                f.write(str(worker_count))
+
+            if worker_count == 0:
+                logger.info('Last worker finished, cleaning up container...')
+                subprocess.run([
+                    'docker', 'stop', '-t', '600',
+                    docker_utils.get_container_name()
+                ],
+                    check=False)
+                subprocess.run(
+                    ['docker', 'rm',
+                     docker_utils.get_container_name()],
+                    check=False)
+                try:
+                    os.remove(counter_file)
+                except OSError:
+                    pass
 
 
 @pytest.fixture(scope='session', autouse=True)

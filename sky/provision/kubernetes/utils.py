@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 import typing
+import sys
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
@@ -2462,29 +2463,39 @@ def check_port_forward_mode_dependencies(
     socat_message = (
         '`socat` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. ')
+        'default networking mode and it is not installed.')
     netcat_default_message = (
         '`nc` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. ')
+        'default networking mode and it is not installed.')
     netcat_macos_message = (
         'The default MacOS `nc` is installed. However, for '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode, GNU netcat is required. ')
+        'default networking mode, GNU netcat is required.')
+    windows_fail_message = (
+        'This may indicate a problem with your SkyPilot installation, as '  # pylint: disable=line-too-long
+        'these tools should be bundled.')
 
     # save
     reasons = []
     required_binaries = []
 
+    socat_cmd = common_utils.get_utility_binary_path('socat')
+    nc_cmd = common_utils.get_utility_binary_path('nc')
+
     # Ensure socat is installed
     try:
-        subprocess.run(['socat', '-V'],
+        subprocess.run([socat_cmd, '-V'],
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL,
                        check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc_info:
         required_binaries.append('socat')
-        reasons.append(socat_message)
+        if sys.platform == 'win32':
+            reasons.append(f'{socat_message} {windows_fail_message}')
+        else:
+            reasons.append(socat_message)
+        reasons.append(str(exc_info))
 
     # Ensure netcat is installed
     #
@@ -2492,7 +2503,7 @@ def check_port_forward_mode_dependencies(
     # does not support the -z flag. To use the -z flag for port scanning,
     # they need GNU nc installed. We check for this case and raise an error.
     try:
-        netcat_output = subprocess.run(['nc', '-h'],
+        netcat_output = subprocess.run([nc_cmd, '-h'],
                                        capture_output=True,
                                        check=False)
         nc_mac_installed = netcat_output.returncode == 1 and 'apple' in str(
@@ -2501,21 +2512,28 @@ def check_port_forward_mode_dependencies(
         if nc_mac_installed:
             required_binaries.append('netcat')
             reasons.append(netcat_macos_message)
-        elif netcat_output.returncode != 0:
+            # return code is 1 on windows
+        elif netcat_output.returncode != 0 and sys.platform != 'win32':
             required_binaries.append('netcat')
             reasons.append(netcat_default_message)
 
     except FileNotFoundError:
         required_binaries.append('netcat')
-        reasons.append(netcat_default_message)
+        if sys.platform == 'win32':
+            reasons.append(f'{netcat_default_message} {windows_fail_message}')
+        else:
+            reasons.append(netcat_default_message)
 
     if required_binaries:
-        reasons.extend([
-            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
-            f'  $ sudo apt install {" ".join(required_binaries)}',
-            'On MacOS, install with: ',
-            f'  $ brew install {" ".join(required_binaries)}',
-        ])
+        # Don't show installation instructions for Windows since they are
+        # bundled.
+        if sys.platform != 'win32':
+            reasons.extend([
+                'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+                f'  $ sudo apt install {" ".join(required_binaries)}',
+                'On MacOS, install with: ',
+                f'  $ brew install {" ".join(required_binaries)}',
+            ])
         if raise_error:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('\n'.join(reasons))

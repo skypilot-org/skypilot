@@ -6,6 +6,8 @@ server.
 import asyncio
 import os
 import signal
+import subprocess
+import sys
 import threading
 import time
 from types import FrameType
@@ -13,14 +15,13 @@ from typing import Optional, Union
 
 import filelock
 import uvicorn
-from uvicorn.supervisors import multiprocess
-
 from sky import sky_logging
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
+from uvicorn.supervisors import multiprocess
 
 logger = sky_logging.init_logger(__name__)
 
@@ -81,7 +82,7 @@ class Server(uvicorn.Server):
                              daemon=True).start()
 
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
-                                                        None]) -> None:
+    None]) -> None:
         """Perform graceful shutdown."""
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
@@ -151,9 +152,28 @@ class Server(uvicorn.Server):
                 return
             if req.pid is not None:
                 try:
-                    os.kill(req.pid, signal.SIGTERM)
+                    if sys.platform == 'win32':
+                        # On Windows, os.kill() is not suitable for terminating
+                        # sibling processes, which leads to a PermissionError.
+                        # We use the 'taskkill' command for a more reliable
+                        # termination. The /F flag forcefully terminates the
+                        # process.
+                        subprocess.run(
+                            ['taskkill', '/F', '/PID',
+                             str(req.pid)],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+                    else:
+                        os.kill(req.pid, signal.SIGTERM)
                 except ProcessLookupError:
+                    # This is expected if the process already finished.
+                    # This exception is for Unix-like systems.
                     logger.debug(f'Process {req.pid} already finished.')
+                except PermissionError as e:
+                    # This might still happen on Unix if permissions are
+                    # insufficient.
+                    logger.warning(f'Failed to kill process {req.pid}: {e}')
             req.status = requests_lib.RequestStatus.CANCELLED
             req.should_retry = True
         logger.info(
