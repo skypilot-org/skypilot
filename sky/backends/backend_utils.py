@@ -35,6 +35,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -2841,6 +2842,12 @@ def get_clusters(
         force_refresh_statuses = None
 
     def _refresh_cluster(cluster_name):
+        request = requests_lib.get_request_tasks(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=[cluster_name])
+        logger.info(f'request {request}')
+        if len(request) > 0:
+            return global_user_state.get_cluster_from_name(cluster_name)
         try:
             record = refresh_cluster_record(
                 cluster_name,
