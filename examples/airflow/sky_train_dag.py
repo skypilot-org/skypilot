@@ -48,8 +48,6 @@ def run_sky_task(base_path: str,
 
     import yaml
 
-    import sky
-
     def _run_sky_task(yaml_path: str, envs_override: dict):
         """Internal helper to run the sky task after directory setup."""
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
@@ -88,11 +86,12 @@ def run_sky_task(base_path: str,
 
     # Set the SkyPilot API server endpoint
     os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = skypilot_api_server_endpoint
+    import sky
     print(
         f"SKYPILOT_API_SERVER_ENDPOINT: {os.environ['SKYPILOT_API_SERVER_ENDPOINT']}"
     )
     print('reload config')
-    sky.reload_config()
+    # sky.reload_config()
     print('login')
     sky.api_login(skypilot_api_server_endpoint)
     print('logged in')
