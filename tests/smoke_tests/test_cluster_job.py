@@ -22,6 +22,7 @@
 import pathlib
 import re
 import shlex
+import subprocess
 import tempfile
 import textwrap
 from typing import Dict, List
@@ -1998,14 +1999,15 @@ def test_remote_server_api_login():
     endpoint = docker_utils.get_api_server_endpoint_inside_docker()
     config_path = skypilot_config._GLOBAL_CONFIG_PATH
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
+    # Stop the local API server; this test is for remote server only.
+    # Only one test runs at a time in the container, so stopping the server is safe.
+    subprocess.run(['sky', 'api', 'stop'], check=True)
 
     test = smoke_tests_utils.Test(
         'remote-server-api-login',
         [
             # Backup existing config file if it exists
             f'if [ -f {config_path} ]; then cp {config_path} {backup_path}; fi',
-            # Stop local api server
-            f'sky api stop',
             # Run sky api login
             f'sky api login -e {endpoint}',
             # Echo the config file content to see what was written
