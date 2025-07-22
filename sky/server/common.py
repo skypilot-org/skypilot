@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 import functools
+import importlib.resources
 from http.cookiejar import CookieJar
 from http.cookiejar import MozillaCookieJar
 import json
@@ -606,8 +607,11 @@ def check_server_healthy(
 # Keep in sync with sky/setup_files/setup.py find_version()
 def get_skypilot_version_on_disk() -> str:
     """Get the version of the SkyPilot code on disk."""
-    current_file_path = pathlib.Path(__file__)
-    sky_root = current_file_path.parent.parent
+    if __package__ is None:
+        current_file_path = pathlib.Path(__file__)
+        sky_root = current_file_path.parent.parent
+    else:
+        sky_root = importlib.resources.files("sky")
     with open(sky_root / '__init__.py', 'r', encoding='utf-8') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)

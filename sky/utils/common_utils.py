@@ -603,7 +603,7 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
 
 
 def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
-                                       Dict[str, Any]]) -> None:
+Dict[str, Any]]) -> None:
     """Dumps a YAML file.
 
     Args:
@@ -1007,7 +1007,7 @@ def hash_file(path: str, hash_alg: str) -> 'hashlib._Hash':
     # Beware of f.read() as some files may be larger than memory.
     with open(path, 'rb') as f:
         file_hash = hashlib.new(hash_alg)
-        buf = bytearray(2**18)
+        buf = bytearray(2 ** 18)
         view = memoryview(buf)
         while True:
             size = f.readinto(buf)
@@ -1089,7 +1089,7 @@ def _mem_size_gb() -> float:
     cgroup_mem = _get_cgroup_memory_limit()
     if cgroup_mem is not None:
         mem = min(mem, cgroup_mem)
-    return mem / (1024**3)
+    return mem / (1024 ** 3)
 
 
 # Refer to:
@@ -1168,4 +1168,12 @@ def get_utility_binary_path(binary_name: str) -> str:
     """Returns the path to the binary based on the platform."""
     system = platform.system().lower()
     machine = platform.machine().lower()
-    return shutil.which(binary_name, path=f"{os.environ.get('PATH')}{os.pathsep}{resources.files('sky') / 'binaries' / system / machine}")
+    dir_path = resources.files('sky') / 'binaries' / system / machine
+    if dir_path.is_dir():
+        which_result = shutil.which(binary_name,
+                                    path=f"{os.environ.get('PATH')}{os.pathsep}{dir_path}")
+    else:
+        which_result = shutil.which(binary_name)
+    if which_result is None:
+        return binary_name
+    return which_result
