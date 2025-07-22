@@ -198,6 +198,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-lambdaCredentials-enabled>`: false
     :ref:`lambdaSecretName <helm-values-lambdaCredentials-lambdaSecretName>`: lambda-credentials
 
+  :ref:`vastCredentials <helm-values-vastCredentials>`:
+    :ref:`enabled <helm-values-vastCredentials-enabled>`: false
+    :ref:`vastSecretName <helm-values-vastCredentials-vastSecretName>`: vast-credentials
+
   :ref:`nebiusCredentials <helm-values-nebiusCredentials>`:
     :ref:`enabled <helm-values-nebiusCredentials-enabled>`: false
     :ref:`tenantId <helm-values-nebiusCredentials-tenantId>`: null
@@ -1548,6 +1552,39 @@ Default: ``lambda-credentials``
 
   lambdaCredentials:
     lambdaSecretName: lambda-credentials
+
+.. _helm-values-vastCredentials:
+
+``vastCredentials``
+~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-vastCredentials-enabled:
+
+``vastCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable Vast credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  vastCredentials:
+    enabled: false
+
+.. _helm-values-vastCredentials-vastSecretName:
+
+``vastCredentials.vastSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the Vast credentials. Only used if enabled is true.
+
+Default: ``vast-credentials``
+
+.. code-block:: yaml
+
+  vastCredentials:
+    vastSecretName: vast-credentials
 
 .. _helm-values-nebiusCredentials:
 
