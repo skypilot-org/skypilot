@@ -88,10 +88,9 @@ def run_sky_task(base_path: str,
     import sky
 
     # os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = skypilot_api_server_endpoint
-
-    print(
-        f"SKYPILOT_API_SERVER_ENDPOINT: {os.environ['SKYPILOT_API_SERVER_ENDPOINT']}"
-    )
+    # print(
+    #     f"SKYPILOT_API_SERVER_ENDPOINT: {os.environ['SKYPILOT_API_SERVER_ENDPOINT']}"
+    # )
     print('reload config')
     sky.reload_config()
     print('login')
