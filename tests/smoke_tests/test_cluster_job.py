@@ -1995,13 +1995,16 @@ def test_gcp_network_tier_with_gpu():
 def test_remote_server_api_login():
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('This test is only for remote server')
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip(
+            'Skipping remote server api login test outside Buildkite; sky api stop may affect local env'
+        )
 
     endpoint = docker_utils.get_api_server_endpoint_inside_docker()
     config_path = skypilot_config._GLOBAL_CONFIG_PATH
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
-    # Stop the local API server; this test is for remote server only.
-    # Only one test runs at a time in the container, so stopping the server won't affect other tests
-    # in buildkite env, might affect local env if we run multiple tests locally at the same time.
+    # Stop the local API server since we have validated the local api server is
+    # not running for sky api login command
     subprocess.run(['sky', 'api', 'stop'], check=True)
 
     test = smoke_tests_utils.Test(
