@@ -207,10 +207,10 @@ class DagRequestBodyWithRequestOptions(DagRequestBody):
     """Request body base class for endpoints with a dag and request options."""
     request_options: Optional[admin_policy.RequestOptions]
 
-    def get_request_options(self) -> admin_policy.RequestOptions:
+    def get_request_options(self) -> Optional[admin_policy.RequestOptions]:
         """Get the request options."""
         if self.request_options is None:
-            return admin_policy.RequestOptions()
+            return None
         if isinstance(self.request_options, dict):
             return admin_policy.RequestOptions(**self.request_options)
         return self.request_options
