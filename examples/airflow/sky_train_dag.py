@@ -90,6 +90,8 @@ def run_sky_task(base_path: str,
     os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = skypilot_api_server_endpoint
     sky.reload_config()
     sky.api_login(skypilot_api_server_endpoint)
+    info = sky.api_info()
+    print(f"SkyPilot API server info: {info}")
 
     original_cwd = os.getcwd()
 
