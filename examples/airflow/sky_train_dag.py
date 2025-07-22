@@ -48,9 +48,8 @@ def run_sky_task(base_path: str,
 
     import yaml
 
-    import sky
-
     def _run_sky_task(yaml_path: str, envs_override: dict):
+        import sky
         """Internal helper to run the sky task after directory setup."""
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             task_config = yaml.safe_load(f)
