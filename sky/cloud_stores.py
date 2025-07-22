@@ -21,6 +21,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.skylet import constants
@@ -602,6 +603,60 @@ class NebiusCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class TigrisCloudStorage(CloudStorage):
+    """Tigris Cloud Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'pip list | grep awscli > /dev/null 2>&1 || pip install awscli',
+        'aws --version || pip install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Checks if the Tigris object is a directory.
+        
+        Args:
+            url: Tigris object URL.
+        """
+        assert 'tigris://' in url, 'tigris:// is not in source'
+        bucket_name, path = data_utils.split_tigris_path(url)
+        if path.endswith('/') or path == '':
+            return True
+        tigris_client = data_utils.create_tigris_client()
+        objects = tigris_client.list_objects_v2(Bucket=bucket_name, 
+                                                Prefix=path,
+                                                MaxKeys=1)
+        return objects.get('KeyCount', 0) > 0
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads a directory using AWS CLI with Tigris endpoint."""
+        assert 'tigris://' in source, 'tigris:// is not in source'
+        source = source.replace('tigris://', 's3://')
+        endpoint_url = tigris.create_endpoint()
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'sync {source} {destination} '
+                               f'--endpoint {endpoint_url} '
+                               f'--profile={tigris.TIGRIS_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI with Tigris endpoint."""
+        assert 'tigris://' in source, 'tigris:// is not in source'
+        source = source.replace('tigris://', 's3://')
+        endpoint_url = tigris.create_endpoint()
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
+                               f'--endpoint {endpoint_url} '
+                               f'--profile={tigris.TIGRIS_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -619,6 +674,7 @@ _REGISTRY = {
     'cos': IBMCosCloudStorage(),
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
+    'tigris': TigrisCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

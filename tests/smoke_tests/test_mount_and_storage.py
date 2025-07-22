@@ -42,6 +42,7 @@ from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import tigris
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -432,6 +433,35 @@ def test_nebius_storage_mounts(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.tigris
+def test_tigris_storage_mounts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_tigris_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = tigris.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME}'
+        ]
+
+        test = smoke_tests_utils.Test(
+            'tigris_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.ibm
 def test_ibm_storage_mounts():
     name = smoke_tests_utils.get_cluster_name()
@@ -755,6 +785,10 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.NEBIUS:
             url = f's3://{bucket_name}'
             return f'aws s3 rb {url} --force --profile={nebius.NEBIUS_PROFILE_NAME}'
+        if store_type == storage_lib.StoreType.TIGRIS:
+            endpoint_url = tigris.create_endpoint()
+            url = f's3://{bucket_name}'
+            return f'aws s3 rb {url} --force --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME}'
 
         if store_type == storage_lib.StoreType.IBM:
             rclone_profile_name = (data_utils.Rclone.RcloneStores.IBM.
@@ -850,6 +884,14 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}'
             recursive_flag = '--recursive' if recursive else ''
             return f'aws s3 ls {url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
+        if store_type == storage_lib.StoreType.TIGRIS:
+            endpoint_url = tigris.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            recursive_flag = '--recursive' if recursive else ''
+            return f'aws s3 ls {url} --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME} {recursive_flag}'
 
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
@@ -919,6 +961,12 @@ class TestStorageWithCredentials:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
             else:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
+        elif store_type == storage_lib.StoreType.TIGRIS:
+            endpoint_url = tigris.create_endpoint()
+            if suffix:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME}'
+            else:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME}'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -942,6 +990,9 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
         elif store_type == storage_lib.StoreType.NEBIUS:
             return f'aws s3 ls s3://{bucket_name} --recursive --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
+        elif store_type == storage_lib.StoreType.TIGRIS:
+            endpoint_url = tigris.create_endpoint()
+            return f'aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME} | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1205,6 +1256,19 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_awscli_bucket_tigris(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli
+        endpoint_url = tigris.create_endpoint()
+        bucket_uri = f's3://{tmp_bucket_name}'
+        subprocess.check_call(
+            f'aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME}',
+            shell=True)
+        yield tmp_bucket_name, f'tigris://{tmp_bucket_name}'
+        subprocess.check_call(
+            f'aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile={tigris.TIGRIS_PROFILE_NAME}',
+            shell=True)
+
+    @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using IBM COS API
         storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
@@ -1229,7 +1293,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
-        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
+        pytest.param(storage_lib.StoreType.TIGRIS, marks=pytest.mark.tigris)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
@@ -1258,7 +1323,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
-        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
+        pytest.param(storage_lib.StoreType.TIGRIS, marks=pytest.mark.tigris)
     ])
     def test_bucket_sub_path(self, tmp_local_storage_obj_with_sub_path,
                              store_type):
@@ -1322,7 +1388,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
         pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        pytest.param(storage_lib.StoreType.TIGRIS, marks=pytest.mark.tigris)
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
@@ -1480,7 +1547,8 @@ class TestStorageWithCredentials:
                 marks=pytest.mark.azure),
             pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
             pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
-            pytest.param('nebius://{random_name}', marks=pytest.mark.nebius)
+            pytest.param('nebius://{random_name}', marks=pytest.mark.nebius),
+            pytest.param('tigris://{random_name}', marks=pytest.mark.tigris)
         ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
@@ -1521,6 +1589,9 @@ class TestStorageWithCredentials:
                     if e.response['Error']['Code'] == '404':
                         # success
                         return
+            elif nonexist_bucket_url.startswith('tigris'):
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={tigris.TIGRIS_PROFILE_NAME}'
+                expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
                                  f'{nonexist_bucket_url}')
@@ -1601,7 +1672,10 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.cloudflare),
                               pytest.param('tmp_awscli_bucket_nebius',
                                            storage_lib.StoreType.NEBIUS,
-                                           marks=pytest.mark.nebius)])
+                                           marks=pytest.mark.nebius),
+                              pytest.param('tmp_awscli_bucket_tigris',
+                                           storage_lib.StoreType.TIGRIS,
+                                           marks=pytest.mark.tigris)])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -1706,7 +1780,10 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.cloudflare),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.NEBIUS,
-                                           marks=pytest.mark.nebius)])
+                                           marks=pytest.mark.nebius),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.TIGRIS,
+                                           marks=pytest.mark.tigris)])
     def test_invalid_names(self, invalid_name_list, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -1729,7 +1806,10 @@ class TestStorageWithCredentials:
                       marks=pytest.mark.cloudflare),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.NEBIUS,
-                      marks=pytest.mark.nebius)])
+                      marks=pytest.mark.nebius),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.TIGRIS,
+                      marks=pytest.mark.tigris)])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
                                                      store_type,
                                                      tmp_gitignore_storage_obj):
@@ -1774,7 +1854,10 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.cloudflare),
                               pytest.param('tmp_awscli_bucket_nebius',
                                            storage_lib.StoreType.NEBIUS,
-                                           marks=pytest.mark.nebius)])
+                                           marks=pytest.mark.nebius),
+                              pytest.param('tmp_awscli_bucket_tigris',
+                                           storage_lib.StoreType.TIGRIS,
+                                           marks=pytest.mark.tigris)])
     def test_externally_created_bucket_mount_without_source(
             self, ext_bucket_fixture, request, store_type):
         # Non-sky managed buckets(buckets created outside of Skypilot CLI)

@@ -111,6 +111,18 @@ def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
+def split_tigris_path(tigris_path: str) -> Tuple[str, str]:
+    """Splits Tigris Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      tigris_path: str; Tigris Path, e.g. tigris://imagenet/train/
+    """
+    path_parts = tigris_path.replace('tigris://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
 def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
     """returns extracted region, bucket name and bucket path to data
         from the specified cos bucket's url.
@@ -329,6 +341,11 @@ def create_nebius_client() -> Client:
     return nebius.client('s3')
 
 
+def create_tigris_client() -> Client:
+    """Helper method that connects to Boto3 client for Tigris Object Storage"""
+    return tigris.client('s3')
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -349,6 +366,17 @@ def verify_nebius_bucket(name: str) -> bool:
     nebius_s = nebius.resource('s3')
     bucket = nebius_s.Bucket(name)
     return bucket in nebius_s.buckets.all()
+
+
+def verify_tigris_bucket(name: str) -> bool:
+    """Helper method that checks if the Tigris bucket exists
+
+    Args:
+      name: str; Name of Tigris Object Storage (without tigris:// prefix)
+    """
+    tigris_s = tigris.resource('s3')
+    bucket = tigris_s.Bucket(name)
+    return bucket in tigris_s.buckets.all()
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
