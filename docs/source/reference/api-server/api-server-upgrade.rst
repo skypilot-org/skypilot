@@ -192,14 +192,8 @@ Upgrade strategy
 By default, the API server is upgraded with the ``Recreate`` strategy, which introduces waiting time for new requests during upgrade. To eliminate the waiting time, you can upgrade the API server with the ``RollingUpdate`` strategy.
 
 .. note::
-
-    ``RollingUpdate`` is an experimental feature with the following known limitations:
-
-    * Command that needs file mount might fail during upgrade, e.g. ``sky launch``;
-    * The CLI might not be able to get log of the request during upgrade.
-
     
-    
+    ``RollingUpdate`` is an experimental feature. There is a known limitation that running command might fail when the old version of the API server get removed from the ingress backend. It is recommended to schedule the upgrade during a maintainence window.
 
 The following table compares the two upgrade strategies:
 
@@ -231,6 +225,7 @@ To use the ``RollingUpdate`` strategy, you need to:
 * :ref:`Back the API server with a persistent database <api-server-persistence-db>`;
 * Disable local peristence by setting :ref:`storage.enabled <helm-values-storage-enabled>` to ``false``;
 * Set :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` to ``RollingUpdate``;
+* Keep the ingress enabled (:ref:`ingress.enabled <helm-values-ingress-enabled>` is ``true`` by default) or :ref:`configure your ingress to improve the availability during upgrade <sky-api-server-rolling-update-ingress>`;
 
 Here's an example of deploying the API server with the ``RollingUpdate`` strategy:
 
@@ -241,6 +236,28 @@ Here's an example of deploying the API server with the ``RollingUpdate`` strateg
       --set storage.enabled=false \
       --set apiService.dbConnectionSecretName=my-db-secret
 
+.. _sky-api-server-rolling-update-ingress:
+
+Ingress config
+--------------
+
+The SkyPilot helm chart automatically configures the ingress resource to achieve best availability during upgrade. If you are managing the ingress resource out side of the SkyPilot helm chart, you can refer to the following snnipets to improve the availability during upgrades:
+
+.. dropdown:: Example ingress based on nginx-ingress-controller
+
+    .. code-block:: yaml
+
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: your-ingress-name
+          annotations:
+            # Enable session affinity to route the requests of the same client to the same pod during upgrade.
+            # Without session affinity, the chance that requests fail during upgrade would be higher.
+            nginx.ingress.kubernetes.io/affinity: "cookie"
+            nginx.ingress.kubernetes.io/session-cookie-name: "SKYPILOT_ROUTEID"
+            nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+            nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
 
 .. _sky-api-server-api-compatibility:
 
