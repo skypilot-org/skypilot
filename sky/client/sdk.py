@@ -2077,6 +2077,22 @@ def _save_config_updates(endpoint: Optional[str] = None,
         skypilot_config.reload_config()
 
 
+def _clear_api_server_config() -> None:
+    """Clear endpoint and service account token from config file."""
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            return
+
+        config = skypilot_config.get_user_config()
+        config = dict(config)
+        del config['api_server']
+
+        common_utils.dump_yaml(str(config_path), config, blank=True)
+        skypilot_config.reload_config()
+
+
 def _validate_endpoint(endpoint: Optional[str]) -> str:
     """Validate and normalize the endpoint URL."""
     if endpoint is None:
@@ -2333,3 +2349,22 @@ def api_login(endpoint: Optional[str] = None,
         endpoint)
     _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
                             server_status)
+
+
+@usage_lib.entrypoint
+@annotations.client_api
+def api_logout() -> None:
+    """Logout of the API server.
+
+    Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    if server_common.is_api_server_local():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Local api server cannot be logged out. '
+                               'Use `sky api stop` instead.')
+
+    # no need to clear cookies if it doesn't exist.
+    server_common.set_api_cookie_jar(cookiejar.MozillaCookieJar(),
+                                     create_if_not_exists=False)
+    _clear_api_server_config()
+    logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
+                f'{colorama.Style.RESET_ALL}')
