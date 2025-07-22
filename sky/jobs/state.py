@@ -10,7 +10,6 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from alembic import command as alembic_command
 import colorama
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -134,7 +133,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
     alembic_config = migration_utils.get_alembic_config(
         engine, migration_utils.SPOT_JOBS_DB_NAME)
     alembic_config.config_ini_section = migration_utils.SPOT_JOBS_DB_NAME
-    alembic_command.upgrade(alembic_config, migration_utils.SPOT_JOBS_VERSION)
+    migration_utils.safe_alembic_upgrade(engine, alembic_config,
+                                         migration_utils.SPOT_JOBS_VERSION)
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
