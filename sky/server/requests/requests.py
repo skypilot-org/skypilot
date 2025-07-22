@@ -9,7 +9,6 @@ import os
 import pathlib
 import shutil
 import signal
-import sqlite3
 import threading
 import time
 import traceback
@@ -17,6 +16,11 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import colorama
 import filelock
+import sqlalchemy
+from sqlalchemy import orm
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import global_user_state
@@ -24,33 +28,59 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import state
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Tables in task.db.
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_DB_INIT_LOCK = threading.Lock()
+
+Base = declarative.declarative_base()
+
+# Tables in requests db.
 REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
+COL_HOST_UUID = 'host_uuid'
+REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+
+request_table = sqlalchemy.Table(
+    REQUEST_TABLE,
+    Base.metadata,
+    sqlalchemy.Column('request_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('entrypoint', sqlalchemy.Text),
+    sqlalchemy.Column('request_body', sqlalchemy.Text),
+    sqlalchemy.Column('status', sqlalchemy.Text),
+    sqlalchemy.Column('return_value', sqlalchemy.Text),
+    sqlalchemy.Column('error', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('pid', sqlalchemy.Integer),
+    sqlalchemy.Column('created_at', sqlalchemy.Float),
+    sqlalchemy.Column(COL_CLUSTER_NAME, sqlalchemy.Text),
+    sqlalchemy.Column('schedule_type', sqlalchemy.Text),
+    sqlalchemy.Column(COL_USER_ID, sqlalchemy.Text),
+    sqlalchemy.Column(COL_STATUS_MSG, sqlalchemy.Text),
+    sqlalchemy.Column(COL_SHOULD_RETRY, sqlalchemy.Boolean),
+    sqlalchemy.Column(COL_FINISHED_AT, sqlalchemy.Float),
+    sqlalchemy.Column(COL_HOST_UUID, sqlalchemy.Text),
+)
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
-
-# TODO(zhwu): For scalability, there are several TODOs:
-# [x] Have a way to queue requests.
-# [ ] Move logs to persistent place.
-# [ ] Deploy API server in a autoscaling fashion.
 
 
 class RequestStatus(enum.Enum):
@@ -99,6 +129,7 @@ REQUEST_COLUMNS = [
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
     COL_FINISHED_AT,
+    COL_HOST_UUID,
 ]
 
 
@@ -133,6 +164,8 @@ class Request:
     should_retry: bool = False
     # When the request finished.
     finished_at: Optional[float] = None
+    # The UUID of the API server that serves the request.
+    host_uuid: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -176,6 +209,11 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
+
+        # Convert error from bytes back to string for RequestPayload
+        if content.get('error') and isinstance(content['error'], bytes):
+            content['error'] = content['error'].decode('utf-8')
+
         return cls.decode(payloads.RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
@@ -220,6 +258,7 @@ class Request:
             status_msg=self.status_msg,
             should_retry=self.should_retry,
             finished_at=self.finished_at,
+            host_uuid=self.host_uuid,
         )
 
     def encode(self) -> payloads.RequestPayload:
@@ -243,6 +282,7 @@ class Request:
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
                 finished_at=self.finished_at,
+                host_uuid=self.host_uuid,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -276,6 +316,7 @@ class Request:
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
                 finished_at=payload.finished_at,
+                host_uuid=payload.host_uuid,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -375,8 +416,22 @@ class InternalRequestDaemon:
     name: str
     event_fn: Callable[[], None]
 
+    def get_unique_id(self) -> str:
+        """Get a global unique ID for the daemon.
+
+        This allows multiple API server replicas to run the same daemon
+        without conflicts.
+        """
+        if state.get_host_uuid():
+            return f'{self.id}-{state.get_host_uuid()}'
+        return self.id
+
     def run_event(self):
         """Run the event."""
+        with locks.get_lock(self.id):
+            self._run_event()
+
+    def _run_event(self):
         while True:
             with ux_utils.enable_traceback():
                 try:
@@ -438,6 +493,7 @@ def kill_requests(request_ids: Optional[List[str]] = None,
             if request_record is None:
                 logger.debug(f'No request ID {request_id}')
                 continue
+
             # Skip internal requests. The internal requests are scheduled with
             # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
             if request_record.request_id in set(
@@ -453,75 +509,98 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                 # - After SIGTERM, the executor can reuse the request process
                 #   for other requests, avoiding the overhead of forking a new
                 #   process for each request.
-                os.kill(request_record.pid, signal.SIGTERM)
+                # TODO(aylei): for requests that processed by other API servers,
+                # forward the kill request to the API server that runs the
+                # request.
+                try:
+                    os.kill(request_record.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    logger.debug(f'Process {request_record.pid} not found')
             request_record.status = RequestStatus.CANCELLED
             request_record.finished_at = time.time()
             cancelled_request_ids.append(request_id)
     return cancelled_request_ids
 
 
-def create_table(cursor, conn):
+def create_table():
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
-    if not common_utils.is_wsl():
+    if (_SQLALCHEMY_ENGINE.dialect.name
+            == db_utils.SQLAlchemyDialect.SQLITE.value and
+            not common_utils.is_wsl()):
         try:
-            cursor.execute('PRAGMA journal_mode=WAL')
-        except sqlite3.OperationalError as e:
+            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
+                session.commit()
+        except sqlalchemy.exc.OperationalError as e:
             if 'database is locked' not in str(e):
                 raise
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Table for Requests
-    cursor.execute(f"""\
-        CREATE TABLE IF NOT EXISTS {REQUEST_TABLE} (
-        request_id TEXT PRIMARY KEY,
-        name TEXT,
-        entrypoint TEXT,
-        request_body TEXT,
-        status TEXT,
-        created_at REAL,
-        return_value TEXT,
-        error BLOB,
-        pid INTEGER,
-        {COL_CLUSTER_NAME} TEXT,
-        schedule_type TEXT,
-        {COL_USER_ID} TEXT,
-        {COL_STATUS_MSG} TEXT,
-        {COL_SHOULD_RETRY} INTEGER,
-        {COL_FINISHED_AT} REAL
-        )""")
+    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, _SQLALCHEMY_ENGINE)
 
-    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
-                                 'TEXT')
-    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_SHOULD_RETRY,
-                                 'INTEGER')
-    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
-                                 'REAL')
+    # For backward compatibility.
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            REQUEST_TABLE,
+            COL_STATUS_MSG,
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            REQUEST_TABLE,
+            COL_SHOULD_RETRY,
+            sqlalchemy.Boolean(),
+            default_statement='DEFAULT FALSE')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            REQUEST_TABLE,
+            COL_FINISHED_AT,
+            sqlalchemy.Float(),
+            default_statement='DEFAULT NULL')
+        db_utils.add_column_to_table_sqlalchemy(
+            session,
+            REQUEST_TABLE,
+            COL_HOST_UUID,
+            sqlalchemy.Text(),
+            default_statement='DEFAULT NULL')
+        session.commit()
 
 
-_DB = None
-_init_db_lock = threading.Lock()
-
-
-def init_db(func):
-    """Initialize the database."""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global _DB
-        if _DB is not None:
-            return func(*args, **kwargs)
-        with _init_db_lock:
-            if _DB is None:
+def initialize_and_get_db() -> sqlalchemy.engine.Engine:
+    global _SQLALCHEMY_ENGINE
+    with _DB_INIT_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        if _SQLALCHEMY_ENGINE is None:
+            conn_string = None
+            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
+                conn_string = skypilot_config.get_nested(('db',), None)
+            if conn_string:
+                logger.debug(f'using db URI from {conn_string}')
+                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(conn_string)
+            else:
                 db_path = os.path.expanduser(
                     server_constants.API_SERVER_REQUEST_DB_PATH)
                 pathlib.Path(db_path).parents[0].mkdir(parents=True,
                                                        exist_ok=True)
-                _DB = db_utils.SQLiteConn(db_path, create_table)
+                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
+                                                              db_path)
+            create_table()
+    return _SQLALCHEMY_ENGINE
+
+
+def _init_db(func):
+    """Initialize the database."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        initialize_and_get_db()
         return func(*args, **kwargs)
 
     return wrapper
@@ -543,7 +622,7 @@ def request_lock_path(request_id: str) -> str:
 
 
 @contextlib.contextmanager
-@init_db
+@_init_db
 def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get a SkyPilot API request."""
     request = _get_request_no_lock(request_id)
@@ -554,39 +633,33 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
 
 def _get_request_no_lock(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
-    assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            'WHERE request_id LIKE ?', (request_id + '%',))
-        row = cursor.fetchone()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(request_table).filter(
+            request_table.c.request_id.like(request_id + '%')).first()
         if row is None:
             return None
     return Request.from_row(row)
 
 
-@init_db
+@_init_db
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(f'SELECT request_id FROM {REQUEST_TABLE} '
-                       'ORDER BY created_at DESC LIMIT 1')
-        row = cursor.fetchone()
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(request_table.c.request_id).order_by(
+            request_table.c.created_at.desc()).first()
         return row[0] if row else None
 
 
-@init_db
+@_init_db
 def get_request(request_id: str) -> Optional[Request]:
     """Get a SkyPilot API request."""
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_request_no_lock(request_id)
 
 
-@init_db
+@_init_db
 def create_if_not_exists(request: Request) -> bool:
     """Create a SkyPilot API request if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
@@ -596,7 +669,7 @@ def create_if_not_exists(request: Request) -> bool:
         return True
 
 
-@init_db
+@_init_db
 def get_request_tasks(
     status: Optional[List[RequestStatus]] = None,
     cluster_names: Optional[List[str]] = None,
@@ -604,6 +677,7 @@ def get_request_tasks(
     exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
     finished_before: Optional[float] = None,
+    host_uuid: Optional[str] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -628,41 +702,31 @@ def get_request_tasks(
             'Only one of exclude_request_names or include_request_names can be '
             'provided, not both.')
 
-    filters = []
-    filter_params: List[Any] = []
-    if status is not None:
-        status_list_str = ','.join(repr(status.value) for status in status)
-        filters.append(f'status IN ({status_list_str})')
-    if exclude_request_names is not None:
-        exclude_request_names_str = ','.join(
-            repr(name) for name in exclude_request_names)
-        filters.append(f'name NOT IN ({exclude_request_names_str})')
-    if cluster_names is not None:
-        cluster_names_str = ','.join(repr(name) for name in cluster_names)
-        filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
-    if user_id is not None:
-        filters.append(f'{COL_USER_ID} = ?')
-        filter_params.append(user_id)
-    if include_request_names is not None:
-        request_names_str = ','.join(
-            repr(name) for name in include_request_names)
-        filters.append(f'name IN ({request_names_str})')
-    if finished_before is not None:
-        filters.append('finished_at < ?')
-        filter_params.append(finished_before)
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        filter_str = ' AND '.join(filters)
-        if filter_str:
-            filter_str = f' WHERE {filter_str}'
-        columns_str = ', '.join(REQUEST_COLUMNS)
-        cursor.execute(
-            f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-            'ORDER BY created_at DESC', filter_params)
-        rows = cursor.fetchall()
-        if rows is None:
-            return []
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(request_table)
+
+        if status is not None:
+            status_values = [s.value for s in status]
+            query = query.filter(request_table.c.status.in_(status_values))
+        if exclude_request_names is not None:
+            query = query.filter(
+                ~request_table.c.name.in_(exclude_request_names))
+        if cluster_names is not None:
+            query = query.filter(
+                request_table.c.cluster_name.in_(cluster_names))
+        if user_id is not None:
+            query = query.filter(request_table.c.user_id == user_id)
+        if include_request_names is not None:
+            query = query.filter(
+                request_table.c.name.in_(include_request_names))
+        if finished_before is not None:
+            query = query.filter(request_table.c.finished_at < finished_before)
+        if host_uuid is not None:
+            query = query.filter(request_table.c.host_uuid == host_uuid)
+
+        rows = query.order_by(request_table.c.created_at.desc()).all()
+
     requests = []
     for row in rows:
         request = Request.from_row(row)
@@ -672,15 +736,71 @@ def get_request_tasks(
 
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
-    row = request.to_row()
-    key_str = ', '.join(REQUEST_COLUMNS)
-    fill_str = ', '.join(['?'] * len(row))
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'INSERT OR REPLACE INTO {REQUEST_TABLE} ({key_str}) '
-            f'VALUES ({fill_str})', row)
+    assert _SQLALCHEMY_ENGINE is not None
+    payload = request.encode()
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        # Convert error string to bytes for LargeBinary column
+        error_bytes = payload.error.encode('utf-8') if payload.error else b''
+
+        insert_stmnt = insert_func(request_table).values(
+            request_id=payload.request_id,
+            name=payload.name,
+            entrypoint=payload.entrypoint,
+            request_body=payload.request_body,
+            status=payload.status,
+            created_at=payload.created_at,
+            return_value=payload.return_value,
+            error=error_bytes,
+            pid=payload.pid,
+            cluster_name=payload.cluster_name,
+            schedule_type=payload.schedule_type,
+            user_id=payload.user_id,
+            status_msg=payload.status_msg,
+            should_retry=payload.should_retry,
+            finished_at=payload.finished_at,
+            host_uuid=payload.host_uuid,
+        )
+
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            # For SQLite, use INSERT OR REPLACE
+            insert_stmnt = insert_stmnt.prefix_with('OR REPLACE')
+            session.execute(insert_stmnt)
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            # For PostgreSQL, use ON CONFLICT DO UPDATE
+            do_update_stmt = insert_stmnt.on_conflict_do_update(
+                index_elements=[request_table.c.request_id],
+                set_={
+                    request_table.c.name: payload.name,
+                    request_table.c.entrypoint: payload.entrypoint,
+                    request_table.c.request_body: payload.request_body,
+                    request_table.c.status: payload.status,
+                    request_table.c.created_at: payload.created_at,
+                    request_table.c.return_value: payload.return_value,
+                    request_table.c.error: error_bytes,
+                    request_table.c.pid: payload.pid,
+                    request_table.c.cluster_name: payload.cluster_name,
+                    request_table.c.schedule_type: payload.schedule_type,
+                    request_table.c.user_id: payload.user_id,
+                    request_table.c.status_msg: payload.status_msg,
+                    request_table.c.should_retry: payload.should_retry,
+                    request_table.c.finished_at: payload.finished_at,
+                    request_table.c.host_uuid: payload.host_uuid,
+                })
+            session.execute(do_update_stmt)
+
+        session.commit()
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
@@ -713,15 +833,26 @@ def set_request_cancelled(request_id: str) -> None:
         request_task.status = RequestStatus.CANCELLED
 
 
-@init_db
-def _delete_requests(requests: List[Request]):
+@_init_db
+def delete_requests(req_ids: List[str]):
     """Clean up requests by their IDs."""
-    id_list_str = ','.join(repr(req.request_id) for req in requests)
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        stmt = sqlalchemy.delete(request_table).where(
+            request_table.c.request_id.in_(req_ids))
+        session.execute(stmt)
+        session.commit()
+
+
+@_init_db
+def delete_requests_by_host_uuid(host_uuid: str):
+    """Delete requests by host UUID."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        stmt = sqlalchemy.delete(request_table).where(
+            request_table.c.host_uuid == host_uuid)
+        session.execute(stmt)
+        session.commit()
 
 
 def clean_finished_requests_with_retention(retention_seconds: int):
@@ -742,7 +873,7 @@ def clean_finished_requests_with_retention(retention_seconds: int):
         args=reqs,
         num_threads=len(reqs))
 
-    _delete_requests(reqs)
+    delete_requests([req.request_id for req in reqs])
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.
