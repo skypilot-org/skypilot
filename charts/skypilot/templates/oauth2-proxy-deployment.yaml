@@ -10,6 +10,29 @@
 {{- fail "ingress.oauth2-proxy.client-secret is required when OAuth2 proxy is enabled and client-details-from-secret is not set" -}}
 {{- end -}}
 
+{{- /* Determine the secret key format when using client-details-from-secret */ -}}
+{{- $clientIdKey := "client-id" -}}
+{{- $clientSecretKey := "client-secret" -}}
+{{- if (index $oauth2 "client-details-from-secret") -}}
+  {{- $secretName := index $oauth2 "client-details-from-secret" -}}
+  {{- $secret := lookup "v1" "Secret" .Release.Namespace $secretName -}}
+  {{- if $secret -}}
+    {{- if and (not (hasKey $secret.data "client-id")) (hasKey $secret.data "client_id") -}}
+      {{- $clientIdKey = "client_id" -}}
+    {{- end -}}
+    {{- if and (not (hasKey $secret.data "client-secret")) (hasKey $secret.data "client_secret") -}}
+      {{- $clientSecretKey = "client_secret" -}}
+    {{- end -}}
+    {{- /* Validate that at least one format exists for each credential */ -}}
+    {{- if not (or (hasKey $secret.data "client-id") (hasKey $secret.data "client_id")) -}}
+      {{- fail (printf "Secret %s must contain either 'client-id' or 'client_id' key" $secretName) -}}
+    {{- end -}}
+    {{- if not (or (hasKey $secret.data "client-secret") (hasKey $secret.data "client_secret")) -}}
+      {{- fail (printf "Secret %s must contain either 'client-secret' or 'client_secret' key" $secretName) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -65,7 +88,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
-              key: client-id
+              key: {{ $clientIdKey }}
           {{- else }}
           value: {{ index .Values.ingress "oauth2-proxy" "client-id" | quote }}
           {{- end }}
@@ -74,7 +97,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ index .Values.ingress "oauth2-proxy" "client-details-from-secret" }}
-              key: client-secret
+              key: {{ $clientSecretKey }}
           {{- else }}
           value: {{ index .Values.ingress "oauth2-proxy" "client-secret" | quote }}
           {{- end }}
