@@ -3023,17 +3023,18 @@ def _down_or_stop_clusters(
                         click.echo(common_utils.format_exception(e))
                     else:
                         raise
-                confirm_str = 'delete'
-                input_prefix = ('Since --purge is set, errors will be ignored '
-                                'and controller will be removed from '
-                                'local state.\n') if purge else ''
-                user_input = click.prompt(
-                    f'{input_prefix}'
-                    f'To proceed, please type {colorama.Style.BRIGHT}'
-                    f'{confirm_str!r}{colorama.Style.RESET_ALL}',
-                    type=str)
-                if user_input != confirm_str:
-                    raise click.Abort()
+                if not purge:
+                    confirm_str = 'delete'
+                    user_input = click.prompt(
+                        f'To proceed, please type {colorama.Style.BRIGHT}'
+                        f'{confirm_str!r}{colorama.Style.RESET_ALL}',
+                        type=str)
+                    if user_input != confirm_str:
+                        raise click.Abort()
+                else:
+                    click.echo('Since --purge is set, errors will be ignored '
+                               'and controller will be removed from '
+                               'local state.\nSkipping confirmation.')
                 no_confirm = True
         names += controllers
 
@@ -5574,6 +5575,12 @@ def api_login(endpoint: Optional[str], relogin: bool,
 
     """
     sdk.api_login(endpoint, relogin, service_account_token)
+
+
+@api.command('logout', cls=_DocumentedCodeCommand)
+def api_logout():
+    """Logs out of the api server"""
+    sdk.api_logout()
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

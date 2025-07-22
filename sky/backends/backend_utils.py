@@ -2030,9 +2030,20 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
+            cloud_name = repr(handle.launched_resources.cloud).lower()
             for i in range(5):
-                ready_head, ready_workers, output, stderr = (
-                    get_node_counts_from_ray_status(head_runner))
+                try:
+                    ready_head, ready_workers, output, stderr = (
+                        get_node_counts_from_ray_status(head_runner))
+                except RuntimeError as e:
+                    logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
+                                 f' {i}: {common_utils.format_exception(e)}')
+                    if cloud_name != 'kubernetes':
+                        raise e
+                    # We retry for kubernetes because coreweave can have a
+                    # transient network issue.
+                    time.sleep(1)
+                    continue
                 if ready_head + ready_workers == total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
