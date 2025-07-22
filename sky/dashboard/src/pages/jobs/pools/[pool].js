@@ -1,98 +1,183 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import Head from 'next/head';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
+import Head from 'next/head';
 import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
-// Using simple HTML table to avoid component issues
-import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
+import {
+  RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { getQueryPools, extractHandleInfo } from '@/data/connectors/jobs';
-
-import { TimestampWithTooltip } from '@/components/utils';
-import { RefreshCw } from 'lucide-react';
-import { StatusBadge } from '@/components/elements/StatusBadge';
-import dashboardCache from '@/lib/cache';
+import {
+  TimestampWithTooltip,
+  formatDuration,
+  CustomTooltip as Tooltip,
+} from '@/components/utils';
+import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { formatYaml } from '@/lib/yamlUtils';
 
 export default function PoolDetailPage() {
   const router = useRouter();
   const { pool: poolName } = router.query;
+
   const [poolData, setPoolData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchPoolData = useCallback(async () => {
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Filtering state
+  const [showFailedWorkers, setShowFailedWorkers] = useState(false);
+
+  // Pool YAML state
+  const [isPoolYamlExpanded, setIsPoolYamlExpanded] = useState(false);
+  const [isPoolYamlCopied, setIsPoolYamlCopied] = useState(false);
+
+  const fetchPoolData = async () => {
     if (!poolName) return;
 
     setLoading(true);
+    setError(null);
+
     try {
-      const data = await dashboardCache.get(getQueryPools);
+      const poolsResponse = await getQueryPools();
+      const { pools = [] } = poolsResponse || {};
 
-      // Find the specific pool
-      let pool = null;
-      if (data && data.pools && Array.isArray(data.pools)) {
-        pool = data.pools.find((p) => p.name === poolName);
-      } else if (data && Array.isArray(data)) {
-        pool = data.find((p) => p.name === poolName);
-      }
-
-      if (!pool) {
+      const foundPool = pools.find((pool) => pool.name === poolName);
+      if (!foundPool) {
         setError(`Pool ${poolName} not found`);
         setPoolData(null);
       } else {
-        setPoolData(pool);
-        setError(null);
+        setPoolData(foundPool);
       }
     } catch (err) {
-      setError('Failed to fetch pool data');
+      console.error('Error fetching pool data:', err);
+      setError(`Failed to fetch pool data: ${err.message}`);
       setPoolData(null);
     } finally {
       setLoading(false);
     }
-  }, [poolName]);
+  };
 
   useEffect(() => {
     fetchPoolData();
-  }, [poolName, fetchPoolData]);
+  }, [poolName]);
 
-  const formatUptime = (uptime) => {
-    if (!uptime) return '-';
-
-    const now = Date.now() / 1000;
-    const durationSeconds = Math.floor(now - uptime);
-
-    if (durationSeconds <= 0) return '-';
-
-    return formatDuration(durationSeconds);
-  };
-
+  // Helper functions
   const getWorkersCount = (replicaInfo) => {
     if (!replicaInfo || replicaInfo.length === 0) return '0';
-
     const readyWorkers = replicaInfo.filter(
       (worker) => worker.status === 'READY'
     ).length;
-
     return readyWorkers.toString();
   };
 
-  // Helper function to get infrastructure summary for ready workers
   const getInfraSummary = (replicaInfo) => {
-    if (!replicaInfo || replicaInfo.length === 0) {
-      return {};
-    }
+    if (!replicaInfo || replicaInfo.length === 0) return {};
+
+    const readyWorkers = replicaInfo.filter(
+      (worker) => worker.status === 'READY'
+    );
 
     const infraCounts = {};
-    replicaInfo.forEach((worker) => {
-      if (worker.handle && worker.status === 'READY') {
+    readyWorkers.forEach((worker) => {
+      try {
         const handleInfo = extractHandleInfo(worker.handle);
         const cloud = handleInfo.cloud;
         infraCounts[cloud] = (infraCounts[cloud] || 0) + 1;
+      } catch (error) {
+        // Handle errors gracefully
+        infraCounts['Unknown'] = (infraCounts['Unknown'] || 0) + 1;
       }
     });
 
     return infraCounts;
   };
 
-  if (loading) {
+  const formatUptime = (uptime) => {
+    if (!uptime) return '-';
+    const now = Date.now() / 1000;
+    const durationSeconds = Math.floor(now - uptime);
+    if (durationSeconds <= 0) return '-';
+    return formatDuration(durationSeconds);
+  };
+
+  const getJobStatusCounts = (poolData) => {
+    if (!poolData || !poolData.jobCounts) return {};
+    return poolData.jobCounts;
+  };
+
+  // Pool YAML functions
+  const togglePoolYamlExpanded = () => {
+    setIsPoolYamlExpanded(!isPoolYamlExpanded);
+  };
+
+  const copyPoolYamlToClipboard = async () => {
+    try {
+      if (poolData && poolData.pool_yaml) {
+        const formattedYaml = formatYaml(poolData.pool_yaml);
+        await navigator.clipboard.writeText(formattedYaml);
+        setIsPoolYamlCopied(true);
+        setTimeout(() => setIsPoolYamlCopied(false), 2000); // Reset after 2 seconds
+      }
+    } catch (err) {
+      console.error('Failed to copy Pool YAML to clipboard:', err);
+    }
+  };
+
+  // Filter and paginate workers
+  const { filteredWorkers, totalPages, paginatedWorkers } = useMemo(() => {
+    if (!poolData || !poolData.replica_info) {
+      return { filteredWorkers: [], totalPages: 0, paginatedWorkers: [] };
+    }
+
+    // Filter workers based on showFailedWorkers toggle
+    const filtered = showFailedWorkers
+      ? poolData.replica_info
+      : poolData.replica_info.filter((worker) => {
+          // Check if status contains 'FAILED' (e.g., FAILED_PROBING, FAILED_SETUP, etc.)
+          return !worker.status || !worker.status.includes('FAILED');
+        });
+
+    // Calculate pagination
+    const pages = Math.ceil(filtered.length / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginated = filtered.slice(startIndex, endIndex);
+
+    return {
+      filteredWorkers: filtered,
+      totalPages: pages,
+      paginatedWorkers: paginated,
+    };
+  }, [poolData, showFailedWorkers, currentPage, pageSize]);
+
+  // Reset to first page when filtering changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [showFailedWorkers]);
+
+  // Page navigation handlers
+  const goToPreviousPage = () => {
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage((page) => Math.min(page + 1, totalPages));
+  };
+
+  const handlePageSizeChange = (e) => {
+    const newSize = parseInt(e.target.value, 10);
+    setPageSize(newSize);
+    setCurrentPage(1);
+  };
+
+  if (!router.isReady || loading) {
     return (
       <>
         <Head>
@@ -140,7 +225,10 @@ export default function PoolDetailPage() {
         <div className="w-full mb-4">
           <div className="flex items-center justify-between mb-4 h-5">
             <div className="text-base flex items-center">
-              <Link href="/jobs" className="text-sky-blue hover:underline">
+              <Link
+                href="/jobs?tab=pools"
+                className="text-sky-blue hover:underline"
+              >
                 Pools
               </Link>
               <span className="mx-2 text-gray-500">›</span>
@@ -174,53 +262,36 @@ export default function PoolDetailPage() {
         </div>
 
         {/* Content sections - explicitly stacked vertically */}
-        <div className="w-full flex flex-col space-y-6">
+        <div className="w-full flex flex-col space-y-4">
           {/* Pool Summary */}
           <div className="bg-white shadow rounded-lg p-6">
             <h2 className="text-xl font-semibold mb-4">Pool Summary</h2>
+
+            {/* Grid layout for job status and infra summary */}
             <div className="grid grid-cols-2 gap-x-8 gap-y-2">
-              {/* Row 1: Job Status | Infra Summary */}
+              {/* Job Status */}
               <div>
                 <div className="text-sm font-medium text-gray-700 mb-2">
                   Job Status
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {poolData.jobCounts &&
-                  Object.keys(poolData.jobCounts).length > 0 ? (
-                    Object.entries(poolData.jobCounts).map(
-                      ([status, count]) => {
-                        const getStatusStyle = (status) => {
-                          switch (status) {
-                            case 'PENDING':
-                              return 'bg-yellow-50 text-yellow-700';
-                            case 'STARTING':
-                              return 'bg-cyan-50 text-cyan-700';
-                            case 'RUNNING':
-                              return 'bg-green-50 text-green-700';
-                            case 'RECOVERING':
-                              return 'bg-orange-50 text-orange-700';
-                            case 'CANCELLING':
-                              return 'bg-yellow-50 text-yellow-700';
-                            default:
-                              return 'bg-gray-50 text-gray-700';
-                          }
-                        };
-
-                        return (
-                          <span
-                            key={status}
-                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusStyle(status)}`}
-                          >
-                            {count} {status}
-                          </span>
-                        );
-                      }
-                    )
-                  ) : (
-                    <span className="text-gray-500 text-sm">
-                      No active jobs
-                    </span>
-                  )}
+                  {(() => {
+                    const jobCounts = getJobStatusCounts(poolData);
+                                         return Object.keys(jobCounts).length > 0 ? (
+                       Object.entries(jobCounts).map(([status, count]) => (
+                         <span
+                           key={status}
+                           className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusStyle(status)}`}
+                         >
+                           {count} {status}
+                         </span>
+                       ))
+                    ) : (
+                      <span className="text-gray-500 text-sm">
+                        No active jobs
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -286,11 +357,85 @@ export default function PoolDetailPage() {
                 </div>
               </div>
             </div>
+
+            {/* Pool YAML Section */}
+            {poolData.pool_yaml && poolData.pool_yaml.trim() && (
+              <div className="pt-4 mt-4">
+                <div className="flex items-center mb-2">
+                  <button
+                    onClick={togglePoolYamlExpanded}
+                    className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                  >
+                    {isPoolYamlExpanded ? (
+                      <ChevronDown className="w-4 h-4 mr-1" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 mr-1" />
+                    )}
+                    <span className="text-base">Show Pool YAML</span>
+                  </button>
+
+                  <Tooltip
+                    content={isPoolYamlCopied ? 'Copied!' : 'Copy YAML'}
+                    className="text-muted-foreground"
+                  >
+                    <button
+                      onClick={copyPoolYamlToClipboard}
+                      className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                    >
+                      {isPoolYamlCopied ? (
+                        <Check className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
+                  </Tooltip>
+                </div>
+
+                {isPoolYamlExpanded && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                    <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                      {formatYaml(poolData.pool_yaml)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Workers Table */}
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold mb-4">Pool Workers</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Pool Workers</h2>
+
+              {/* Show Failed Workers Toggle */}
+              <div className="flex items-center space-x-2">
+                <label className="flex items-center space-x-3 text-sm cursor-pointer">
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={showFailedWorkers}
+                      onChange={(e) => setShowFailedWorkers(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div
+                      className={`w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                        showFailedWorkers ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out translate-y-0.5 ${
+                          showFailedWorkers
+                            ? 'translate-x-5'
+                            : 'translate-x-0.5'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-gray-700">Show all workers</span>
+                </label>
+              </div>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -319,19 +464,23 @@ export default function PoolDetailPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {poolData.replica_info && poolData.replica_info.length > 0 ? (
-                    poolData.replica_info.map((worker, index) => (
+                  {paginatedWorkers.length > 0 ? (
+                    paginatedWorkers.map((worker, index) => (
                       <tr key={worker.replica_id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">
                           {worker.replica_id}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {worker.name}
+                          {worker.version}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          <TimestampWithTooltip
-                            date={new Date(worker.launched_at * 1000)}
-                          />
+                          {worker.launched_at && worker.launched_at > 0 ? (
+                            <TimestampWithTooltip
+                              date={new Date(worker.launched_at * 1000)}
+                            />
+                          ) : (
+                            '-'
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 max-w-xs truncate">
                           {(() => {
@@ -381,13 +530,74 @@ export default function PoolDetailPage() {
                         colSpan={7}
                         className="px-6 py-8 text-center text-gray-500"
                       >
-                        No workers found in this pool
+                        {showFailedWorkers
+                          ? 'No workers found in this pool'
+                          : 'No non-failed workers found in this pool'}
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination */}
+            {filteredWorkers.length > 0 && (
+              <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center">
+                    <span className="mr-2">Rows per page:</span>
+                    <div className="relative inline-block">
+                      <select
+                        value={pageSize}
+                        onChange={handlePageSizeChange}
+                        className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
+                        style={{ minWidth: '40px' }}
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={20}>20</option>
+                        <option value={50}>50</option>
+                      </select>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                  <div>
+                    {(currentPage - 1) * pageSize + 1} –{' '}
+                    {Math.min(currentPage * pageSize, filteredWorkers.length)}{' '}
+                    of {filteredWorkers.length}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={goToPreviousPage}
+                      disabled={currentPage === 1}
+                      className="px-2 py-1 text-sm text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 rounded"
+                    >
+                      &lt;
+                    </button>
+                    <button
+                      onClick={goToNextPage}
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      className="px-2 py-1 text-sm text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 rounded"
+                    >
+                      &gt;
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

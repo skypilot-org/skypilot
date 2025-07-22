@@ -77,6 +77,8 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # Whether the service is a cluster pool.
     db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
                                  'INTEGER DEFAULT 0')
+    db_utils.add_column_to_table(cursor, conn, 'services', 'pool_yaml',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -278,7 +280,8 @@ _SERVICE_STATUS_TO_COLOR = {
 @init_db
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus, tls_encrypted: bool, pool: bool) -> bool:
+                status: ServiceStatus, tls_encrypted: bool, pool: bool,
+                pool_yaml: str) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -293,11 +296,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
                 requested_resources_str, load_balancing_policy, tls_encrypted,
-                pool)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                pool, pool_yaml)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted), int(pool)))
+                 int(tls_encrypted), int(pool), pool_yaml))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -313,6 +316,10 @@ def remove_service(service_name: str) -> None:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute("""\
             DELETE FROM services WHERE name=(?)""", (service_name,))
+        cursor.execute(
+            """\
+            DELETE FROM replica_assignments WHERE service_name=(?)""",
+            (service_name,))
 
 
 @init_db
@@ -374,8 +381,9 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted, pool) = row[:16]
-    return {
+     _, active_versions, load_balancing_policy, tls_encrypted, pool,
+     pool_yaml) = row[:17]
+    record = {
         'name': name,
         'controller_job_id': controller_job_id,
         'controller_port': controller_port,
@@ -394,7 +402,13 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
         'pool': bool(pool),
+        'pool_yaml': pool_yaml,
     }
+    latest_spec = get_spec(name, current_version)
+    if latest_spec is not None:
+        record['policy'] = latest_spec.autoscaling_policy_str()
+        record['load_balancing_policy'] = latest_spec.load_balancing_policy
+    return record
 
 
 @init_db

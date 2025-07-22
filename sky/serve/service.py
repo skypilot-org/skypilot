@@ -195,6 +195,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached.')
+        task_config = task.to_yaml_config()
+        task_config.pop('service', None)
+        task_config.pop('pool', None)
+        task_config.pop('run', None)
         success = serve_state.add_service(
             service_name,
             controller_job_id=job_id,
@@ -203,7 +207,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             load_balancing_policy=service_spec.load_balancing_policy,
             status=serve_state.ServiceStatus.CONTROLLER_INIT,
             tls_encrypted=service_spec.tls_credential is not None,
-            pool=service_spec.pool)
+            pool=service_spec.pool,
+            pool_yaml=common_utils.dump_yaml_str(task_config))
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
