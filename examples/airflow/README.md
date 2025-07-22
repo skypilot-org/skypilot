@@ -224,7 +224,6 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
     preprocess_task = run_sky_task.override(task_id="data_preprocess")(
         base_path,
         'data_preprocessing_gcp_sa.yaml',
-        skypilot_api_server_endpoint,
         gcp_service_account_json=gcp_service_account_json,
         envs_override=common_envs)
 
