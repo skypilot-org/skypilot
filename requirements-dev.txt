@@ -25,6 +25,7 @@ types-setuptools
 types-cachetools
 types-pyvmomi
 types-aiofiles
+types-paramiko
 
 # testing
 pytest
@@ -46,3 +47,7 @@ boto3-stubs[s3,ec2,sts,iam,service-quotas]
 
 # For postgres
 psycopg2-binary==2.9.10
+
+# For helm okta test
+selenium==4.33.0
+webdriver-manager==4.0.2

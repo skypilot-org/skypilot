@@ -1,10 +1,10 @@
-# Full finetuning of Llama-4 Scout 17B MoE model with 128 experts.
+# Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-scout_gke_llama_factory_sft.yaml -c scout --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick-lora.yaml -c maverick --env HF_TOKEN
 #
-# This config uses H100 GPUs with 80GB memory each
+# This config requires at least 2 nodes with 8x H100 GPUs each.
 
 envs:
   HF_TOKEN: 
@@ -41,15 +41,14 @@ setup: |
   # Update package list
   sudo apt-get update
 
-  # Install CUDA and build tools
+  #sudo apt-get install cuda-minimal-build-12-6 -y
   sudo apt-get install cuda-toolkit-12-6 -y
-  sudo apt-get install -y nvidia-cuda-dev libaio-dev libssl-dev build-essential cmake ninja-build
 
-  git clone --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
+  git clone -b v0.9.3 --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
   cd LLaMA-Factory
-  pip install -e ".[torch,metrics,deepspeed,liger-kernel]" --no-build-isolation
+  pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
   pip install "transformers>=4.51.1"
-  pip install deepspeed==0.14.5 --upgrade --force-reinstall --no-cache-dir
+
 
 run: |
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
@@ -57,4 +56,4 @@ run: |
 
   cd LLaMA-Factory
 
-  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=2 NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_scout_full_sft.yaml
+  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=$SKYPILOT_NUM_NODES NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_lora_sft.yaml

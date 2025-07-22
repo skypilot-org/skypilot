@@ -16,6 +16,14 @@ import {
   CardTitle,
   CardFooter,
 } from '@/components/ui/card';
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { CircularProgress } from '@mui/material';
 import yaml from 'js-yaml';
@@ -34,13 +42,16 @@ import {
   TickIcon,
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, PlusIcon, Trash2Icon, EditIcon } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
+import { sortData } from '@/data/utils';
+import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
+import Link from 'next/link';
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -126,173 +137,15 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
 const WorkspaceBadge = ({ isPrivate }) => {
   if (isPrivate) {
     return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
         Private
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
       Public
     </span>
-  );
-};
-
-// Workspace card component
-const WorkspaceCard = ({
-  workspace,
-  onDelete,
-  onEdit,
-  router,
-  rawWorkspacesData,
-  checkPermissionAndAct,
-  roleLoading,
-}) => {
-  const handleEdit = () => {
-    checkPermissionAndAct('cannot edit workspace', () => {
-      onEdit(workspace.name);
-    });
-  };
-
-  // Get the workspace configuration to check if it's private
-  const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
-  const isPrivate = workspaceConfig.private === true;
-
-  return (
-    <Card key={workspace.name}>
-      <CardHeader>
-        <CardTitle className="text-base font-normal">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="font-semibold">Workspace:</span> {workspace.name}
-            </div>
-            <WorkspaceBadge isPrivate={isPrivate} />
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm pb-2">
-        <div className="py-2 flex items-center justify-between">
-          <div className="flex items-center text-gray-600">
-            <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
-            <span>Clusters (Running / Total)</span>
-          </div>
-          <button
-            onClick={() => {
-              router.push({
-                pathname: '/clusters',
-                query: { workspace: workspace.name },
-              });
-            }}
-            className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-          >
-            {workspace.runningClusterCount} / {workspace.totalClusterCount}
-          </button>
-        </div>
-        <div className="py-2 flex items-center justify-between border-t border-gray-100">
-          <div className="flex items-center text-gray-600">
-            <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
-            <span>Managed Jobs</span>
-          </div>
-          <button
-            onClick={() => {
-              router.push({
-                pathname: '/jobs',
-                query: { workspace: workspace.name },
-              });
-            }}
-            className="font-normal text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-          >
-            {workspace.managedJobsCount}
-          </button>
-        </div>
-      </CardContent>
-
-      <div className="px-6 pb-3 text-sm pt-3">
-        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
-          Enabled Infra
-        </h4>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {workspace.clouds.map((cloud) => (
-            <div key={cloud} className="flex items-center text-gray-700">
-              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
-              <span>{cloud}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <CardFooter className="flex justify-end pt-3 gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onDelete(workspace.name)}
-          disabled={workspace.name === 'default' || roleLoading}
-          title={
-            workspace.name === 'default'
-              ? 'Cannot delete default workspace'
-              : 'Delete workspace'
-          }
-          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-        >
-          {roleLoading ? (
-            <div className="flex items-center">
-              <CircularProgress size={12} className="mr-1" />
-              <span>Delete</span>
-            </div>
-          ) : (
-            'Delete'
-          )}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleEdit}
-          disabled={roleLoading}
-        >
-          {roleLoading ? (
-            <div className="flex items-center">
-              <CircularProgress size={12} className="mr-1" />
-              <span>Edit</span>
-            </div>
-          ) : (
-            'Edit'
-          )}
-        </Button>
-      </CardFooter>
-    </Card>
-  );
-};
-
-// Create new workspace card component
-const CreateWorkspaceCard = ({
-  onClick,
-  checkPermissionAndAct,
-  roleLoading,
-}) => {
-  const handleClick = () => {
-    checkPermissionAndAct('cannot create workspace', onClick);
-  };
-
-  return (
-    <Card
-      key="create-new"
-      className="border-2 border-dashed border-sky-300 hover:border-sky-400 cursor-pointer transition-colors flex flex-col"
-      onClick={handleClick}
-    >
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-sky-100 flex items-center justify-center mb-4 mx-auto">
-            <span className="text-3xl text-sky-600">+</span>
-          </div>
-          <h3 className="text-lg font-medium text-sky-700 mb-2">
-            Create New Workspace
-          </h3>
-          <p className="text-sm text-gray-500">
-            Set up a new workspace with custom infrastructure configurations
-          </p>
-        </div>
-      </div>
-    </Card>
   );
 };
 
@@ -356,6 +209,15 @@ export function Workspaces() {
   });
   const [loading, setLoading] = useState(true);
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+
+  // Sorting state
+  const [sortConfig, setSortConfig] = useState({
+    key: 'name',
+    direction: 'asc',
+  });
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Modal states
   const [isAllWorkspacesModalOpen, setIsAllWorkspacesModalOpen] =
@@ -518,17 +380,13 @@ export function Workspaces() {
       let activeGlobalManagedJobs = 0;
 
       jobs.forEach((job) => {
-        const jobClusterName =
-          job.cluster_name || (job.resources && job.resources.cluster_name);
-        if (jobClusterName) {
-          const wsName = clusterNameToWorkspace[jobClusterName];
-          if (
-            wsName &&
-            workspaceStatsAggregator[wsName] &&
-            activeJobStatuses.has(job.status)
-          ) {
-            workspaceStatsAggregator[wsName].managedJobsCount++;
-          }
+        // Use the direct workspace field from managed jobs
+        const wsName = job.workspace || 'default';
+        if (
+          workspaceStatsAggregator[wsName] &&
+          activeJobStatuses.has(job.status)
+        ) {
+          workspaceStatsAggregator[wsName].managedJobsCount++;
         }
         if (activeJobStatuses.has(job.status)) {
           activeGlobalManagedJobs++;
@@ -579,6 +437,65 @@ export function Workspaces() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Sorting functionality
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirection = (key) => {
+    if (sortConfig.key === key) {
+      return sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
+    }
+    return '';
+  };
+
+  const sortedWorkspaces = React.useMemo(() => {
+    if (!workspaceDetails) return [];
+
+    // First apply search filter
+    let filtered = workspaceDetails;
+    if (searchQuery && searchQuery.trim() !== '') {
+      const searchLower = searchQuery.toLowerCase().trim();
+      filtered = workspaceDetails.filter((workspace) => {
+        // Check workspace name
+        if (workspace.name.toLowerCase().includes(searchLower)) {
+          return true;
+        }
+
+        // Check infrastructure clouds (both original and canonical names)
+        if (
+          workspace.clouds.some((cloud) => {
+            const canonicalCloudName =
+              CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud;
+            return (
+              cloud.toLowerCase().includes(searchLower) ||
+              canonicalCloudName.toLowerCase().includes(searchLower)
+            );
+          })
+        ) {
+          return true;
+        }
+
+        // Check public/private status
+        const workspaceConfig = rawWorkspacesData?.[workspace.name] || {};
+        const isPrivate = workspaceConfig.private === true;
+        const status = isPrivate ? 'private' : 'public';
+        if (status.includes(searchLower)) {
+          return true;
+        }
+
+        return false;
+      });
+    }
+
+    // Then apply sorting
+    return sortData(filtered, sortConfig.key, sortConfig.direction);
+  }, [workspaceDetails, sortConfig, searchQuery, rawWorkspacesData]);
 
   const handleDeleteWorkspace = (workspaceName) => {
     checkPermissionAndAct('cannot delete workspace', () => {
@@ -646,9 +563,15 @@ export function Workspaces() {
     });
   };
 
-  const handleEditAllConfigs = () => {
-    checkPermissionAndAct('cannot edit config', () => {
-      router.push('/config');
+  const handleCreateWorkspace = () => {
+    checkPermissionAndAct('cannot create workspace', () => {
+      router.push('/workspace/new');
+    });
+  };
+
+  const handleEditWorkspace = (workspaceName) => {
+    checkPermissionAndAct('cannot edit workspace', () => {
+      router.push(`/workspaces/${workspaceName}`);
     });
   };
 
@@ -726,31 +649,11 @@ export function Workspaces() {
           onDismiss={() => setTopLevelError(null)}
         />
       </div>
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-2 h-5">
         <div className="text-base flex items-center">
           <span className="text-sky-blue leading-none">Workspaces</span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleEditAllConfigs}
-            className="ml-4 px-2 py-1 text-xs"
-            disabled={
-              loading ||
-              roleLoading ||
-              !rawWorkspacesData ||
-              Object.keys(rawWorkspacesData).length === 0
-            }
-          >
-            {roleLoading ? (
-              <div className="flex items-center">
-                <CircularProgress size={12} className="mr-1" />
-                <span>Edit All Configs</span>
-              </div>
-            ) : (
-              'Edit All Configs'
-            )}
-          </Button>
         </div>
         <div className="flex items-center">
           {loading && (
@@ -770,16 +673,61 @@ export function Workspaces() {
         </div>
       </div>
 
-      {/* Statistics Summary */}
-      <StatsSummary
-        workspaceCount={workspaceDetails.length}
-        runningClusters={globalStats.runningClusters}
-        totalClusters={globalStats.totalClusters}
-        managedJobs={globalStats.managedJobs}
-        router={router}
-      />
+      {/* Search and Create Workspace Row */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="relative flex-1 max-w-md">
+          <input
+            type="text"
+            placeholder="Filter workspaces"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              title="Clear search"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
 
-      {/* Workspace Cards */}
+        {/* Create Workspace Button */}
+        <button
+          onClick={handleCreateWorkspace}
+          disabled={roleLoading}
+          className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+          title="Create Workspace"
+        >
+          {roleLoading ? (
+            <>
+              <CircularProgress size={12} className="mr-2" />
+              <span>Create Workspace</span>
+            </>
+          ) : (
+            <>
+              <PlusIcon className="h-4 w-4 mr-2" />
+              Create Workspace
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Workspaces Table */}
       {workspaceDetails.length === 0 && !loading ? (
         <div className="text-center py-10">
           <p className="text-lg text-gray-600">No workspaces found.</p>
@@ -788,25 +736,167 @@ export function Workspaces() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {workspaceDetails.map((ws) => (
-            <WorkspaceCard
-              key={ws.name}
-              workspace={ws}
-              onDelete={handleDeleteWorkspace}
-              onEdit={(name) => router.push(`/workspaces/${name}`)}
-              router={router}
-              rawWorkspacesData={rawWorkspacesData}
-              checkPermissionAndAct={checkPermissionAndAct}
-              roleLoading={roleLoading}
-            />
-          ))}
-          <CreateWorkspaceCard
-            onClick={() => router.push('/workspace/new')}
-            checkPermissionAndAct={checkPermissionAndAct}
-            roleLoading={roleLoading}
-          />
-        </div>
+        <Card>
+          <div className="overflow-x-auto rounded-lg">
+            <Table className="min-w-full">
+              <TableHeader>
+                <TableRow>
+                  <TableHead
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                    onClick={() => handleSort('name')}
+                  >
+                    Workspace{getSortDirection('name')}
+                  </TableHead>
+                  <TableHead
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                    onClick={() => handleSort('totalClusterCount')}
+                  >
+                    Clusters {getSortDirection('totalClusterCount')}
+                  </TableHead>
+                  <TableHead
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                    onClick={() => handleSort('managedJobsCount')}
+                  >
+                    Jobs{getSortDirection('managedJobsCount')}
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap">
+                    Enabled infra
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading && sortedWorkspaces.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      className="text-center py-6 text-gray-500"
+                    >
+                      <div className="flex justify-center items-center">
+                        <CircularProgress size={20} className="mr-2" />
+                        <span>Loading...</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : sortedWorkspaces.length > 0 ? (
+                  sortedWorkspaces.map((workspace) => {
+                    // Get the workspace configuration to check if it's private
+                    const workspaceConfig =
+                      rawWorkspacesData?.[workspace.name] || {};
+                    const isPrivate = workspaceConfig.private === true;
+
+                    return (
+                      <TableRow
+                        key={workspace.name}
+                        className="hover:bg-gray-50"
+                      >
+                        <TableCell className="">
+                          <button
+                            onClick={() => handleEditWorkspace(workspace.name)}
+                            disabled={roleLoading}
+                            className="text-blue-600 hover:text-blue-600 hover:underline text-left"
+                          >
+                            {workspace.name}
+                          </button>
+                          <span className="ml-2">
+                            <WorkspaceBadge isPrivate={isPrivate} />
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            onClick={() => {
+                              router.push({
+                                pathname: '/clusters',
+                                query: { workspace: workspace.name },
+                              });
+                            }}
+                            className="text-gray-700 hover:text-blue-600 hover:underline"
+                          >
+                            {workspace.runningClusterCount} running,{' '}
+                            {workspace.totalClusterCount} total
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            onClick={() => {
+                              router.push({
+                                pathname: '/jobs',
+                                query: { workspace: workspace.name },
+                              });
+                            }}
+                            className="text-gray-700 hover:text-blue-600 hover:underline"
+                          >
+                            {workspace.managedJobsCount}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          {workspace.clouds.length > 0 ? (
+                            [...workspace.clouds].sort().map((cloud, index) => {
+                              const canonicalCloudName =
+                                CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] ||
+                                cloud;
+                              return (
+                                <span key={cloud}>
+                                  <Link
+                                    href="/infra"
+                                    className="inline-flex items-center px-2 py-1 rounded text-sm bg-sky-100 text-sky-800 hover:bg-sky-200 hover:text-sky-900 transition-colors duration-200"
+                                  >
+                                    {canonicalCloudName}
+                                  </Link>
+                                  {index < workspace.clouds.length - 1 && ' '}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-gray-500 text-sm">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEditWorkspace(workspace.name)}
+                            disabled={roleLoading}
+                            className="text-gray-600 hover:text-gray-800 mr-1"
+                          >
+                            <EditIcon className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              handleDeleteWorkspace(workspace.name)
+                            }
+                            disabled={
+                              workspace.name === 'default' || roleLoading
+                            }
+                            title={
+                              workspace.name === 'default'
+                                ? 'Cannot delete default workspace'
+                                : 'Delete workspace'
+                            }
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2Icon className="w-4 h-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      className="text-center py-6 text-gray-500"
+                    >
+                      No workspaces found
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
       )}
 
       {/* All Workspaces Config Modal */}

@@ -8,14 +8,17 @@ trust_remote_code: true
 stage: sft
 do_train: true
 finetuning_type: full
-deepspeed: examples/deepspeed/ds_z3_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
+# deepspeed: examples/deepspeed/ds_z2_offload_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
+deepspeed: /configs/offload_cpu.yaml
+flash_attn: fa2
+enable_liger_kernel: True
 
 ### dataset
-dataset: mllm_demo,identity,alpaca_en_demo
+dataset: alpaca_en_demo
 template: llama4
-cutoff_len: 1024
-max_samples: 5000
-overwrite_cache: false
+cutoff_len: 128
+max_samples: 100
+overwrite_cache: true
 preprocessing_num_workers: 4
 dataloader_num_workers: 1
 
@@ -30,11 +33,11 @@ report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
 
 ### train
 per_device_train_batch_size: 1
-gradient_accumulation_steps: 2
+gradient_accumulation_steps: 1
 learning_rate: 1.0e-4
 num_train_epochs: 1.0
 lr_scheduler_type: cosine
-warmup_ratio: 0.1
+warmup_ratio: 0.0
 bf16: true
 ddp_timeout: 180000000
 resume_from_checkpoint: null
