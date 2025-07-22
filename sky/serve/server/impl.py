@@ -367,6 +367,9 @@ def update(
     # will not apply the config.
     dag, _ = admin_policy_utils.apply(task)
     task = dag.tasks[0]
+    if pool:
+        # Use dummy run script for cluster pool.
+        task.run = 'echo "setup done"'
 
     assert task.service is not None
     if not pool and task.service.tls_credential is not None:

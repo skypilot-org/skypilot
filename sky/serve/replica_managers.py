@@ -1351,8 +1351,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         # are not empty.
         if new_config.get('file_mounts', None) != {}:
             return
-        for key in ['service']:
-            new_config.pop(key)
+        for key in ['service', 'pool']:
+            new_config.pop(key, None)
         replica_infos = serve_state.get_replica_infos(self._service_name)
         for info in replica_infos:
             if info.version < version and not info.is_terminal:
@@ -1362,8 +1362,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                         self._service_name, info.version))
                 old_config = common_utils.read_yaml(
                     os.path.expanduser(old_service_task_yaml_path))
-                for key in ['service']:
-                    old_config.pop(key)
+                for key in ['service', 'pool']:
+                    old_config.pop(key, None)
                 # Bump replica version if all fields except for service are
                 # the same.
                 # Here, we manually convert the any_of field to a set to avoid
@@ -1373,6 +1373,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 new_config_any_of = new_config.get('resources',
                                                    {}).pop('any_of', [])
                 if set(old_config_any_of) != set(new_config_any_of):
+                    logger.info('Replica config changed (any_of), skipping.'
+                                f'Old: {old_config_any_of}, '
+                                f'new: {new_config_any_of}')
                     continue
                 # File mounts should both be empty, as update always
                 # create new buckets if they are not empty.
@@ -1386,6 +1389,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                     info.version = version
                     serve_state.add_or_update_replica(self._service_name,
                                                       info.replica_id, info)
+                else:
+                    logger.info('Replica config changed (rest), skipping.'
+                                f'Old: {old_config}, '
+                                f'new: {new_config}')
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)

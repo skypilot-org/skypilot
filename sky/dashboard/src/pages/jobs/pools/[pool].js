@@ -319,8 +319,7 @@ export default function PoolDetailPage() {
               </div>
             </div>
 
-            {/* Horizontal separator */}
-            <div className="pt-2 border-t mt-2">
+            <div className="pt-2 mt-2">
               <div className="grid grid-cols-2 gap-x-8 gap-y-2">
                 {/* Row 2: Workers | Policy */}
                 <div>
@@ -336,24 +335,17 @@ export default function PoolDetailPage() {
                   <div className="text-sm font-medium text-gray-700 mb-1">
                     Policy
                   </div>
-                  <div className="text-sm">{poolData.policy || '-'}</div>
+                  <div className="text-lg font-mono">
+                    {poolData.policy || '-'}
+                  </div>
                 </div>
 
-                {/* Row 3: Status | Uptime */}
+                {/* Row 3: Status */}
                 <div>
                   <div className="text-sm font-medium text-gray-700 mb-1">
                     Status
                   </div>
                   <StatusBadge status={poolData.status} />
-                </div>
-
-                <div>
-                  <div className="text-sm font-medium text-gray-700 mb-1">
-                    Uptime
-                  </div>
-                  <div className="text-lg font-mono">
-                    {formatUptime(poolData.uptime)}
-                  </div>
                 </div>
               </div>
             </div>
@@ -444,9 +436,6 @@ export default function PoolDetailPage() {
                       ID
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Version
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Launched
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -469,9 +458,6 @@ export default function PoolDetailPage() {
                       <tr key={worker.replica_id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">
                           {worker.replica_id}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {worker.version}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {worker.launched_at && worker.launched_at > 0 ? (
@@ -527,7 +513,7 @@ export default function PoolDetailPage() {
                   ) : (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={6}
                         className="px-6 py-8 text-center text-gray-500"
                       >
                         {showFailedWorkers

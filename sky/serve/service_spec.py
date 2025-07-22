@@ -274,6 +274,8 @@ class SkyServiceSpec:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
             add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
         add_if_not_none('pool', None, self.pool)
+        if self.pool:
+            config.pop('readiness_probe', None)
         return config
 
     def probe_str(self):

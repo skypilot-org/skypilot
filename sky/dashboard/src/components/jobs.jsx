@@ -1079,18 +1079,7 @@ export function ManagedJobsTable({
                 >
                   Worker Pool{getSortDirection('pool')}
                 </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('current_cluster_name')}
-                >
-                  Worker Cluster{getSortDirection('current_cluster_name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('job_id_on_pm')}
-                >
-                  Worker Job ID{getSortDirection('job_id_on_pm')}
-                </TableHead>
+
                 <TableHead>Details</TableHead>
                 <TableHead>Logs</TableHead>
               </TableRow>
@@ -1214,10 +1203,6 @@ export function ManagedJobsTable({
                         <TableCell>{item.recoveries}</TableCell>
                         <TableCell>{item.pool || '-'}</TableCell>
                         <TableCell>
-                          {item.current_cluster_name || '-'}
-                        </TableCell>
-                        <TableCell>{item.job_id_on_pm || '-'}</TableCell>
-                        <TableCell>
                           {item.details ? (
                             <TruncatedDetails
                               text={item.details}
@@ -1240,7 +1225,7 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={15}
+                          colSpan={13}
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1249,7 +1234,7 @@ export function ManagedJobsTable({
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={15} className="text-center py-6">
+                  <TableCell colSpan={13} className="text-center py-6">
                     <div className="flex flex-col items-center space-y-4">
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
@@ -2102,19 +2087,13 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               >
                 Status{getSortDirection('status')}
               </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap w-28"
-                onClick={() => requestSort('uptime')}
-              >
-                Uptime{getSortDirection('uptime')}
-              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={6}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -2147,15 +2126,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <StatusBadge status={pool.status} />
                   </TableCell>
-                  <TableCell>
-                    {pool.uptime ? formatUptime(pool.uptime) : '-'}
-                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={6}
                   className="text-center py-6 text-gray-500"
                 >
                   No pools found
