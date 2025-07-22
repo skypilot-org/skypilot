@@ -42,6 +42,7 @@
     "react-router-dom": "^6.24.1",
     "react-tooltip": "^5.27.1",
     "seedrandom": "^3.0.5",
+    "shepherd.js": "^14.5.0",
     "tailwind-merge": "^2.4.0",
     "tailwindcss-animate": "^1.0.7"
   },
