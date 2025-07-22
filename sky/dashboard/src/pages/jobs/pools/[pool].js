@@ -277,15 +277,15 @@ export default function PoolDetailPage() {
                 <div className="flex flex-wrap gap-1">
                   {(() => {
                     const jobCounts = getJobStatusCounts(poolData);
-                                         return Object.keys(jobCounts).length > 0 ? (
-                       Object.entries(jobCounts).map(([status, count]) => (
-                         <span
-                           key={status}
-                           className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusStyle(status)}`}
-                         >
-                           {count} {status}
-                         </span>
-                       ))
+                    return Object.keys(jobCounts).length > 0 ? (
+                      Object.entries(jobCounts).map(([status, count]) => (
+                        <span
+                          key={status}
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusStyle(status)}`}
+                        >
+                          {count} {status}
+                        </span>
+                      ))
                     ) : (
                       <span className="text-gray-500 text-sm">
                         No active jobs
