@@ -1066,6 +1066,7 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
     assert vcn_ocid is None
 
 
+# TODO (kyuds): remove after 0.11.0
 def test_standardized_region_configs_back_compat(monkeypatch, tmp_path) -> None:
     """Test that nested per-region nebius config works with legacy yaml"""
     from sky.provision.kubernetes import utils as kubernetes_utils
