@@ -11,7 +11,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 
 def dummy():
