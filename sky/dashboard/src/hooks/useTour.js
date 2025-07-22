@@ -41,11 +41,21 @@ export function TourProvider({ children }) {
   const router = useRouter();
   const { isFirstVisit, markTourCompleted } = useFirstVisit();
   const [tourAutoStarted, setTourAutoStarted] = useState(false);
+  const [isTourActive, setIsTourActive] = useState(false);
+  const [tourJustStarted, setTourJustStarted] = useState(false);
+  const tourNavigatingRef = useRef(false);
 
   const startTour = () => {
     if (tourRef.current) {
+      setIsTourActive(true);
+      setTourJustStarted(true);
       // Remove delay for immediate tour start since first step doesn't require setup
       tourRef.current.start();
+
+      // Clear the "just started" flag after a delay to allow for initial setup
+      setTimeout(() => {
+        setTourJustStarted(false);
+      }, 1000);
     }
   };
 
@@ -322,6 +332,8 @@ export function TourProvider({ children }) {
           mobileMenu.style.removeProperty('max-height');
         }
 
+        setIsTourActive(false);
+        setTourJustStarted(false);
         markTourCompleted();
       });
 
@@ -385,6 +397,8 @@ export function TourProvider({ children }) {
           mobileMenu.style.removeProperty('max-height');
         }
 
+        setIsTourActive(false);
+        setTourJustStarted(false);
         markTourCompleted();
       });
 
@@ -456,7 +470,9 @@ export function TourProvider({ children }) {
               };
 
               if (router.pathname !== '/dashboard/clusters') {
-                router.push('clusters').then(() => {
+                tourNavigatingRef.current = true;
+                router.push('/clusters').then(() => {
+                  tourNavigatingRef.current = false;
                   setTimeout(setupClustersStep, 200); // Reduced delay for faster response
                 });
               } else {
@@ -771,7 +787,9 @@ export function TourProvider({ children }) {
 
               // Navigate to clusters page if not already there, then set up elements
               if (window.location.pathname !== '/dashboard/clusters') {
-                router.push('clusters').then(() => {
+                tourNavigatingRef.current = true;
+                router.push('/clusters').then(() => {
+                  tourNavigatingRef.current = false;
                   setTimeout(setupElements, 200); // Reduced delay for faster response
                 });
               } else {
@@ -1131,7 +1149,9 @@ export function TourProvider({ children }) {
 
               // Navigate to clusters page if not already there, then set up elements
               if (window.location.pathname !== '/dashboard/clusters') {
-                router.push('clusters').then(() => {
+                tourNavigatingRef.current = true;
+                router.push('/clusters').then(() => {
+                  tourNavigatingRef.current = false;
                   setTimeout(setupElements, 200); // Reduced delay for faster response
                 });
               } else {
@@ -1391,7 +1411,7 @@ export function TourProvider({ children }) {
           title: 'Jobs',
           text: `
             <p>Use <strong>Managed Jobs</strong> for long-running workloads.</p>
-            <p>They provide automatic recovery against failures, such as recovering from preemptions or GPU errors.</p>
+            <p>They provide automatic recovery against failures, such as recovering from preemptions or transient errors.</p>
           `,
           attachTo: {
             element: function () {
@@ -1466,7 +1486,7 @@ export function TourProvider({ children }) {
         {
           title: 'Bring one or many infrastructure',
           text: `
-            <p>SkyPilot combines your Kubernetes clusters, VMs (17+ supported clouds), or SSH nodes into a unified pool.</p>
+            <p>SkyPilot combines your Kubernetes clusters, cloud VMs, or on-premise nodes into a unified compute pool.</p>
             <p>You can monitor them in this page.</p>
           `,
           attachTo: {
@@ -1542,7 +1562,7 @@ export function TourProvider({ children }) {
         {
           title: 'Workspaces',
           text: `
-            <p>For team deployments, admins can use Workspaces to isolate teams or projects.</p>
+            <p>For team deployments, admins can use Workspaces to manage teams or projects.</p>
           `,
           attachTo: {
             element: 'a[href="/dashboard/workspaces"]',
@@ -1667,10 +1687,17 @@ export function TourProvider({ children }) {
           title: '🎉 Tour complete!',
           text: `
               <p>We invite you to to explore the rest of the dashboard.</p>
-              <p>To get started with SkyPilot, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a> docs.</p>
+              <p>To get started with SkyPilot, refer to <a href="https://docs.skypilot.co/en/latest/getting-started/quickstart.html">Quickstart</a>. You can restart this tour by clicking the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block h-4 w-4 align-middle"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg> icon in the bottom right corner.</p>
               <p>Have questions? Join Slack to directly chat with the SkyPilot team.</p>
             `,
           buttons: [
+            {
+              text: 'Finish',
+              action() {
+                this.complete();
+              },
+              classes: 'shepherd-button-secondary',
+            },
             {
               text: 'Join Slack',
               action() {
@@ -1701,10 +1728,51 @@ export function TourProvider({ children }) {
     };
   }, [isFirstVisit]);
 
+  // Block navigation during tour
+  useEffect(() => {
+    if (!isTourActive || tourJustStarted) return;
+
+    // Block router navigation unless it's tour-initiated
+    const handleRouteChangeStart = (url) => {
+      if (!tourNavigatingRef.current) {
+        // Show confirmation dialog
+        const shouldLeave = window.confirm(
+          'The tour is currently in progress. Do you want to abort the tour and navigate away?\n\nYou can resume the tour by clicking the question mark on the bottom right.'
+        );
+        if (!shouldLeave) {
+          router.events.emit('routeChangeError');
+          throw 'Route change aborted by user during tour.';
+        } else {
+          // User wants to leave, cancel the tour
+          if (tourRef.current) {
+            tourRef.current.cancel();
+          }
+        }
+      }
+    };
+
+    // Warn on page refresh/close
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue =
+        'The tour is currently in progress. Are you sure you want to leave?';
+      return e.returnValue;
+    };
+
+    router.events.on('routeChangeStart', handleRouteChangeStart);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      router.events.off('routeChangeStart', handleRouteChangeStart);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isTourActive, tourJustStarted, router]);
+
   const completeTour = () => {
     if (tourRef.current) {
       tourRef.current.complete();
     }
+    setTourJustStarted(false);
   };
 
   const value = {
