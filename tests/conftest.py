@@ -355,13 +355,13 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
     if request.config.getoption('--remote-server'):
         yield
         return
-    
+
     # Only run the policy server for smoke tests.
     has_smoke_tests = False
     if hasattr(request.session, 'items'):
-        has_smoke_tests = any('smoke_tests' in item.location[0] 
-                            for item in request.session.items)
-    
+        has_smoke_tests = any(
+            'smoke_tests' in item.location[0] for item in request.session.items)
+
     if not has_smoke_tests:
         yield
         return
