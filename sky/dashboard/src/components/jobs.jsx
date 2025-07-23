@@ -1971,7 +1971,15 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               >
                 Infra Summary{getSortDirection('requested_resources_str')}
               </TableHead>
-              <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Worker Resources{getSortDirection('requested_resources_str')}
+              </TableHead>
+              <TableHead className="whitespace-nowrap w-20">
+                # Workers
+              </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-24"
                 onClick={() => requestSort('status')}
@@ -1984,7 +1992,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -2010,6 +2018,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <InfraBadges replicaInfo={pool.replica_info} />
                   </TableCell>
+                  <TableCell>{pool.requested_resources_str || '-'}</TableCell>
                   <TableCell>{getWorkersCount(pool.replica_info)}</TableCell>
                   <TableCell>
                     <StatusBadge status={pool.status} />
@@ -2019,7 +2028,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className="text-center py-6 text-gray-500"
                 >
                   No pools found

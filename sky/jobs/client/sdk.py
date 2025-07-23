@@ -75,6 +75,13 @@ def launch(
                 request_id = sdk.optimize(dag)
                 sdk.stream_and_get(request_id)
             else:
+                request_id = query_pool(pool)
+                pool_statuses = sdk.get(request_id)
+                if not pool_statuses:
+                    raise click.UsageError(f'Pool {pool!r} not found.')
+                pool_status = pool_statuses[0]
+                if pool_status['status'].value != 'READY':
+                    raise click.UsageError(f'Pool {pool!r} is not ready.')
                 click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
                 job_identity = ('a managed job' if batch_size is None else
                                 f'{batch_size} managed jobs')
