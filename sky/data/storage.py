@@ -1851,8 +1851,8 @@ class S3CompatibleStore(AbstractStore):
             # Handle credentials file via environment
             cmd = ' '.join(cmd_parts)
             if self.config.credentials_file:
-                cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
-                    {self.config.credentials_file} {cmd}'
+                cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
+                f'{self.config.credentials_file} {cmd}'
 
             return cmd
 
@@ -1896,8 +1896,8 @@ class S3CompatibleStore(AbstractStore):
 
             cmd = ' '.join(cmd_parts)
             if self.config.credentials_file:
-                cmd = f'AWS_SHARED_CREDENTIALS_FILE=\
-                    {self.config.credentials_file} {cmd}'
+                cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
+                f'{self.config.credentials_file} {cmd}'
 
             return cmd
 
