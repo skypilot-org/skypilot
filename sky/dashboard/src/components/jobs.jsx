@@ -23,6 +23,7 @@ import {
   JobStatusBadges as SharedJobStatusBadges,
   InfraBadges as SharedInfraBadges,
 } from '@/components/utils';
+import { UI_CONFIG } from '@/lib/config';
 import { getManagedJobs, getQueryPools } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -1097,9 +1098,29 @@ export function ManagedJobsTable({
                                 {item.infra.includes('(') && (
                                   <span>
                                     {' ' +
-                                      item.infra.substring(
-                                        item.infra.indexOf('(')
-                                      )}
+                                      (() => {
+                                        const NAME_TRUNCATE_LENGTH =
+                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                                        const fullRegionPart =
+                                          item.infra.substring(
+                                            item.infra.indexOf('(')
+                                          );
+                                        const regionContent =
+                                          fullRegionPart.substring(
+                                            1,
+                                            fullRegionPart.length - 1
+                                          );
+
+                                        if (
+                                          regionContent.length <=
+                                          NAME_TRUNCATE_LENGTH
+                                        ) {
+                                          return fullRegionPart;
+                                        }
+
+                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                                        return `(${truncatedRegion})`;
+                                      })()}
                                   </span>
                                 )}
                               </span>

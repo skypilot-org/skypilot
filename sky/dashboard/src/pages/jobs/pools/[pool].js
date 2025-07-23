@@ -21,7 +21,9 @@ import {
   TimestampWithTooltip,
   formatDuration,
   CustomTooltip as Tooltip,
+  NonCapitalizedTooltip,
 } from '@/components/utils';
+import { UI_CONFIG } from '@/lib/config';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { formatYaml } from '@/lib/yamlUtils';
 
@@ -424,10 +426,45 @@ export default function PoolDetailPage() {
                             '-'
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 max-w-xs truncate">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {(() => {
                             try {
-                              return `${worker.cloud} (${worker.region})`;
+                              const cloudWithRegion = `${worker.cloud} (${worker.region})`;
+                              const NAME_TRUNCATE_LENGTH =
+                                UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+                              // Check if there's a region part in parentheses
+                              const parenIndex = cloudWithRegion.indexOf('(');
+                              if (parenIndex === -1) {
+                                // No region part, return as is
+                                return cloudWithRegion;
+                              }
+
+                              const cloudName = cloudWithRegion
+                                .substring(0, parenIndex)
+                                .trim();
+                              const regionPart = cloudWithRegion.substring(
+                                parenIndex + 1,
+                                cloudWithRegion.length - 1
+                              );
+
+                              // Only truncate the region part if it's longer than the truncate length
+                              if (regionPart.length <= NAME_TRUNCATE_LENGTH) {
+                                return cloudWithRegion;
+                              }
+
+                              // Truncate only the region part
+                              const truncatedRegion = `${regionPart.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionPart.substring(regionPart.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                              const displayText = `${cloudName} (${truncatedRegion})`;
+
+                              return (
+                                <NonCapitalizedTooltip
+                                  content={cloudWithRegion}
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <span>{displayText}</span>
+                                </NonCapitalizedTooltip>
+                              );
                             } catch (error) {
                               return `Error: ${error.message}`;
                             }
