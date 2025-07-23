@@ -179,7 +179,7 @@ def maybe_start_controllers(env_file_path: typing.Optional[str] = None) -> None:
                 source_environment_cmd = (f'source {env_file_path};'
                                           if env_file_path else '')
                 run_controller_cmd = (f'{sys.executable} -u -m'
-                                      'sky.jobs.controller_server')
+                                      'sky.jobs.controller')
 
                 run_cmd = (f'{activate_python_env_cmd}'
                            f'{source_environment_cmd}'

@@ -2,11 +2,12 @@
 
 TODO(cooperc): Document lifecycle, and multiprocess layout.
 """
-import argparse
 import asyncio
 import logging
 import os
+import resource
 import shutil
+import sys
 import time
 import traceback
 import typing
@@ -981,17 +982,29 @@ async def monitor_loop():
         await start_job(job_id, dag_yaml_path)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--job-id',
-                        required=True,
-                        type=int,
-                        help='Job id for the controller job.')
-    parser.add_argument('dag_yaml',
-                        type=str,
-                        help='The path to the user job yaml file.')
-    args = parser.parse_args()
+async def main():
+    # Will happen multiple times, who cares though
+    os.makedirs(jobs_constants.SIGNAL_PATH, exist_ok=True)
 
-    logger.info(f'Starting controller with job_id={args.job_id}, '
-                f'dag_yaml={args.dag_yaml}')
-    asyncio.run(start_job(args.job_id, args.dag_yaml))
+    # Increase number of files we can open
+    soft = None
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+    except OSError as e:
+        logger.warning(f'Failed to increase number of files we can open: {e}\n'
+                       f'Current soft limit: {soft}, hard limit: {hard}')
+
+    # Will loop forever, do it in the background
+    cancel_job_task = asyncio.create_task(cancel_job())
+    monitor_loop_task = asyncio.create_task(monitor_loop())
+
+    try:
+        await asyncio.gather(cancel_job_task, monitor_loop_task)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Controller server crashed: {e}')
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
