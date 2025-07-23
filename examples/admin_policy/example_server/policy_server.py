@@ -12,7 +12,7 @@ import uvicorn
 
 import sky
 
-app = FastAPI(title="Example Admin Policy Server", version="1.0.0")
+app = FastAPI(title='Example Admin Policy Server', version='1.0.0')
 
 
 class DoNothingPolicy(sky.AdminPolicy):
@@ -33,7 +33,7 @@ async def apply_policy(request: Request) -> JSONResponse:
     json_data = await request.json()
     user_request = sky.UserRequest.decode(json_data)
     # Example: change the following list to apply different policies.
-    policies: List[sky.AdminPolicy] = [
+    policies: List = [
         # Example: policy that implemented in the server package.
         DoNothingPolicy,
         # Example: policy from third party packages.
@@ -64,4 +64,4 @@ if __name__ == '__main__':
                 workers=1,
                 host=args.host,
                 port=args.port,
-                log_level="info")
+                log_level='info')

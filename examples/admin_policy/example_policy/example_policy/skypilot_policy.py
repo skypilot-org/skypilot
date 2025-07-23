@@ -104,10 +104,11 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         cluster_name = request_options.cluster_name
         cluster_records = []
         if cluster_name is not None:
-            cluster_records = sky.status(cluster_name,
-                                         refresh=True,
-                                         all_users=True)
-
+            request_id = sky.status(
+                [cluster_name],
+                refresh=sky.utils.common.StatusRefreshMode.FORCE,
+                all_users=True)
+            cluster_records = sky.get(request_id)
         # Check if the user request should specify autostop settings.
         need_autostop = False
         if not cluster_records:
@@ -148,7 +149,7 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
         for r in task.resources:
             disabled = (r.autostop_config is None or
                         not r.autostop_config.enabled)
-            too_long = (not disabled and
+            too_long = (not disabled and r.autostop_config is not None and
                         r.autostop_config.idle_minutes is not None and
                         r.autostop_config.idle_minutes > max_idle_minutes)
             if disabled or too_long:
@@ -161,8 +162,8 @@ class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
 def update_current_kubernetes_clusters_from_registry():
     """Mock implementation of updating kubernetes clusters from registry."""
     # All cluster names can be fetched from an organization's internal API.
-    NEW_CLUSTER_NAMES = ['my-cluster']
-    for cluster_name in NEW_CLUSTER_NAMES:
+    new_cluster_names = ['my-cluster']
+    for cluster_name in new_cluster_names:
         # Update the local kubeconfig with the new cluster credentials.
         subprocess.run(
             f'gcloud container clusters get-credentials {cluster_name} '
@@ -173,6 +174,7 @@ def update_current_kubernetes_clusters_from_registry():
 
 def get_allowed_contexts():
     """Mock implementation of getting allowed kubernetes contexts."""
+    # pylint: disable=import-outside-toplevel
     from sky.provision.kubernetes import utils
     contexts = utils.get_all_kube_context_names()
     return contexts[:2]
