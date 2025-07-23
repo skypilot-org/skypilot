@@ -2,6 +2,7 @@ import fcntl
 import json
 import os
 import pathlib
+import signal
 import subprocess
 import tempfile
 import time
@@ -349,10 +350,12 @@ def generic_cloud(request) -> str:
 @pytest.fixture(scope='session', autouse=True)
 def setup_policy_server(request, tmp_path_factory, worker_id):
     """Setup policy server for restful policy testing."""
-    # For remote server, the policy server should be accessible from the
-    # remote server host. Left as future work.
-    # TODO(aylei): support remote server with restful policy.
+    # TODO(aylei): this is common pattern to launch global instance before
+    # test suite and cleanup after the suite, abstract this out if needed.
     if request.config.getoption('--remote-server'):
+        # For remote server, the policy server should be accessible from the
+        # remote server host. Left as future work.
+        # TODO(aylei): support remote server with restful policy.
         yield
         return
 
@@ -371,12 +374,27 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
 
     fn = root_tmp_dir / "policy_server.txt"
     policy_server_url = ''
-    server_process = None
     original_config = None
+    # Reference count and pid for cleanup
+    counter_file = root_tmp_dir / "policy_server_counter.txt"
+    pid_file = root_tmp_dir / "policy_server_pid.txt"
+
+    def ref_count(delta: int) -> int:
+        try:
+            with open(counter_file, 'r') as f:
+                count = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            count = 0
+        count += delta
+        with open(counter_file, 'w') as f:
+            f.write(str(count))
+        return count
+
     try:
         with filelock.FileLock(str(fn) + ".lock"):
             if fn.is_file():
                 skypilot_config.reload_config()
+                ref_count(1)
             else:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
@@ -386,6 +404,7 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
                     '0.0.0.0', '--port',
                     str(port)
                 ])
+                pid_file.write_text(str(server_process.pid))
                 config_path = pathlib.Path(
                     skypilot_config.get_user_config_path()).expanduser()
                 if not config_path.exists():
@@ -399,10 +418,15 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
                 common_utils.dump_yaml(str(config_path), config)
                 skypilot_config.reload_config()
                 fn.write_text(policy_server_url)
+                ref_count(1)
         yield
     finally:
-        if server_process is not None:
-            server_process.kill()
+        with filelock.FileLock(str(fn) + ".lock"):
+            count = ref_count(-1)
+            if count == 0:
+                pid = pid_file.read_text().strip()
+                if pid:
+                    os.kill(int(pid), signal.SIGKILL)
         if original_config is not None:
             common_utils.dump_yaml(str(config_path), original_config)
             skypilot_config.reload_config()
