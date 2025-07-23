@@ -2845,8 +2845,12 @@ def get_clusters(
         request = requests_lib.get_request_tasks(
             status=[requests_lib.RequestStatus.RUNNING],
             cluster_names=[cluster_name])
-        logger.info(f'request {request}')
         if len(request) > 0:
+            # There is an active request on the cluster,
+            # so we don't want to update the cluster status until
+            # the request is completed.
+            logger.debug(f'skipping refresh for cluster {cluster_name} '
+                         'as there is an active request')
             return global_user_state.get_cluster_from_name(cluster_name)
         try:
             record = refresh_cluster_record(
