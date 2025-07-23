@@ -355,6 +355,16 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
     if request.config.getoption('--remote-server'):
         yield
         return
+    
+    # Only run the policy server for smoke tests.
+    has_smoke_tests = False
+    if hasattr(request.session, 'items'):
+        has_smoke_tests = any('smoke_tests' in item.location[0] 
+                            for item in request.session.items)
+    
+    if not has_smoke_tests:
+        yield
+        return
 
     # get the temp directory shared by all workers
     root_tmp_dir = tmp_path_factory.getbasetemp().parent
@@ -385,7 +395,7 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
                     config = skypilot_config.get_user_config()
                     config = dict(config)
                 original_config = config.copy()
-                config['amind_policy'] = policy_server_url
+                config['admin_policy'] = policy_server_url
                 common_utils.dump_yaml(str(config_path), config)
                 skypilot_config.reload_config()
                 fn.write_text(policy_server_url)
