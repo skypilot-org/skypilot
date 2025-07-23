@@ -208,12 +208,34 @@ class ValidateBody(DagRequestBody):
     dag: str
     request_options: Optional[admin_policy.RequestOptions]
 
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+
+        # Convert request_options back to admin_policy.RequestOptions if it's a dict
+        if (kwargs.get('request_options') is not None and not isinstance(
+                kwargs['request_options'], admin_policy.RequestOptions)):
+            kwargs['request_options'] = admin_policy.RequestOptions(
+                **kwargs['request_options'])
+
+        return kwargs
+
 
 class OptimizeBody(DagRequestBody):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
     request_options: Optional[admin_policy.RequestOptions]
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+
+        # Convert request_options back to admin_policy.RequestOptions if it's a dict
+        if (kwargs.get('request_options') is not None and not isinstance(
+                kwargs['request_options'], admin_policy.RequestOptions)):
+            kwargs['request_options'] = admin_policy.RequestOptions(
+                **kwargs['request_options'])
+
+        return kwargs
 
 
 class LaunchBody(RequestBody):
