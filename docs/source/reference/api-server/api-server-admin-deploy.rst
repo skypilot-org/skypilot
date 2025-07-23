@@ -66,7 +66,7 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
-The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:``
+The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:`sky-api-server-custom-ingress`
 
 .. tip::
 
