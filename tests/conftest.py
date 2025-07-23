@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import signal
+import socket
 import subprocess
 import tempfile
 import time
@@ -390,6 +391,16 @@ def setup_policy_server(request, tmp_path_factory):
             f.write(str(count))
         return count
 
+    def wait_server(port: int, timeout: int = 60):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                socket.create_connection(('127.0.0.1', port), timeout=1).close()
+                return True
+            except (socket.error, OSError):
+                time.sleep(0.5)
+        raise RuntimeError(f"Policy server not available after {timeout}s")
+
     try:
         with filelock.FileLock(str(fn) + ".lock"):
             if fn.is_file():
@@ -404,6 +415,7 @@ def setup_policy_server(request, tmp_path_factory):
                     '0.0.0.0', '--port',
                     str(port)
                 ])
+                wait_server(port)
                 pid_file.write_text(str(server_process.pid))
                 config_path = pathlib.Path(
                     skypilot_config.get_user_config_path()).expanduser()
