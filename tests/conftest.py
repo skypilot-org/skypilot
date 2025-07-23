@@ -348,9 +348,9 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture(scope='session', autouse=True)
-def setup_policy_server(request, tmp_path_factory, worker_id):
+def setup_policy_server(request, tmp_path_factory):
     """Setup policy server for restful policy testing."""
-    # TODO(aylei): this is common pattern to launch global instance before
+    # TODO(aylei): this is a common pattern to launch global instance before
     # test suite and cleanup after the suite, abstract this out if needed.
     if request.config.getoption('--remote-server'):
         # For remote server, the policy server should be accessible from the
@@ -372,21 +372,21 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
     # get the temp directory shared by all workers
     root_tmp_dir = tmp_path_factory.getbasetemp().parent
 
-    fn = root_tmp_dir / "policy_server.txt"
+    fn = root_tmp_dir / 'policy_server.txt'
     policy_server_url = ''
     original_config = None
     # Reference count and pid for cleanup
-    counter_file = root_tmp_dir / "policy_server_counter.txt"
-    pid_file = root_tmp_dir / "policy_server_pid.txt"
+    counter_file = root_tmp_dir / 'policy_server_counter.txt'
+    pid_file = root_tmp_dir / 'policy_server_pid.txt'
 
     def ref_count(delta: int) -> int:
         try:
-            with open(counter_file, 'r') as f:
+            with open(counter_file, 'r', encoding='utf-8') as f:
                 count = int(f.read().strip())
         except (FileNotFoundError, ValueError):
             count = 0
         count += delta
-        with open(counter_file, 'w') as f:
+        with open(counter_file, 'w', encoding='utf-8') as f:
             f.write(str(count))
         return count
 
@@ -424,12 +424,12 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
         with filelock.FileLock(str(fn) + ".lock"):
             count = ref_count(-1)
             if count == 0:
+                # All workers are done, run post cleanup.
                 pid = pid_file.read_text().strip()
                 if pid:
                     os.kill(int(pid), signal.SIGKILL)
-        if original_config is not None:
-            common_utils.dump_yaml(str(config_path), original_config)
-            skypilot_config.reload_config()
+                common_utils.dump_yaml(str(config_path), original_config)
+                skypilot_config.reload_config()
 
 
 @pytest.fixture(scope='session', autouse=True)
