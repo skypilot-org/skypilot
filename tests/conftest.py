@@ -6,6 +6,7 @@ import tempfile
 import time
 from typing import List
 
+import filelock
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
@@ -16,6 +17,7 @@ import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.utils import common_utils
 
 # Initialize logger at the top level
 logger = sky_logging.init_logger(__name__)
@@ -339,6 +341,43 @@ def _generic_cloud(config) -> str:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_policy_server(request, tmp_path_factory, worker_id):
+    """Setup policy server for restful policy testing."""
+    # For remote server, the policy server should be accessible from the
+    # remote server host. Left as future work.
+    # TODO(aylei): support remote server with restful policy.
+    if request.config.getoption('--remote-server'):
+        yield
+        return
+
+    # get the temp directory shared by all workers
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+
+    fn = root_tmp_dir / "policy_server.txt"
+    policy_server_url = ''
+    server_process = None
+    with filelock.FileLock(str(fn) + ".lock"):
+        if fn.is_file():
+            # Use the launched policy server from other workers.
+            policy_server_url = fn.read_text().strip()
+        else:
+            # Launch the policy server
+            port = common_utils.find_free_port(start_port=10000)
+            policy_server_url = f'http://127.0.0.1:{port}'
+            server_process = subprocess.Popen([
+                'python', 'tests/admin_policy/no_op_server.py', '--host',
+                '0.0.0.0', '--port',
+                str(port)
+            ])
+            fn.write_text(policy_server_url)
+    try:
+        yield
+    finally:
+        if server_process is not None:
+            server_process.kill()
 
 
 @pytest.fixture(scope='session', autouse=True)
