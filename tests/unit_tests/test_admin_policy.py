@@ -13,10 +13,10 @@ import pytest
 import requests
 
 import sky
-from sky.server import common as server_common
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import common as server_common
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -123,31 +123,37 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
         }
 
     # Cluster does not exist
-    with mock.patch('sky.status', return_value=server_common.RequestId('test_request_id')):
+    with mock.patch('sky.status',
+                    return_value=server_common.RequestId('test_request_id')):
         with mock.patch('sky.get', return_value=[]):
             _load_task_and_apply_policy(task,
                                         os.path.join(POLICY_PATH,
-                                                    'enforce_autostop.yaml'),
+                                                     'enforce_autostop.yaml'),
                                         idle_minutes_to_autostop=10)
 
             with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                            match='Autostop/down must be set'):
+                               match='Autostop/down must be set'):
                 _load_task_and_apply_policy(task,
-                                            os.path.join(POLICY_PATH,
-                                                        'enforce_autostop.yaml'),
+                                            os.path.join(
+                                                POLICY_PATH,
+                                                'enforce_autostop.yaml'),
                                             idle_minutes_to_autostop=None)
 
         # Cluster is stopped
-        with mock.patch('sky.get', return_value=[_gen_cluster_record(sky.ClusterStatus.STOPPED, 10)]):
+        with mock.patch('sky.get',
+                        return_value=[
+                            _gen_cluster_record(sky.ClusterStatus.STOPPED, 10)
+                        ]):
             _load_task_and_apply_policy(task,
                                         os.path.join(POLICY_PATH,
-                                                    'enforce_autostop.yaml'),
+                                                     'enforce_autostop.yaml'),
                                         idle_minutes_to_autostop=10)
             with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                            match='Autostop/down must be set'):
+                               match='Autostop/down must be set'):
                 _load_task_and_apply_policy(task,
-                                            os.path.join(POLICY_PATH,
-                                                        'enforce_autostop.yaml'),
+                                            os.path.join(
+                                                POLICY_PATH,
+                                                'enforce_autostop.yaml'),
                                             idle_minutes_to_autostop=None)
 
         # Cluster is running but autostop is not set
@@ -156,13 +162,14 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                 return_value=[_gen_cluster_record(sky.ClusterStatus.UP, -1)]):
             _load_task_and_apply_policy(task,
                                         os.path.join(POLICY_PATH,
-                                                    'enforce_autostop.yaml'),
+                                                     'enforce_autostop.yaml'),
                                         idle_minutes_to_autostop=10)
             with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                            match='Autostop/down must be set'):
+                               match='Autostop/down must be set'):
                 _load_task_and_apply_policy(task,
-                                            os.path.join(POLICY_PATH,
-                                                        'enforce_autostop.yaml'),
+                                            os.path.join(
+                                                POLICY_PATH,
+                                                'enforce_autostop.yaml'),
                                             idle_minutes_to_autostop=None)
 
         # Cluster is init but autostop is not set
@@ -171,13 +178,14 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                 return_value=[_gen_cluster_record(sky.ClusterStatus.INIT, -1)]):
             _load_task_and_apply_policy(task,
                                         os.path.join(POLICY_PATH,
-                                                    'enforce_autostop.yaml'),
+                                                     'enforce_autostop.yaml'),
                                         idle_minutes_to_autostop=10)
             with pytest.raises(exceptions.UserRequestRejectedByPolicy,
-                            match='Autostop/down must be set'):
+                               match='Autostop/down must be set'):
                 _load_task_and_apply_policy(task,
-                                            os.path.join(POLICY_PATH,
-                                                        'enforce_autostop.yaml'),
+                                            os.path.join(
+                                                POLICY_PATH,
+                                                'enforce_autostop.yaml'),
                                             idle_minutes_to_autostop=None)
 
         # Cluster is running and autostop is set
@@ -186,11 +194,11 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                 return_value=[_gen_cluster_record(sky.ClusterStatus.UP, 10)]):
             _load_task_and_apply_policy(task,
                                         os.path.join(POLICY_PATH,
-                                                    'enforce_autostop.yaml'),
+                                                     'enforce_autostop.yaml'),
                                         idle_minutes_to_autostop=10)
             _load_task_and_apply_policy(task,
                                         os.path.join(POLICY_PATH,
-                                                    'enforce_autostop.yaml'),
+                                                     'enforce_autostop.yaml'),
                                         idle_minutes_to_autostop=None)
 
 

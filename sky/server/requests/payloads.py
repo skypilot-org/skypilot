@@ -211,7 +211,7 @@ class ValidateBody(DagRequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
 
-        # Convert request_options back to 
+        # Convert request_options back to
         # admin_policy.RequestOptions if it's a dict
         if (kwargs.get('request_options') is not None and not isinstance(
                 kwargs['request_options'], admin_policy.RequestOptions)):
@@ -230,7 +230,7 @@ class OptimizeBody(DagRequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
 
-        # Convert request_options back to 
+        # Convert request_options back to
         # admin_policy.RequestOptions if it's a dict
         if (kwargs.get('request_options') is not None and not isinstance(
                 kwargs['request_options'], admin_policy.RequestOptions)):
