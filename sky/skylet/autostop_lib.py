@@ -111,22 +111,20 @@ def set_last_active_time_to_now() -> None:
 def has_active_ssh_sessions() -> bool:
     """Returns True if there are any active SSH sessions on the node."""
     try:
-        # Use 'who' to check for active SSH sessions.
-        # https://man7.org/linux/man-pages/man1/who.1.html
-        #
-        # It outputs a list of users currently logged in, in this format:
-        # <user>   <device>     <datetime>       (<hostname>)
-        # Example:
-        # gcpuser  pts/0        2025-07-23 20:50 (50.171.245.192)
-        proc = subprocess.run(['who'],
+        # /dev/pts is a virtual filesystem that contains the pseudo-terminal
+        # devices. ptmx is the pseudo-terminal multiplexer, which is the
+        # "master" device that creates new pseudo-terminal devices, so we
+        # exclude it from the count.
+        proc = subprocess.run('ls /dev/pts | grep -v ptmx | wc -l',
                               capture_output=True,
                               text=True,
-                              check=False)
+                              check=False,
+                              shell=True)
         if proc.returncode != 0:
             logger.warning(f'SSH session check command failed with return code '
                            f'{proc.returncode}.')
             return False
-        return len(proc.stdout.splitlines()) > 0
+        return int(proc.stdout.strip()) > 0
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Error checking active SSH sessions: {e}.')
         return False
