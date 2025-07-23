@@ -41,9 +41,9 @@ Now, you can use ``sky api login -e <ENDPOINT>``, for example, ``sky api login -
    To support RBAC, please create different usernames and passwords for different users. If you distribute the same username and password to multiple users, the users will share the same username and permissions.
 
 User flow
----------
+~~~~~~~~~
 
-The administrator can login to the SkyPilot dashboard with the initial username and password, and create new users and manage their permissions through the SkyPilot dashboard.
+The administrator can login to the SkyPilot dashboard with the initial username and password, and create new users and manage their roles through the SkyPilot dashboard.
 
 After a user is created, the user can login to the API server with the username and password.
 For example, the user ``user1`` with password ``password1`` is created, and the user can login to the API server with ``sky api login -e http://user1:password1@myendpoint.com:30050``.
@@ -67,7 +67,3 @@ CSV file example:
     user2,password2,user
 
 * The users with ``User`` role can only view the users and their roles, and update their own password.
-
-
-
-
