@@ -100,12 +100,26 @@ In this step, the GKE cluster is configured so the API server can use the GCP se
     kubectl create secret generic cloud-sql-credentials \
         --from-file=service-account-key.json=gcp-key.json -n ${NAMESPACE}
 
+Step 6: Create the database connection secret
+---------------------------------------------
 
-Step 6: Deploy the SkyPilot API server
+In this step, we create a secret to store the database connection information to be used by the API server.
+
+.. code-block:: bash
+
+    NAMESPACE=skypilot
+    DB_USER=skypilot
+    DB_PASSWORD=<password for the 'skypilot' user>
+    DB_NAME=skypilot-db
+    kubectl create secret generic skypilot-db-connection-uri \
+        --namespace ${NAMESPACE} \
+        --from-literal connection_string=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}
+
+
+Step 7: Deploy the SkyPilot API server
 --------------------------------------
 
-Use the following values.yaml to deploy the SkyPilot API server.
-
+Replace ``<GCP_PROJECT_ID>`` and ``<REGION>`` in the following ``values.yaml`` with the corresponding values.
 
 ``values.yaml``:
 
@@ -117,13 +131,17 @@ Use the following values.yaml to deploy the SkyPilot API server.
         secret:
           secretName: cloud-sql-credentials
 
-      config: |
-        db: postgresql://$DB_USER:$DB_PASSWORD@localhost/$DB_NAME
+      dbConnectionSecretName: skypilot-db-connection-uri
+
+      # config must be null when using an external database.
+      # To set the config, use the web dashboard once the API server is deployed.
+      config: null
 
     rbac:
-      serviceAccountName: $GKE_SERVICE_ACCOUNT
+      serviceAccountName: "skypilot-api-sa"
       serviceAccountAnnotations:
-        iam.gke.io/gcp-service-account: $GCP_SERVICE_ACCOUNT@$GCP_PROJECT_ID.iam.gserviceaccount.com
+        # TODO: fill in <GCP_PROJECT_ID>
+        iam.gke.io/gcp-service-account: skypilot-cloud-sql-access@<GCP_PROJECT_ID>.iam.gserviceaccount.com
 
     # Extra init containers to run before the api container
     extraInitContainers:
@@ -149,7 +167,8 @@ Use the following values.yaml to deploy the SkyPilot API server.
 
           # Replace DB_PORT with the port the proxy should listen on
           - "--port=5432"
-          - "$GCP_PROJECT_ID:$REGION:$DB_INSTANCE_NAME"
+          # TODO: fill in <GCP_PROJECT_ID> and <REGION>
+          - "<GCP_PROJECT_ID>:<REGION>:cloud-sql-skypilot-instance"
 
         securityContext:
           # The default Cloud SQL Auth Proxy image runs as the
@@ -174,92 +193,6 @@ Use the following values.yaml to deploy the SkyPilot API server.
         - name: cloud-sql-credentials
           mountPath: /var/secrets/google
           readOnly: true
-
-Replace ``$DB_USER``, ``$DB_PASSWORD``, ``$DB_NAME``, ``$GCP_SERVICE_ACCOUNT``, ``$GKE_SERVICE_ACCOUNT``,  ``$DB_INSTANCE_NAME``, ``$GCP_PROJECT_ID``, ``$REGION`` with the corresponding values.
-
-For reference, the following values are used in the example:
-
-.. code-block:: bash
-
-    DB_USER=skypilot
-    DB_PASSWORD=<password for the 'skypilot' user>
-    DB_NAME=skypilot-db
-    GCP_SERVICE_ACCOUNT=skypilot-cloud-sql-access
-    GKE_SERVICE_ACCOUNT=skypilot-api-sa
-    DB_INSTANCE_NAME=cloud-sql-skypilot-instance
-    GCP_PROJECT_ID=<your gcp project id>
-    REGION=<region of the GKE cluster>
-
-
-For your convenience, here is a ``values.yaml`` file with ``$DB_USER``, ``$DB_NAME``, ``$GCP_SERVICE_ACCOUNT``, ``$GKE_SERVICE_ACCOUNT``, and ``$DB_INSTANCE_NAME`` filled in.
-
-.. dropdown:: ``values.yaml`` file with populated values.
-
-    .. code-block:: yaml
-
-        apiService:
-          extraVolumes:
-          - name: cloud-sql-credentials
-            secret:
-              secretName: cloud-sql-credentials
-
-          config: |
-            db: postgresql://skypilot:$DB_PASSWORD@localhost/skypilot-db
-
-        rbac:
-          serviceAccountName: "skypilot-api-sa"
-          serviceAccountAnnotations:
-            iam.gke.io/gcp-service-account: skypilot-cloud-sql-access@$GCP_PROJECT_ID.iam.gserviceaccount.com
-
-        # Extra init containers to run before the api container
-        extraInitContainers:
-          - name: cloud-sql-proxy
-            restartPolicy: Always
-            # It is recommended to use the latest version of the Cloud SQL Auth Proxy
-            # Make sure to update on a regular schedule!
-            image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
-            args:
-              # If connecting from a VPC-native GKE cluster, you can use the
-              # following flag to have the proxy connect over private IP
-              # - "--private-ip"
-
-              # If you are not connecting with Automatic IAM, you can delete
-              # the following flag.
-              # - "--auto-iam-authn"
-
-              # Use service account key file for authentication
-              - "--credentials-file=/var/secrets/google/service-account-key.json"
-
-              # Enable structured logging with LogEntry format:
-              - "--structured-logs"
-
-              # Replace DB_PORT with the port the proxy should listen on
-              - "--port=5432"
-              - "$GCP_PROJECT_ID:$REGION:cloud-sql-skypilot-instance"
-
-            securityContext:
-              # The default Cloud SQL Auth Proxy image runs as the
-              # "nonroot" user and group (uid: 65532) by default.
-              runAsNonRoot: true
-            # You should use resource requests/limits as a best practice to prevent
-            # pods from consuming too many resources and affecting the execution of
-            # other pods. You should adjust the following values based on what your
-            # application needs. For details, see
-            # https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
-            resources:
-              requests:
-                # The proxy's memory use scales linearly with the number of active
-                # connections. Fewer open connections will use less memory. Adjust
-                # this value based on your application's requirements.
-                memory: "2Gi"
-                # The proxy's CPU use scales linearly with the amount of IO between
-                # the database and the application. Adjust this value based on your
-                # application's requirements.
-                cpu: "1"
-            volumeMounts:
-            - name: cloud-sql-credentials
-              mountPath: /var/secrets/google
-              readOnly: true
 
 Then run the following command to deploy the API server using helm:
 
