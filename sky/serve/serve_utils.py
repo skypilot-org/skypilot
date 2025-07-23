@@ -565,8 +565,10 @@ def _get_service_status(
         latest_yaml_path = generate_task_yaml_file_name(service_name,
                                                         record['version'])
         original_config = common_utils.read_yaml(latest_yaml_path)
-        svc = original_config.pop('service')
+        original_config.pop('run', None)
+        svc: Dict[str, Any] = original_config.pop('service')
         if svc is not None:
+            svc.pop('pool', None)
             original_config['pool'] = svc
         record['pool_yaml'] = common_utils.dump_yaml_str(original_config)
     if with_replica_info:

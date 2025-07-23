@@ -45,6 +45,26 @@ class SkyServiceSpec:
         load_balancing_policy: Optional[str] = None,
         pool: Optional[bool] = None,
     ) -> None:
+        if pool:
+            for unsupported_field in [
+                    'target_qps_per_replica',
+                    'upscale_delay_seconds',
+                    'downscale_delay_seconds',
+                    'load_balancing_policy',
+                    'ports',
+                    'post_data',
+                    'tls_credential',
+                    'readiness_headers',
+            ]:
+                if locals()[unsupported_field] is not None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'{unsupported_field} is not supported for pool.')
+            if max_replicas is not None and max_replicas != min_replicas:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Autoscaling is not supported for pool '
+                                     'for now.')
+
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('max_replicas must be greater than or '
