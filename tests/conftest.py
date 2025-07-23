@@ -1,10 +1,11 @@
 import fcntl
 import json
 import os
+import pathlib
 import subprocess
 import tempfile
 import time
-from typing import List
+from typing import Any, Dict, List
 
 import filelock
 import pytest
@@ -17,6 +18,8 @@ import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
+from sky.skylet import constants
 from sky.utils import common_utils
 
 # Initialize logger at the top level
@@ -359,25 +362,40 @@ def setup_policy_server(request, tmp_path_factory, worker_id):
     fn = root_tmp_dir / "policy_server.txt"
     policy_server_url = ''
     server_process = None
-    with filelock.FileLock(str(fn) + ".lock"):
-        if fn.is_file():
-            # Use the launched policy server from other workers.
-            policy_server_url = fn.read_text().strip()
-        else:
-            # Launch the policy server
-            port = common_utils.find_free_port(start_port=10000)
-            policy_server_url = f'http://127.0.0.1:{port}'
-            server_process = subprocess.Popen([
-                'python', 'tests/admin_policy/no_op_server.py', '--host',
-                '0.0.0.0', '--port',
-                str(port)
-            ])
-            fn.write_text(policy_server_url)
+    original_config = None
     try:
+        with filelock.FileLock(str(fn) + ".lock"):
+            if fn.is_file():
+                skypilot_config.reload_config()
+            else:
+                # Launch the policy server
+                port = common_utils.find_free_port(start_port=10000)
+                policy_server_url = f'http://127.0.0.1:{port}'
+                server_process = subprocess.Popen([
+                    'python', 'tests/admin_policy/no_op_server.py', '--host',
+                    '0.0.0.0', '--port',
+                    str(port)
+                ])
+                config_path = pathlib.Path(
+                    skypilot_config.get_user_config_path()).expanduser()
+                if not config_path.exists():
+                    config_path.touch()
+                    config: Dict[str, Any] = {}
+                else:
+                    config = skypilot_config.get_user_config()
+                    config = dict(config)
+                original_config = config.copy()
+                config['amind_policy'] = policy_server_url
+                common_utils.dump_yaml(str(config_path), config)
+                skypilot_config.reload_config()
+                fn.write_text(policy_server_url)
         yield
     finally:
         if server_process is not None:
             server_process.kill()
+        if original_config is not None:
+            common_utils.dump_yaml(str(config_path), original_config)
+            skypilot_config.reload_config()
 
 
 @pytest.fixture(scope='session', autouse=True)
