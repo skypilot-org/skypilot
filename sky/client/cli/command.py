@@ -24,6 +24,7 @@ listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
 import collections
+import difflib
 import fnmatch
 import os
 import pathlib
@@ -830,8 +831,34 @@ class _NaturalOrderGroup(click.Group):
     Reference: https://github.com/pallets/click/issues/513
     """
 
+    _common_mistakes = {
+        # I often type sky jobs status instead of sky jobs queue on accident
+        'status': 'queue',
+    }
+
     def list_commands(self, ctx):  # pylint: disable=unused-argument
         return self.commands.keys()
+
+    def get_command(self, ctx, cmd_name):
+        rv = super().get_command(ctx, cmd_name)
+        if rv is not None:
+            return rv
+
+        if cmd_name in self._common_mistakes:
+            suggestion = self._common_mistakes[cmd_name]
+            ctx.fail(f'No such command \'{cmd_name}\'. '
+                     f'Did you mean: \'{suggestion}\'?')
+
+        matches = difflib.get_close_matches(cmd_name,
+                                            self.commands.keys(),
+                                            n=2,
+                                            cutoff=0.5)
+        if matches:
+            suggestion = '\', \''.join(matches)
+            ctx.fail(f'No such command \'{cmd_name}\'. '
+                     f'Did you mean: \'{suggestion}\'?')
+        else:
+            ctx.fail(f'No such command \'{cmd_name}\'.')
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
     def invoke(self, ctx):
