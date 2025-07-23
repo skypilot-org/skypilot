@@ -164,6 +164,8 @@ ingress:
   path: '/'
   # Ingress class name (for newer Kubernetes versions)
   ingressClassName: nginx
+  # Custom annotations for the ingress
+  annotations: null
 
   # Whether enable an additional NodePort service for the ingress controller
   # Default to null for backward compatibility:

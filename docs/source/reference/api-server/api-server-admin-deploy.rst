@@ -66,7 +66,7 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
-The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`.
+The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:`sky-api-server-custom-ingress`
 
 .. tip::
 
@@ -977,6 +977,26 @@ The same approach also applies when you have a ingress-nginx controller deployed
         --set ingress.path=/skypilot
 
 It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingress-path>` too in this case, to avoid conflicts with other backends hosted on the same ingress controller.
+
+.. _sky-api-server-custom-ingress:
+
+Use custom ingress controller
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, you can use a custom ingress controller by disabling the creation of nginx ingress controller and setting :ref:`ingress.ingressClassName <helm-values-ingress-ingressclassname>` to the ingress class name of your controller. In addition, most of the ingress controllers support customizing behavior by setting annotations on the ingress resource. You can set :ref:`ingress.annotations <helm-values-ingress-annotations>` in the helm values to pass annotations to the ingress resource. Here is an example of using a custom ingress controller:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set ingress-nginx.enabled=false \
+        --set ingress.ingressClassName=custom-ingress-class \
+        --set ingress.annotations.custom-ingress-annotation=custom-ingress-annotation-value
+
+.. note::
+
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller. For other ingress controllers, you can refer to :ref:`deploy-api-server-basic-auth` to setup authentication on the API server.
 
 
 .. _sky-api-server-cloud-deploy:

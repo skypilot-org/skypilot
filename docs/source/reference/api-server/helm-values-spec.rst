@@ -94,6 +94,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`nodePortEnabled <helm-values-ingress-nodePortEnabled>`: null
     :ref:`httpNodePort <helm-values-ingress-httpNodePort>`: 30050
     :ref:`httpsNodePort <helm-values-ingress-httpsNodePort>`: 30051
+    :ref:`annotations <helm-values-ingress-annotations>`: null
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
       :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
       # Required when enabled:
@@ -912,6 +913,21 @@ Default: ``30051``
   ingress:
     httpsNodePort: 30051
 
+.. _helm-values-ingress-annotations:
+
+``ingress.annotations``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Custom annotations for the ingress controller.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    annotations:
+      my-annotation: "my-value"
+
 .. _helm-values-ingress-oauth2-proxy:
 
 ``ingress.oauth2-proxy``
@@ -1239,15 +1255,15 @@ Default: see the yaml below.
       - apiGroups: ["apps"]
         resources: ["deployments", "deployments/status"]
         verbs: ["*"]
-              - apiGroups: [ "" ]
-          resources: [ "configmaps" ]
-          verbs: [ "get", "patch" ]
-        - apiGroups: ["apps"]
-          resources: ["deployments", "deployments/status"]
-          verbs: ["*"]
-        - apiGroups: [""]
-          resources: ["persistentvolumeclaims"]
-          verbs: ["*"]
+      - apiGroups: [ "" ]
+        resources: [ "configmaps" ]
+        verbs: [ "get", "patch" ]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "deployments/status"]
+        verbs: ["*"]
+      - apiGroups: [""]
+        resources: ["persistentvolumeclaims"]
+        verbs: ["*"]
 
 .. _helm-values-rbac-clusterRules:
 
