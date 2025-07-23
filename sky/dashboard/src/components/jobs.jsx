@@ -53,6 +53,13 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import {
+  FilterDropdown,
+  Filters,
+  filterData,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+} from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -75,11 +82,29 @@ export const statusGroups = {
   ],
 };
 
-// Define constant for "All Workspaces" like in clusters.jsx
-const ALL_WORKSPACES_VALUE = '__ALL_WORKSPACES__';
-
-// Define constant for "All Users"
-const ALL_USERS_VALUE = '__ALL_USERS__';
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Status',
+    value: 'status',
+  },
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'User',
+    value: 'user',
+  },
+  {
+    label: 'Workspace',
+    value: 'workspace',
+  },
+  {
+    label: 'Pool',
+    value: 'pool',
+  },
+];
 
 // Helper function to filter jobs by name
 export function filterJobsByName(jobs, nameFilter) {
@@ -99,7 +124,7 @@ export function filterJobsByName(jobs, nameFilter) {
 // Helper function to filter jobs by workspace
 export function filterJobsByWorkspace(jobs, workspaceFilter) {
   // If no workspace filter or set to "All Workspaces", return all jobs
-  if (!workspaceFilter || workspaceFilter === ALL_WORKSPACES_VALUE) {
+  if (!workspaceFilter || workspaceFilter === 'ALL_WORKSPACES') {
     return jobs;
   }
 
@@ -113,7 +138,7 @@ export function filterJobsByWorkspace(jobs, workspaceFilter) {
 // Helper function to filter jobs by user
 export function filterJobsByUser(jobs, userFilter) {
   // If no user filter or set to "All Users", return all jobs
-  if (!userFilter || userFilter === ALL_USERS_VALUE) {
+  if (!userFilter || userFilter === 'ALL_USERS') {
     return jobs;
   }
 
@@ -121,6 +146,21 @@ export function filterJobsByUser(jobs, userFilter) {
   return jobs.filter((job) => {
     const jobUserId = job.user_hash || job.user;
     return jobUserId === userFilter;
+  });
+}
+
+// Helper function to filter jobs by pool
+export function filterJobsByPool(jobs, poolFilter) {
+  // If no pool filter, return all jobs
+  if (!poolFilter || poolFilter.trim() === '') {
+    return jobs;
+  }
+
+  // Filter jobs by the pool filter (case-insensitive partial match)
+  const filterLower = poolFilter.toLowerCase().trim();
+  return jobs.filter((job) => {
+    const jobPool = job.pool || '';
+    return jobPool.toLowerCase().includes(filterLower);
   });
 }
 
@@ -252,14 +292,18 @@ export function ManagedJobs() {
     onConfirm: null,
   });
   const isMobile = useMobile();
-  const [workspaceFilter, setWorkspaceFilter] = useState(ALL_WORKSPACES_VALUE);
-  const [userFilter, setUserFilter] = useState(ALL_USERS_VALUE);
-  const [nameFilter, setNameFilter] = useState('');
-  const [workspaces, setWorkspaces] = useState([]);
-  const [users, setUsers] = useState([]);
   const [activeMainTab, setActiveMainTab] = useState('jobs');
 
-  // Handle URL query parameters for tab selection
+  const [filters, setFilters] = useState([]);
+  const [optionValues, setOptionValues] = useState({
+    status: [],
+    name: [],
+    user: [],
+    workspace: [],
+    pool: [],
+  }); // Option values for properties
+
+  // Handle URL query parameters for tab selection and filters
   useEffect(() => {
     if (router.isReady) {
       const tab = router.query.tab;
@@ -268,161 +312,36 @@ export function ManagedJobs() {
       } else {
         setActiveMainTab('jobs');
       }
-
-      if (router.query.workspace) {
-        const workspaceParam = Array.isArray(router.query.workspace)
-          ? router.query.workspace[0]
-          : router.query.workspace;
-        setWorkspaceFilter(workspaceParam);
-      }
-      if (router.query.user) {
-        const userParam = Array.isArray(router.query.user)
-          ? router.query.user[0]
-          : router.query.user;
-        setUserFilter(userParam);
-      }
-      if (router.query.name) {
-        const nameParam = Array.isArray(router.query.name)
-          ? router.query.name[0]
-          : router.query.name;
-        setNameFilter(nameParam);
-      }
+      updateFiltersByURLParams();
     }
-  }, [
-    router.isReady,
-    router.query.tab,
-    router.query.workspace,
-    router.query.user,
-    router.query.name,
-  ]);
+  }, [router.isReady, router.query.tab]);
 
   // Helper function to update URL query parameters
-  const updateURLParams = (newWorkspace, newUser, newName) => {
-    const query = { ...router.query };
-
-    // Update workspace parameter
-    if (newWorkspace && newWorkspace !== ALL_WORKSPACES_VALUE) {
-      query.workspace = newWorkspace;
-    } else {
-      delete query.workspace;
-    }
-
-    // Update user parameter
-    if (newUser && newUser !== ALL_USERS_VALUE) {
-      query.user = newUser;
-    } else {
-      delete query.user;
-    }
-
-    // Update name parameter
-    if (newName && newName.trim() !== '') {
-      query.name = newName.trim();
-    } else {
-      delete query.name;
-    }
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
   };
 
-  // Handle workspace filter change
-  const handleWorkspaceFilterChange = (newWorkspace) => {
-    setWorkspaceFilter(newWorkspace);
-    updateURLParams(newWorkspace, userFilter, nameFilter);
+  const updateFiltersByURLParams = () => {
+    const propertyMap = new Map();
+    propertyMap.set('', '');
+    propertyMap.set('status', 'Status');
+    propertyMap.set('name', 'Name');
+    propertyMap.set('user', 'User');
+    propertyMap.set('workspace', 'Workspace');
+    propertyMap.set('pool', 'Pool');
+
+    const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+    setFilters(urlFilters);
   };
 
-  // Handle user filter change
-  const handleUserFilterChange = (newUser) => {
-    setUserFilter(newUser);
-    updateURLParams(workspaceFilter, newUser, nameFilter);
-  };
-
-  // Handle name filter change
-  const handleNameFilterChange = (newName) => {
-    setNameFilter(newName);
-    updateURLParams(workspaceFilter, userFilter, newName);
-  };
-
-  // Fetch workspaces and users for filter dropdown
+  // Fetch initial filter data for preloading
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
         // Trigger cache preloading for jobs page and background preload other pages
         await cachePreloader.preloadForPage('jobs');
-
-        // Fetch configured workspaces for the filter dropdown
-        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
-        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
-
-        // Fetch all jobs to see if 'default' workspace is implicitly used
-        const jobsResponse = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true },
-        ]);
-        const allJobs = jobsResponse.jobs || [];
-        const uniqueJobWorkspaces = [
-          ...new Set(
-            allJobs.map((job) => job.workspace || 'default').filter((ws) => ws)
-          ),
-        ];
-
-        // Combine configured workspaces with any actively used workspaces
-        const finalWorkspaces = new Set(configuredWorkspaceNames);
-        uniqueJobWorkspaces.forEach((wsName) => finalWorkspaces.add(wsName));
-
-        setWorkspaces(Array.from(finalWorkspaces).sort());
-
-        // Fetch users for the filter dropdown
-        const fetchedUsers = await dashboardCache.get(getUsers);
-        const uniqueJobUsers = [
-          ...new Set(
-            allJobs
-              .map((job) => ({
-                userId: job.user_hash || job.user,
-                username: job.user,
-              }))
-              .filter((user) => user.userId)
-          ).values(),
-        ];
-
-        // Combine fetched users with unique job users
-        const finalUsers = new Map();
-
-        // Add fetched users first
-        fetchedUsers.forEach((user) => {
-          finalUsers.set(user.userId, {
-            userId: user.userId,
-            username: user.username,
-            display: formatUserDisplay(user.username, user.userId),
-          });
-        });
-
-        // Add any job users not in the fetched list
-        uniqueJobUsers.forEach((user) => {
-          if (!finalUsers.has(user.userId)) {
-            finalUsers.set(user.userId, {
-              userId: user.userId,
-              username: user.username,
-              display: formatUserDisplay(user.username, user.userId),
-            });
-          }
-        });
-
-        setUsers(
-          Array.from(finalUsers.values()).sort((a, b) =>
-            a.display.localeCompare(b.display)
-          )
-        );
       } catch (error) {
         console.error('Error fetching data for filters:', error);
-        setWorkspaces(['default']); // Fallback or error state
-        setUsers([]); // Fallback or error state
       }
     };
     fetchFilterData();
@@ -440,127 +359,102 @@ export function ManagedJobs() {
     }
   };
 
+  const handleJobAction = async (jobId, action) => {
+    try {
+      setConfirmationModal({
+        isOpen: true,
+        title: `${action.charAt(0).toUpperCase() + action.slice(1)} Job`,
+        message: `Are you sure you want to ${action} job ${jobId}?`,
+        onConfirm: async () => {
+          await handleJobAction(jobId, action);
+          if (refreshDataRef.current) {
+            refreshDataRef.current();
+          }
+        },
+      });
+    } catch (error) {
+      console.error(`Error ${action}ing job:`, error);
+    }
+  };
+
   return (
     <>
-      {/* Main Tabs */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-base flex items-center">
-          <button
-            className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <div className="flex items-center gap-4">
+          <div
+            className={`cursor-pointer border-b-2 pb-1 ${
               activeMainTab === 'jobs'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
+                ? 'border-sky-blue text-sky-blue'
+                : 'border-transparent text-gray-600 hover:text-sky-blue'
             }`}
-            onClick={() => {
-              setActiveMainTab('jobs');
-              router.push('/jobs', undefined, { shallow: true });
-            }}
+            onClick={() => setActiveMainTab('jobs')}
           >
             Managed Jobs
-          </button>
-          <button
-            className={`leading-none pb-2 px-2 border-b-2 ${
+          </div>
+          <div
+            className={`cursor-pointer border-b-2 pb-1 ${
               activeMainTab === 'pools'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
+                ? 'border-sky-blue text-sky-blue'
+                : 'border-transparent text-gray-600 hover:text-sky-blue'
             }`}
-            onClick={() => {
-              setActiveMainTab('pools');
-              router.push('/jobs?tab=pools', undefined, { shallow: true });
-            }}
+            onClick={() => setActiveMainTab('pools')}
           >
             Pools
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 ml-auto">
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center disabled:opacity-50"
-            title="Refresh"
-          >
-            <RotateCwIcon
-              className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`}
-            />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+          </div>
         </div>
       </div>
 
       {/* Filters and Content */}
       {activeMainTab === 'jobs' && (
         <>
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Filter by job name"
-                value={nameFilter}
-                onChange={(e) => handleNameFilterChange(e.target.value)}
-                className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-              />
-              {nameFilter && (
-                <button
-                  onClick={() => handleNameFilterChange('')}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  title="Clear filter"
-                >
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              )}
+          <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
+            <div className="flex items-center gap-2">
+              <Link
+                href="/jobs"
+                className="text-sky-blue hover:underline leading-none text-base"
+              >
+                Managed Jobs
+              </Link>
             </div>
-            <Select
-              value={workspaceFilter}
-              onValueChange={handleWorkspaceFilterChange}
-            >
-              <SelectTrigger className="w-40 sm:w-48 h-8 text-sm">
-                <SelectValue placeholder="All Workspaces" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_WORKSPACES_VALUE}>
-                  All Workspaces
-                </SelectItem>
-                {workspaces.map((workspace) => (
-                  <SelectItem key={workspace} value={workspace}>
-                    {workspace}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={userFilter} onValueChange={handleUserFilterChange}>
-              <SelectTrigger className="w-40 sm:w-48 h-8 text-sm">
-                <SelectValue placeholder="All Users" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-                {users.map((user) => (
-                  <SelectItem key={user.userId} value={user.userId}>
-                    {user.display}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="w-full sm:w-auto">
+              <FilterDropdown
+                propertyList={PROPERTY_OPTIONS}
+                valueList={optionValues}
+                setFilters={setFilters}
+                updateURLParams={updateURLParams}
+                placeholder="Filter jobs"
+              />
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              {loading && (
+                <div className="flex items-center">
+                  <CircularProgress size={15} className="mt-0" />
+                  <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+                </div>
+              )}
+              <button
+                onClick={handleRefresh}
+                disabled={loading}
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              >
+                <RotateCwIcon className="h-4 w-4 mr-1.5" />
+                {!isMobile && <span>Refresh</span>}
+              </button>
+            </div>
           </div>
+
+          <Filters
+            filters={filters}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+          />
+
           <ManagedJobsTable
             refreshInterval={REFRESH_INTERVAL}
             setLoading={setLoading}
             refreshDataRef={refreshDataRef}
-            workspaceFilter={workspaceFilter}
-            userFilter={userFilter}
-            nameFilter={nameFilter}
+            filters={filters}
+            setOptionValues={setOptionValues}
           />
         </>
       )}
@@ -590,9 +484,8 @@ export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
-  workspaceFilter,
-  userFilter,
-  nameFilter,
+  filters,
+  setOptionValues,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -673,6 +566,7 @@ export function ManagedJobsTable({
       }
 
       setData(jobs);
+      setOptionValues(fetchOptionValuesFromJobs(jobs));
       setControllerStopped(isControllerStopped);
       setIsInitialLoad(false);
     } catch (err) {
@@ -768,16 +662,39 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on selected statuses and active tab
+  // Helper function to extract option values from jobs data
+  const fetchOptionValuesFromJobs = (jobs) => {
+    let optionValues = {
+      status: [],
+      name: [],
+      user: [],
+      workspace: [],
+      pool: [],
+    };
+
+    const pushWithoutDuplication = (array, item) => {
+      if (array.includes(item)) return;
+      array.push(item);
+    };
+
+    jobs.map((job) => {
+      pushWithoutDuplication(optionValues.status, job.status);
+      pushWithoutDuplication(optionValues.name, job.name);
+      pushWithoutDuplication(optionValues.user, job.user);
+      pushWithoutDuplication(
+        optionValues.workspace,
+        job.workspace || 'default'
+      );
+      pushWithoutDuplication(optionValues.pool, job.pool);
+    });
+
+    return optionValues;
+  };
+
+  // Filter data based on filters and selected statuses
   const filteredData = React.useMemo(() => {
-    // First apply workspace filter
-    let filtered = filterJobsByWorkspace(data, workspaceFilter);
-
-    // Then apply user filter
-    filtered = filterJobsByUser(filtered, userFilter);
-
-    // Then apply name filter
-    filtered = filterJobsByName(filtered, nameFilter);
+    // First apply shared filters
+    let filtered = filterData(data, filters);
 
     // If specific statuses are selected, show jobs with any of those statuses
     if (selectedStatuses.length > 0) {
@@ -797,15 +714,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [
-    data,
-    activeTab,
-    selectedStatuses,
-    showAllMode,
-    workspaceFilter,
-    userFilter,
-    nameFilter,
-  ]);
+  }, [data, filters, activeTab, selectedStatuses, showAllMode]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -1483,7 +1392,7 @@ export function ClusterJobs({
     let filtered = clusterJobData || [];
 
     // Apply user filter if provided
-    if (userFilter && userFilter !== ALL_USERS_VALUE) {
+    if (userFilter && userFilter !== 'ALL_USERS') {
       filtered = filterJobsByUser(filtered, userFilter);
     }
 
@@ -2032,12 +1941,6 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               </TableHead>
               <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
               <TableHead
-                className="sortable whitespace-nowrap w-48"
-                onClick={() => requestSort('policy')}
-              >
-                Policy{getSortDirection('policy')}
-              </TableHead>
-              <TableHead
                 className="sortable whitespace-nowrap w-24"
                 onClick={() => requestSort('status')}
               >
@@ -2049,7 +1952,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -2076,9 +1979,6 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     <InfraBadges replicaInfo={pool.replica_info} />
                   </TableCell>
                   <TableCell>{getWorkersCount(pool.replica_info)}</TableCell>
-                  <TableCell className="truncate max-w-xs" title={pool.policy}>
-                    {pool.policy || '-'}
-                  </TableCell>
                   <TableCell>
                     <StatusBadge status={pool.status} />
                   </TableCell>
@@ -2087,7 +1987,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center py-6 text-gray-500"
                 >
                   No pools found
