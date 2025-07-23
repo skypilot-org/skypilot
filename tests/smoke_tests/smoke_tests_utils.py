@@ -430,7 +430,12 @@ def override_sky_config(
         return
 
     temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    original_config = skypilot_config.get_user_config()
+    if skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_dict:
+        # Read the original config
+        original_config = skypilot_config.parse_and_validate_config_file(
+            env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
+    else:
+        original_config = skypilot_config.config_utils.Config()
     overlay_config = skypilot_config.overlay_skypilot_config(
         original_config, override_sky_config_dict)
     temp_config_file.write(common_utils.dump_yaml_str(dict(overlay_config)))
