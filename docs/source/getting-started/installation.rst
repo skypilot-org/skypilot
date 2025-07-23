@@ -540,41 +540,55 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 Tigris
 ~~~~~~
 
-`Tigris <https://www.tigrisdata.com/>`__ is a globally distributed S3-compatible object storage service. SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Tigris support, configure your credentials using AWS CLI with a dedicated profile:
+`Tigris <https://www.tigrisdata.com/>`__ is a globally distributed S3-compatible object storage service. SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Tigris support:
 
 .. code-block:: shell
 
   # Install boto3 if not already installed
   pip install boto3
+
+Create your Tigris credentials file at :code:`~/.tigris/credentials`:
+
+.. code-block:: shell
+
+  # Create Tigris credentials directory and file
+  mkdir -p ~/.tigris
   
-  # Configure Tigris credentials with a dedicated profile
-  aws configure --profile tigris
-
-In the prompt, enter your Tigris Access Key ID and Secret Access Key (see `instructions to generate Tigris credentials <https://www.tigrisdata.com/docs/get-started/>`_). Use :code:`auto` for the region and :code:`json` for the output format:
-
-.. code-block:: text
-
-  AWS Access Key ID [None]: <tid_your_access_key_id>
-  AWS Secret Access Key [None]: <tsec_your_secret_access_key>
-  Default region name [None]: auto
-  Default output format [None]: json
-
-After configuration, add the endpoint URL to your credentials file:
-
-.. code-block:: shell
-
-  # Add endpoint URL to the tigris profile
-  aws configure set endpoint_url https://t3.storage.dev --profile tigris
-
-Alternatively, you can manually edit :code:`~/.aws/credentials`:
-
-.. code-block:: shell
-
-  # Manual configuration in ~/.aws/credentials
+  # Add your Tigris credentials
+  cat << EOF > ~/.tigris/credentials
   [tigris]
   aws_access_key_id = <tid_your_access_key_id>
   aws_secret_access_key = <tsec_your_secret_access_key>
   endpoint_url = https://t3.storage.dev
+  EOF
+
+You can get your Tigris access keys from the `Tigris console <https://www.tigrisdata.com/docs/get-started/>`_.
+
+Verify your configuration:
+
+.. code-block:: shell
+
+  # Test the configuration
+  AWS_SHARED_CREDENTIALS_FILE=~/.tigris/credentials aws s3 ls --profile tigris
+
+You can now use Tigris buckets in your SkyPilot tasks with the :code:`tigris://` prefix:
+
+.. code-block:: yaml
+
+  # Example: Using an existing Tigris bucket
+  file_mounts:
+    /data: tigris://my-tigris-bucket
+
+  # Example: Creating a new Tigris bucket with local data
+  file_mounts:
+    /dataset:
+      name: my-dataset-bucket
+      source: ~/my-data
+      store: tigris
+
+.. note::
+
+  Tigris supports both global endpoint (https://t3.storage.dev) and Fly.io endpoint (https://fly.storage.tigris.dev). SkyPilot will automatically select the appropriate endpoint based on your environment.
 
 Nebius
 ~~~~~~

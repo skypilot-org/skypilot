@@ -1,4 +1,5 @@
 """Tigris cloud adaptor."""
+import contextlib
 import os
 import threading
 from typing import Optional, Tuple
@@ -15,7 +16,7 @@ logger = sky_logging.init_logger(__name__)
 
 # Tigris configuration
 TIGRIS_PROFILE_NAME = 'tigris'
-TIGRIS_CREDENTIALS_PATH = '~/.aws/credentials'
+TIGRIS_CREDENTIALS_PATH = '~/.tigris/credentials'
 
 # Default endpoints
 TIGRIS_ENDPOINT_FLY = 'https://fly.storage.tigris.dev'
@@ -33,6 +34,22 @@ _session_creation_lock = threading.RLock()
 
 NAME = 'Tigris'
 SKY_CHECK_NAME = 'Tigris (for object storage)'
+
+
+@contextlib.contextmanager
+def _load_tigris_credentials_env():
+    """Context manager to temporarily change the AWS credentials file path."""
+    prev_credentials_path = os.environ.get('AWS_SHARED_CREDENTIALS_FILE')
+    tigris_creds_path = os.path.expanduser(TIGRIS_CREDENTIALS_PATH)
+    os.environ['AWS_SHARED_CREDENTIALS_FILE'] = tigris_creds_path
+    try:
+        yield
+    finally:
+        if prev_credentials_path is None:
+            if 'AWS_SHARED_CREDENTIALS_FILE' in os.environ:
+                del os.environ['AWS_SHARED_CREDENTIALS_FILE']
+        else:
+            os.environ['AWS_SHARED_CREDENTIALS_FILE'] = prev_credentials_path
 
 
 def create_endpoint() -> str:
@@ -68,6 +85,28 @@ def get_tigris_credentials(boto3_session):
     return tigris_credentials.get_frozen_credentials()
 
 
+def tigris_profile_in_credentials() -> bool:
+    """Checks if Tigris profile is set in credentials file."""
+    credentials_path = os.path.expanduser(TIGRIS_CREDENTIALS_PATH)
+    tigris_profile_exists = False
+    if os.path.isfile(credentials_path):
+        with open(credentials_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if f'[{TIGRIS_PROFILE_NAME}]' in line:
+                    tigris_profile_exists = True
+                    break
+    return tigris_profile_exists
+
+
+def get_credential_file_mounts() -> dict:
+    """Returns Tigris credential file mounts."""
+    file_mounts = {}
+    credentials_path = os.path.expanduser(TIGRIS_CREDENTIALS_PATH)
+    if os.path.exists(credentials_path):
+        file_mounts['~/.tigris/credentials'] = credentials_path
+    return file_mounts
+
+
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache  # pylint: disable=line-too-long
@@ -80,7 +119,8 @@ def session():
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
-        session_ = boto3.session.Session(profile_name=TIGRIS_PROFILE_NAME)
+        with _load_tigris_credentials_env():
+            session_ = boto3.session.Session(profile_name=TIGRIS_PROFILE_NAME)
     return session_
 
 
@@ -139,6 +179,30 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         error_message is None if credentials are valid, otherwise contains
         error details.
     """
+    hints = None
+    credentials_path = os.path.expanduser(TIGRIS_CREDENTIALS_PATH)
+
+    if not tigris_profile_in_credentials():
+        hints = f'[{TIGRIS_PROFILE_NAME}] profile is not set in {TIGRIS_CREDENTIALS_PATH}.'
+
+    if not os.path.exists(credentials_path):
+        if hints:
+            hints += f' {TIGRIS_CREDENTIALS_PATH} does not exist.'
+        else:
+            hints = f'{TIGRIS_CREDENTIALS_PATH} does not exist.'
+
+    if hints:
+        hints += (
+            ' Run the following commands:\n'
+            '  $ mkdir -p ~/.tigris\n'
+            '  $ echo "[tigris]" > ~/.tigris/credentials\n'
+            '  $ echo "aws_access_key_id = <tid_your_access_key>" >> ~/.tigris/credentials\n'
+            '  $ echo "aws_secret_access_key = <tsec_your_secret_key>" >> ~/.tigris/credentials\n'
+            '  $ echo "endpoint_url = https://t3.storage.dev" >> ~/.tigris/credentials\n'
+            'For more info: https://docs.skypilot.co/en/latest/getting-started/installation.html#tigris'
+        )
+        return False, hints
+
     try:
         # Try to create a session and get credentials
         session_ = session()
@@ -150,7 +214,7 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         else:
             return False, 'Tigris credentials not found or incomplete'
 
-    except ValueError as e:
+    except (ValueError, RuntimeError, OSError) as e:
         return False, f'Failed to verify Tigris credentials: {str(e)}'
 
 

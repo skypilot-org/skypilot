@@ -34,7 +34,8 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     # clouds. Also validate names with get_cloud_tuple.
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
-        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME, tigris.NAME])
+        [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
+        [cloudflare.NAME, tigris.NAME])
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -122,7 +123,7 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare and Tigris.
+            # the cloud object.
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
             elif cloud_name.lower().startswith('tigris'):
@@ -228,15 +229,13 @@ def check_capabilities(
             # registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and
-                not cloud.startswith('Cloudflare') and
-                not cloud.startswith('Tigris')
+                if capability in capabilities and not cloud.startswith(
+                    'Cloudflare') and not cloud.startswith('Tigris')
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and
-                not cloud.startswith('Cloudflare') and
-                not cloud.startswith('Tigris')
+                if capability in capabilities and not cloud.startswith(
+                    'Cloudflare') and not cloud.startswith('Tigris')
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
@@ -440,9 +439,8 @@ def get_cloud_credential_file_mounts(
     # Similar handling for Tigris storage credentials
     tigris_is_enabled, _ = tigris.check_storage_credentials()
     if tigris_is_enabled:
-        # For Tigris, we use AWS credential files with tigris profile
-        # No need to add separate mounts as it uses existing AWS credentials structure
-        pass
+        tigris_credential_mounts = tigris.get_credential_file_mounts()
+        file_mounts.update(tigris_credential_mounts)
 
     return file_mounts
 

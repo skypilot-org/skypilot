@@ -4615,6 +4615,7 @@ class TigrisStore(S3CompatibleStore):
             resource_factory=lambda name: tigris.resource('s3').Bucket(name),
             split_path=cls.split_tigris_path,
             verify_bucket=cls.verify_tigris_bucket,
+            credentials_file=tigris.TIGRIS_CREDENTIALS_PATH,
             aws_profile=tigris.TIGRIS_PROFILE_NAME,
             get_endpoint_url=tigris.create_endpoint,
             cloud_name=tigris.NAME,
