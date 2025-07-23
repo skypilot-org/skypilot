@@ -303,20 +303,19 @@ export function ManagedJobs() {
     workspace: [],
     pool: [],
   }); // Option values for properties
-  const [hasPools, setHasPools] = useState(false);
 
   // Handle URL query parameters for tab selection and filters
   useEffect(() => {
     if (router.isReady) {
       const tab = router.query.tab;
-      if (tab === 'pools' && hasPools) {
+      if (tab === 'pools') {
         setActiveMainTab('pools');
       } else {
         setActiveMainTab('jobs');
       }
       updateFiltersByURLParams();
     }
-  }, [router.isReady, router.query.tab, hasPools]);
+  }, [router.isReady, router.query.tab]);
 
   // Helper function to update URL query parameters
   const updateURLParams = (filters) => {
@@ -335,25 +334,6 @@ export function ManagedJobs() {
     const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
     setFilters(urlFilters);
   };
-
-  // Fetch initial filter data and check for pools
-  useEffect(() => {
-    const fetchFilterData = async () => {
-      try {
-        // Trigger cache preloading for jobs page and background preload other pages
-        await cachePreloader.preloadForPage('jobs');
-
-        // Check if there are any pools
-        const poolsResponse = await dashboardCache.get(getQueryPools, [{}]);
-        const pools = poolsResponse.pools || [];
-        setHasPools(pools.length > 0);
-      } catch (error) {
-        console.error('Error fetching data for filters:', error);
-        setHasPools(false);
-      }
-    };
-    fetchFilterData();
-  }, []);
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
@@ -387,47 +367,35 @@ export function ManagedJobs() {
 
   return (
     <>
-      {hasPools && (
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <div className="flex items-center gap-4">
-            <div
-              className={`cursor-pointer border-b-2 pb-1 ${
-                activeMainTab === 'jobs'
-                  ? 'border-sky-blue text-sky-blue'
-                  : 'border-transparent text-gray-600 hover:text-sky-blue'
-              }`}
-              onClick={() => setActiveMainTab('jobs')}
-            >
-              Managed Jobs
-            </div>
-            <div
-              className={`cursor-pointer border-b-2 pb-1 ${
-                activeMainTab === 'pools'
-                  ? 'border-sky-blue text-sky-blue'
-                  : 'border-transparent text-gray-600 hover:text-sky-blue'
-              }`}
-              onClick={() => setActiveMainTab('pools')}
-            >
-              Pools
-            </div>
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <div className="flex items-center gap-4">
+          <div
+            className={`cursor-pointer border-b-2 pb-1 ${
+              activeMainTab === 'jobs'
+                ? 'border-sky-blue text-sky-blue'
+                : 'border-transparent text-gray-600 hover:text-sky-blue'
+            }`}
+            onClick={() => setActiveMainTab('jobs')}
+          >
+            Managed Jobs
+          </div>
+          <div
+            className={`cursor-pointer border-b-2 pb-1 ${
+              activeMainTab === 'pools'
+                ? 'border-sky-blue text-sky-blue'
+                : 'border-transparent text-gray-600 hover:text-sky-blue'
+            }`}
+            onClick={() => setActiveMainTab('pools')}
+          >
+            Pools
           </div>
         </div>
-      )}
+      </div>
 
       {/* Filters and Content */}
       {activeMainTab === 'jobs' && (
         <>
           <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
-            {!hasPools && (
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/jobs"
-                  className="text-sky-blue hover:underline leading-none text-base"
-                >
-                  Managed Jobs
-                </Link>
-              </div>
-            )}
             <div className="w-full sm:w-auto">
               <FilterDropdown
                 propertyList={PROPERTY_OPTIONS}
@@ -471,7 +439,7 @@ export function ManagedJobs() {
         </>
       )}
 
-      {hasPools && activeMainTab === 'pools' && (
+      {activeMainTab === 'pools' && (
         <PoolsTable
           refreshInterval={REFRESH_INTERVAL}
           setLoading={setLoading}
