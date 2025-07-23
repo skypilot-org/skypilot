@@ -18,20 +18,13 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
-import {
-  getManagedJobs,
-  getQueryPools,
-  extractHandleInfo,
-} from '@/data/connectors/jobs';
+import { getManagedJobs, getQueryPools } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { Layout } from '@/components/elements/layout';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
-  relativeTime,
-  formatDateTime,
   TimestampWithTooltip,
 } from '@/components/utils';
 import {
@@ -2028,10 +2021,11 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     // Aggregate infrastructure types from READY worker handles only
     const infraCounts = {};
     replicaInfo.forEach((worker) => {
-      if (worker.handle && worker.status === 'READY') {
-        const handleInfo = extractHandleInfo(worker.handle);
-        const cloud = handleInfo.cloud;
-        infraCounts[cloud] = (infraCounts[cloud] || 0) + 1;
+      if (worker.cloud && worker.status === 'READY') {
+        const cloudWithRegion = worker.region
+          ? `${worker.cloud} (${worker.region})`
+          : worker.cloud;
+        infraCounts[cloudWithRegion] = (infraCounts[cloudWithRegion] || 0) + 1;
       }
     });
 
@@ -2041,12 +2035,15 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
 
     return (
       <div className="flex flex-wrap gap-1">
-        {Object.entries(infraCounts).map(([cloud, count]) => (
+        {Object.entries(infraCounts).map(([cloudWithRegion, count]) => (
           <span
-            key={cloud}
-            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+            key={cloudWithRegion}
+            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
           >
-            {count} {cloud}
+            <span>{cloudWithRegion}</span>
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
           </span>
         ))}
       </div>

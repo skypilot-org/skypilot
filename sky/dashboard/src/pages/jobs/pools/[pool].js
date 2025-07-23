@@ -87,9 +87,10 @@ export default function PoolDetailPage() {
     const infraCounts = {};
     readyWorkers.forEach((worker) => {
       try {
-        const handleInfo = extractHandleInfo(worker.handle);
-        const cloud = handleInfo.cloud;
-        infraCounts[cloud] = (infraCounts[cloud] || 0) + 1;
+        const cloudWithRegion = worker.region
+          ? `${worker.cloud} (${worker.region})`
+          : worker.cloud;
+        infraCounts[cloudWithRegion] = (infraCounts[cloudWithRegion] || 0) + 1;
       } catch (error) {
         // Handle errors gracefully
         infraCounts['Unknown'] = (infraCounts['Unknown'] || 0) + 1;
@@ -307,14 +308,19 @@ export default function PoolDetailPage() {
                   {(() => {
                     const infraCounts = getInfraSummary(poolData.replica_info);
                     return Object.keys(infraCounts).length > 0 ? (
-                      Object.entries(infraCounts).map(([cloud, count]) => (
-                        <span
-                          key={cloud}
-                          className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700"
-                        >
-                          {count} {cloud}
-                        </span>
-                      ))
+                      Object.entries(infraCounts).map(
+                        ([cloudWithRegion, count]) => (
+                          <span
+                            key={cloudWithRegion}
+                            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
+                          >
+                            <span>{cloudWithRegion}</span>
+                            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                              {count}
+                            </span>
+                          </span>
+                        )
+                      )
                     ) : (
                       <span className="text-gray-500 text-sm">-</span>
                     );
@@ -333,7 +339,7 @@ export default function PoolDetailPage() {
                   <div className="text-sm font-medium text-gray-700 mb-1">
                     Workers
                   </div>
-                  <div className="text-lg font-mono">
+                  <div className="text-sm font-medium">
                     {getWorkersCount(poolData.replica_info)}
                   </div>
                 </div>
@@ -342,7 +348,7 @@ export default function PoolDetailPage() {
                   <div className="text-sm font-medium text-gray-700 mb-1">
                     Policy
                   </div>
-                  <div className="text-lg font-mono">
+                  <div className="text-sm font-medium">
                     {poolData.policy || '-'}
                   </div>
                 </div>
@@ -478,15 +484,7 @@ export default function PoolDetailPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 max-w-xs truncate">
                           {(() => {
                             try {
-                              if (!worker.handle) {
-                                return 'No handle';
-                              }
-
-                              // Extract infrastructure info from base64-encoded handle
-                              const handleInfo = extractHandleInfo(
-                                worker.handle
-                              );
-                              return handleInfo.cloud;
+                              return `${worker.cloud} (${worker.region})`;
                             } catch (error) {
                               return `Error: ${error.message}`;
                             }
@@ -495,15 +493,7 @@ export default function PoolDetailPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 max-w-xs truncate">
                           {(() => {
                             try {
-                              if (!worker.handle) {
-                                return 'No handle';
-                              }
-
-                              // Extract resource info from base64-encoded handle
-                              const handleInfo = extractHandleInfo(
-                                worker.handle
-                              );
-                              return handleInfo.instanceType;
+                              return worker.resources_str;
                             } catch (error) {
                               return `Error: ${error.message}`;
                             }
@@ -513,7 +503,16 @@ export default function PoolDetailPage() {
                           <StatusBadge status={worker.status} />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {worker.used_by || '-'}
+                          {worker.used_by ? (
+                            <Link
+                              href={`/jobs/${worker.used_by}`}
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              Job ID: {worker.used_by}
+                            </Link>
+                          ) : (
+                            '-'
+                          )}
                         </td>
                       </tr>
                     ))

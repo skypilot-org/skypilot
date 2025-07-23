@@ -537,7 +537,7 @@ export async function handleJobAction(action, jobId, cluster) {
 // Simple function to extract info from base64-encoded handle without full unpickling
 export function extractHandleInfo(base64Handle) {
   if (!base64Handle || typeof base64Handle !== 'string') {
-    return { cloud: 'Unknown', instanceType: 'Unknown' };
+    return { cloud: 'Unknown', instanceType: 'Unknown', region: 'Unknown' };
   }
 
   try {
@@ -560,6 +560,30 @@ export function extractHandleInfo(base64Handle) {
       cloud = 'GCP';
     } else if (pickledData.includes('azure') || pickledData.includes('Azure')) {
       cloud = 'Azure';
+    }
+
+    // Look for region patterns
+    let region = 'Unknown';
+    const regionPatterns = [
+      /us-[a-z]+-\d+[a-z]?/, // AWS regions like us-east-1, us-west-2a
+      /europe-[a-z]+-\d+/, // GCP regions like europe-west1
+      /asia-[a-z]+-\d+/, // Asia regions
+      /australia-[a-z]+-\d+/, // Australia regions
+      /[a-z]+-[a-z]+-\d+/, // General pattern for cloud regions
+      /gke_[^_]+_[^_]+_([^)]+)/, // GKE cluster pattern to extract zone/region
+    ];
+
+    for (const pattern of regionPatterns) {
+      const match = pickledData.match(pattern);
+      if (match) {
+        if (pattern.source.includes('gke_')) {
+          // For GKE, extract the zone/region from cluster name
+          region = match[3] || 'Unknown';
+        } else {
+          region = match[0];
+        }
+        break;
+      }
     }
 
     // Look for instance type patterns (common formats like "2CPU--2GB", "m5.large", etc.)
@@ -586,9 +610,9 @@ export function extractHandleInfo(base64Handle) {
       }
     }
 
-    return { cloud, instanceType };
+    return { cloud, instanceType, region };
   } catch (error) {
     console.warn('Failed to extract handle info:', error);
-    return { cloud: 'Unknown', instanceType: 'Unknown' };
+    return { cloud: 'Unknown', instanceType: 'Unknown', region: 'Unknown' };
   }
 }
