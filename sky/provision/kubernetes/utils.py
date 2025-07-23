@@ -554,6 +554,9 @@ class GKELabelFormatter(GPULabelFormatter):
             return acc
         elif is_tpu_on_gke(value):
             return value
+        elif value == '':
+            # heterogenous cluster may have empty labels for cpu nodes.
+            return ''
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
@@ -993,6 +996,9 @@ class GKEAutoscaler(Autoscaler):
             node_accelerator_type = (
                 GKELabelFormatter.get_accelerator_from_label_value(
                     accelerator['acceleratorType']))
+            # handle heterogenous nodes.
+            if not node_accelerator_type:
+                continue
             node_accelerator_count = accelerator['acceleratorCount']
             if node_accelerator_type == requested_gpu_type and int(
                     node_accelerator_count) >= requested_gpu_count:

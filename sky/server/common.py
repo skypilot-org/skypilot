@@ -252,8 +252,9 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(endpoint: Optional[str] = None):
+    server_url = endpoint if endpoint is not None else get_server_url()
+    return server_url in AVAILABLE_LOCAL_API_SERVER_URLS
 
 
 def _handle_non_200_server_status(
@@ -371,6 +372,10 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 
 
 def handle_request_error(response: 'requests.Response') -> None:
+    # Keep the original HTTPError if the response code >= 400
+    response.raise_for_status()
+    # Other status codes are not expected neither, e.g. we do not expect to
+    # handle redirection here.
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -562,7 +567,7 @@ def check_server_healthy(
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
         msg = api_server_info.error
-        if is_api_server_local():
+        if is_api_server_local(endpoint):
             # For local server, just hint user to restart the server to get
             # a consistent version.
             msg = _LOCAL_API_SERVER_RESTART_HINT
@@ -706,9 +711,10 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             continue
         if 'workdir' in task_config:
             workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
+            if isinstance(workdir, str):
+                task_config['workdir'] = str(
+                    client_file_mounts_dir /
+                    file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

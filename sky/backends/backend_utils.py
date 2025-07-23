@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
 import colorama
-import filelock
 from packaging import version
 from typing_extensions import Literal
 
@@ -45,6 +44,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -104,23 +104,18 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # Fixed IP addresses are used to avoid DNS lookup blocking the check, for
 # machine with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
+_TEST_IP_LIST = ['https://8.8.8.8', 'https://1.1.1.1']
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Filelocks for the cluster status change.
-CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Time that must elapse since the last status check before we should re-check if
 # the cluster has been terminated or autostopped.
 _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
-# Filelocks for updating cluster's file_mounts.
-CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
-    '~/.sky/.{}_file_mounts.lock')
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
@@ -1635,18 +1630,28 @@ def get_node_ips(cluster_yaml: str,
 
 def check_network_connection():
     # Tolerate 3 retries as it is observed that connections can fail.
-    adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
     http = requests.Session()
-    http.mount('https://', adapter)
-    http.mount('http://', adapter)
-    for i, ip in enumerate(_TEST_IP_LIST):
-        try:
-            http.head(ip, timeout=3)
-            return
-        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
-            if i == len(_TEST_IP_LIST) - 1:
-                raise exceptions.NetworkError('Could not refresh the cluster. '
-                                              'Network seems down.') from e
+    http.mount('https://', adapters.HTTPAdapter())
+    http.mount('http://', adapters.HTTPAdapter())
+
+    # Alternate between IPs on each retry
+    max_retries = 3
+    timeout = 0.5
+
+    for _ in range(max_retries):
+        for ip in _TEST_IP_LIST:
+            try:
+                http.head(ip, timeout=timeout)
+                return
+            except (requests.Timeout, requests.exceptions.ConnectionError):
+                continue
+
+        timeout *= 2  # Double the timeout for next retry
+
+    # If we get here, all IPs failed
+    # Assume network connection is down
+    raise exceptions.NetworkError('Could not refresh the cluster. '
+                                  'Network seems down.')
 
 
 @timeline.event
@@ -1995,9 +2000,20 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
+            cloud_name = repr(handle.launched_resources.cloud).lower()
             for i in range(5):
-                ready_head, ready_workers, output, stderr = (
-                    get_node_counts_from_ray_status(head_runner))
+                try:
+                    ready_head, ready_workers, output, stderr = (
+                        get_node_counts_from_ray_status(head_runner))
+                except RuntimeError as e:
+                    logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
+                                 f' {i}: {common_utils.format_exception(e)}')
+                    if cloud_name != 'kubernetes':
+                        raise e
+                    # We retry for kubernetes because coreweave can have a
+                    # transient network issue.
+                    time.sleep(1)
+                    continue
                 if ready_head + ready_workers == total_nodes:
                     return True
                 logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
@@ -2284,8 +2300,7 @@ def refresh_cluster_record(
 
         # The loop logic allows us to notice if the status was updated in the
         # global_user_state by another process and stop trying to get the lock.
-        # The core loop logic is adapted from FileLock's implementation.
-        lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+        lock = locks.get_lock(cluster_status_lock_id(cluster_name))
         start_time = time.perf_counter()
 
         # Loop until we have an up-to-date status or until we acquire the lock.
@@ -2309,7 +2324,8 @@ def refresh_cluster_record(
                         return record
                     # Update and return the cluster status.
                     return _update_cluster_status(cluster_name)
-            except filelock.Timeout:
+
+            except locks.LockTimeout:
                 # lock.acquire() will throw a Timeout exception if the lock is not
                 # available and we have blocking=False.
                 pass
@@ -2610,7 +2626,7 @@ def is_controller_accessible(
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -3187,3 +3203,13 @@ def get_endpoints(cluster: str,
         return {
             port_num: urls[0].url() for port_num, urls in port_details.items()
         }
+
+
+def cluster_status_lock_id(cluster_name: str) -> str:
+    """Get the lock ID for cluster status operations."""
+    return f'{cluster_name}_status'
+
+
+def cluster_file_mounts_lock_id(cluster_name: str) -> str:
+    """Get the lock ID for cluster file mounts operations."""
+    return f'{cluster_name}_file_mounts'

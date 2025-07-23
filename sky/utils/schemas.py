@@ -791,7 +791,21 @@ def get_task_schema():
                 'type': 'string',
             },
             'workdir': {
-                'type': 'string',
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['url'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'ref': {
+                            'type': 'string',
+                        },
+                    },
+                }],
             },
             'event_callback': {
                 'type': 'string',
@@ -1338,43 +1352,47 @@ def get_config_schema():
             'type': 'object',
             'required': [],
             'properties': {
-                **_NETWORK_CONFIG_SCHEMA,
-                'tenant_id': {
+                **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
                     'type': 'string',
                 },
-            },
-            'additionalProperties': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'project_id': {
-                        'type': 'string',
-                    },
-                    'fabric': {
-                        'type': 'string',
-                    },
-                    'filesystems': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'object',
-                            'additionalProperties': False,
-                            'properties': {
-                                'filesystem_id': {
-                                    'type': 'string',
-                                },
-                                'attach_mode': {
-                                    'type': 'string',
-                                    'case_sensitive_enum': [
-                                        'READ_WRITE', 'READ_ONLY'
-                                    ]
-                                },
-                                'mount_path': {
-                                    'type': 'string',
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'project_id': {
+                                'type': 'string',
+                            },
+                            'fabric': {
+                                'type': 'string',
+                            },
+                            'filesystems': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'filesystem_id': {
+                                            'type': 'string',
+                                        },
+                                        'attach_mode': {
+                                            'type': 'string',
+                                            'case_sensitive_enum': [
+                                                'READ_WRITE', 'READ_ONLY'
+                                            ]
+                                        },
+                                        'mount_path': {
+                                            'type': 'string',
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                    },
+                            },
+                        },
+                    }
                 }
             },
         }

@@ -431,7 +431,7 @@ def _execute_dag(
             logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
-            backend.sync_workdir(handle, task.workdir)
+            backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,

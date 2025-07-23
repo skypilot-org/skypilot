@@ -349,10 +349,12 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional['resources_utils.DiskTier'] = None) -> str:
+            disk_tier: Optional['resources_utils.DiskTier'] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier  # Unused.
+        del disk_tier, region, zone  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -806,7 +808,9 @@ class Kubernetes(clouds.Cloud):
         default_instance_type = Kubernetes.get_default_instance_type(
             cpus=resources.cpus,
             memory=resources.memory,
-            disk_tier=resources.disk_tier)
+            disk_tier=resources.disk_tier,
+            region=resources.region,
+            zone=resources.zone)
 
         if accelerators is None:
             # For CPU only clusters, need no special handling

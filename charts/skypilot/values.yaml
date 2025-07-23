@@ -1,7 +1,8 @@
 apiService:
-  image: berkeleyskypilot/skypilot:0.9.2
-  # Number of replicas to deploy - replicas > 1 is not well tested, and requires
-  # a PVC that supports ReadWriteMany (see accessMode in storage section below).
+  # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
+  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
+  image: berkeleyskypilot/skypilot-nightly:latest
+  # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-
     # Run commands before deploying the API server, e.g. installing an admin
@@ -13,6 +14,11 @@ apiService:
     # echo "Installing admin policy"
     # pip install git+https://github.com/michaelvll/admin-policy-examples
 
+  # Upgrade strategy for the API server, available options are:
+  # - Recreate: delete the old pod first and create a new one (has downtime).
+  # - RollingUpdate: [EXPERIMENTAL] create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
+  # Default to Recreate. When set to RollingUpdate, an external database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString.
+  upgradeStrategy: Recreate
   # Enable basic auth and user management in the API server
   # If enabled, the user can be created, updated, and deleted in the Dashboard,
   # and the basic auth will be done in the API server instead of the ingress.
@@ -61,9 +67,12 @@ apiService:
   #     - aws
   #     - kubernetes
 
-  # Set the DB connection string for the API server.
-  # If this field is set, config must be null.
+  # Use a secret to set the DB connection string for the API server.
+  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-back-the-api-server-with-a-persistent-database for more details.
+  # If either this field or dbConnectionString is set, config must be null.
   dbConnectionSecretName: null
+  # Set the DB connection string directly. This is a shortcut for setting the DB connection string in a secret.
+  dbConnectionString: null
 
   # Set ~/.sky/ssh_node_pools.yaml content on the API server
   # Updating this value will not restart the API server but it will take tens of seconds to take effect on the API server.
@@ -100,6 +109,26 @@ apiService:
     limits:
       cpu: "4"
       memory: "8Gi"
+
+  # Extra environment variables to set before starting the API server. Example:
+  # extraEnvs:
+  #   - name: MY_ADDITIONAL_ENV_VAR
+  #     value: "my_value"
+  extraEnvs: null
+
+  # Extra volumes to mount to the API server. Example:
+  # extraVolumes:
+  #   - name: my-volume
+  #     secret:
+  #       secretName: my-secret
+  extraVolumes: null
+
+  # Extra volume mounts to mount to the API server. Example:
+  # extraVolumeMounts:
+  #   - name: my-volume
+  #     mountPath: /my-path
+  #     subPath: my-file
+  extraVolumeMounts: null
 
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
@@ -169,7 +198,9 @@ ingress:
     client-secret: ""
     # Alternative: Get both client ID and client secret from a Kubernetes secret
     # If set to a secret name, both client-id and client-secret values above are ignored
-    # The secret must contain keys named "client-id" and "client-secret"
+    # The secret must contain keys named either "client-id" and "client-secret" OR "client_id" and "client_secret"
+    # Both dash and underscore formats are supported for compatibility with different secret managers
+    # (e.g., HashiCorp Vault requires underscore format due to key naming constraints)
     # If empty/null, the above client-id and client-secret values are used instead
     # See https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#auth-proxy-client-secret
     client-details-from-secret: ""
@@ -281,6 +312,9 @@ rbac:
   # object store mounting or you manage system components manually, i.e. outside of SkyPilot.
   manageSystemComponents: true
 
+  # Custom annotations for the API server service account.
+  serviceAccountAnnotations: null
+
 # kubernetesCredentials add additional kubernetes cluster permissions to the API server.
 kubernetesCredentials:
   # Enable/disable using the API server's cluster for workloads
@@ -320,12 +354,23 @@ lambdaCredentials:
   # Name of the secret containing the Lambda credentials. Only used if enabled is true.
   lambdaSecretName: lambda-credentials
 
+# Populate Vast credentials from the secret with key `api_key`
+vastCredentials:
+  enabled: false
+  # Name of the secret containing the Vast credentials. Only used if enabled is true.
+  vastSecretName: vast-credentials
+
 # Populate Nebius credentials from the secret with nebius credentials.
 nebiusCredentials:
   enabled: false
   tenantId: null
   # Name of the secret containing the Nebius credentials. Only used if enabled is true.
   nebiusSecretName: nebius-credentials
+
+r2Credentials:
+  enabled: false
+  # Name of the secret containing the r2 credentials. Only used if enabled is true.
+  r2SecretName: r2-credentials
 
 # Extra init containers to run before the api container
 extraInitContainers:

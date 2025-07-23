@@ -740,6 +740,7 @@ def tail_logs(
     target: ServiceComponentOrStr,
     replica_id: Optional[int] = None,
     follow: bool = True,
+    tail: Optional[int] = None,
 ) -> None:
     """Tails logs for a service.
 
@@ -805,11 +806,14 @@ def tail_logs(
             service_name,
             stream_controller=(
                 target == serve_utils.ServiceComponent.CONTROLLER),
-            follow=follow)
+            follow=follow,
+            tail=tail)
     else:
         assert replica_id is not None, service_name
-        code = serve_utils.ServeCodeGen.stream_replica_logs(
-            service_name, replica_id, follow)
+        code = serve_utils.ServeCodeGen.stream_replica_logs(service_name,
+                                                            replica_id,
+                                                            follow,
+                                                            tail=tail)
 
     # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
     # kill the process, so we need to handle it manually here.
@@ -834,6 +838,7 @@ def sync_down_logs(
     targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
                    None] = None,
     replica_ids: Optional[List[int]] = None,
+    tail: Optional[int] = None,
 ) -> str:
     """Sync down logs from the controller for the given service.
 
@@ -936,16 +941,22 @@ def sync_down_logs(
         if component == serve_utils.ServiceComponent.CONTROLLER:
             stream_logs_code = (
                 serve_utils.ServeCodeGen.stream_serve_process_logs(
-                    service_name, stream_controller=True, follow=False))
+                    service_name,
+                    stream_controller=True,
+                    follow=False,
+                    tail=tail))
         elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
             stream_logs_code = (
                 serve_utils.ServeCodeGen.stream_serve_process_logs(
-                    service_name, stream_controller=False, follow=False))
+                    service_name,
+                    stream_controller=False,
+                    follow=False,
+                    tail=tail))
         elif component == serve_utils.ServiceComponent.REPLICA:
             replica_id = target.replica_id
             assert replica_id is not None, service_name
             stream_logs_code = serve_utils.ServeCodeGen.stream_replica_logs(
-                service_name, replica_id, follow=False)
+                service_name, replica_id, follow=False, tail=tail)
         else:
             assert False, component
 
