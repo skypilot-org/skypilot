@@ -1,6 +1,7 @@
 """Autostop utilities."""
 import pickle
 import shlex
+import subprocess
 import time
 import typing
 from typing import List, Optional
@@ -105,6 +106,30 @@ def set_last_active_time_to_now() -> None:
     """Sets the last active time to time.time()."""
     logger.debug('Setting last active time.')
     configs.set_config(_AUTOSTOP_LAST_ACTIVE_TIME, str(time.time()))
+
+
+def has_active_ssh_sessions() -> bool:
+    """Returns True if there are any active SSH sessions on the node."""
+    try:
+        # Use 'who' to check for active SSH sessions.
+        # https://man7.org/linux/man-pages/man1/who.1.html
+        #
+        # It outputs a list of users currently logged in, in this format:
+        # <user>   <device>     <datetime>       (<hostname>)
+        # Example:
+        # gcpuser  pts/0        2025-07-23 20:50 (50.171.245.192)
+        proc = subprocess.run(['who'],
+                              capture_output=True,
+                              text=True,
+                              check=False)
+        if proc.returncode != 0:
+            logger.warning(f'SSH session check command failed with return code '
+                           f'{proc.returncode}.')
+            return False
+        return len(proc.stdout.splitlines()) > 0
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Error checking active SSH sessions: {e}.')
+        return False
 
 
 class AutostopCodeGen:

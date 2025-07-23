@@ -129,7 +129,8 @@ class AutostopEvent(SkyletEvent):
             return
 
         if (job_lib.is_cluster_idle() and
-                not managed_job_state.get_num_alive_jobs()):
+                not managed_job_state.get_num_alive_jobs() and
+                not autostop_lib.has_active_ssh_sessions()):
             idle_minutes = (time.time() -
                             autostop_lib.get_last_active_time()) // 60
             logger.debug(
