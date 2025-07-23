@@ -3023,17 +3023,18 @@ def _down_or_stop_clusters(
                         click.echo(common_utils.format_exception(e))
                     else:
                         raise
-                confirm_str = 'delete'
-                input_prefix = ('Since --purge is set, errors will be ignored '
-                                'and controller will be removed from '
-                                'local state.\n') if purge else ''
-                user_input = click.prompt(
-                    f'{input_prefix}'
-                    f'To proceed, please type {colorama.Style.BRIGHT}'
-                    f'{confirm_str!r}{colorama.Style.RESET_ALL}',
-                    type=str)
-                if user_input != confirm_str:
-                    raise click.Abort()
+                if not purge:
+                    confirm_str = 'delete'
+                    user_input = click.prompt(
+                        f'To proceed, please type {colorama.Style.BRIGHT}'
+                        f'{confirm_str!r}{colorama.Style.RESET_ALL}',
+                        type=str)
+                    if user_input != confirm_str:
+                        raise click.Abort()
+                else:
+                    click.echo('Since --purge is set, errors will be ignored '
+                               'and controller will be removed from '
+                               'local state.\nSkipping confirmation.')
                 no_confirm = True
         names += controllers
 
@@ -5114,6 +5115,12 @@ def serve_down(
               default=False,
               help='Sync down logs to the local machine. Can be combined with '
               '--controller, --load-balancer, or a replica ID to narrow scope.')
+@click.option(
+    '--tail',
+    default=None,
+    type=int,
+    help='The number of lines to display from the end of the log file. '
+    'Default is None, which means print all lines.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
@@ -5126,6 +5133,7 @@ def serve_logs(
     load_balancer: bool,
     replica_ids: Tuple[int, ...],
     sync_down: bool,
+    tail: Optional[int],
 ):
     """Tail or sync down logs of a service.
 
@@ -5145,12 +5153,26 @@ def serve_logs(
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
         \b
+        # Show the last 100 lines of the controller logs
+        sky serve logs --controller --tail 100 [SERVICE_NAME]
+        \b
         # Sync down all logs of the service (controller, LB, all replicas)
         sky serve logs [SERVICE_NAME] --sync-down
         \b
         # Sync down controller logs and logs for replicas 1 and 3
         sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
+    if tail is not None:
+        if tail < 0:
+            raise click.UsageError('--tail must be a non-negative integer.')
+        # TODO(arda): We could add ability to tail and follow logs together.
+        if follow:
+            follow = False
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                '--tail and --follow cannot be used together. '
+                f'Changed the mode to --no-follow.{colorama.Style.RESET_ALL}')
+
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
@@ -5185,7 +5207,8 @@ def serve_logs(
             serve_lib.sync_down_logs(service_name,
                                      local_dir=str(log_dir),
                                      targets=targets_to_sync,
-                                     replica_ids=list(replica_ids))
+                                     replica_ids=list(replica_ids),
+                                     tail=tail)
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Service {service_name} logs: '
@@ -5227,7 +5250,8 @@ def serve_logs(
         serve_lib.tail_logs(service_name,
                             target=target_component,
                             replica_id=target_replica_id,
-                            follow=follow)
+                            follow=follow,
+                            tail=tail)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
@@ -5485,19 +5509,27 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
         columns.append('Cluster')
     columns.extend(['Created', 'Status'])
     table = log_utils.create_table(columns)
-    for request in request_list:
-        r_id = request.request_id
-        if not verbose:
-            r_id = common_utils.truncate_long_string(r_id, 36)
-        req_status = requests.RequestStatus(request.status)
-        row = [r_id, request.user_name, request.name]
+    if len(request_list) > 0:
+        for request in request_list:
+            r_id = request.request_id
+            if not verbose:
+                r_id = common_utils.truncate_long_string(r_id, 36)
+            req_status = requests.RequestStatus(request.status)
+            row = [r_id, request.user_name, request.name]
+            if verbose:
+                row.append(request.cluster_name)
+            row.extend([
+                log_utils.readable_time_duration(request.created_at),
+                req_status.colored_str()
+            ])
+            table.add_row(row)
+    else:
+        # add dummy data for when api server is down.
+        dummy_row = ['-'] * 5
         if verbose:
-            row.append(request.cluster_name)
-        row.extend([
-            log_utils.readable_time_duration(request.created_at),
-            req_status.colored_str()
-        ])
-        table.add_row(row)
+            dummy_row.append('-')
+        table.add_row(dummy_row)
+        click.echo()
     click.echo(table)
 
 
@@ -5543,6 +5575,12 @@ def api_login(endpoint: Optional[str], relogin: bool,
 
     """
     sdk.api_login(endpoint, relogin, service_account_token)
+
+
+@api.command('logout', cls=_DocumentedCodeCommand)
+def api_logout():
+    """Logs out of the api server"""
+    sdk.api_logout()
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

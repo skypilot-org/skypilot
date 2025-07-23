@@ -18,3 +18,5 @@ include sky/server/html/*
 recursive-include sky/dashboard/out *
 include sky/users/*.conf
 include sky/utils/*.sh
+include sky/setup_files/alembic.ini
+recursive-include sky/schemas/db *

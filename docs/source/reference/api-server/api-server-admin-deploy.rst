@@ -440,6 +440,43 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
 
+    .. tab-item:: Vast
+        :sync: vast-creds-tab
+
+        SkyPilot API server uses an **API key** to authenticate with Vast. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console and get your **API key**.
+
+        Once the key is obtained, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic vast-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Vast credentials by setting ``vastCredentials.enabled=true``
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set vastCredentials.enabled=true
+
+        .. dropdown:: Use existing Vast credentials
+
+            You can also set the following values to use a secret that already contains your Vast credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set vastCredentials.enabled=true \
+                    --set vastCredentials.vastSecretName=your_secret_name
+
+
     .. tab-item:: SSH Node Pools
         :sync: ssh-node-pools-tab
 
@@ -480,6 +517,30 @@ Following tabs describe how to configure credentials for different clouds on the
 
            SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
 
+    .. tab-item:: Cloudflare R2
+        :sync: r2-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`Cloudflare R2 installation <cloudflare-r2-installation>` to authenticate with Cloudflare R2.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic r2-credentials \
+              --namespace $NAMESPACE \
+              --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
+              --from-file=accountid=$HOME/.cloudflare/accountid
+        
+        When installing or upgrading the Helm chart, enable Cloudflare R2 credentials by setting :ref:`r2Credentials.enabled <helm-values-r2credentials-enabled>` and :ref:`r2Credentials.r2SecretName <helm-values-r2credentials-r2secretname>`:
+        
+        .. code-block:: bash
+        
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set r2Credentials.enabled=true \
+              --set r2Credentials.r2SecretName=r2-credentials
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
@@ -988,4 +1049,5 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     API server metrics monitoring <examples/api-server-metrics-setup>
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
+    Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>

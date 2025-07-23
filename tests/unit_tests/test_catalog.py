@@ -83,3 +83,100 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
                                  '.meta', filename + '.lock')
         if os.path.exists(lock_path):
             os.remove(lock_path)
+
+
+@pytest.mark.parametrize(
+    "cpus, memory, region, zone, expected",
+    [
+        ('4', '16', None, None, 'a'),  # Exact match
+        ('4+', '16+', None, None, 'a'),  # At least match, cheapest
+        ('16', '128', None, None, None),  # No match
+        ('1+', None, 'asia-southeast1', None, 'd'),  # Region filtering
+        ('1+', None, 'us-west1', 'us-west1-b', 'b'),  # Zone filtering
+        ('1+', None, 'us-west1', 'us-west1-c',
+         None),  # Zone filtering, no match
+        # Regression test for https://github.com/skypilot-org/skypilot/pull/6293:
+        # b is cheaper but only available in us-west1-b; so c is chosen.
+        ('8', '32', 'us-west1', 'us-west1-a', 'c'),
+    ])
+def test_get_instance_type_for_cpus_mem_impl_with_az(cpus, memory, region, zone,
+                                                     expected):
+    """Test get_instance_type_for_cpus_mem_impl with a DataFrame that includes AvailabilityZone."""
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'a',
+            'vCPUs': 4,
+            'MemoryGiB': 16,
+            'Price': 1.0,
+            'Region': 'us-west1',
+            'AvailabilityZone': 'us-west1-a'
+        },
+        {
+            'InstanceType': 'b',
+            'vCPUs': 8,
+            'MemoryGiB': 32,
+            'Price': 2.0,
+            'Region': 'us-west1',
+            'AvailabilityZone': 'us-west1-b'
+        },
+        {
+            'InstanceType': 'c',
+            'vCPUs': 8,
+            'MemoryGiB': 32,
+            'Price': 5.0,
+            'Region': 'us-west1',
+            'AvailabilityZone': 'us-west1-a'
+        },
+        {
+            'InstanceType': 'd',
+            'vCPUs': 8,
+            'MemoryGiB': 32,
+            'Price': 3.0,
+            'Region': 'asia-southeast1',
+            'AvailabilityZone': 'asia-southeast1-a'
+        },
+    ])
+    result = catalog_common.get_instance_type_for_cpus_mem_impl(
+        df, cpus=cpus, memory_gb_or_ratio=memory, region=region, zone=zone)
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "cpus, memory, region, expected",
+    [
+        ('4', '16', None, 'a'),  # Exact match
+        ('1+', None, None, 'a'),  # At least match, cheapest
+        ('8+', '32+', None, 'c'),  # At least match, higher req
+        ('16', '128', None, None),  # No match
+        ('1+', None, 'asia-southeast1', 'b'),  # Region filtering, cheapest
+        ('1+', None, 'europe-west1', None),  # Region filtering, no match
+    ])
+def test_get_instance_type_for_cpus_mem_impl_no_az(cpus, memory, region,
+                                                   expected):
+    """Test get_instance_type_for_cpus_mem_impl with a DataFrame that does not include AvailabilityZone."""
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'a',
+            'vCPUs': 4,
+            'MemoryGiB': 16,
+            'Price': 1.0,
+            'Region': 'us-east1'
+        },
+        {
+            'InstanceType': 'b',
+            'vCPUs': 4,
+            'MemoryGiB': 16,
+            'Price': 3.0,
+            'Region': 'asia-southeast1'
+        },
+        {
+            'InstanceType': 'c',
+            'vCPUs': 8,
+            'MemoryGiB': 32,
+            'Price': 5.0,
+            'Region': 'asia-southeast1'
+        },
+    ])
+    result = catalog_common.get_instance_type_for_cpus_mem_impl(
+        df, cpus=cpus, memory_gb_or_ratio=memory, region=region)
+    assert result == expected
