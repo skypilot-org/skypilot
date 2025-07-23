@@ -358,30 +358,6 @@ def verify_ibm_cos_bucket(name: str) -> bool:
     return get_ibm_cos_bucket_region(name) != ''
 
 
-def verify_oci_bucket(name: str) -> bool:
-    """Helper method that checks if the OCI bucket exists
-
-    Args:
-      name: str; Name of OCI Bucket (without oci:// prefix)
-
-    Returns:
-      bool: True if the bucket exists, False otherwise
-    """
-    try:
-        # Get OCI client and check if bucket exists
-        client = oci.get_object_storage_client()
-        namespace = client.get_namespace(
-            compartment_id=oci.get_oci_config()['tenancy']).data
-
-        # Try to get the bucket
-        client.get_bucket(namespace_name=namespace, bucket_name=name)
-        return True
-    except Exception:  # pylint: disable=broad-except
-        # If any exception occurs (bucket not found, permission issues, etc.),
-        # return False
-        return False
-
-
 def _get_ibm_cos_bucket_region(region, bucket_name):
     """helper function of get_ibm_cos_bucket_region
 
