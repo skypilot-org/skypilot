@@ -3,10 +3,13 @@ import os
 import threading
 from typing import Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common
+from sky.clouds import cloud
 from sky.utils import annotations
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -37,13 +40,13 @@ def create_endpoint() -> str:
     # Check if we're running in Fly.io environment
     if os.environ.get('FLY_APP_NAME'):
         return TIGRIS_ENDPOINT_FLY
-    
+
     # Check config for custom endpoint
     endpoint = skypilot_config.get_effective_region_config(
         cloud='tigris', region=None, keys=('endpoint_url',), default_value=None)
     if endpoint:
         return endpoint
-    
+
     return TIGRIS_ENDPOINT_GLOBAL
 
 
@@ -53,11 +56,11 @@ def get_tigris_credentials(boto3_session):
     Args:
         boto3_session: The boto3 session object.
     Returns:
-        botocore.credentials.ReadOnlyCredentials object with the Tigris credentials.
+        botocore.credentials.ReadOnlyCredentials object with the Tigris
+        credentials.
     """
     tigris_credentials = boto3_session.get_credentials()
     if tigris_credentials is None:
-        from sky.utils import ux_utils
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Tigris credentials not found. Run '
                              '`sky check` to verify credentials are '
@@ -67,7 +70,7 @@ def get_tigris_credentials(boto3_session):
 
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
-# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache  # pylint: disable=line-too-long
 @annotations.lru_cache(scope='global')
 def session():
     """Create a Tigris session."""
@@ -97,11 +100,11 @@ def resource(resource_name: str, **kwargs):
     session_ = session()
     endpoint_url = create_endpoint()
 
-    return session_.resource(resource_name, 
-                           endpoint_url=endpoint_url,
-                           config=botocore.config.Config(
-                               s3={'addressing_style': 'virtual'}),
-                           **kwargs)
+    return session_.resource(
+        resource_name,
+        endpoint_url=endpoint_url,
+        config=botocore.config.Config(s3={'addressing_style': 'virtual'}),
+        **kwargs)
 
 
 @annotations.lru_cache(scope='global')
@@ -120,63 +123,53 @@ def client(service_name: str, region: str = 'auto'):
     session_ = session()
     endpoint_url = create_endpoint()
 
-    return session_.client(service_name,
-                          region_name=region,
-                          endpoint_url=endpoint_url,
-                          config=botocore.config.Config(
-                              s3={'addressing_style': 'virtual'}))
-
-
-@common.load_lazy_modules(_LAZY_MODULES)
-def botocore_exceptions():
-    """Tigris botocore exception."""
-    # pylint: disable=import-outside-toplevel
-    from botocore import exceptions
-    return exceptions 
+    return session_.client(
+        service_name,
+        region_name=region,
+        endpoint_url=endpoint_url,
+        config=botocore.config.Config(s3={'addressing_style': 'virtual'}))
 
 
 def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Check if Tigris storage credentials are available.
-    
+
     Returns:
         Tuple of (is_enabled, error_message).
         is_enabled is True if credentials are properly configured.
-        error_message is None if credentials are valid, otherwise contains error details.
+        error_message is None if credentials are valid, otherwise contains
+        error details.
     """
     try:
         # Try to create a session and get credentials
         session_ = session()
         credentials = get_tigris_credentials(session_)
-        
+
         # Basic validation that credentials exist
         if credentials.access_key and credentials.secret_key:
             return True, None
         else:
             return False, 'Tigris credentials not found or incomplete'
-            
-    except Exception as e:
+
+    except ValueError as e:
         return False, f'Failed to verify Tigris credentials: {str(e)}'
 
 
 def check_credentials(cloud_capability) -> Tuple[bool, Optional[str]]:
     """Check credentials for the specified capability.
-    
+
     Args:
         cloud_capability: The capability to check (COMPUTE or STORAGE)
-        
+
     Returns:
         Tuple of (is_enabled, error_message)
     """
-    from sky.clouds import cloud
-    
+
     if cloud_capability == cloud.CloudCapability.STORAGE:
         return check_storage_credentials()
     elif cloud_capability == cloud.CloudCapability.COMPUTE:
         # Tigris doesn't support compute, only storage
-        from sky import exceptions
         raise exceptions.NotSupportedError(
             f'{NAME} does not support {cloud_capability.value}.')
     else:
-        from sky import exceptions
         raise exceptions.NotSupportedError(
-            f'{NAME} does not support {cloud_capability}.') 
+            f'{NAME} does not support {cloud_capability}.')

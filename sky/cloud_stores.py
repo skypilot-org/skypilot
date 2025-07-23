@@ -614,7 +614,7 @@ class TigrisCloudStorage(CloudStorage):
 
     def is_directory(self, url: str) -> bool:
         """Checks if the Tigris object is a directory.
-        
+
         Args:
             url: Tigris object URL.
         """
@@ -623,7 +623,7 @@ class TigrisCloudStorage(CloudStorage):
         if path.endswith('/') or path == '':
             return True
         tigris_client = data_utils.create_tigris_client()
-        objects = tigris_client.list_objects_v2(Bucket=bucket_name, 
+        objects = tigris_client.list_objects_v2(Bucket=bucket_name,
                                                 Prefix=path,
                                                 MaxKeys=1)
         return objects.get('KeyCount', 0) > 0

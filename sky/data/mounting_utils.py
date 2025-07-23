@@ -90,25 +90,6 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     return mount_cmd
 
 
-def get_tigris_mount_cmd(tigris_profile_name: str,
-                         bucket_name: str,
-                         endpoint_url: str,
-                         mount_path: str,
-                         _bucket_sub_path: Optional[str] = None) -> str:
-    """Returns a command to install Tigris mount utility goofys."""
-    if _bucket_sub_path is None:
-        _bucket_sub_path = ''
-    else:
-        _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_PROFILE={tigris_profile_name} {_GOOFYS_WRAPPER} '
-                 '-o allow_other '
-                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
-    return mount_cmd
-
-
 def get_gcs_mount_install_cmd() -> str:
     """Returns a command to install GCS mount utility gcsfuse."""
     install_cmd = ('ARCH=$(uname -m) && '
