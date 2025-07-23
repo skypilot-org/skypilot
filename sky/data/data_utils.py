@@ -22,7 +22,6 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
-from sky.adaptors import oci
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
