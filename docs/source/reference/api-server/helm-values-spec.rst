@@ -34,7 +34,7 @@ Below is the available helm value keys and the default value of each key:
 .. parsed-literal::
 
   :ref:`apiService <helm-values-apiService>`:
-    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.2
+    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
@@ -242,14 +242,18 @@ Configuration for the SkyPilot API server deployment.
 ``apiService.image``
 ^^^^^^^^^^^^^^^^^^^^
 
-Docker image to use for the API server.
+Docker image to use for the API server. The default value is depending on the chart you are using:
 
-Default: ``"berkeleyskypilot/skypilot:0.9.2"``
+- Stable release of the chart(``skypilot/skypilot``): the same stable release of SkyPilot will be used by default, i.e. ``berkeleyskypilot/skypilot:$CHART_VERSION``.
+- Nightly release of the chart(``skypilot/skypilot-nightly``): the same nightly build of SkyPilot will be used by default, i.e. ``berkeleyskypilot/skypilot-nightly:$CHART_VERSION``.
+- Installing from `source <https://github.com/skypilot-org/skypilot/tree/master/charts/skypilot>`_: the latest nightly build of SkyPilot will be used by default, i.e. ``berkeleyskypilot/skypilot-nightly:latest``.
+
+To use a specific release version, set the ``image`` value to the desired version:
 
 .. code-block:: yaml
 
   apiService:
-    image: berkeleyskypilot/skypilot:0.9.2
+    image: berkeleyskypilot/skypilot:0.10.0
 
 To use a nightly build, find the desired nightly version on `pypi <https://pypi.org/project/skypilot-nightly/#history>`_ and update the ``image`` value:
 

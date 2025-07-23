@@ -1,5 +1,7 @@
 apiService:
-  image: berkeleyskypilot/skypilot:0.9.2
+  # The container image of the API server, the default value is set by the release pipeline.
+  # - For nightly release, 
+  image: berkeleyskypilot/skypilot-nightly:latest
   # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-
