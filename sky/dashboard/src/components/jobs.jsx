@@ -2007,9 +2007,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
           return (
             <span
               key={status}
-              className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${style}`}
+              className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
             >
-              {count} {status}
+              <span>{status}</span>
+              <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                {count}
+              </span>
             </span>
           );
         })}

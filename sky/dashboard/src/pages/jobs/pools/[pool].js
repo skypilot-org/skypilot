@@ -281,9 +281,12 @@ export default function PoolDetailPage() {
                       Object.entries(jobCounts).map(([status, count]) => (
                         <span
                           key={status}
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusStyle(status)}`}
+                          className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${getStatusStyle(status)}`}
                         >
-                          {count} {status}
+                          <span>{status}</span>
+                          <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                            {count}
+                          </span>
                         </span>
                       ))
                     ) : (
@@ -295,6 +298,7 @@ export default function PoolDetailPage() {
                 </div>
               </div>
 
+              {/* Infra Summary */}
               <div>
                 <div className="text-sm font-medium text-gray-700 mb-2">
                   Infra Summary
@@ -317,6 +321,9 @@ export default function PoolDetailPage() {
                   })()}
                 </div>
               </div>
+
+              {/* Placeholder for second column if needed */}
+              <div></div>
             </div>
 
             <div className="pt-2 mt-2">
