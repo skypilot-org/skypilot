@@ -32,7 +32,7 @@ _LAZY_MODULES = (boto3, botocore)
 _session_creation_lock = threading.RLock()
 
 NAME = 'Tigris'
-SKY_CHECK_NAME = 'Tigris'
+SKY_CHECK_NAME = 'Tigris (for object storage)'
 
 
 def create_endpoint() -> str:

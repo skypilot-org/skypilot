@@ -189,6 +189,7 @@ This will produce a summary like:
     SCP: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
+    Tigris (for object storage): enabled
     Kubernetes: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
@@ -535,6 +536,45 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
+Tigris
+~~~~~~
+
+`Tigris <https://www.tigrisdata.com/>`__ is a globally distributed S3-compatible object storage service. SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Tigris support, configure your credentials using AWS CLI with a dedicated profile:
+
+.. code-block:: shell
+
+  # Install boto3 if not already installed
+  pip install boto3
+  
+  # Configure Tigris credentials with a dedicated profile
+  aws configure --profile tigris
+
+In the prompt, enter your Tigris Access Key ID and Secret Access Key (see `instructions to generate Tigris credentials <https://www.tigrisdata.com/docs/get-started/>`_). Use :code:`auto` for the region and :code:`json` for the output format:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <tid_your_access_key_id>
+  AWS Secret Access Key [None]: <tsec_your_secret_access_key>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+After configuration, add the endpoint URL to your credentials file:
+
+.. code-block:: shell
+
+  # Add endpoint URL to the tigris profile
+  aws configure set endpoint_url https://t3.storage.dev --profile tigris
+
+Alternatively, you can manually edit :code:`~/.aws/credentials`:
+
+.. code-block:: shell
+
+  # Manual configuration in ~/.aws/credentials
+  [tigris]
+  aws_access_key_id = <tid_your_access_key_id>
+  aws_secret_access_key = <tsec_your_secret_access_key>
+  endpoint_url = https://t3.storage.dev
 
 Nebius
 ~~~~~~

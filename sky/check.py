@@ -34,7 +34,7 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     # clouds. Also validate names with get_cloud_tuple.
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
-        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME])
+        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME, tigris.NAME])
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -82,7 +82,7 @@ def check_capabilities(
 
     def get_all_clouds() -> Tuple[str, ...]:
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-                     [cloudflare.NAME])
+                     [cloudflare.NAME, tigris.NAME])
 
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
@@ -122,9 +122,11 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare.
+            # the cloud object. Includes special handling for Cloudflare and Tigris.
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
+            elif cloud_name.lower().startswith('tigris'):
+                return tigris.NAME, tigris
             else:
                 cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
@@ -227,16 +229,19 @@ def check_capabilities(
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
                 if capability in capabilities and
-                not cloud.startswith('Cloudflare')
+                not cloud.startswith('Cloudflare') and
+                not cloud.startswith('Tigris')
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
                 if capability in capabilities and
-                not cloud.startswith('Cloudflare')
+                not cloud.startswith('Cloudflare') and
+                not cloud.startswith('Tigris')
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not cloud.startswith('Cloudflare')
+                if not cloud.startswith('Cloudflare') and
+                not cloud.startswith('Tigris')
             }
             previously_enabled_clouds_set = {
                 repr(cloud)
@@ -433,17 +438,10 @@ def get_cloud_credential_file_mounts(
         file_mounts.update(r2_credential_mounts)
 
     # Similar handling for Tigris storage credentials
-    try:
-        tigris_is_enabled, _ = tigris.check_storage_credentials()
-        if tigris_is_enabled:
-            # For Tigris, we use AWS credential files
-            # No need to add separate mounts as it uses existing AWS credentials
-            pass
-    except ImportError:
-        # Tigris adaptor not available
-        pass
-    except (AttributeError, ValueError, RuntimeError):
-        # Tigris check failed, skip
+    tigris_is_enabled, _ = tigris.check_storage_credentials()
+    if tigris_is_enabled:
+        # For Tigris, we use AWS credential files with tigris profile
+        # No need to add separate mounts as it uses existing AWS credentials structure
         pass
 
     return file_mounts
@@ -500,7 +498,7 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if verbose and cloud is not cloudflare:
+        if verbose and cloud is not cloudflare and cloud is not tigris:
             activated_account = cloud.get_active_user_identity_str()
         if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
             detail_string = _format_context_details(cloud_tuple[1],
