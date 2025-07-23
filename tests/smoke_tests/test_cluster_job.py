@@ -1281,6 +1281,50 @@ def test_autostop(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
+def test_autostop_with_ssh_sessions(generic_cloud: str):
+    """Test that autostop is prevented when SSH sessions are active."""
+    name = smoke_tests_utils.get_cluster_name()
+    # See test_autostop() for explanation of autostop_timeout.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    test = smoke_tests_utils.Test(
+        'autostop_with_ssh_sessions',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} -i 1',
+
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m"',
+
+            # Ensure the job succeeded.
+            f'sky queue {name} | grep SUCCEEDED',
+
+            # Start an interactive SSH session to keep the cluster active.
+            # -tt forces a pseudo-terminal to be allocated.
+            f'ssh -tt {name} "sleep 180"',
+
+            # Ensure the cluster is still UP (autostop should be prevented by active SSH session).
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
+
+            # Now the cluster should autostop since no SSH sessions are active
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
