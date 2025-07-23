@@ -17,7 +17,12 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
+import {
+  formatDuration,
+  REFRESH_INTERVAL,
+  JobStatusBadges as SharedJobStatusBadges,
+  InfraBadges as SharedInfraBadges,
+} from '@/components/utils';
 import { getManagedJobs, getQueryPools } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -1989,65 +1994,16 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
   };
 
   const JobStatusBadges = ({ jobCounts }) => {
-    if (!jobCounts || Object.keys(jobCounts).length === 0) {
-      return <span className="text-gray-500 text-sm">No active jobs</span>;
-    }
-
     return (
-      <div className="flex flex-wrap gap-1">
-        {Object.entries(jobCounts).map(([status, count]) => {
-          const style = getStatusStyle(status);
-          return (
-            <span
-              key={status}
-              className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
-            >
-              <span>{status}</span>
-              <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
-                {count}
-              </span>
-            </span>
-          );
-        })}
-      </div>
+      <SharedJobStatusBadges
+        jobCounts={jobCounts}
+        getStatusStyle={getStatusStyle}
+      />
     );
   };
 
   const InfraBadges = ({ replicaInfo }) => {
-    if (!replicaInfo || replicaInfo.length === 0) {
-      return <span className="text-muted-foreground">-</span>;
-    }
-
-    // Aggregate infrastructure types from READY worker handles only
-    const infraCounts = {};
-    replicaInfo.forEach((worker) => {
-      if (worker.cloud && worker.status === 'READY') {
-        const cloudWithRegion = worker.region
-          ? `${worker.cloud} (${worker.region})`
-          : worker.cloud;
-        infraCounts[cloudWithRegion] = (infraCounts[cloudWithRegion] || 0) + 1;
-      }
-    });
-
-    if (Object.keys(infraCounts).length === 0) {
-      return <span className="text-muted-foreground">-</span>;
-    }
-
-    return (
-      <div className="flex flex-wrap gap-1">
-        {Object.entries(infraCounts).map(([cloudWithRegion, count]) => (
-          <span
-            key={cloudWithRegion}
-            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
-          >
-            <span>{cloudWithRegion}</span>
-            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
-              {count}
-            </span>
-          </span>
-        ))}
-      </div>
-    );
+    return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
   return (

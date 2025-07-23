@@ -584,7 +584,8 @@ def status(
     controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
-        stopped_message=controller_type.value.default_hint_if_non_existent)
+        stopped_message=controller_type.value.default_hint_if_non_existent.
+        replace('service', noun))
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)

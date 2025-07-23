@@ -495,3 +495,82 @@ export function formatFullTimestamp(date) {
   });
   return dateStr + ' ' + timeStr;
 }
+
+// Shared badge components for pools
+
+export const getJobStatusCounts = (poolData) => {
+  if (!poolData || !poolData.jobCounts) return {};
+  return poolData.jobCounts;
+};
+
+export const getInfraSummary = (replicaInfo) => {
+  if (!replicaInfo || replicaInfo.length === 0) return {};
+
+  const readyWorkers = replicaInfo.filter(
+    (worker) => worker.status === 'READY'
+  );
+
+  const infraCounts = {};
+  readyWorkers.forEach((worker) => {
+    try {
+      const cloudWithRegion = worker.region
+        ? `${worker.cloud} (${worker.region})`
+        : worker.cloud;
+      infraCounts[cloudWithRegion] = (infraCounts[cloudWithRegion] || 0) + 1;
+    } catch (error) {
+      // Handle errors gracefully
+      infraCounts['Unknown'] = (infraCounts['Unknown'] || 0) + 1;
+    }
+  });
+
+  return infraCounts;
+};
+
+export const JobStatusBadges = ({ jobCounts, getStatusStyle }) => {
+  if (!jobCounts || Object.keys(jobCounts).length === 0) {
+    return <span className="text-gray-500 text-sm">No active jobs</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Object.entries(jobCounts).map(([status, count]) => {
+        const style = getStatusStyle(status);
+        return (
+          <span
+            key={status}
+            className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
+          >
+            <span>{status}</span>
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+export const InfraBadges = ({ replicaInfo }) => {
+  const infraCounts = getInfraSummary(replicaInfo);
+
+  if (Object.keys(infraCounts).length === 0) {
+    return <span className="text-gray-500 text-sm">-</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Object.entries(infraCounts).map(([cloudWithRegion, count]) => (
+        <span
+          key={cloudWithRegion}
+          className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
+        >
+          <span>{cloudWithRegion}</span>
+          <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+            {count}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+};

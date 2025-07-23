@@ -34,8 +34,8 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
-from sky.utils import status_lib
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -487,10 +487,12 @@ class ReplicaInfo:
         if with_handle:
             handle = self.handle(cluster_record)
             info_dict['handle'] = handle
-            info_dict['cloud'] = repr(handle.launched_resources.cloud)
-            info_dict['region'] = handle.launched_resources.region
-            info_dict['resources_str'] = (resources_utils.get_readable_resources_repr(
-                handle, simplify=True))
+            if handle is not None:
+                info_dict['cloud'] = repr(handle.launched_resources.cloud)
+                info_dict['region'] = handle.launched_resources.region
+                info_dict['resources_str'] = (
+                    resources_utils.get_readable_resources_repr(handle,
+                                                                simplify=True))
         return info_dict
 
     def __repr__(self) -> str:

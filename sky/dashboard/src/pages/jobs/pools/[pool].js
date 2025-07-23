@@ -10,7 +10,13 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import { getQueryPools, extractHandleInfo } from '@/data/connectors/jobs';
+import { getQueryPools } from '@/data/connectors/jobs';
+import {
+  getJobStatusCounts,
+  getInfraSummary,
+  JobStatusBadges,
+  InfraBadges,
+} from '@/components/utils';
 import {
   TimestampWithTooltip,
   formatDuration,
@@ -77,28 +83,7 @@ export default function PoolDetailPage() {
     return readyWorkers.toString();
   };
 
-  const getInfraSummary = (replicaInfo) => {
-    if (!replicaInfo || replicaInfo.length === 0) return {};
-
-    const readyWorkers = replicaInfo.filter(
-      (worker) => worker.status === 'READY'
-    );
-
-    const infraCounts = {};
-    readyWorkers.forEach((worker) => {
-      try {
-        const cloudWithRegion = worker.region
-          ? `${worker.cloud} (${worker.region})`
-          : worker.cloud;
-        infraCounts[cloudWithRegion] = (infraCounts[cloudWithRegion] || 0) + 1;
-      } catch (error) {
-        // Handle errors gracefully
-        infraCounts['Unknown'] = (infraCounts['Unknown'] || 0) + 1;
-      }
-    });
-
-    return infraCounts;
-  };
+  // Using shared getInfraSummary from utils
 
   const formatUptime = (uptime) => {
     if (!uptime) return '-';
@@ -108,10 +93,7 @@ export default function PoolDetailPage() {
     return formatDuration(durationSeconds);
   };
 
-  const getJobStatusCounts = (poolData) => {
-    if (!poolData || !poolData.jobCounts) return {};
-    return poolData.jobCounts;
-  };
+  // Using shared getJobStatusCounts from utils
 
   // Pool YAML functions
   const togglePoolYamlExpanded = () => {
@@ -275,28 +257,10 @@ export default function PoolDetailPage() {
                 <div className="text-sm font-medium text-gray-700 mb-2">
                   Job Status
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {(() => {
-                    const jobCounts = getJobStatusCounts(poolData);
-                    return Object.keys(jobCounts).length > 0 ? (
-                      Object.entries(jobCounts).map(([status, count]) => (
-                        <span
-                          key={status}
-                          className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${getStatusStyle(status)}`}
-                        >
-                          <span>{status}</span>
-                          <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
-                            {count}
-                          </span>
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-gray-500 text-sm">
-                        No active jobs
-                      </span>
-                    );
-                  })()}
-                </div>
+                <JobStatusBadges
+                  jobCounts={getJobStatusCounts(poolData)}
+                  getStatusStyle={getStatusStyle}
+                />
               </div>
 
               {/* Infra Summary */}
@@ -304,28 +268,7 @@ export default function PoolDetailPage() {
                 <div className="text-sm font-medium text-gray-700 mb-2">
                   Infra Summary
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {(() => {
-                    const infraCounts = getInfraSummary(poolData.replica_info);
-                    return Object.keys(infraCounts).length > 0 ? (
-                      Object.entries(infraCounts).map(
-                        ([cloudWithRegion, count]) => (
-                          <span
-                            key={cloudWithRegion}
-                            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
-                          >
-                            <span>{cloudWithRegion}</span>
-                            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
-                              {count}
-                            </span>
-                          </span>
-                        )
-                      )
-                    ) : (
-                      <span className="text-gray-500 text-sm">-</span>
-                    );
-                  })()}
-                </div>
+                <InfraBadges replicaInfo={poolData.replica_info} />
               </div>
 
               {/* Placeholder for second column if needed */}
