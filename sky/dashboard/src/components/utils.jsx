@@ -8,7 +8,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { REFRESH_INTERVALS } from '@/lib/config';
+import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -558,19 +558,60 @@ export const InfraBadges = ({ replicaInfo }) => {
     return <span className="text-gray-500 text-sm">-</span>;
   }
 
+  const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+  const truncateCloudRegion = (cloudWithRegion) => {
+    // Check if there's a region part in parentheses
+    const parenIndex = cloudWithRegion.indexOf('(');
+    if (parenIndex === -1) {
+      // No region part, return as is
+      return cloudWithRegion;
+    }
+
+    const cloudName = cloudWithRegion.substring(0, parenIndex).trim();
+    const regionPart = cloudWithRegion.substring(
+      parenIndex + 1,
+      cloudWithRegion.length - 1
+    );
+
+    // Only truncate the region part if it's longer than the truncate length
+    if (regionPart.length <= NAME_TRUNCATE_LENGTH) {
+      return cloudWithRegion;
+    }
+
+    // Truncate only the region part
+    const truncatedRegion = `${regionPart.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionPart.substring(regionPart.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+
+    return `${cloudName} (${truncatedRegion})`;
+  };
+
   return (
     <div className="flex flex-wrap gap-1">
-      {Object.entries(infraCounts).map(([cloudWithRegion, count]) => (
-        <span
-          key={cloudWithRegion}
-          className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
-        >
-          <span>{cloudWithRegion}</span>
-          <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
-            {count}
+      {Object.entries(infraCounts).map(([cloudWithRegion, count]) => {
+        const displayText = truncateCloudRegion(cloudWithRegion);
+        const shouldTruncate = displayText !== cloudWithRegion;
+
+        return (
+          <span
+            key={cloudWithRegion}
+            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
+          >
+            {shouldTruncate ? (
+              <NonCapitalizedTooltip
+                content={cloudWithRegion}
+                className="text-sm text-muted-foreground"
+              >
+                <span>{displayText}</span>
+              </NonCapitalizedTooltip>
+            ) : (
+              <span>{cloudWithRegion}</span>
+            )}
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
           </span>
-        </span>
-      ))}
+        );
+      })}
     </div>
   );
 };
