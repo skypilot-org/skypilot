@@ -1661,10 +1661,10 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
               required=False,
               help='Also show sky serve services, if any.')
 @click.option('--show-pools/--no-show-pools',
-              default=True,
+              default=False,
               is_flag=True,
               required=False,
-              help='Also show sky serve pools, if any.')
+              help='Also show cluster pools, if any.')
 @click.option(
     '--kubernetes',
     '--k8s',

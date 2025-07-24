@@ -131,7 +131,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         git_commit: job.metadata?.git_commit || '-',
         pool: job.pool,
         current_cluster_name: job.current_cluster_name,
-        job_id_on_pm: job.job_id_on_pm,
+        job_id_on_pool_cluster: job.job_id_on_pool_cluster,
       };
     });
 

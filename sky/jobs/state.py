@@ -105,7 +105,9 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('current_cluster_name',
                       sqlalchemy.Text,
                       server_default=None),
-    sqlalchemy.Column('job_id_on_pm', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('job_id_on_pool_cluster',
+                      sqlalchemy.Integer,
+                      server_default=None),
 )
 
 ha_recovery_script_table = sqlalchemy.Table(
@@ -223,7 +225,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'original_user_yaml_path': r['original_user_yaml_path'],
         'pool': r['pool'],
         'current_cluster_name': r['current_cluster_name'],
-        'job_id_on_pm': r['job_id_on_pm'],
+        'job_id_on_pool_cluster': r['job_id_on_pool_cluster'],
     }
 
 
@@ -1284,14 +1286,14 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
 
 @_init_db
 def set_pool_submit_info(job_id: int, current_cluster_name: str,
-                         job_id_on_pm: int) -> None:
+                         job_id_on_pool_cluster: int) -> None:
     """Set the cluster name and job id on the pool from the managed job id."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(job_info_table).filter(
             job_info_table.c.spot_job_id == job_id).update({
                 job_info_table.c.current_cluster_name: current_cluster_name,
-                job_info_table.c.job_id_on_pm: job_id_on_pm
+                job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster
             })
         session.commit()
 
@@ -1304,7 +1306,7 @@ def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
         info = session.execute(
             sqlalchemy.select(
                 job_info_table.c.current_cluster_name,
-                job_info_table.c.job_id_on_pm).where(
+                job_info_table.c.job_id_on_pool_cluster).where(
                     job_info_table.c.spot_job_id == job_id)).fetchone()
         if info is None:
             return None, None
@@ -1431,8 +1433,12 @@ def get_num_launching_jobs() -> int:
             sqlalchemy.select(
                 sqlalchemy.func.count()  # pylint: disable=not-callable
             ).select_from(job_info_table).where(
-                job_info_table.c.schedule_state ==
-                ManagedJobScheduleState.LAUNCHING.value)).fetchone()[0]
+                sqlalchemy.and_(
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.LAUNCHING.value,
+                    # We only count jobs that are not in the pool, because the
+                    # job in the pool does not actually calling the sky.launch.
+                    job_info_table.c.pool.is_(None)))).fetchone()[0]
 
 
 @_init_db

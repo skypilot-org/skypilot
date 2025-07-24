@@ -169,7 +169,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                 if maybe_next_job is None:
                     # Nothing left to start, break from scheduling loop
                     break
-                pool = maybe_next_job['pool']
+                actual_pool = maybe_next_job['pool']
 
                 current_state = maybe_next_job['schedule_state']
 
@@ -188,7 +188,17 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                         # Can't schedule anything, break from scheduling loop.
                         break
                 elif current_state == state.ManagedJobScheduleState.WAITING:
-                    if not _can_start_new_job(pool):
+                    if not _can_start_new_job(actual_pool):
+                        # If there is no job can be scheduled in the pool, we
+                        # try to schedule another job regardless of the pool.
+                        # This is to avoid the case where the pool is scaled
+                        # down at the same time as a job is done. In this case,
+                        # we won't have any job to schedule in the pool, but
+                        # other jobs in other pool (or no pool) can still be
+                        # scheduled.
+                        if pool is not None:
+                            pool = None
+                            continue
                         # Can't schedule anything, break from scheduling loop.
                         break
 
@@ -205,7 +215,7 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
                     env_file_path = maybe_next_job['env_file_path']
 
                     _start_controller(job_id, dag_yaml_path, env_file_path,
-                                      pool)
+                                      actual_pool)
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock

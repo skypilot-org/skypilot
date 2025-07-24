@@ -1482,7 +1482,7 @@ def format_job_table(
                                                       zone).formatted_str()
                 values.extend([
                     task.get('current_cluster_name', '-'),
-                    task.get('job_id_on_pm', '-'),
+                    task.get('job_id_on_pool_cluster', '-'),
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
                     infra_str,

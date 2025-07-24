@@ -74,7 +74,7 @@ class StrategyExecutor:
         self.task_id = task_id
         self.pool = pool
         self.restart_cnt_on_failure = 0
-        self.job_id_on_pm: Optional[int] = None
+        self.job_id_on_pool_cluster: Optional[int] = None
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
@@ -171,7 +171,7 @@ class StrategyExecutor:
             if self.pool is None:
                 kwargs = dict(all=True)
             else:
-                kwargs = dict(job_ids=[self.job_id_on_pm])
+                kwargs = dict(job_ids=[self.job_id_on_pool_cluster])
             core.cancel(cluster_name=self.cluster_name,
                         **kwargs,
                         _try_cancel_if_cluster_is_init=True)
@@ -221,7 +221,9 @@ class StrategyExecutor:
 
             try:
                 status = managed_job_utils.get_job_status(
-                    self.backend, self.cluster_name, job_id=self.job_id_on_pm)
+                    self.backend,
+                    self.cluster_name,
+                    job_id=self.job_id_on_pool_cluster)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -330,14 +332,14 @@ class StrategyExecutor:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
                             self.cluster_name = cluster_name
-                            job_id_on_pm, _ = execution.exec(
+                            job_id_on_pool_cluster, _ = execution.exec(
                                 self.dag, cluster_name=self.cluster_name)
-                            assert job_id_on_pm is not None, (self.cluster_name,
-                                                              self.job_id)
-                            self.job_id_on_pm = job_id_on_pm
+                            assert job_id_on_pool_cluster is not None, (
+                                self.cluster_name, self.job_id)
+                            self.job_id_on_pool_cluster = job_id_on_pool_cluster
                             state.set_pool_submit_info(self.job_id,
                                                        cluster_name,
-                                                       job_id_on_pm)
+                                                       job_id_on_pool_cluster)
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,

@@ -106,6 +106,10 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
     job_ids = []
     for _ in range(batch_size if batch_size is not None else 1):
+        # TODO(tian): We should have a separate name for each job in the batch.
+        # Current blocker is that we are sharing the same dag object for all
+        # jobs in the batch. Maybe we can do copy.copy() for each job and then
+        # give it a unique name (e.g. append job id after the task name).
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
