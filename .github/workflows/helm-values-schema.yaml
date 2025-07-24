@@ -32,7 +32,7 @@ jobs:
       run: |
         cd charts/skypilot
         helm schema -o values.new.schema.json
-        result=$(diff values.schema.json values.new.schema.json)
+        result=$(diff values.schema.json values.new.schema.json || true)
         if [ -n "$result" ]; then
           echo "Helm chart values schema is not up to date. Please install the plugin with 'helm plugin install https://github.com/losisin/helm-values-schema-json.git' and run 'helm schema' to generate the latest schema."
           exit 1
