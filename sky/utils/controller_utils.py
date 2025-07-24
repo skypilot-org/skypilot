@@ -59,8 +59,8 @@ _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
 
 # Configuration for file mount compression
-_COMPRESSION_THRESHOLD_FILE_COUNT = 1  # Compress if more than 1 files
-_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = 50  # Compress if total size > 50MB
+_COMPRESSION_THRESHOLD_FILE_COUNT = 1  # Compress if more or equal to 1 files
+_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = 0  # Compress if total size > 50MB
 _COMPRESSED_FILE_SUFFIX = '.skypilot.tar.gz'
 
 
@@ -128,7 +128,8 @@ def _create_compressed_archive(source_path: str, output_path: str) -> None:
                             logger.warning(f'Skipping file {file_path}: {e}')
 
 
-def _get_decompression_commands(compressed_filename: str) -> List[str]:
+def _get_decompression_commands(compressed_filename: str,
+                                current_dir: str) -> List[str]:
     """ Generate shell commands to:
     - extract the compressed file (assumed to be in the current directory)
       into a temporary subdirectory under $PWD,
@@ -140,11 +141,17 @@ def _get_decompression_commands(compressed_filename: str) -> List[str]:
     temp_extract_dir = f'tmp_extract_{archive_base}'
 
     return [
+        'ORIGINAL_PWD="$PWD"', f'cd "{current_dir}"',
+        'echo "Now in working directory:"', 'pwd',
+        f'if [ ! -f "{compressed_filename}" ]; then',
+        f'  echo "Error: {compressed_filename} not found in {current_dir}!"',
+        '  cd "$ORIGINAL_PWD"', '  exit 1', 'fi',
         f'mkdir -p "{temp_extract_dir}"',
         f'tar -xzf "{compressed_filename}" -C "{temp_extract_dir}"',
-        f'rm -f "{compressed_filename}"',
-        f'mv "{temp_extract_dir}"/* .',
-        f'rmdir "{temp_extract_dir}"',
+        f'rm -f "{compressed_filename}"', 'shopt -s dotglob',
+        f'mv "{temp_extract_dir}"/* .', 'shopt -u dotglob',
+        f'rm -rf "{temp_extract_dir}"', 'echo "Decompression complete"',
+        'cd "$ORIGINAL_PWD"', 'echo "Returned to original directory: $PWD"'
     ]
 
 
@@ -1064,7 +1071,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 # Add decompression commands
                 decompression_commands.extend(
                     _get_decompression_commands(
-                        os.path.basename(temp_archive_path)))
+                        os.path.basename(temp_archive_path),
+                        constants.SKY_REMOTE_WORKDIR))
 
                 logger.info(
                     f'  {colorama.Style.DIM}Workdir (compressed): {workdir!r} '
@@ -1155,7 +1163,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 # Add decompression commands
                 decompression_commands.extend(
                     _get_decompression_commands(
-                        os.path.basename(temp_archive_path)))
+                        os.path.basename(temp_archive_path), dst))
 
                 logger.info(
                     f'  {colorama.Style.DIM}Folder (compressed): {src!r} '
@@ -1224,7 +1232,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 # Create a compressed archive of all files with proper cleanup
                 temp_archive_folder = tempfile.mkdtemp()
                 temp_archive_fd, temp_archive_path = tempfile.mkstemp(
-                    suffix=_COMPRESSED_FILE_SUFFIX)
+                    suffix=_COMPRESSED_FILE_SUFFIX, dir=temp_archive_folder)
                 os.close(temp_archive_fd)  # Close file descriptor, keep file
                 temp_files_to_cleanup.append(temp_archive_path)
                 temp_folders_to_cleanup.append(temp_archive_folder)
@@ -1255,7 +1263,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     # Add decompression command for the file archive
                     decompression_commands.extend(
                         _get_decompression_commands(
-                            os.path.basename(temp_archive_path)))
+                            os.path.basename(temp_archive_path),
+                            file_mount_remote_tmp_dir))
 
                     len_file = len(copy_mounts_with_file_in_src)
                     logger.info(
@@ -1438,7 +1447,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
         # Add a comment and the decompression commands
         decompression_setup = '# SkyPilot: Decompress uploaded file mounts\n'
-        decompression_setup += ' && '.join(decompression_commands)
+        decompression_setup += '\n'.join(decompression_commands)
 
         task.setup = current_setup + decompression_setup
 
