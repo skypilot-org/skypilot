@@ -772,7 +772,6 @@ export function ManagedJobsTable({
       <div className="flex flex-col">
         {/* Combined Status Filter */}
         <div className="flex flex-wrap items-center text-sm">
-          <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
             {!loading && (!data || data.length === 0) && !isInitialLoad && (
               <span className="text-gray-500 mr-2">No jobs found</span>
@@ -1927,7 +1926,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 className="sortable whitespace-nowrap w-32"
                 onClick={() => requestSort('name')}
               >
-                Pool Name{getSortDirection('name')}
+                Pool{getSortDirection('name')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-40"
@@ -1935,20 +1934,18 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               >
                 Jobs{getSortDirection('job_counts')}
               </TableHead>
+              <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-36"
                 onClick={() => requestSort('requested_resources_str')}
               >
-                Infra Summary{getSortDirection('requested_resources_str')}
+                Worker Details{getSortDirection('requested_resources_str')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-40"
                 onClick={() => requestSort('requested_resources_str')}
               >
                 Worker Resources{getSortDirection('requested_resources_str')}
-              </TableHead>
-              <TableHead className="whitespace-nowrap w-20">
-                # Workers
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -1979,11 +1976,11 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <JobStatusBadges jobCounts={pool.jobCounts} />
                   </TableCell>
+                  <TableCell>{getWorkersCount(pool)}</TableCell>
                   <TableCell>
                     <InfraBadges replicaInfo={pool.replica_info} />
                   </TableCell>
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
-                  <TableCell>{getWorkersCount(pool)}</TableCell>
                 </TableRow>
               ))
             ) : (

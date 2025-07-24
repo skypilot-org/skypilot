@@ -250,9 +250,9 @@ export default function PoolDetailPage() {
 
         {/* Content sections - explicitly stacked vertically */}
         <div className="w-full flex flex-col space-y-4">
-          {/* Pool Summary */}
+          {/* Details */}
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold mb-4">Pool Summary</h2>
+            <h2 className="text-xl font-semibold mb-4">Details</h2>
 
             {/* Grid layout for job status and infra summary */}
             <div className="grid grid-cols-2 gap-x-8 gap-y-2">
@@ -267,10 +267,10 @@ export default function PoolDetailPage() {
                 />
               </div>
 
-              {/* Infra Summary */}
+              {/* Worker Details */}
               <div>
                 <div className="text-sm font-medium text-gray-700 mb-2">
-                  Infra Summary
+                  Worker Details
                 </div>
                 <InfraBadges replicaInfo={poolData.replica_info} />
               </div>
