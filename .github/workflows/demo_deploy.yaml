@@ -17,7 +17,7 @@ on:
         type: string
         default: 'skypilot-demo'
       skip_rebase:
-        description: 'Skip rebase with upstream skypilot master'
+        description: 'Skip rebase with upstream skypilot master (only works for skypilot-demo-staging)'
         required: false
         type: boolean
         default: false
