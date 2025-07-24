@@ -286,6 +286,28 @@ export function Config() {
             <textarea
               value={editableConfig}
               onChange={(e) => setEditableConfig(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab') {
+                  e.preventDefault();
+                  const target = e.target;
+                  const start = target.selectionStart;
+                  const end = target.selectionEnd;
+                  const spaces = '  '; // 2 spaces for YAML indentation
+
+                  // Insert spaces at cursor position
+                  const newValue =
+                    editableConfig.substring(0, start) +
+                    spaces +
+                    editableConfig.substring(end);
+                  setEditableConfig(newValue);
+
+                  // Move cursor to after the inserted spaces
+                  setTimeout(() => {
+                    target.selectionStart = target.selectionEnd =
+                      start + spaces.length;
+                  }, 0);
+                }
+              }}
               className="w-full h-96 p-3 border border-gray-300 rounded font-mono text-sm resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder={
                 loading

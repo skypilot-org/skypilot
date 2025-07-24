@@ -785,10 +785,32 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </div>
                         </div>
 
-                        <Textarea
+                        <textarea
                           value={yamlValue}
                           onChange={(e) => handleYamlChange(e.target.value)}
-                          className="font-mono text-sm flex-1 resize-none"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Tab') {
+                              e.preventDefault();
+                              const target = e.target;
+                              const start = target.selectionStart;
+                              const end = target.selectionEnd;
+                              const spaces = '  '; // 2 spaces for YAML indentation
+
+                              // Insert spaces at cursor position
+                              const newValue =
+                                yamlValue.substring(0, start) +
+                                spaces +
+                                yamlValue.substring(end);
+                              handleYamlChange(newValue);
+
+                              // Move cursor to after the inserted spaces
+                              setTimeout(() => {
+                                target.selectionStart = target.selectionEnd =
+                                  start + spaces.length;
+                              }, 0);
+                            }
+                          }}
+                          className="w-full font-mono text-sm flex-1 resize-none border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           style={{ minHeight: '350px' }}
                           spellCheck={false}
                           placeholder={`# Enter workspace configuration in YAML format`}
