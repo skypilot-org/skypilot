@@ -208,7 +208,6 @@ you can provide the registry authentication details using :ref:`task environment
                 SKYPILOT_DOCKER_USERNAME: _json_key_base64
                 ...
 
-
             Furthermore, note that the base64 encoding option is only available on Google Artifact Registry (GAR), not Google Container Registry (GCR), which has been deprecated by Google
 
 
