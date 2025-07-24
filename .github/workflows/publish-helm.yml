@@ -124,8 +124,8 @@ jobs:
               helm package "$d" -u -d dest
           done
           cd dest
-          tar -xzf skypilot-nightly-*.tgz
-          ls -lartR .
+          tar -xzf skypilot-nightly-0.0.0.tgz
+          ls -lart skypilot
 
       # - name: Push New Files
       #   shell: bash
