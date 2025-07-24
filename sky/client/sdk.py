@@ -838,11 +838,11 @@ def download_logs(cluster_name: str,
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
-    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
+    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR
 ) -> server_common.RequestId:
     """Restart a cluster.
 
@@ -1006,11 +1006,11 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR
 ) -> server_common.RequestId:
     """Schedules an autostop/autodown for a cluster.
 

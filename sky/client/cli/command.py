@@ -2755,9 +2755,13 @@ def start(
             show_default=True)
 
     request_ids = subprocess_utils.run_in_parallel(
-        lambda name: sdk.start(name, idle_minutes_to_autostop,
-                               autostop_lib.AutostopWaitFor.from_str(wait_for),
-                               retry_until_up, down, force), to_start)
+        lambda name: sdk.start(name,
+                               idle_minutes_to_autostop,
+                               retry_until_up,
+                               down=down,
+                               force=force,
+                               wait_for=autostop_lib.AutostopWaitFor.from_str(
+                                   wait_for)), to_start)
 
     for name, request_id in zip(to_start, request_ids):
         try:
@@ -3146,8 +3150,8 @@ def _down_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None and wait_for is not None:
             try:
-                request_id = sdk.autostop(name, idle_minutes_to_autostop,
-                                          wait_for, down)
+                request_id = sdk.autostop(name, idle_minutes_to_autostop, down,
+                                          wait_for)
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,
