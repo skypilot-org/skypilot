@@ -519,4 +519,3 @@ grafana:
         updateIntervalSeconds: 30
         options:
           path: /var/lib/grafana/dashboards/default
-test: test
