@@ -2143,7 +2143,9 @@ def logs(
     if sync_down:
         with rich_utils.client_status(
                 ux_utils.spinner_message('Downloading logs')):
-            log_local_path_dict = sdk.download_logs(cluster, job_ids)
+            log_local_path_dict = sdk.download_logs(
+                cluster,
+                list(job_ids) if job_ids else None)
         style = colorama.Style
         fore = colorama.Fore
         for job, log_local_path in log_local_path_dict.items():
@@ -2195,8 +2197,7 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    returncode = sdk.tail_logs(cluster, job_id, follow, tail=tail)
-    sys.exit(returncode)
+    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail))
 
 
 @cli.command()
@@ -3244,7 +3245,7 @@ def show_gpus(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: Optional[bool]):
+        all_regions: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -5398,7 +5399,7 @@ def api():
               required=False,
               help='Enable basic authentication in the SkyPilot API server.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str], foreground: bool,
+def api_start(deploy: bool, host: str, foreground: bool,
               enable_basic_auth: bool):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
