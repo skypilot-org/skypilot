@@ -124,7 +124,10 @@ Example queries:
 .. code-block:: bash
 
     # Get logs of a specific cluster by name using AWS CLI
-    aws logs filter-log-events --log-group-name my-skypilot-logs --filter-pattern "skypilot_cluster_name=my-cluster-name"
+    aws logs filter-log-events --log-group-name my-skypilot-logs --filter-pattern 'skypilot.cluster_name = "my-cluster-name"' | | jq -r ".events[].message | fromjson | .log"
+
+    # Get logs of a specific job by name using AWS CLI
+    aws logs filter-log-events --log-group-name my-skypilot-logs --filter-pattern '%my-job-name%' | | jq -r ".events[].message | fromjson | .log"
 
     # Using CloudWatch Logs Insights
     fields @timestamp, @message
