@@ -29,20 +29,11 @@
 </h3>
 
 <div align="center">
-  <a href="https://demo.skypilot.co/dashboard/" target="_blank">
-      <strong>🌟 SkyPilot Demo 🌟</strong><br>
-      Click to see a 1-minute tour
-  </a>
-</div>
-
-<!-- ----
-
-<div align="center">
 
 #### [🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour](https://demo.skypilot.co/dashboard/)
 
 </div>
- -->
+
 
 
 ----
