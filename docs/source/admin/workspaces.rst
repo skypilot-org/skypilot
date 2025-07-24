@@ -35,14 +35,14 @@ The above is achieved by configuring the following section in the config file:
      team-a:
        # Use both AWS and GCP.
        aws:
-         account_id: 123456789012
+         profile_name: team-a-profile
        gcp:
          project_id: project-id-for-team-a
 
      team-b:
-       # Use AWS with a different account and GCP with a different project ID.
+       # Use AWS with a different profile and GCP with a different project ID.
        aws:
-         account_id: 987654321098
+         profile_name: team-b-profile
        gcp:
          project_id: project-id-for-team-b
 
@@ -81,7 +81,7 @@ The above is achieved by configuring the following section in the config file:
 
            aws:
              disabled: false
-             account_id: AWS account ID
+             profile_name: AWS profile name
 
            gcp:
              disabled: false

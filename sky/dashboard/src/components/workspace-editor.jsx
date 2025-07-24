@@ -102,8 +102,8 @@ const WorkspaceConfigDescription = ({
       let detail = '';
       if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
         detail = ` (Project ID: ${cloudConfig.project_id})`;
-      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.account_id) {
-        detail = ` (Account ID: ${cloudConfig.account_id})`;
+      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.profile_name) {
+        detail = ` (Profile: ${cloudConfig.profile_name})`;
       }
 
       if (isActuallyEnabled) {
@@ -776,7 +776,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   - user1@mydomain.com
   - user2@mydomain.com
   aws:
-    account_id: 123456789012
+    profile_name: my-aws-profile
     disabled: false
   gcp:
     project_id: xxx

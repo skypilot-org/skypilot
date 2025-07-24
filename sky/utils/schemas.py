@@ -1548,7 +1548,7 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {
-                        'account_id': {
+                        'profile_name': {
                             'type': 'string'
                         },
                         'disabled': {

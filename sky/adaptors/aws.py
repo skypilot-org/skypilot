@@ -122,109 +122,43 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
-def session(check_credentials: bool = True):
+def session(check_credentials: bool = True, profile_name: Optional[str] = None):
     """Create an AWS session."""
-    # Check for workspace-specific account_id configuration
+    # Check for workspace-specific profile_name configuration
     from sky import skypilot_config
-    workspace_account_id = skypilot_config.get_workspace_cloud('aws').get(
-        'account_id', None)
+    workspace_profile_name = profile_name or skypilot_config.get_workspace_cloud('aws').get(
+        'profile_name', None)
 
-    if workspace_account_id:
-        # Create base session to check current account
-        base_session = _create_aws_object(boto3.session.Session, 'session')
-
-        if check_credentials and base_session.get_credentials() is None:
-            raise botocore_exceptions().NoCredentialsError()
-
-        # Get current account ID to check if we need to switch accounts
+    if workspace_profile_name:
+        # Use the specified profile directly
         try:
-            sts_client = base_session.client('sts')
-            current_account = sts_client.get_caller_identity()['Account']
-
-            if current_account == workspace_account_id:
-                # Already in the correct account, use base session
-                return base_session
-            else:
-                # Need to switch to target account.
-                # First, try to find an existing AWS profile for the target
-                # account
-                import configparser
-                import os
-
-                aws_config_path = os.path.expanduser('~/.aws/config')
-
-                # Look for a profile that matches the target account
-                target_profile = None
-
-                if os.path.exists(aws_config_path):
-                    config = configparser.ConfigParser()
-                    config.read(aws_config_path)
-
-                    for section_name in config.sections():
-                        if section_name.startswith('profile '):
-                            profile_name = section_name[
-                                8:]  # Remove 'profile ' prefix
-                            # Try this profile to see if it's for the target
-                            # account
-                            try:
-                                profile_session = boto3.session.Session(
-                                    profile_name=profile_name)
-                                profile_sts = profile_session.client('sts')
-                                profile_account = (
-                                    profile_sts.get_caller_identity()['Account']
-                                )
-                                if profile_account == workspace_account_id:
-                                    target_profile = profile_name
-                                    break
-                            except Exception:  # pylint: disable=broad-except
-                                # Skip profiles that fail
-                                continue
-
-                if target_profile:
-                    # Found a profile for the target account, use it
-                    return boto3.session.Session(profile_name=target_profile)
-                else:
-                    # No profile found, try to assume role in target account
-                    role_arn = (f'arn:aws:iam::{workspace_account_id}:'
-                                'role/skypilot-v1')
-
-                    # Assume the role
-                    response = sts_client.assume_role(
-                        RoleArn=role_arn,
-                        RoleSessionName='skypilot-workspace-session')
-
-                    credentials = response['Credentials']
-
-                    # Create new session with assumed role credentials
-                    assumed_session = boto3.session.Session(
-                        aws_access_key_id=credentials['AccessKeyId'],
-                        aws_secret_access_key=credentials['SecretAccessKey'],
-                        aws_session_token=credentials['SessionToken'])
-
-                    return assumed_session
-
+            profile_session = _create_aws_object(
+                lambda: boto3.session.Session(profile_name=workspace_profile_name), 
+                'session'
+            )
+            
+            if check_credentials and profile_session.get_credentials() is None:
+                raise botocore_exceptions().NoCredentialsError()
+                
+            return profile_session
+            
         except Exception as e:
-            # Provide helpful error message based on the situation
-            error_msg = f'Failed to access account {workspace_account_id}.'
-
-            if 'AssumeRole' in str(e):
+            # Provide helpful error message
+            error_msg = f'Failed to create session with profile "{workspace_profile_name}".'
+            
+            if 'could not be found' in str(e).lower():
                 error_msg += (
-                    f'\n\nFor AWS SSO users:'
-                    f'\n1. Configure an AWS profile for account '
-                    f'{workspace_account_id}:'
-                    f'\n   aws configure sso --profile account-'
-                    f'{workspace_account_id}'
-                    f'\n2. Or create a cross-account role:'
-                    f'\n   - Create role "skypilot-v1" in account '
-                    f'{workspace_account_id}'
-                    f'\n   - Add trust policy to allow your current identity '
-                    f'to assume it')
-
+                    f'\n\nProfile "{workspace_profile_name}" not found. '
+                    f'Available options:'
+                    f'\n1. Configure the profile: aws configure --profile {workspace_profile_name}'
+                    f'\n2. For AWS SSO: aws configure sso --profile {workspace_profile_name}'
+                    f'\n3. Check existing profiles: aws configure list-profiles')
+            
             error_msg += f'\n\nOriginal error: {e}'
-
+            
             raise RuntimeError(error_msg) from e
     else:
-        # No workspace account_id configured, use standard session
+        # No workspace profile_name configured, use standard session
         s = _create_aws_object(boto3.session.Session, 'session')
         if check_credentials and s.get_credentials() is None:
             raise botocore_exceptions().NoCredentialsError()
@@ -276,12 +210,13 @@ def resource(service_name: str, **kwargs):
         kwargs['config'] = config
 
     check_credentials = kwargs.pop('check_credentials', True)
+    profile_name = kwargs.pop('profile_name', None)
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials).resource(
+        lambda: session(check_credentials=check_credentials, profile_name=profile_name).resource(
             service_name, **kwargs), 'resource')
 
 
@@ -317,13 +252,14 @@ def client(service_name: str, **kwargs):
     _assert_kwargs_builtin_type(kwargs)
 
     check_credentials = kwargs.pop('check_credentials', True)
+    profile_name = kwargs.pop('profile_name', None)
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials).client(
+        lambda: session(check_credentials=check_credentials, profile_name=profile_name).client(
             service_name, **kwargs), 'client')
 
 

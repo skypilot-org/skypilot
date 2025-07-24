@@ -938,11 +938,22 @@ class AWS(clouds.Cloud):
         if dryrun:
             return 'dryrun-account-id'
 
-        # Check if workspace-specific account_id is configured
-        config_account_id = skypilot_config.get_workspace_cloud('aws').get(
-            'account_id', None)
-        if config_account_id:
-            return config_account_id
+        # Check if workspace-specific profile_name is configured
+        config_profile_name = skypilot_config.get_workspace_cloud('aws').get(
+            'profile_name', None)
+        if config_profile_name:
+            # Use the specified profile to get account ID
+            try:
+                profile_session = aws.session(profile_name=config_profile_name)
+                sts = profile_session.client('sts', check_credentials=False)
+                user_info = sts.get_caller_identity()
+                return user_info['Account']
+            except Exception as e:
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get AWS account ID using profile "{config_profile_name}". '
+                    'Please make sure the profile exists and has valid credentials.\n'
+                    f'  Details: {common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
 
         # Fall back to getting account ID from current credentials directly
         # (avoiding circular dependency with user identity methods)
