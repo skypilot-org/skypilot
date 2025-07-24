@@ -59,7 +59,7 @@ from sky.server import common as server_common
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic'
+    'vast', 'nebius', 'hyperbolic', 'tigris'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -85,7 +85,8 @@ cloud_to_pytest_keyword = {
     'vast': 'vast',
     'runpod': 'runpod',
     'nebius': 'nebius',
-    'hyperbolic': 'hyperbolic'
+    'hyperbolic': 'hyperbolic',
+    'tigris': 'tigris'
 }
 
 
@@ -218,6 +219,8 @@ def _get_cloud_to_run(config) -> List[str]:
         if config.getoption(f'--{cloud}'):
             if cloud == 'cloudflare':
                 cloud_to_run.append(default_clouds_to_run[0])
+            elif cloud == 'tigris':
+                cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
 
@@ -271,6 +274,8 @@ def pytest_collection_modifyitems(config, items):
                 # Need to check both conditions as the first default cloud is
                 # added to cloud_to_run when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
+                if config.getoption('--tigris') and cloud == 'tigris':
                     continue
                 item.add_marker(skip_marks[cloud])
 
