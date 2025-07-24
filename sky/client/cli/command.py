@@ -2755,12 +2755,9 @@ def start(
             show_default=True)
 
     request_ids = subprocess_utils.run_in_parallel(
-        lambda name: sdk.start(name,
-                               idle_minutes_to_autostop,
+        lambda name: sdk.start(name, idle_minutes_to_autostop,
                                autostop_lib.AutostopWaitFor.from_str(wait_for),
-                               retry_until_up,
-                               down=down,
-                               force=force), to_start)
+                               retry_until_up, down, force), to_start)
 
     for name, request_id in zip(to_start, request_ids):
         try:

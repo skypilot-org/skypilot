@@ -15,6 +15,7 @@ from sky.utils import registry
 _DEFAULT_AUTOSTOP = {
     'down': False,
     'idle_minutes': 10,
+    'wait_for': 'jobs_and_ssh',
 }
 
 
