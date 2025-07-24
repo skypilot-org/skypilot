@@ -375,7 +375,17 @@ export function ManagedJobs() {
                 ? 'border-sky-blue text-sky-blue'
                 : 'border-transparent text-gray-600 hover:text-sky-blue'
             }`}
-            onClick={() => setActiveMainTab('jobs')}
+            onClick={() => {
+              setActiveMainTab('jobs');
+              router.replace(
+                {
+                  pathname: router.pathname,
+                  query: { ...router.query, tab: 'jobs' },
+                },
+                undefined,
+                { shallow: true }
+              );
+            }}
           >
             Managed Jobs
           </div>
@@ -385,7 +395,17 @@ export function ManagedJobs() {
                 ? 'border-sky-blue text-sky-blue'
                 : 'border-transparent text-gray-600 hover:text-sky-blue'
             }`}
-            onClick={() => setActiveMainTab('pools')}
+            onClick={() => {
+              setActiveMainTab('pools');
+              router.replace(
+                {
+                  pathname: router.pathname,
+                  query: { ...router.query, tab: 'pools' },
+                },
+                undefined,
+                { shallow: true }
+              );
+            }}
           >
             Pools
           </div>
