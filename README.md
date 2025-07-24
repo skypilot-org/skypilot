@@ -30,7 +30,7 @@
 
 <div align="center">
 
-#### [🌟 **SkyPilot Demo** 🌟](https://demo.skypilot.co/dashboard/): Click to see a 1-minute tour
+#### [🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour](https://demo.skypilot.co/dashboard/)
 
 </div>
 
