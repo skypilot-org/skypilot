@@ -765,6 +765,19 @@ class AWS(clouds.Cloud):
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
             user_info = sts.get_caller_identity()
+
+            # Use cls.get_account_id() to ensure workspace configuration is respected
+            # This follows the same pattern as GCP which calls cls.get_project_id()
+            try:
+                account_id = cls.get_account_id()
+            except Exception as e:  # pylint: disable=broad-except
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        f'Failed to get AWS account ID for user identity.\n'
+                        '  Reason: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}'
+                    ) from e
+
             # Allow fallback to AccountId if UserId does not match, because:
             # 1. In the case where multiple IAM users belong a single root account,
             # those users normally share the visibility of the VMs, so we do not
@@ -774,7 +787,7 @@ class AWS(clouds.Cloud):
             # userid changed for a cluster).
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
-            user_ids = [user_info['UserId'], user_info['Account']]
+            user_ids = [user_info['UserId'], account_id]
         except aws.botocore_exceptions().NoCredentialsError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -869,6 +882,19 @@ class AWS(clouds.Cloud):
             exceptions.CloudUserIdentityError: if the user identity cannot be
                 retrieved.
         """
+        aws_workspace_config = json.dumps(
+            skypilot_config.get_workspace_cloud('aws'), sort_keys=True)
+        return cls._get_user_identities(aws_workspace_config)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=5)
+    def _get_user_identities(
+            cls, workspace_config: Optional[str]) -> Optional[List[List[str]]]:
+        # We add workspace_config in args to avoid caching the AWS identity
+        # for when different workspace configs are used. Use json.dumps to
+        # ensure the config is hashable.
+        del workspace_config  # Unused but needed for cache key
+
         stdout = cls._aws_configure_list()
         if stdout is None:
             # `aws configure list` is not available, possible reasons:
@@ -918,14 +944,18 @@ class AWS(clouds.Cloud):
         if config_account_id:
             return config_account_id
 
-        # Fall back to getting account ID from current credentials
-        user_identity = cls.get_active_user_identity()
-        if user_identity is None:
+        # Fall back to getting account ID from current credentials directly
+        # (avoiding circular dependency with user identity methods)
+        try:
+            sts = aws.client('sts', check_credentials=False)
+            user_info = sts.get_caller_identity()
+            return user_info['Account']
+        except Exception as e:  # pylint: disable=broad-except
             raise exceptions.CloudUserIdentityError(
                 'Failed to get AWS account ID. Please make sure you have '
-                'configured AWS credentials.')
-        # user_identity is [UserId, Account]
-        return user_identity[1]
+                'configured AWS credentials.\n'
+                f'  Details: {common_utils.format_exception(e, use_bracket=True)}'
+            ) from e
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # The credentials file should not be uploaded if the user identity is
