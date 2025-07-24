@@ -1122,8 +1122,10 @@ def dump_managed_job_queue() -> str:
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
-        cluster_name = generate_managed_job_cluster_name(
-            job['task_name'], job['job_id'])
+        cluster_name, _ = managed_job_state.get_pool_submit_info(job['job_id'])
+        if cluster_name is None:
+            cluster_name = generate_managed_job_cluster_name(
+                job['task_name'], job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if isinstance(handle, backends.CloudVmRayResourceHandle):
             resources_str = resources_utils.get_readable_resources_repr(
@@ -1135,6 +1137,11 @@ def dump_managed_job_queue() -> str:
             job['cloud'] = str(handle.launched_resources.cloud)
             job['region'] = handle.launched_resources.region
             job['zone'] = handle.launched_resources.zone
+            job['infra'] = infra_utils.InfraInfo(
+                str(handle.launched_resources.cloud),
+                handle.launched_resources.region,
+                handle.launched_resources.zone).formatted_str()
+            job['accelerators'] = handle.launched_resources.accelerators
         else:
             # FIXME(zongheng): display the last cached values for these.
             job['cluster_resources'] = '-'
@@ -1142,6 +1149,7 @@ def dump_managed_job_queue() -> str:
             job['cloud'] = '-'
             job['region'] = '-'
             job['zone'] = '-'
+            job['infra'] = '-'
 
         # Add details about schedule state / backoff.
         state_details = None
@@ -1450,31 +1458,34 @@ def format_job_table(
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
                                   if len(job_tasks) == 1 else '-')
-                cloud = task.get('cloud')
-                if cloud is None:
-                    # Backward compatibility for old jobs controller without
-                    # cloud info returned, we parse it from the cluster
-                    # resources
-                    # TODO(zhwu): remove this after 0.12.0
-                    cloud = task['cluster_resources'].split('(')[0].split(
-                        'x')[-1]
-                    task['cluster_resources'] = task[
-                        'cluster_resources'].replace(f'{cloud}(',
-                                                     '(').replace('x ', 'x')
-                region = task['region']
-                zone = task.get('zone')
-                if cloud == '-':
-                    cloud = None
-                if region == '-':
-                    region = None
-                if zone == '-':
-                    zone = None
-
-                infra = infra_utils.InfraInfo(cloud, region, zone)
+                infra_str = task.get('infra')
+                if infra_str is None:
+                    cloud = task.get('cloud')
+                    if cloud is None:
+                        # Backward compatibility for old jobs controller without
+                        # cloud info returned, we parse it from the cluster
+                        # resources
+                        # TODO(zhwu): remove this after 0.12.0
+                        cloud = task['cluster_resources'].split('(')[0].split(
+                            'x')[-1]
+                        task['cluster_resources'] = task[
+                            'cluster_resources'].replace(f'{cloud}(',
+                                                         '(').replace(
+                                                             'x ', 'x')
+                    region = task['region']
+                    zone = task.get('zone')
+                    if cloud == '-':
+                        cloud = None
+                    if region == '-':
+                        region = None
+                    if zone == '-':
+                        zone = None
+                    infra_str = infra_utils.InfraInfo(cloud, region,
+                                                      zone).formatted_str()
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
-                    infra.formatted_str(),
+                    infra_str,
                     task['cluster_resources'],
                     schedule_state,
                     generate_details(task.get('details'),

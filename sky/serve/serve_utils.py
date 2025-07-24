@@ -600,6 +600,7 @@ def get_service_status_encoded(service_names: Optional[List[str]],
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
+    service_statuses = sorted(service_statuses, key=lambda x: x['name'])
     # We have to use payload_type here to avoid the issue of
     # message_utils.decode_payload() not being able to correctly decode the
     # message with <sky-payload> tags.

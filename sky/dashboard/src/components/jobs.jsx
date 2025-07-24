@@ -367,7 +367,7 @@ export function ManagedJobs() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
         <div className="flex items-center gap-4">
           <div
             className={`cursor-pointer border-b-2 pb-1 ${
@@ -390,6 +390,22 @@ export function ManagedJobs() {
             Pools
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          {loading && (
+            <div className="flex items-center">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+            </div>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          >
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            {!isMobile && <span>Refresh</span>}
+          </button>
+        </div>
       </div>
 
       {/* Filters and Content */}
@@ -404,22 +420,6 @@ export function ManagedJobs() {
                 updateURLParams={updateURLParams}
                 placeholder="Filter jobs"
               />
-            </div>
-            <div className="flex items-center gap-2 ml-auto">
-              {loading && (
-                <div className="flex items-center">
-                  <CircularProgress size={15} className="mt-0" />
-                  <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-                </div>
-              )}
-              <button
-                onClick={handleRefresh}
-                disabled={loading}
-                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-              >
-                <RotateCwIcon className="h-4 w-4 mr-1.5" />
-                {!isMobile && <span>Refresh</span>}
-              </button>
             </div>
           </div>
 

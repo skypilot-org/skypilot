@@ -79,10 +79,9 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       let full_infra = '';
 
       try {
-        const resources = JSON.parse(job.resources);
-        cloud = resources.cloud || '';
-        cluster_resources = job.cluster_resources || job.resources;
-        region = resources.region || '';
+        cloud = job.cloud || '';
+        cluster_resources = job.cluster_resources;
+        region = job.region || '';
 
         if (cloud) {
           infra = cloud;
@@ -92,8 +91,8 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         }
 
         full_infra = infra;
-        if (resources.accelerators) {
-          const accel_str = Object.entries(resources.accelerators)
+        if (job.accelerators) {
+          const accel_str = Object.entries(job.accelerators)
             .map(([key, value]) => `${value}x${key}`)
             .join(', ');
           if (accel_str) {
@@ -101,7 +100,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           }
         }
       } catch (e) {
-        cluster_resources = job.cluster_resources || job.resources;
+        cluster_resources = job.cluster_resources;
       }
 
       return {
