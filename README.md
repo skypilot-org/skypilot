@@ -28,6 +28,8 @@
     Run AI on Any Infra — Unified, Faster, Cheaper
 </h3>
 
+----
+
 <div align="center">
 
 #### [🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour](https://demo.skypilot.co/dashboard/)
