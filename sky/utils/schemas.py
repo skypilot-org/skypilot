@@ -1323,27 +1323,33 @@ def get_config_schema():
         'oci': {
             'type': 'object',
             'required': [],
-            'properties': {},
-            # Properties are either 'default' or a region name.
-            'additionalProperties': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'compartment_ocid': {
-                        'type': 'string',
-                    },
-                    'image_tag_general': {
-                        'type': 'string',
-                    },
-                    'image_tag_gpu': {
-                        'type': 'string',
-                    },
-                    'vcn_ocid': {
-                        'type': 'string',
-                    },
-                    'vcn_subnet': {
-                        'type': 'string',
+            'properties': {
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    # Properties are either 'default' or a region name.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'compartment_ocid': {
+                                'type': 'string',
+                            },
+                            'image_tag_general': {
+                                'type': 'string',
+                            },
+                            'image_tag_gpu': {
+                                'type': 'string',
+                            },
+                            'vcn_ocid': {
+                                'type': 'string',
+                            },
+                            'vcn_subnet': {
+                                'type': 'string',
+                            },
+                        }
                     },
                 }
             },
