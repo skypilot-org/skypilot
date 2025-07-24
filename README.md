@@ -36,6 +36,25 @@
 
 </div>
 
+<div align="center">
+  <a href="https://demo.skypilot.co/dashboard/" target="_blank">
+    <div style="
+      border: 2px solid #0366d6;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 10px;
+      background-color: #f6f8fa;
+      text-decoration: none;
+      display: inline-block;
+      min-width: 250px;
+      transition: transform 0.2s ease-in-out;
+    ">
+      <strong>🌟 SkyPilot Demo 🌟</strong><br>
+      Click to see a 1-minute tour
+    </div>
+  </a>
+</div>
+
 ----
 
 :fire: *News* :fire:
