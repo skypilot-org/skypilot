@@ -26,6 +26,15 @@ import {
 import { UI_CONFIG } from '@/lib/config';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { formatYaml } from '@/lib/yamlUtils';
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 
 export default function PoolDetailPage() {
   const router = useRouter();
@@ -41,6 +50,12 @@ export default function PoolDetailPage() {
 
   // Filtering state
   const [showFailedWorkers, setShowFailedWorkers] = useState(false);
+
+  // Sorting state
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
 
   // Pool YAML state
   const [isPoolYamlExpanded, setIsPoolYamlExpanded] = useState(false);
@@ -75,6 +90,22 @@ export default function PoolDetailPage() {
   useEffect(() => {
     fetchPoolData();
   }, [poolName]);
+
+  // Sorting functions
+  const requestSort = (key) => {
+    let direction = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirection = (key) => {
+    if (sortConfig.key === key) {
+      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+    }
+    return '';
+  };
 
   // Helper functions
   const getWorkersCount = (pool) => {
@@ -124,12 +155,42 @@ export default function PoolDetailPage() {
     }
 
     // Filter workers based on showFailedWorkers toggle
-    const filtered = showFailedWorkers
+    let filtered = showFailedWorkers
       ? poolData.replica_info
       : poolData.replica_info.filter((worker) => {
           // Check if status contains 'FAILED' (e.g., FAILED_PROBING, FAILED_SETUP, etc.)
           return !worker.status || !worker.status.includes('FAILED');
         });
+
+    // Apply sorting if sortConfig is set
+    if (sortConfig.key) {
+      filtered = [...filtered].sort((a, b) => {
+        let aValue = a[sortConfig.key];
+        let bValue = b[sortConfig.key];
+
+        // Handle timestamp sorting
+        if (sortConfig.key === 'launched_at') {
+          aValue = aValue || 0;
+          bValue = bValue || 0;
+        }
+
+        // Handle string sorting
+        if (typeof aValue === 'string') {
+          aValue = aValue.toLowerCase();
+        }
+        if (typeof bValue === 'string') {
+          bValue = bValue.toLowerCase();
+        }
+
+        if (aValue < bValue) {
+          return sortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'ascending' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
 
     // Calculate pagination
     const pages = Math.ceil(filtered.length / pageSize);
@@ -142,12 +203,12 @@ export default function PoolDetailPage() {
       totalPages: pages,
       paginatedWorkers: paginated,
     };
-  }, [poolData, showFailedWorkers, currentPage, pageSize]);
+  }, [poolData, showFailedWorkers, currentPage, pageSize, sortConfig]);
 
-  // Reset to first page when filtering changes
+  // Reset to first page when filtering or sorting changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [showFailedWorkers]);
+  }, [showFailedWorkers, sortConfig]);
 
   // Page navigation handlers
   const goToPreviousPage = () => {
@@ -208,199 +269,225 @@ export default function PoolDetailPage() {
         <title>Pool {poolName} | SkyPilot Dashboard</title>
       </Head>
       <div>
-        {/* Header */}
-        <div className="w-full mb-4">
-          <div className="flex items-center justify-between mb-4 h-5">
-            <div className="text-base flex items-center">
-              <Link
-                href="/jobs?tab=pools"
-                className="text-sky-blue hover:underline"
-              >
-                Pools
-              </Link>
-              <span className="mx-2 text-gray-500">›</span>
-              <Link
-                href={`/jobs/pools/${poolName}`}
-                className="text-sky-blue hover:underline"
-              >
-                {poolName}
-              </Link>
-            </div>
+        <div className="flex items-center justify-between mb-4 h-5">
+          <div className="text-base flex items-center">
+            <Link
+              href="/jobs?tab=pools"
+              className="text-sky-blue hover:underline"
+            >
+              Pools
+            </Link>
+            <span className="mx-2 text-gray-500">›</span>
+            <Link
+              href={`/jobs/pools/${poolName}`}
+              className="text-sky-blue hover:underline"
+            >
+              {poolName}
+            </Link>
+          </div>
 
-            <div className="text-sm flex items-center">
-              {loading && (
-                <div className="flex items-center mr-4">
-                  <CircularProgress size={15} className="mt-0" />
-                  <span className="ml-2 text-gray-500">Loading...</span>
-                </div>
-              )}
-              <button
-                onClick={fetchPoolData}
-                disabled={loading}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
-              >
-                <RefreshCw
-                  className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`}
-                />
-                <span>Refresh</span>
-              </button>
-            </div>
+          <div className="text-sm flex items-center">
+            {loading && (
+              <div className="flex items-center mr-4">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            <button
+              onClick={fetchPoolData}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+            >
+              <RefreshCw
+                className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`}
+              />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
 
         {/* Content sections - explicitly stacked vertically */}
-        <div className="w-full flex flex-col space-y-4">
+        <div className="w-full flex flex-col space-y-6">
           {/* Details */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold mb-4">Details</h2>
-
-            {/* Grid layout for job status and infra summary */}
-            <div className="grid grid-cols-2 gap-x-8 gap-y-2">
-              {/* Job Status */}
-              <div>
-                <div className="text-sm font-medium text-gray-700 mb-2">
-                  Job Status
-                </div>
-                <JobStatusBadges
-                  jobCounts={getJobStatusCounts(poolData)}
-                  getStatusStyle={getStatusStyle}
-                />
+          <div className="mb-6">
+            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              <div className="flex items-center justify-between px-4 pt-4">
+                <h3 className="text-lg font-semibold">Details</h3>
               </div>
-
-              {/* Worker Details */}
-              <div>
-                <div className="text-sm font-medium text-gray-700 mb-2">
-                  Worker Details
-                </div>
-                <InfraBadges replicaInfo={poolData.replica_info} />
-              </div>
-
-              {/* Row 2: Workers | Policy */}
-              <div>
-                <div className="text-sm font-medium text-gray-700 mb-1">
-                  Workers
-                </div>
-                <div className="text-sm">{getWorkersCount(poolData)}</div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium text-gray-700 mb-1">
-                  Policy
-                </div>
-                <div className="text-sm">{poolData.policy || '-'}</div>
-              </div>
-            </div>
-
-            {/* Pool YAML Section */}
-            {poolData.pool_yaml && poolData.pool_yaml.trim() && (
-              <div className="pt-4 mt-4">
-                <div className="flex items-center mb-2">
-                  <button
-                    onClick={togglePoolYamlExpanded}
-                    className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
-                  >
-                    {isPoolYamlExpanded ? (
-                      <ChevronDown className="w-4 h-4 mr-1" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 mr-1" />
-                    )}
-                    <span className="text-base">Show Pool YAML</span>
-                  </button>
-
-                  <Tooltip
-                    content={isPoolYamlCopied ? 'Copied!' : 'Copy YAML'}
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={copyPoolYamlToClipboard}
-                      className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                    >
-                      {isPoolYamlCopied ? (
-                        <Check className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                    </button>
-                  </Tooltip>
-                </div>
-
-                {isPoolYamlExpanded && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                    <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
-                      {formatYaml(poolData.pool_yaml)}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Workers Table */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Pool Workers</h2>
-
-              {/* Show Failed Workers Toggle */}
-              <div className="flex items-center space-x-2">
-                <label className="flex items-center space-x-3 text-sm cursor-pointer">
-                  <div className="relative">
-                    <input
-                      type="checkbox"
-                      checked={showFailedWorkers}
-                      onChange={(e) => setShowFailedWorkers(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
-                        showFailedWorkers ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}
-                    >
-                      <div
-                        className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out translate-y-0.5 ${
-                          showFailedWorkers
-                            ? 'translate-x-5'
-                            : 'translate-x-0.5'
-                        }`}
+              <div className="p-4">
+                <div className="grid grid-cols-2 gap-6">
+                  {/* Jobs */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Jobs
+                    </div>
+                    <div className="text-base mt-1">
+                      <JobStatusBadges
+                        jobCounts={getJobStatusCounts(poolData)}
+                        getStatusStyle={getStatusStyle}
                       />
                     </div>
                   </div>
-                  <span className="text-gray-700">Show all workers</span>
-                </label>
+
+                  {/* Workers */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Workers
+                    </div>
+                    <div className="text-base mt-1">
+                      {getWorkersCount(poolData)}
+                    </div>
+                  </div>
+
+                  {/* Worker Details */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Worker Details
+                    </div>
+                    <div className="text-base mt-1">
+                      <InfraBadges replicaInfo={poolData.replica_info} />
+                    </div>
+                  </div>
+
+                  {/* Policy */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Policy
+                    </div>
+                    <div className="text-base mt-1">
+                      {poolData.policy || '-'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pool YAML Section */}
+                {poolData.pool_yaml && poolData.pool_yaml.trim() && (
+                  <div className="pt-4 mt-4">
+                    <div className="flex items-center mb-2">
+                      <button
+                        onClick={togglePoolYamlExpanded}
+                        className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
+                      >
+                        {isPoolYamlExpanded ? (
+                          <ChevronDown className="w-4 h-4 mr-1" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 mr-1" />
+                        )}
+                        <span className="text-base">Show Pool YAML</span>
+                      </button>
+
+                      <Tooltip
+                        content={isPoolYamlCopied ? 'Copied!' : 'Copy YAML'}
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={copyPoolYamlToClipboard}
+                          className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                        >
+                          {isPoolYamlCopied ? (
+                            <Check className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </button>
+                      </Tooltip>
+                    </div>
+
+                    {isPoolYamlExpanded && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                        <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                          {formatYaml(poolData.pool_yaml)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      ID
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Launched
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Infra
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Resources
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Used By
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+          {/* Workers Table */}
+          <div className="mb-8">
+            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              <div className="flex items-center justify-between p-4">
+                <h3 className="text-lg font-semibold">Pool Workers</h3>
+
+                {/* Show Failed Workers Toggle */}
+                <div className="flex items-center space-x-2">
+                  <label className="flex items-center space-x-3 text-sm cursor-pointer">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={showFailedWorkers}
+                        onChange={(e) => setShowFailedWorkers(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div
+                        className={`w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                          showFailedWorkers ? 'bg-blue-600' : 'bg-gray-300'
+                        }`}
+                      >
+                        <div
+                          className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out translate-y-0.5 ${
+                            showFailedWorkers
+                              ? 'translate-x-5'
+                              : 'translate-x-0.5'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                    <span className="text-gray-700">Show all workers</span>
+                  </label>
+                </div>
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('replica_id')}
+                    >
+                      ID{getSortDirection('replica_id')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('launched_at')}
+                    >
+                      Launched{getSortDirection('launched_at')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('cloud')}
+                    >
+                      Infra{getSortDirection('cloud')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('resources_str')}
+                    >
+                      Resources{getSortDirection('resources_str')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('status')}
+                    >
+                      Status{getSortDirection('status')}
+                    </TableHead>
+                    <TableHead
+                      className="sortable whitespace-nowrap"
+                      onClick={() => requestSort('used_by')}
+                    >
+                      Used By{getSortDirection('used_by')}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {paginatedWorkers.length > 0 ? (
                     paginatedWorkers.map((worker, index) => (
-                      <tr key={worker.replica_id}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">
-                          {worker.replica_id}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <TableRow key={worker.replica_id}>
+                        <TableCell>{worker.replica_id}</TableCell>
+                        <TableCell>
                           {worker.launched_at && worker.launched_at > 0 ? (
                             <TimestampWithTooltip
                               date={new Date(worker.launched_at * 1000)}
@@ -408,8 +495,8 @@ export default function PoolDetailPage() {
                           ) : (
                             '-'
                           )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        </TableCell>
+                        <TableCell>
                           {(() => {
                             try {
                               const cloudWithRegion = `${worker.cloud} (${worker.region})`;
@@ -452,8 +539,8 @@ export default function PoolDetailPage() {
                               return `Error: ${error.message}`;
                             }
                           })()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 max-w-xs truncate">
+                        </TableCell>
+                        <TableCell>
                           {(() => {
                             try {
                               return worker.resources_str;
@@ -461,11 +548,11 @@ export default function PoolDetailPage() {
                               return `Error: ${error.message}`;
                             }
                           })()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        </TableCell>
+                        <TableCell>
                           <StatusBadge status={worker.status} />
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        </TableCell>
+                        <TableCell>
                           {worker.used_by ? (
                             <Link
                               href={`/jobs/${worker.used_by}`}
@@ -476,23 +563,23 @@ export default function PoolDetailPage() {
                           ) : (
                             '-'
                           )}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))
                   ) : (
-                    <tr>
-                      <td
+                    <TableRow>
+                      <TableCell
                         colSpan={6}
-                        className="px-6 py-8 text-center text-gray-500"
+                        className="text-center py-8 text-gray-500"
                       >
                         {showFailedWorkers
                           ? 'No workers found in this pool'
                           : 'No non-failed workers found in this pool'}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
             {/* Pagination */}
@@ -534,22 +621,50 @@ export default function PoolDetailPage() {
                     {Math.min(currentPage * pageSize, filteredWorkers.length)}{' '}
                     of {filteredWorkers.length}
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={goToPreviousPage}
-                      disabled={currentPage === 1}
-                      className="px-2 py-1 text-sm text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 rounded"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={goToPreviousPage}
+                    disabled={currentPage === 1}
+                    className="text-gray-500 h-8 w-8 p-0"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="chevron-left"
                     >
-                      &lt;
-                    </button>
-                    <button
-                      onClick={goToNextPage}
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      className="px-2 py-1 text-sm text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 rounded"
+                      <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={goToNextPage}
+                    disabled={currentPage === totalPages}
+                    className="text-gray-500 h-8 w-8 p-0"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="chevron-right"
                     >
-                      &gt;
-                    </button>
-                  </div>
+                      <path d="M9 18l6-6-6-6" />
+                    </svg>
+                  </Button>
                 </div>
               </div>
             )}
