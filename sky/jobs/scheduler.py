@@ -9,9 +9,11 @@ The scheduler is not its own process - instead, maybe_schedule_next_jobs() can
 be called from any code running on the managed jobs controller instance to
 trigger scheduling of new jobs if possible. This function should be called
 immediately after any state change that could result in jobs newly being able to
-be scheduled.
+be scheduled. If the job is running in a pool, the scheduler will only schedule
+jobs for the same pool, because the resources limitations are per-pool (see the
+following section for more details).
 
-The scheduling logic limits the number of running jobs according to two limits:
+The scheduling logic limits #running jobs according to three limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
    once, based on the number of CPUs. (See _get_launch_parallelism.) This the
    most compute-intensive part of the job lifecycle, which is why we have an
@@ -20,6 +22,8 @@ The scheduling logic limits the number of running jobs according to two limits:
    of memory. (See _get_job_parallelism.) Since the job controller is doing very
    little once a job starts (just checking its status periodically), the most
    significant resource it consumes is memory.
+3. The number of jobs that can be running in a pool at any given time, based on
+   the number of ready workers in the pool. (See _can_start_new_job.)
 
 The state of the scheduler is entirely determined by the schedule_state column
 of all the jobs in the job_info table. This column should only be modified via
@@ -146,6 +150,13 @@ def maybe_schedule_next_jobs(pool: Optional[str] = None) -> None:
     the jobs controller instance. New job controller processes will be detached
     from the current process and there will not be a parent/child relationship.
     See launch_new_process_tree for more.
+
+    After adding the pool support, this function will be called in a per-pool
+    basis. We employ resources limitation for each pool given the number of
+    ready workers in the pool. Each pool will have its own scheduler queue,
+    indicating by the argument `pool`. Finished job in pool 1 will only trigger
+    another jobs in pool 1, but the job in pool 2 will still be waiting. When
+    the `pool` argument is None, it schedules a job regardless of the pool.
     """
     try:
         # We must use a global lock rather than a per-job lock to ensure correct
@@ -287,11 +298,10 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
-    pool = state.get_pool_from_job_id(job_id)
 
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs(pool)
+    maybe_schedule_next_jobs()
 
 
 def _set_alive_waiting(job_id: int) -> None:

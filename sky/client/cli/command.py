@@ -4351,7 +4351,9 @@ def jobs_launch(
         batch_ids = job_id_handle[0]
         bids = ','.join(map(str, batch_ids))
         click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
-                    f'{colorama.Style.RESET_ALL}.')
+                    f'{colorama.Style.RESET_ALL}.'
+                    f'To stream job logs: {colorama.Style.BRIGHT}'
+                    f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4670,6 +4672,10 @@ def jobs_create_pool(
     click.echo(task.service)
     serve_lib.validate_service_task(task)
 
+    if task.run is not None:
+        click.secho('The `run` section will be ignored for pool workers.',
+                    fg='yellow')
+
     click.secho(
         'Each pool worker will use the following resources (estimated):',
         fg='cyan')
@@ -4776,7 +4782,6 @@ def jobs_query_pool(verbose: bool, pool_names: List[str]):
     pool_names_to_query: Optional[List[str]] = pool_names
     if not pool_names:
         pool_names_to_query = None
-    # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking pools[/]'):
         pool_status_request_id = managed_jobs.query_pool(pool_names_to_query)
         _, msg = _handle_services_request(pool_status_request_id,

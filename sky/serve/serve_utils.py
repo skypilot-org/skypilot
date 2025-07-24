@@ -53,7 +53,7 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_pm_filelock_path(pool: Optional[str]) -> str:
+def _get_pool_filelock_path(pool: Optional[str]) -> str:
     path = pathlib.Path(constants.SKYSERVE_METADATA_DIR)
     if pool is not None:
         path = path / pool
@@ -419,6 +419,9 @@ def generate_remote_tls_certfile_name(service_name: str) -> str:
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
+    # NOTE: `release_cluster_name` relies on the format of the cluster name.
+    # If the naming schema is updated, `release_cluster_name` should be updated
+    # as well.
     return f'{service_name}-{replica_id}'
 
 
@@ -587,11 +590,13 @@ def _get_service_status(
 
     if with_replica_info:
         if record['pool']:
-            record['replica_info'] = [{
-                'used_by': jid,
-                **info.to_info_dict(with_handle=True, with_url=False)
-            } for info, jid in serve_state.get_replica_infos_and_job_ids(
-                service_name)]
+            record['replica_info'] = [
+                {
+                    'used_by': replica_job_id,
+                    **info.to_info_dict(with_handle=True, with_url=False)
+                } for info, replica_job_id in
+                serve_state.get_replica_infos_and_job_ids(service_name)
+            ]
         else:
             record['replica_info'] = [
                 info.to_info_dict(with_handle=True)
@@ -669,38 +674,38 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
     Returns:
         The cluster name if an idle replica is found, None otherwise.
     """
-    with filelock.FileLock(_get_pm_filelock_path(service_name)):
-        logger.info(f'Get next cluster name for pool {service_name!r}')
-        # Check if service exists
-        service_status = _get_service_status(service_name,
-                                             pool=True,
-                                             with_replica_info=False)
-        if service_status is None:
-            logger.error(f'Service {service_name!r} does not exist.')
-            return None
-        if not service_status['pool']:
-            logger.error(f'Service {service_name!r} is not a cluster pool.')
-            return None
+    # Check if service exists
+    service_status = _get_service_status(service_name,
+                                         pool=True,
+                                         with_replica_info=False)
+    if service_status is None:
+        logger.error(f'Service {service_name!r} does not exist.')
+        return None
+    if not service_status['pool']:
+        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        return None
 
-        # Get idle replicas using database
+    with filelock.FileLock(_get_pool_filelock_path(service_name)):
+        logger.info(f'Get next cluster name for pool {service_name!r}')
         idle_replicas = [
-            (info, jid)
-            for info, jid in serve_state.get_replica_infos_and_job_ids(
-                service_name)
-            if info.status == serve_state.ReplicaStatus.READY and jid is None
+            info for info, replica_job_id in
+            serve_state.get_replica_infos_and_job_ids(service_name)
+            if info.status == serve_state.ReplicaStatus.READY and
+            replica_job_id is None
         ]
         if not idle_replicas:
             logger.info(f'No idle replicas found for pool {service_name!r}')
             return None
 
-        # Select the first idle replica
+        # Select the first idle replica.
         # TODO(tian): "Load balancing" policy.
-        ri = idle_replicas[0][0]
-        logger.info(f'Selected replica {ri.replica_id} with cluster '
-                    f'{ri.cluster_name!r} for job {job_id!r} in pool '
+        replica_info = idle_replicas[0]
+        logger.info(f'Selected replica {replica_info.replica_id} with cluster '
+                    f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
                     f'{service_name!r}')
-        serve_state.set_replica_job_id(service_name, ri.replica_id, job_id)
-        return ri.cluster_name
+        serve_state.set_replica_job_id(service_name, replica_info.replica_id,
+                                       job_id)
+        return replica_info.cluster_name
 
 
 def release_cluster_name(service_name: str, cluster_name: str) -> None:
@@ -709,35 +714,31 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
     Args:
         service_name: The name of the service.
         cluster_name: The name of the cluster to release.
-
-    Returns:
-        A success message.
     """
-    with filelock.FileLock(_get_pm_filelock_path(service_name)):
+    if not cluster_name:
+        logger.info('Skip clean up dummy cluster.')
+        return
+    service_status = _get_service_status(service_name,
+                                         pool=True,
+                                         with_replica_info=False)
+    if service_status is None:
+        logger.error(f'Service {service_name!r} does not exist.')
+        return
+    if not service_status['pool']:
+        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        return
+
+    with filelock.FileLock(_get_pool_filelock_path(service_name)):
         logger.info(
             f'Release cluster {cluster_name!r} for pool {service_name!r}')
-        if not cluster_name:
-            logger.info('Skip clean up dummy cluster.')
-            return
-        # Check if service exists
-        service_status = _get_service_status(service_name,
-                                             pool=True,
-                                             with_replica_info=False)
-        if service_status is None:
-            logger.error(f'Service {service_name!r} does not exist.')
-            return
-        if not service_status['pool']:
-            logger.error(f'Service {service_name!r} is not a cluster pool.')
-            return
-
-        # Release the cluster using database
-        rid = int(cluster_name.split('-')[-1])
-        current_jid = serve_state.get_replica_job_id(service_name, rid)
-        if current_jid is None:
+        replica_id = int(cluster_name.split('-')[-1])
+        current_replica_job_id = serve_state.get_replica_job_id(
+            service_name, replica_id)
+        if current_replica_job_id is None:
             logger.info(f'Skip releasing cluster {cluster_name!r}: '
                         f'cluster not in use.')
             return
-        serve_state.set_replica_job_id(service_name, rid, None)
+        serve_state.set_replica_job_id(service_name, replica_id, None)
         logger.info(f'Cluster {cluster_name!r} released successfully.')
 
 

@@ -63,6 +63,10 @@ class StrategyExecutor:
             'Only CloudVMRayBackend is supported.')
         self.dag = sky.Dag()
         self.dag.add(task)
+        # For jobs submitted to a pool, the cluster name might change after each
+        # recovery. Initially this is set to an empty string to indicate that no
+        # cluster is assigned yet, and in `_launch`, it will be set to one of
+        # the cluster names in the pool.
         self.cluster_name = cluster_name
         self.backend = backend
         self.max_restarts_on_errors = max_restarts_on_errors
@@ -70,7 +74,7 @@ class StrategyExecutor:
         self.task_id = task_id
         self.pool = pool
         self.restart_cnt_on_failure = 0
-        self.job_id_on_pm: Optional[int] = None if pool is None else -1
+        self.job_id_on_pm: Optional[int] = None
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
@@ -178,7 +182,7 @@ class StrategyExecutor:
                         f'{common_utils.format_exception(e)}\n'
                         'Terminating the cluster explicitly to ensure no '
                         'remaining job process interferes with recovery.')
-            managed_job_utils.terminate_cluster(self.cluster_name)
+            self._cleanup_cluster()
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster

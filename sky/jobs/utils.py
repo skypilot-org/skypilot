@@ -1291,12 +1291,12 @@ def format_job_table(
         '#RECOVERIES',
         'STATUS',
         'WORKER_POOL',
-        'WORKER_CLUSTER',
-        'WORKER_JOB_ID',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
         columns += [
+            'WORKER_CLUSTER',
+            'WORKER_JOB_ID',
             'STARTED',
             'INFRA',
             'RESOURCES',
@@ -1407,13 +1407,13 @@ def format_job_table(
                 recovery_cnt,
                 status_str,
                 job_tasks[0].get('pool', '-'),
-                '-',
-                '-',
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
                 failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
+                    '-',
+                    '-',
                     '-',
                     '-',
                     '-',
@@ -1450,8 +1450,6 @@ def format_job_table(
                 task['recovery_count'],
                 task['status'].colored_str(),
                 task.get('pool', '-'),
-                task.get('current_cluster_name', '-'),
-                task.get('job_id_on_pm', '-'),
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
@@ -1483,6 +1481,8 @@ def format_job_table(
                     infra_str = infra_utils.InfraInfo(cloud, region,
                                                       zone).formatted_str()
                 values.extend([
+                    task.get('current_cluster_name', '-'),
+                    task.get('job_id_on_pm', '-'),
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
                     infra_str,

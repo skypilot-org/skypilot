@@ -24,6 +24,7 @@ from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.jobs import scheduler as jobs_scheduler
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -629,6 +630,7 @@ class ReplicaManager:
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
         self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
+        self._is_pool: bool = spec.pool
         header_keys = None
         if spec.readiness_headers is not None:
             header_keys = list(spec.readiness_headers.keys())
@@ -978,6 +980,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._service_name, replica_id)
                 assert info is not None, replica_id
                 error_in_sky_launch = False
+                schedule_next_jobs = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
                     if (serve_state.total_number_provisioning_replicas() <
@@ -1006,6 +1009,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
+                        schedule_next_jobs = True
                     if self._spot_placer is not None and info.is_spot:
                         # TODO(tian): Currently, we set the location to
                         # preemptive if the launch process failed. This is
@@ -1025,6 +1029,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                             self._spot_placer.set_active(location)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
+                if schedule_next_jobs and self._is_pool:
+                    jobs_scheduler.maybe_schedule_next_jobs(
+                        pool=self._service_name)
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
