@@ -138,7 +138,8 @@ MEMORY_SIZE_UNITS = {
 # The resource keys used by Kubernetes to track NVIDIA GPUs and Google TPUs on
 # nodes. These keys are typically used in the node's status.allocatable
 # or status.capacity fields to indicate the available resources on the node.
-GPU_RESOURCE_KEY = 'nvidia.com/gpu'
+#GPU_RESOURCE_KEY = 'nvidia.com/gpu'
+GPU_RESOURCE_KEY = 'amd.com/gpu'
 TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_ACCELERATOR_HELP_MESSAGE = (
@@ -380,7 +381,11 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     elif accelerator == 'H200':
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
-    elif accelerator.startswith('tpu-'):
+    elif accelerator.startswith('amd-'):
+        return accelerator
+    elif accelerator.startswith('mi300-'):
+        return accelerator
+   elif accelerator.startswith('tpu-'):
         return accelerator
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
@@ -3309,7 +3314,7 @@ def process_skypilot_pods(
                 unit='G')
             gpu_count = parse_cpu_or_gpu_resource(
                 pod.spec.containers[0].resources.requests.get(
-                    'nvidia.com/gpu', '0'))
+                    'amd.com/gpu', '0'))
             gpu_name = None
             if gpu_count > 0:
                 label_formatter, _ = (detect_gpu_label_formatter(context))
