@@ -242,6 +242,7 @@ jobs:
             --values demo/charts/skypilot-demo/values.yaml \
             --set skypilot.apiService.image=$DOCKER_IMAGE \
             --set skypilot.apiService.skipResourceCheck=true \
+            --set skypilot.apiService.upgradeStrategy=Recreate \
             --set skypilot.ingress-nginx.enabled=true \
             --set "skypilot.apiService.extraVolumes[0].configMap.name=${{ inputs.deployment_target }}-demo-users" \
             --set "skypilot.apiService.extraVolumes[1].configMap.name=${{ inputs.deployment_target }}-demo-clusters" \
