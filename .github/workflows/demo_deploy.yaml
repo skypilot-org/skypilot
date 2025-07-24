@@ -15,7 +15,7 @@ on:
         description: 'GKE cluster name'
         required: false
         type: string
-        default: 'skypilot-demo-2'
+        default: 'skypilot-demo'
       skip_rebase:
         description: 'Skip rebase with upstream skypilot master'
         required: false
@@ -26,6 +26,11 @@ on:
         required: false
         type: boolean
         default: true
+      branch:
+        description: 'Branch to deploy from'
+        required: true
+        type: string
+        default: 'demo'
 
 env:
   REGISTRY: us-central1-docker.pkg.dev
@@ -45,7 +50,7 @@ jobs:
         if: ${{ inputs.deployment_target == 'skypilot-demo-staging' }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Git and merge with upstream master
@@ -305,7 +310,7 @@ jobs:
           echo ""
           echo "✅ Demo deployment completed successfully!"
           echo "Cluster: ${{ env.CLUSTER_NAME }}"
-          echo "Branch: ${{ github.ref_name }}"
+          echo "Branch: ${{ inputs.branch }}"
           echo "Image: $DOCKER_IMAGE (Built with correct basePath)"
           echo "Namespace: ${{ inputs.deployment_target }}"
           echo "Mode: ${{ inputs.clean_deploy && 'Clean deploy' || 'Upgrade deploy' }}"
