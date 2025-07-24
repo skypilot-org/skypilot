@@ -157,7 +157,7 @@ jobs:
           gcloud container clusters get-credentials skypilot-demo-2 --zone=${{ env.CLUSTER_ZONE }} --project=${{ secrets.GCP_PROJECT_ID }}
 
           # Get the current image from the staging deployment
-          STAGING_IMAGE=$(kubectl get deployment skypilot-demo-staging-api-service -n skypilot-demo-staging -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          STAGING_IMAGE=$(kubectl get deployment skypilot-demo-staging-api-server -n skypilot-demo-staging -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
 
           if [ -z "$STAGING_IMAGE" ]; then
             echo "❌ No staging deployment found. Please run skypilot-demo-staging first."
