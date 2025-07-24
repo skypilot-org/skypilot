@@ -906,6 +906,27 @@ class AWS(clouds.Cloud):
         identity_str = f'{user_identity[0]} [account={user_identity[1]}]'
         return identity_str
 
+    @classmethod
+    def get_account_id(cls, dryrun: bool = False) -> str:
+        """Get the AWS account ID, using workspace configuration if available."""
+        if dryrun:
+            return 'dryrun-account-id'
+        
+        # Check if workspace-specific account_id is configured
+        config_account_id = skypilot_config.get_workspace_cloud('aws').get(
+            'account_id', None)
+        if config_account_id:
+            return config_account_id
+        
+        # Fall back to getting account ID from current credentials
+        user_identity = cls.get_active_user_identity()
+        if user_identity is None:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to get AWS account ID. Please make sure you have '
+                'configured AWS credentials.')
+        # user_identity is [UserId, Account]
+        return user_identity[1]
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # The credentials file should not be uploaded if the user identity is
         # not SHARED_CREDENTIALS_FILE, since we cannot be sure if the currently

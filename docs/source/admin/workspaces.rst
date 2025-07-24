@@ -25,7 +25,7 @@ For example, assume:
 
 - Your organization has two teams, team-a and team-b.
 - SkyPilot API server is configured to use AWS and GCP.
-- You want team-a to use both infra, and team-b to use GCP only with a different project ID.
+- You want each team to use both AWS and GCP, but with different accounts/projects.
 
 The above is achieved by configuring the following section in the config file:
 
@@ -34,15 +34,17 @@ The above is achieved by configuring the following section in the config file:
    workspaces:
      team-a:
        # Use both AWS and GCP.
+       aws:
+         account_id: 123456789012
        gcp:
          project_id: project-id-for-team-a
 
      team-b:
-       # Use GCP only with a different project ID.
+       # Use AWS with a different account and GCP with a different project ID.
+       aws:
+         account_id: 987654321098
        gcp:
          project_id: project-id-for-team-b
-       aws:
-         disabled: true
 
       team-c:
          private: true
@@ -76,6 +78,10 @@ The above is achieved by configuring the following section in the config file:
              allowed_contexts:
                - node-pool-1
                - node-pool-2
+
+           aws:
+             disabled: false
+             account_id: AWS account ID
 
            gcp:
              disabled: false

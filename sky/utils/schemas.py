@@ -1495,10 +1495,10 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
     # Create pattern for not supported clouds, i.e.
-    # all clouds except gcp, kubernetes, ssh
+    # all clouds except gcp, aws, kubernetes, ssh, nebius
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
+        if cloud.lower() not in ['gcp', 'aws', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1536,6 +1536,19 @@ def get_config_schema():
                     'type': 'object',
                     'properties': {
                         'project_id': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        }
+                    },
+                    'additionalProperties': False,
+                },
+                'aws': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {
+                        'account_id': {
                             'type': 'string'
                         },
                         'disabled': {
