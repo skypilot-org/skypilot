@@ -27,7 +27,7 @@ on:
         type: boolean
         default: true
       branch:
-        description: 'Branch to deploy from'
+        description: 'Branch to deploy from (only works for skypilot-demo-staging, if you are deploying skypilot-demo, then staging-deployed-latest will be used and not modifiable - this is the cutoff that deployed to staging)'
         required: true
         type: string
         default: 'demo'
