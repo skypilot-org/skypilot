@@ -80,8 +80,8 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
       let detail = '';
       if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
         detail = ` (Project ID: ${cloudConfig.project_id})`;
-      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.account_id) {
-        detail = ` (Account ID: ${cloudConfig.account_id})`;
+      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.profile_name) {
+        detail = ` (Profile: ${cloudConfig.profile_name})`;
       }
       enabledDescriptions.push(
         <span key={`${cloud}-enabled`} className="block">

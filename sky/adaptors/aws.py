@@ -126,36 +126,38 @@ def session(check_credentials: bool = True, profile_name: Optional[str] = None):
     """Create an AWS session."""
     # Check for workspace-specific profile_name configuration
     from sky import skypilot_config
-    workspace_profile_name = profile_name or skypilot_config.get_workspace_cloud('aws').get(
-        'profile_name', None)
+    workspace_profile_name = (profile_name or
+                              skypilot_config.get_workspace_cloud('aws').get(
+                                  'profile_name', None))
 
     if workspace_profile_name:
         # Use the specified profile directly
         try:
             profile_session = _create_aws_object(
-                lambda: boto3.session.Session(profile_name=workspace_profile_name), 
-                'session'
-            )
-            
+                lambda: boto3.session.Session(
+                    profile_name=workspace_profile_name), 'session')
+
             if check_credentials and profile_session.get_credentials() is None:
                 raise botocore_exceptions().NoCredentialsError()
-                
+
             return profile_session
-            
+
         except Exception as e:
             # Provide helpful error message
-            error_msg = f'Failed to create session with profile "{workspace_profile_name}".'
-            
+            error_msg = ('Failed to create session with profile'
+                         f'"{workspace_profile_name}".')
+
             if 'could not be found' in str(e).lower():
                 error_msg += (
                     f'\n\nProfile "{workspace_profile_name}" not found. '
-                    f'Available options:'
-                    f'\n1. Configure the profile: aws configure --profile {workspace_profile_name}'
-                    f'\n2. For AWS SSO: aws configure sso --profile {workspace_profile_name}'
-                    f'\n3. Check existing profiles: aws configure list-profiles')
-            
+                    'Available options: \n1. Configure the profile: aws '
+                    f'configure --profile {workspace_profile_name}\n2. For '
+                    'AWS SSO: aws configure sso --profile '
+                    f'{workspace_profile_name} \n3. Check existing profiles:'
+                    'aws configure list-profiles')
+
             error_msg += f'\n\nOriginal error: {e}'
-            
+
             raise RuntimeError(error_msg) from e
     else:
         # No workspace profile_name configured, use standard session
@@ -216,8 +218,9 @@ def resource(service_name: str, **kwargs):
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials, profile_name=profile_name).resource(
-            service_name, **kwargs), 'resource')
+        lambda: session(check_credentials=check_credentials,
+                        profile_name=profile_name).resource(
+                            service_name, **kwargs), 'resource')
 
 
 # New typing overloads can be added as needed.
@@ -259,8 +262,9 @@ def client(service_name: str, **kwargs):
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials, profile_name=profile_name).client(
-            service_name, **kwargs), 'client')
+        lambda: session(check_credentials=check_credentials,
+                        profile_name=profile_name).client(
+                            service_name, **kwargs), 'client')
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
