@@ -911,13 +911,13 @@ class AWS(clouds.Cloud):
         """Get the AWS account ID, using workspace configuration if available."""
         if dryrun:
             return 'dryrun-account-id'
-        
+
         # Check if workspace-specific account_id is configured
         config_account_id = skypilot_config.get_workspace_cloud('aws').get(
             'account_id', None)
         if config_account_id:
             return config_account_id
-        
+
         # Fall back to getting account ID from current credentials
         user_identity = cls.get_active_user_identity()
         if user_identity is None:
