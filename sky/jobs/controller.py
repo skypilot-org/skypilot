@@ -125,7 +125,9 @@ class JobsController:
                                                  log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
-    def _cleanup_cluster(self, cluster_name: str) -> None:
+    def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
+        if cluster_name is None:
+            return
         if self._pool is None:
             managed_job_utils.terminate_cluster(cluster_name)
         else:
@@ -205,7 +207,7 @@ class JobsController:
         # to a pool. This will be updated when we later calls the `launch`
         # or `recover` function from the strategy executor.
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id) if self._pool is None else ''
+            task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id,
             self._pool)
@@ -244,8 +246,7 @@ class JobsController:
             # Update the cluster name when using cluster pool.
             cluster_name, job_id_on_pool_cluster = (
                 managed_job_state.get_pool_submit_info(self._job_id))
-            assert cluster_name is not None, (cluster_name,
-                                              job_id_on_pool_cluster)
+        assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
             managed_job_state.set_started(job_id=self._job_id,

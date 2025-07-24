@@ -49,7 +49,7 @@ class StrategyExecutor:
 
     RETRY_INIT_GAP_SECONDS = 60
 
-    def __init__(self, cluster_name: str, backend: 'backends.Backend',
+    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
                  job_id: int, task_id: int, pool: Optional[str]) -> None:
         """Initialize the strategy executor.
@@ -77,7 +77,7 @@ class StrategyExecutor:
         self.job_id_on_pool_cluster: Optional[int] = None
 
     @classmethod
-    def make(cls, cluster_name: str, backend: 'backends.Backend',
+    def make(cls, cluster_name: Optional[str], backend: 'backends.Backend',
              task: 'task_lib.Task', job_id: int, task_id: int,
              pool: Optional[str]) -> 'StrategyExecutor':
         """Create a strategy from a task."""
@@ -142,9 +142,11 @@ class StrategyExecutor:
     def _try_cancel_jobs(self):
         from sky import core  # pylint: disable=import-outside-toplevel
 
+        if self.cluster_name is None:
+            return
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
-        if handle is None:
+        if handle is None or self.pool is not None:
             return
         try:
             usage_lib.messages.usage.set_internal()
@@ -191,6 +193,7 @@ class StrategyExecutor:
             The timestamp of when the job is submitted, or None if failed to
             submit.
         """
+        assert self.cluster_name is not None
         status = None
         job_checking_retry_cnt = 0
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
@@ -252,6 +255,8 @@ class StrategyExecutor:
         return None
 
     def _cleanup_cluster(self) -> None:
+        if self.cluster_name is None:
+            return
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
         else:
@@ -312,6 +317,7 @@ class StrategyExecutor:
                     try:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
+                            assert self.cluster_name is not None
                             # Detach setup, so that the setup failure can be
                             # detected by the controller process (job_status ->
                             # FAILED_SETUP).
@@ -467,7 +473,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
-    def __init__(self, cluster_name: str, backend: 'backends.Backend',
+    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
                  job_id: int, task_id: int, pool: Optional[str]) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
@@ -484,7 +490,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 recovery: bool = False) -> Optional[float]:
         job_submitted_at = super()._launch(max_retry, raise_on_failure,
                                            recovery)
-        if job_submitted_at is not None:
+        if job_submitted_at is not None and self.cluster_name is not None:
             # Only record the cloud/region if the launch is successful.
             handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)
