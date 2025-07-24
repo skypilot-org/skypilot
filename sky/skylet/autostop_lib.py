@@ -1,4 +1,5 @@
 """Autostop utilities."""
+import enum
 import pickle
 import shlex
 import subprocess
@@ -11,6 +12,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import configs
 from sky.skylet import constants
 from sky.utils import message_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -31,6 +33,38 @@ _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
 
 
+class AutostopWaitFor(enum.Enum):
+    """Enum for the Autostop behaviour.
+
+    JOBS: Wait for jobs to finish.
+    JOBS_AND_SSH: Wait for jobs to finish and all SSH sessions to be closed.
+    NONE: Unconditionally stop the cluster after the idle time.
+    """
+    JOBS = 'jobs'
+    JOBS_AND_SSH = 'jobs_and_ssh'
+    NONE = 'none'
+
+    @classmethod
+    def from_str(cls, mode: str) -> 'AutostopWaitFor':
+        """Returns the enum value for the given string."""
+        if mode.lower() == cls.JOBS.value:
+            return cls.JOBS
+        elif mode.lower() == cls.JOBS_AND_SSH.value:
+            return cls.JOBS_AND_SSH
+        elif mode.lower() == cls.NONE.value:
+            return cls.NONE
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unsupported autostop wait mode: '
+                                 f'{mode}. The mode must be either '
+                                 f'\'{cls.JOBS.value}\', '
+                                 f'\'{cls.JOBS_AND_SSH.value}\' or '
+                                 f'\'{cls.NONE.value}\'. ')
+
+
+DEFAULT_AUTOSTOP_WAIT_FOR: AutostopWaitFor = AutostopWaitFor.JOBS_AND_SSH
+
+
 class AutostopConfig:
     """Autostop configuration."""
 
@@ -38,12 +72,14 @@ class AutostopConfig:
                  autostop_idle_minutes: int,
                  boot_time: float,
                  backend: Optional[str],
+                 wait_for: AutostopWaitFor,
                  down: bool = False):
         assert autostop_idle_minutes < 0 or backend is not None, (
             autostop_idle_minutes, backend)
         self.autostop_idle_minutes = autostop_idle_minutes
         self.boot_time = boot_time
         self.backend = backend
+        self.wait_for = wait_for
         self.down = down
 
     def __setstate__(self, state: dict):
@@ -54,15 +90,18 @@ class AutostopConfig:
 def get_autostop_config() -> AutostopConfig:
     config_str = configs.get_config(_AUTOSTOP_CONFIG_KEY)
     if config_str is None:
-        return AutostopConfig(-1, -1, None)
+        return AutostopConfig(-1, -1, None, DEFAULT_AUTOSTOP_WAIT_FOR)
     return pickle.loads(config_str)
 
 
-def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
+def set_autostop(idle_minutes: int, backend: Optional[str],
+                 wait_for: AutostopWaitFor, down: bool) -> None:
     boot_time = psutil.boot_time()
-    autostop_config = AutostopConfig(idle_minutes, boot_time, backend, down)
+    autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
+                                     down)
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
-    logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}.')
+    logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
+                 f'wait_for {wait_for.value}.')
     # Reset timer whenever an autostop setting is submitted, i.e. the idle
     # time will be counted from now.
     set_last_active_time_to_now()
@@ -137,13 +176,20 @@ class AutostopCodeGen:
 
       >> codegen = AutostopCodeGen.set_autostop(...)
     """
-    _PREFIX = ['from sky.skylet import autostop_lib']
+    _PREFIX = ['from sky.skylet import autostop_lib, constants']
 
     @classmethod
-    def set_autostop(cls, idle_minutes: int, backend: str, down: bool) -> str:
+    def set_autostop(cls,
+                     idle_minutes: int,
+                     backend: str,
+                     wait_for: AutostopWaitFor,
+                     down: bool = False) -> str:
         code = [
-            f'autostop_lib.set_autostop({idle_minutes}, {backend!r},'
-            f' {down})',
+            f'\nif getattr(constants, "SKYLET_LIB_VERSION", 1) < 4: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, {down})'
+            f'\nelse: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down})',
         ]
         return cls._build(code)
 
