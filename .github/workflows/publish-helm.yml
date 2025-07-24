@@ -123,23 +123,19 @@ jobs:
               echo "$d"
               helm package "$d" -u -d dest
           done
-          cd dest
-          sleep 2
-          tar -xzf skypilot-nightly-0.0.0.tgz
-          ls -lart skypilot-nightly
 
-      # - name: Push New Files
-      #   shell: bash
-      #   working-directory: dest
-      #   run: |
-      #     helm repo index . --url ${{ env.HELM_REPO_URL }}
-      #     git config user.name "github-actions[bot]"
-      #     git config user.email "github-actions[bot]@users.noreply.github.com"
-      #     # Add both untracked files and .tgz files explicitly
-      #     git add $(git ls-files -o --exclude-standard)
-      #     git add *.tgz
-      #     git add index.yaml
-      #     # Show what's being committed for debugging
-      #     git status
-      #     git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
-      #     git push origin main
+      - name: Push New Files
+        shell: bash
+        working-directory: dest
+        run: |
+          helm repo index . --url ${{ env.HELM_REPO_URL }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Add both untracked files and .tgz files explicitly
+          git add $(git ls-files -o --exclude-standard)
+          git add *.tgz
+          git add index.yaml
+          # Show what's being committed for debugging
+          git status
+          git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
+          git push origin main
