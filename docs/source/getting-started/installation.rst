@@ -571,21 +571,6 @@ Verify your configuration:
   # Test the configuration
   AWS_SHARED_CREDENTIALS_FILE=~/.tigris/credentials aws s3 ls --profile tigris
 
-You can now use Tigris buckets in your SkyPilot tasks with the :code:`tigris://` prefix:
-
-.. code-block:: yaml
-
-  # Example: Using an existing Tigris bucket
-  file_mounts:
-    /data: tigris://my-tigris-bucket
-
-  # Example: Creating a new Tigris bucket with local data
-  file_mounts:
-    /dataset:
-      name: my-dataset-bucket
-      source: ~/my-data
-      store: tigris
-
 .. note::
 
   Tigris supports both global endpoint (https://t3.storage.dev) and Fly.io endpoint (https://fly.storage.tigris.dev). SkyPilot will automatically select the appropriate endpoint based on your environment.
