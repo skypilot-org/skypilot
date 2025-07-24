@@ -515,14 +515,14 @@ export const getInfraSummary = (replicaInfo) => {
     try {
       const cloud = worker.cloud;
       const region = worker.region;
-      
+
       if (!cloudData[cloud]) {
         cloudData[cloud] = {
           count: 0,
-          regions: new Set()
+          regions: new Set(),
         };
       }
-      
+
       cloudData[cloud].count += 1;
       if (region) {
         cloudData[cloud].regions.add(region);
@@ -532,7 +532,7 @@ export const getInfraSummary = (replicaInfo) => {
       if (!cloudData['Unknown']) {
         cloudData['Unknown'] = {
           count: 0,
-          regions: new Set()
+          regions: new Set(),
         };
       }
       cloudData['Unknown'].count += 1;
@@ -543,12 +543,17 @@ export const getInfraSummary = (replicaInfo) => {
   const infraCounts = {};
   Object.entries(cloudData).forEach(([cloud, data]) => {
     const regionCount = data.regions.size;
-    
+
     // Use 'context' for Kubernetes, 'region' for other clouds
-    const isKubernetes = cloud.toLowerCase().includes('kubernetes') || cloud.toLowerCase().includes('k8s');
+    const isKubernetes =
+      cloud.toLowerCase().includes('kubernetes') ||
+      cloud.toLowerCase().includes('k8s');
     const locationTerm = isKubernetes ? 'context' : 'region';
-    const locationText = regionCount === 1 ? `1 ${locationTerm}` : `${regionCount} ${locationTerm}s`;
-    
+    const locationText =
+      regionCount === 1
+        ? `1 ${locationTerm}`
+        : `${regionCount} ${locationTerm}s`;
+
     const key = regionCount > 0 ? `${cloud} (${locationText})` : cloud;
     infraCounts[key] = data.count;
   });

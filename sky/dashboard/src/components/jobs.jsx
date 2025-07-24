@@ -367,8 +367,8 @@ export function ManagedJobs() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-8">
           <div
             className={`cursor-pointer border-b-2 pb-1 ${
               activeMainTab === 'jobs'
@@ -411,7 +411,7 @@ export function ManagedJobs() {
       {/* Filters and Content */}
       {activeMainTab === 'jobs' && (
         <>
-          <div className="flex flex-wrap items-center gap-2 mb-1 min-h-[20px]">
+          <div className="flex flex-wrap items-center gap-2 min-h-[20px]">
             <div className="w-full sm:w-auto">
               <FilterDropdown
                 propertyList={PROPERTY_OPTIONS}
@@ -769,9 +769,9 @@ export function ManagedJobsTable({
 
   return (
     <div className="relative">
-      <div className="flex flex-col space-y-1 mb-1">
+      <div className="flex flex-col">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm mb-1">
+        <div className="flex flex-wrap items-center text-sm">
           <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
             {!loading && (!data || data.length === 0) && !isInitialLoad && (
