@@ -160,7 +160,7 @@ you can provide the registry authentication details using :ref:`task environment
     .. tab-item:: GCP GCR
         :sync: gcp-artifact-registry-tab
 
-        We support private GCP Artifact Registry (GAR) with a service account key.
+        We support private GCP Artifact Registry (GCR) with a service account key.
         See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_. Note that the ``SKYPILOT_DOCKER_USERNAME`` needs to be set to ``_json_key``.
 
 
