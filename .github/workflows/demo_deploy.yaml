@@ -236,7 +236,6 @@ jobs:
               --set skypilot.apiService.image=$DOCKER_IMAGE \
               --set skypilot.apiService.skipResourceCheck=true \
               --set skypilot.ingress-nginx.enabled=false \
-              --set skypilot.ingress.path=/demo \
               --set "skypilot.apiService.extraVolumes[0].configMap.name=skypilot-demo-demo-users" \
               --set "skypilot.apiService.extraVolumes[1].configMap.name=skypilot-demo-demo-clusters" \
               --set "skypilot.apiService.extraVolumes[2].configMap.name=skypilot-demo-demo-jobs" \
