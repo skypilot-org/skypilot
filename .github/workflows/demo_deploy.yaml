@@ -145,7 +145,7 @@ jobs:
             BASE_PATH="/staging/dashboard"
             echo "Building staging image with basePath: $BASE_PATH"
           elif [ "${{ inputs.deployment_target }}" == "skypilot-demo" ]; then
-            BASE_PATH="/demo/dashboard"
+            BASE_PATH="/dashboard"
             echo "Building demo image with basePath: $BASE_PATH"
           else
             echo "Unknown deployment target: ${{ inputs.deployment_target }}"
@@ -268,7 +268,7 @@ jobs:
             fi
           fi
           if [ "${{ inputs.deployment_target }}" == "skypilot-demo" ]; then
-            ACCESS_PATH="/demo/dashboard"
+            ACCESS_PATH="/dashboard"
           else
             ACCESS_PATH="/staging/dashboard"
           fi
