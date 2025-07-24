@@ -523,10 +523,10 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
-                      get_end_time: bool) -> float:
+                      job_id: Optional[int], get_end_time: bool) -> float:
     """Get the submitted/ended time of the job."""
     code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
-        job_id=None, get_ended_time=get_end_time)
+        job_id=job_id, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
@@ -540,14 +540,17 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
 
 
 def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
-                            cluster_name: str) -> float:
+                            cluster_name: str, job_id: Optional[int]) -> float:
     """Try to get the end time of the job.
 
     If the job is preempted or we can't connect to the instance for whatever
     reason, fall back to the current time.
     """
     try:
-        return get_job_timestamp(backend, cluster_name, get_end_time=True)
+        return get_job_timestamp(backend,
+                                 cluster_name,
+                                 job_id=job_id,
+                                 get_end_time=True)
     except exceptions.CommandError as e:
         if e.returncode == 255:
             # Failed to connect - probably the instance was preempted since the

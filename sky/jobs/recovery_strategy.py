@@ -242,7 +242,10 @@ class StrategyExecutor:
             if status is not None and status > job_lib.JobStatus.INIT:
                 try:
                     job_submitted_at = managed_job_utils.get_job_timestamp(
-                        self.backend, self.cluster_name, get_end_time=False)
+                        self.backend,
+                        self.cluster_name,
+                        self.job_id_on_pool_cluster,
+                        get_end_time=False)
                     return job_submitted_at
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry

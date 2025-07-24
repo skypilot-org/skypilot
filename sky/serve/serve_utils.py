@@ -1381,7 +1381,7 @@ class ServeCodeGen:
     def get_service_status(cls, service_names: Optional[List[str]],
                            pool: bool) -> str:
         code = [
-            f'msg = serve_utils.get_service_status_encoded({service_names!r},'
+            f'msg = serve_utils.get_service_status_encoded({service_names!r}, '
             f'pool={pool})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

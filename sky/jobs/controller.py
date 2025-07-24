@@ -311,7 +311,7 @@ class JobsController:
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 success_end_time = managed_job_utils.try_to_get_job_end_time(
-                    self._backend, cluster_name)
+                    self._backend, cluster_name, job_id_on_pool_cluster)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
@@ -387,7 +387,7 @@ class JobsController:
                       job_status == job_lib.JobStatus.FAILED_DRIVER):
                     # The user code has probably crashed, fail immediately.
                     end_time = managed_job_utils.try_to_get_job_end_time(
-                        self._backend, cluster_name)
+                        self._backend, cluster_name, job_id_on_pool_cluster)
                     logger.info(
                         f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
