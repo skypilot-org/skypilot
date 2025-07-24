@@ -272,7 +272,7 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
 Upgrade strategy for the API server deployment. Available options are:
 
 - ``Recreate``: Delete the old pod first and create a new one (has downtime).
-- ``RollingUpdate``: [EXPERIMENTAL] Create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
+- ``RollingUpdate``: Create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
 
 When set to ``RollingUpdate``, an external database must be configured via :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`.
 
