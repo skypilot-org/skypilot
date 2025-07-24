@@ -715,9 +715,6 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
         service_name: The name of the service.
         cluster_name: The name of the cluster to release.
     """
-    if not cluster_name:
-        logger.info('Skip clean up dummy cluster.')
-        return
     service_status = _get_service_status(service_name,
                                          pool=True,
                                          with_replica_info=False)
