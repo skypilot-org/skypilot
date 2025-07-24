@@ -273,38 +273,21 @@ export default function PoolDetailPage() {
                 <InfraBadges replicaInfo={poolData.replica_info} />
               </div>
 
-              {/* Placeholder for second column if needed */}
-              <div></div>
-            </div>
-
-            <div className="pt-2 mt-2">
-              <div className="grid grid-cols-2 gap-x-8 gap-y-2">
-                {/* Row 2: Workers | Policy */}
-                <div>
-                  <div className="text-sm font-medium text-gray-700 mb-1">
-                    Workers
-                  </div>
-                  <div className="text-sm font-medium">
-                    {getWorkersCount(poolData.replica_info)}
-                  </div>
+              {/* Row 2: Workers | Policy */}
+              <div>
+                <div className="text-sm font-medium text-gray-700 mb-1">
+                  Workers
                 </div>
-
-                <div>
-                  <div className="text-sm font-medium text-gray-700 mb-1">
-                    Policy
-                  </div>
-                  <div className="text-sm font-medium">
-                    {poolData.policy || '-'}
-                  </div>
+                <div className="text-sm">
+                  {getWorkersCount(poolData.replica_info)}
                 </div>
+              </div>
 
-                {/* Row 3: Status */}
-                <div>
-                  <div className="text-sm font-medium text-gray-700 mb-1">
-                    Status
-                  </div>
-                  <StatusBadge status={poolData.status} />
+              <div>
+                <div className="text-sm font-medium text-gray-700 mb-1">
+                  Policy
                 </div>
+                <div className="text-sm">{poolData.policy || '-'}</div>
               </div>
             </div>
 

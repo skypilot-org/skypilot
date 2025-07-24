@@ -28,7 +28,7 @@ export const getStatusStyle = (status) => {
 
     // Job specific statuses
     case 'PENDING':
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-gray-100 text-gray-800';
     case 'SUCCEEDED':
       return 'bg-blue-50 text-blue-700';
     case 'FAILED':

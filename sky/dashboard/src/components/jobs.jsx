@@ -1948,19 +1948,13 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableHead className="whitespace-nowrap w-20">
                 # Workers
               </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap w-24"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading || isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -1988,15 +1982,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   </TableCell>
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
                   <TableCell>{getWorkersCount(pool.replica_info)}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={pool.status} />
-                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center py-6 text-gray-500"
                 >
                   No pools found
