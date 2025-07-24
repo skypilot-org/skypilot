@@ -132,6 +132,8 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
 def set_api_cookie_jar(cookie_jar: CookieJar,
                        create_if_not_exists: bool = True) -> None:
     """Updates the file cookie jar with the given cookie jar."""
+    if len(cookie_jar) == 0:
+        return
     cookie_path = get_api_cookie_jar_path()
     if not cookie_path.exists() and not create_if_not_exists:
         # if the file doesn't exist and we don't want to create it, do nothing
@@ -351,7 +353,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                      error=version_info.error)
 
             cookies = get_cookies_from_response(response)
-            set_api_cookie_jar(cookies, create_if_not_exists=False)
+            # Save or refresh the cookie jar in case of session affinity and
+            # OAuth.
+            set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
         except (json.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.

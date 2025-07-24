@@ -827,7 +827,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
         with admin_policy_utils.apply_and_use_config_in_current_request(
-                dag, request_options=validate_body.request_options) as dag:
+                dag,
+                request_options=validate_body.get_request_options()) as dag:
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
             # with `upload_mounts_to_api_server`.

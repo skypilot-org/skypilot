@@ -209,3 +209,47 @@ tests:
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
           value: 80 
+
+  # Test cases for upgradeStrategy-related annotations
+  - it: should add session affinity annotations for RollingUpdate strategy
+    set:
+      ingress.enabled: true
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+          value: "cookie"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+          value: "SKYPILOT_ROUTEID"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+          value: "http_502 non_idempotent"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
+          value: "3"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-change-on-failure"]
+          value: "true"
+
+  - it: should not add session affinity annotations for Recreate strategy
+    set:
+      ingress.enabled: true
+      apiService.upgradeStrategy: Recreate
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
