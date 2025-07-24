@@ -110,6 +110,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`specific_reservations <config-yaml-aws-specific-reservations>`:
       - cr-a1234567
     :ref:`remote_identity <config-yaml-aws-remote-identity>`: LOCAL_CREDENTIALS
+    :ref:`post_provision_runcmd <config-yaml-aws-post-provision-runcmd>`:
+      - echo "hello world!"
 
   :ref:`gcp <config-yaml-gcp>`:
     :ref:`labels <config-yaml-gcp-labels>`:
@@ -709,6 +711,30 @@ Supported values:
       - my-cluster-name: my-service-account-1
       - sky-serve-controller-*: my-service-account-2
       - "*": my-default-service-account
+
+.. _config-yaml-aws-post-provision-runcmd:
+
+``aws.post_provision_runcmd``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run commands during the instance initialization phase (optional).
+
+This is executed through cloud-init's ``runcmd``, which is useful for doing any setup that must happen right after the instance starts, such as:
+
+- Configuring system settings
+- Installing certificates
+- Installing packages
+
+Each item can be either a string or a list.
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    post_provision_runcmd:
+      - echo "hello world!"
+      - [ls, -l, /]
 
 
 .. _config-yaml-gcp:
