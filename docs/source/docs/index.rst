@@ -25,6 +25,7 @@ Welcome to SkyPilot!
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
 
+
 .. grid:: 1 1 1 1
     :gutter: 3
 
@@ -33,7 +34,8 @@ Welcome to SkyPilot!
         :link: https://demo.skypilot.co/dashboard/
         :text-align: center
 
-        👋 **Demo**: Click to see the SkyPilot demo dashboard
+        🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
+
 
 
 SkyPilot is an open-source framework for running AI and batch workloads on any infra.
