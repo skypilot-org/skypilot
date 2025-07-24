@@ -4352,7 +4352,7 @@ def jobs_launch(
         batch_ids = job_id_handle[0]
         bids = ','.join(map(str, batch_ids))
         click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
-                    f'{colorama.Style.RESET_ALL}.'
+                    f'{colorama.Style.RESET_ALL}.\n'
                     f'To stream job logs: {colorama.Style.BRIGHT}'
                     f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}')
 
