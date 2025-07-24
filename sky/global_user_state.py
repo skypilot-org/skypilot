@@ -9,7 +9,6 @@ Concepts:
 import functools
 import json
 import os
-import pathlib
 import pickle
 import re
 import time
@@ -248,24 +247,20 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
+
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with migration_utils.db_lock(migration_utils.GLOBAL_USER_STATE_DB_NAME):
-        if _SQLALCHEMY_ENGINE is None:
-            conn_string = None
-            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-                conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                logger.debug(f'using db URI from {conn_string}')
-                engine = sqlalchemy.create_engine(conn_string,
-                                                  poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = os.path.expanduser('~/.sky/state.db')
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
-            create_table(engine)
-            _SQLALCHEMY_ENGINE = engine
+
+    # get an engine to the db
+    engine = migration_utils.get_engine('state')
+
+    # run migrations if needed
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
+
+    # return engine
+    _SQLALCHEMY_ENGINE = engine
     return _SQLALCHEMY_ENGINE
 
 
