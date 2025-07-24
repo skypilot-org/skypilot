@@ -254,7 +254,6 @@ def get_az_mount_cmd(container_name: str,
                      f'{bucket_sub_path_arg}'
                      f'--container-name {container_name} {custom_mount_options}').strip()
     
-    print(blobfuse2_cmd)
     # 1. Set -o nonempty to bypass empty directory check of blobfuse2 when using
     # fusermount-wrapper, since the mount is delegated to fusermount and
     # blobfuse2 only get the mounted fd.
