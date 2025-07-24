@@ -36,6 +36,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
+    _should_optimize: bool = True,
 ) -> server_common.RequestId:
     """Launches a managed job.
 
@@ -66,8 +67,9 @@ def launch(
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, at_client_side=True) as dag:
         sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
+        if _should_optimize:
+            request_id = sdk.optimize(dag)
+            sdk.stream_and_get(request_id)
         if _need_confirmation:
             prompt = f'Launching a managed job {dag.name!r}. Proceed?'
             if prompt is not None:

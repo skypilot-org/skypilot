@@ -4268,7 +4268,11 @@ def jobs_launch(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    request_id = managed_jobs.launch(
+        dag,
+        name,
+        _need_confirmation=not yes,
+        _should_optimize=not (async_call or detach_run))
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
