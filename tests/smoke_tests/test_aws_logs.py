@@ -64,7 +64,7 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                 'sleep 10',
                 # Query logs for the job
                 (f'output=$(aws --region us-east-1 logs filter-log-events --log-group-name skypilot-logs '
-                 f'--filter-pattern "{name}-job" '
+                 f'--filter-pattern "%{name}-job%" '
                  f'--start-time $(date -d "{one_hour_ago}" +%s)000 '
                  f'--query "events[*].message" --output text) && '
                  f'{validate_logs_cmd}'),
@@ -80,7 +80,7 @@ def test_log_collection_to_aws_cloudwatch(generic_cloud: str):
                  f'--query "events[*].message" --output text) && '
                  f'{validate_logs_cmd}'),
             ],
-            # f'sky down -y {name}',
+            f'sky down -y {name}',
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
