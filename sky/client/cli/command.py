@@ -1661,7 +1661,7 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
               required=False,
               help='Also show sky serve services, if any.')
 @click.option('--show-pools/--no-show-pools',
-              default=False,
+              default=True,
               is_flag=True,
               required=False,
               help='Also show cluster pools, if any.')
@@ -1939,8 +1939,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(pool_status_request_id, silent=True)
                     num_pools = -1
                     msg = 'KeyboardInterrupt'
-        click.echo(msg)
         if num_pools is not None:
+            if num_pools > 0:
+                click.echo(msg)
             hints.append(
                 controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
                 in_progress_hint(True))

@@ -644,6 +644,14 @@ class ReplicaManager:
         # Oldest version among the currently provisioned and launched replicas
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
 
+    def _consecutive_failure_threshold_timeout(self) -> int:
+        """The timeout for the consecutive failure threshold in seconds.
+
+        We reduce the timeout for pool to 10 seconds to make the pool more
+        responsive to the failure.
+        """
+        return 10 if self._is_pool else 180
+
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
         """Scale up the service by 1 replica with resources_override.
@@ -1261,8 +1269,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                         consecutive_failure_time = (
                             info.consecutive_failure_times[-1] -
                             info.consecutive_failure_times[0])
-                        if (consecutive_failure_time >=
-                                _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
+                        failure_threshold = (
+                            self._consecutive_failure_threshold_timeout())
+                        if consecutive_failure_time >= failure_threshold:
                             logger.info(
                                 f'Replica {info.replica_id} is not ready for '
                                 'too long and exceeding consecutive failure '
@@ -1273,8 +1282,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                 f'Replica {info.replica_id} is not ready '
                                 'but within consecutive failure threshold '
                                 f'({consecutive_failure_time}s / '
-                                f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
-                                'Skipping.')
+                                f'{failure_threshold}s). Skipping.')
                     else:
                         initial_delay_seconds = self._get_initial_delay_seconds(
                             info.version)
