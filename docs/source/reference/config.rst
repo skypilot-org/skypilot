@@ -717,7 +717,7 @@ Supported values:
 
 Run commands during the instance initialization phase (optional).
 
-This is useful for doing any setup that must happen right after the instance starts, such as:
+This is executed through cloud-init's ``runcmd``, which is useful for doing any setup that must happen right after the instance starts, such as:
 
 - Configuring system settings
 - Installing certificates
