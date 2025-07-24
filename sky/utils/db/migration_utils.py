@@ -47,6 +47,11 @@ def get_alembic_config(engine: sqlalchemy.engine.Engine, section: str):
     # Override the database URL to match SkyPilot's current connection
     # Use render_as_string to get the full URL with password
     url = engine.url.render_as_string(hide_password=False)
+    # Replace % with %% to escape the % character in the URL
+    # set_section_option uses variable interpolation, which treats % as a
+    # special character.
+    # any '%' symbol not used for interpolation needs to be escaped.
+    url = url.replace('%', '%%')
     alembic_cfg.set_section_option(section, 'sqlalchemy.url', url)
 
     return alembic_cfg
