@@ -11,6 +11,7 @@ import shlex
 import shutil
 import threading
 import time
+import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Generic, Iterator,
                     List, Optional, TextIO, Type, TypeVar, Union)
@@ -560,6 +561,7 @@ def _get_service_status(
         return None
     if record['pool'] != pool:
         return None
+
     record['pool_yaml'] = ''
     if record['pool']:
         latest_yaml_path = generate_task_yaml_file_name(service_name,
@@ -571,6 +573,18 @@ def _get_service_status(
             svc.pop('pool', None)
             original_config['pool'] = svc
         record['pool_yaml'] = common_utils.dump_yaml_str(original_config)
+
+    record['target_num_replicas'] = 0
+    try:
+        controller_port = record['controller_port']
+        resp = requests.get(
+            _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+            '/autoscaler/info')
+        record['target_num_replicas'] = resp.json()['target_num_replicas']
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to get autoscaler info for {service_name}: {e}\n'
+                     f'Traceback: {traceback.format_exc()}')
+
     if with_replica_info:
         if record['pool']:
             record['replica_info'] = [{

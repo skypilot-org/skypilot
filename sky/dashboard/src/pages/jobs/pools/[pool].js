@@ -77,12 +77,14 @@ export default function PoolDetailPage() {
   }, [poolName]);
 
   // Helper functions
-  const getWorkersCount = (replicaInfo) => {
-    if (!replicaInfo || replicaInfo.length === 0) return '0';
-    const readyWorkers = replicaInfo.filter(
+  const getWorkersCount = (pool) => {
+    if (!pool || !pool.replica_info || pool.replica_info.length === 0)
+      return '0 (target: 0)';
+    const readyWorkers = pool.replica_info.filter(
       (worker) => worker.status === 'READY'
     ).length;
-    return readyWorkers.toString();
+    const targetWorkers = pool.target_num_replicas || 0;
+    return `${readyWorkers} (target: ${targetWorkers})`;
   };
 
   // Using shared getInfraSummary from utils
@@ -278,9 +280,7 @@ export default function PoolDetailPage() {
                 <div className="text-sm font-medium text-gray-700 mb-1">
                   Workers
                 </div>
-                <div className="text-sm">
-                  {getWorkersCount(poolData.replica_info)}
-                </div>
+                <div className="text-sm">{getWorkersCount(poolData)}</div>
               </div>
 
               <div>

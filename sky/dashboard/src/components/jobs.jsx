@@ -1879,13 +1879,15 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     setCurrentPage(1);
   };
 
-  const getWorkersCount = (replicaInfo) => {
-    if (!replicaInfo || replicaInfo.length === 0) return '0';
+  const getWorkersCount = (pool) => {
+    if (!pool || !pool.replica_info || pool.replica_info.length === 0)
+      return '0 (target: 0)';
 
-    const readyWorkers = replicaInfo.filter(
+    const readyWorkers = pool.replica_info.filter(
       (worker) => worker.status === 'READY'
     ).length;
-    return readyWorkers.toString();
+    const targetWorkers = pool.target_num_replicas || 0;
+    return `${readyWorkers} (target: ${targetWorkers})`;
   };
 
   const formatUptime = (uptime) => {
@@ -1981,7 +1983,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     <InfraBadges replicaInfo={pool.replica_info} />
                   </TableCell>
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
-                  <TableCell>{getWorkersCount(pool.replica_info)}</TableCell>
+                  <TableCell>{getWorkersCount(pool)}</TableCell>
                 </TableRow>
               ))
             ) : (
