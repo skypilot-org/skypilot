@@ -59,8 +59,8 @@ _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
 
 # Configuration for file mount compression
-_COMPRESSION_THRESHOLD_FILE_COUNT = 1  # Compress if more or equal to 1 files
-_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = 0  # Compress if total size > 50MB
+_COMPRESSION_THRESHOLD_FILE_COUNT = 10  # Compress if more or equal to 10 files
+_COMPRESSION_THRESHOLD_TOTAL_SIZE_MB = 50  # Compress if total size > 50MB
 _COMPRESSED_FILE_SUFFIX = '.skypilot.tar.gz'
 
 
