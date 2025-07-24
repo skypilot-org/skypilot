@@ -28,17 +28,17 @@
     Run AI on Any Infra — Unified, Faster, Cheaper
 </h3>
 
-----
-
 <div align="center">
 
 #### [🌟 **SkyPilot Demo** 🌟](https://demo.skypilot.co/dashboard/): Click to see a 1-minute tour
 
 </div>
 
+----
+
 :fire: *News* :fire:
 - [Jul 2025] SkyPilot v0.10.0 released! [**blog post**](https://blog.skypilot.co/announcing-skypilot-0.10.0/), [**release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.10.0)
-- [Jul 2025] Two-part blog series, `The Evolution of AI Job Orchestration`! [(Part 1) Running AI jobs on GPU Neoclouds](https://blog.skypilot.co/ai-job-orchestration-pt1-gpu-neoclouds/), [(Part 2) The AI-Native Control Plane & Orchestration that Finally Works for ML](https://blog.skypilot.co/ai-job-orchestration-pt2-ai-control-plane/)
+- [Jul 2025] Two-part blog series, `The Evolution of AI Job Orchestration`: (1) [Running AI jobs on GPU Neoclouds](https://blog.skypilot.co/ai-job-orchestration-pt1-gpu-neoclouds/), (2) [The AI-Native Control Plane & Orchestration that Finally Works for ML](https://blog.skypilot.co/ai-job-orchestration-pt2-ai-control-plane/)
 - [Apr 2025] Spin up **Qwen3** on your cluster/cloud: [**example**](./llm/qwen/)
 - [Mar 2025] Run and serve **Google Gemma 3** using SkyPilot [**example**](./llm/gemma3/)
 - [Feb 2025] Prepare and serve **Retrieval Augmented Generation (RAG) with DeepSeek-R1**: [**blog post**](https://blog.skypilot.co/deepseek-rag), [**example**](./llm/rag/)
