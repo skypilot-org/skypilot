@@ -126,11 +126,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Get alembic config for spot jobs db and run migrations
-    alembic_config = migration_utils.get_alembic_config(
-        engine, migration_utils.SPOT_JOBS_DB_NAME)
-    alembic_config.config_ini_section = migration_utils.SPOT_JOBS_DB_NAME
-    migration_utils.safe_alembic_upgrade(engine, alembic_config,
+    migration_utils.safe_alembic_upgrade(engine,
+                                         migration_utils.SPOT_JOBS_DB_NAME,
                                          migration_utils.SPOT_JOBS_VERSION)
 
 
@@ -144,9 +141,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     engine = migration_utils.get_engine('spot_jobs')
 
     # run migrations if needed
-    migration_utils.safe_alembic_upgrade(engine,
-                                         migration_utils.SPOT_JOBS_DB_NAME,
-                                         migration_utils.SPOT_JOBS_VERSION)
+    create_table(engine)
 
     # return engine
     _SQLALCHEMY_ENGINE = engine

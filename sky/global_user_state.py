@@ -236,13 +236,9 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Get alembic config for state db and run migrations
-    alembic_config = migration_utils.get_alembic_config(
-        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME)
-    # pylint: disable=line-too-long
-    alembic_config.config_ini_section = migration_utils.GLOBAL_USER_STATE_DB_NAME
     migration_utils.safe_alembic_upgrade(
-        engine, alembic_config, migration_utils.GLOBAL_USER_STATE_VERSION)
+        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
 
 
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
@@ -255,9 +251,7 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     engine = migration_utils.get_engine('state')
 
     # run migrations if needed
-    migration_utils.safe_alembic_upgrade(
-        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
-        migration_utils.GLOBAL_USER_STATE_VERSION)
+    create_table(engine)
 
     # return engine
     _SQLALCHEMY_ENGINE = engine
