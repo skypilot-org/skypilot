@@ -1297,6 +1297,8 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
             f'sky autostop -y {name} -i 5',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "5m"',
+            # Ensure the job succeeded.
+            f'sky logs {name} 1 --status',
             # Stop the ray cluster, but leave the node running.
             # TODO(kevin): Find a better way to replicate the issue
             f'ssh {name} "skypilot-runtime/bin/ray stop"',
