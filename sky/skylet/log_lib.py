@@ -395,11 +395,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                # Only show "Job finished" for actually terminal states
-                if status is not None and status.is_terminal():
-                    print(ux_utils.finishing_message(
-                        f'Job finished (status: {status_str}).'),
-                          flush=True)
+                print(ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).'),
+                      flush=True)
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)

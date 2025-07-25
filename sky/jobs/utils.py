@@ -733,18 +733,13 @@ def stream_logs_by_id(job_id: int,
                             start_streaming = True
                         if start_streaming:
                             print(line, end='', flush=True)
-                # Add the "Job finished" message that would normally come from log_lib.tail_logs
+                # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
                     print(ux_utils.finishing_message(
                         f'Job finished (status: {managed_job_status.value}).'),
                           flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
-            # Add the "Job finished" message for terminal states
-            if managed_job_status.is_terminal():
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {managed_job_status.value}).'),
-                      flush=True)
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '
