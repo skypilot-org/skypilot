@@ -3427,13 +3427,6 @@ def show_gpus(
         num_filtered_contexts = 0
 
         if realtime_gpu_availability_lists:
-            if len(realtime_gpu_availability_lists[0]) != 2:
-                # TODO(kyuds): for backwards compatibility, as we add new
-                # context to the API server response in #5362. Remove this after
-                # 0.10.0.
-                realtime_gpu_availability_lists = [
-                    (context, realtime_gpu_availability_lists)
-                ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 if not _filter_ctx(ctx):
                     continue
