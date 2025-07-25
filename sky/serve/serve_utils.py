@@ -807,7 +807,8 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
                     f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} has '
                     f'{num_nonterminal_jobs} nonterminal jobs: '
                     f'{nonterminal_job_ids_str}. To terminate the {noun}, '
-                    'please run `sky jobs cancel` to cancel all jobs first.'
+                    f'please run `sky jobs cancel --pool {service_name}` to '
+                    'cancel all jobs in the pool first.'
                     f'{colorama.Style.RESET_ALL}')
                 continue
         # If the `services` and `version_specs` table are not aligned, it might

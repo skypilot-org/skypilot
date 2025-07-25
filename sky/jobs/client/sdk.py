@@ -176,6 +176,7 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
+    pool: Optional[str] = None,
 ) -> server_common.RequestId:
     """Cancels managed jobs.
 
@@ -186,6 +187,7 @@ def cancel(
         job_ids: IDs of the managed jobs to cancel.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
+        pool: Pool name to cancel.
 
     Returns:
         The request ID of the cancel request.
@@ -199,6 +201,7 @@ def cancel(
         job_ids=job_ids,
         all=all,
         all_users=all_users,
+        pool=pool,
     )
     response = server_common.make_authenticated_request(
         'POST',

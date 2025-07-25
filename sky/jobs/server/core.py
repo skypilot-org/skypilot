@@ -636,7 +636,8 @@ def queue(refresh: bool,
 def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False,
-           all_users: bool = False) -> None:
+           all_users: bool = False,
+           pool: Optional[str] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -654,15 +655,19 @@ def cancel(name: Optional[str] = None,
             stopped_message='All managed jobs should have finished.')
 
         job_id_str = ','.join(map(str, job_ids))
-        if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+        if sum([
+                bool(job_ids), name is not None, pool is not None, all or
+                all_users
+        ]) != 1:
             arguments = []
             arguments += [f'job_ids={job_id_str}'] if job_ids else []
             arguments += [f'name={name}'] if name is not None else []
+            arguments += [f'pool={pool}'] if pool is not None else []
             arguments += ['all'] if all else []
             arguments += ['all_users'] if all_users else []
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Can only specify one of JOB_IDS, name, or all/'
+                    'Can only specify one of JOB_IDS, name, pool, or all/'
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
         backend = backend_utils.get_backend_from_handle(handle)
@@ -675,9 +680,11 @@ def cancel(name: Optional[str] = None,
         elif job_ids:
             code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
                 job_ids)
-        else:
-            assert name is not None, (job_ids, name, all)
+        elif name is not None:
             code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
+        else:
+            assert pool is not None, (job_ids, name, pool, all)
+            code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(pool)
         # The stderr is redirected to stdout
         returncode, stdout, stderr = backend.run_on_head(handle,
                                                          code,

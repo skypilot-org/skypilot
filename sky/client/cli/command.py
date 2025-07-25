@@ -4511,14 +4511,19 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               required=False,
               type=str,
               help='Managed job name to cancel.')
+@click.option('--pool',
+              '-p',
+              required=False,
+              type=str,
+              help='Pool name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
 @flags.all_users_option('Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
-                all_users: bool):
+def jobs_cancel(name: Optional[str], pool: Optional[str], job_ids: Tuple[int],
+                all: bool, yes: bool, all_users: bool):
     """Cancel managed jobs.
 
     You can provide either a job name or a list of job IDs to be cancelled.
@@ -4533,22 +4538,29 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
       \b
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
+      \b
+      # Cancel all managed jobs in pool 'my-pool'
+      $ sky jobs cancel -p my-pool
     """
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+    if sum([
+            bool(job_ids), name is not None, pool is not None, all or all_users
+    ]) != 1:
         arguments = []
         arguments += [f'--job-ids {job_id_str}'] if job_ids else []
         arguments += [f'--name {name}'] if name is not None else []
+        arguments += [f'--pool {pool}'] if pool is not None else []
         arguments += ['--all'] if all else []
         arguments += ['--all-users'] if all_users else []
         raise click.UsageError(
-            'Can only specify one of JOB_IDS, --name, or --all/--all-users. '
-            f'Provided {" ".join(arguments)!r}.')
+            'Can only specify one of JOB_IDS, --name, --pool, or '
+            f'--all/--all-users. Provided {" ".join(arguments)!r}.')
 
     if not yes:
         plural = 's' if len(job_ids) > 1 else ''
         job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
-                            if job_ids else repr(name))
+                            if job_ids else f'{name!r}' if name is not None else
+                            f'managed jobs in pool {pool!r}')
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
         elif all:
@@ -4561,6 +4573,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
     sdk.stream_and_get(
         managed_jobs.cancel(job_ids=job_ids,
                             name=name,
+                            pool=pool,
                             all=all,
                             all_users=all_users))
 

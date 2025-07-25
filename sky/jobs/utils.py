@@ -700,6 +700,15 @@ def cancel_job_by_name(job_name: str,
     return f'{job_name!r} {msg}'
 
 
+def cancel_jobs_by_pool(pool_name: str,
+                        current_workspace: Optional[str] = None) -> str:
+    """Cancel all jobs in a pool."""
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(pool_name)
+    if not job_ids:
+        return f'No running job found in pool {pool_name!r}.'
+    return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+
+
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
                       tail: Optional[int] = None) -> Tuple[str, int]:
@@ -1577,6 +1586,15 @@ class ManagedJobCodeGen:
         else:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
         print(msg, end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
+        active_workspace = skypilot_config.get_active_workspace()
+        code = textwrap.dedent(f"""\
+            msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
+            print(msg, end="", flush=True)
         """)
         return cls._build(code)
 

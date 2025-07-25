@@ -502,6 +502,7 @@ class JobsCancelBody(RequestBody):
     job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
+    pool: Optional[str] = None
 
 
 class JobsLogsBody(RequestBody):
