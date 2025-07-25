@@ -1376,6 +1376,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             return
         for key in ['service', 'pool']:
             new_config.pop(key, None)
+        new_config_any_of = new_config.get('resources', {}).pop('any_of', [])
+
         replica_infos = serve_state.get_replica_infos(self._service_name)
         for info in replica_infos:
             if info.version < version and not info.is_terminal:
@@ -1393,8 +1395,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # only the difference in the random order of the any_of fields.
                 old_config_any_of = old_config.get('resources',
                                                    {}).pop('any_of', [])
-                new_config_any_of = new_config.get('resources',
-                                                   {}).pop('any_of', [])
 
                 def normalize_dict_list(lst):
                     return collections.Counter(
@@ -1402,8 +1402,8 @@ class SkyPilotReplicaManager(ReplicaManager):
 
                 if (normalize_dict_list(old_config_any_of) !=
                         normalize_dict_list(new_config_any_of)):
-                    logger.info('Replica config changed (any_of), skipping.'
-                                f'Old: {old_config_any_of}, '
+                    logger.info('Replica config changed (any_of), skipping. '
+                                f'old: {old_config_any_of}, '
                                 f'new: {new_config_any_of}')
                     continue
                 # File mounts should both be empty, as update always
@@ -1419,8 +1419,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     serve_state.add_or_update_replica(self._service_name,
                                                       info.replica_id, info)
                 else:
-                    logger.info('Replica config changed (rest), skipping.'
-                                f'Old: {old_config}, '
+                    logger.info('Replica config changed (rest), skipping. '
+                                f'old: {old_config}, '
                                 f'new: {new_config}')
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
