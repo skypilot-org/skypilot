@@ -556,7 +556,7 @@ def down(
 
     try:
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to terminate service',
+                                           f'Failed to terminate {noun}',
                                            stdout)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e

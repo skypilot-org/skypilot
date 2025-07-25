@@ -26,6 +26,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_placer
@@ -795,6 +796,20 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
             continue
+        if pool:
+            nonterminal_job_ids = (
+                managed_job_state.get_nonterminal_job_ids_by_pool(service_name))
+            if nonterminal_job_ids:
+                nonterminal_job_ids_str = ','.join(
+                    str(job_id) for job_id in nonterminal_job_ids)
+                num_nonterminal_jobs = len(nonterminal_job_ids)
+                messages.append(
+                    f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} has '
+                    f'{num_nonterminal_jobs} nonterminal jobs: '
+                    f'{nonterminal_job_ids_str}. To terminate the {noun}, '
+                    'please run `sky jobs cancel` to cancel all jobs first.'
+                    f'{colorama.Style.RESET_ALL}')
+                continue
         # If the `services` and `version_specs` table are not aligned, it might
         # result in a None service status. In this case, the controller process
         # is not functioning as well and we should also use the

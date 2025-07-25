@@ -1465,6 +1465,29 @@ def get_num_alive_jobs(pool: Optional[str] = None) -> int:
 
 
 @_init_db
+def get_nonterminal_job_ids_by_pool(pool: str) -> List[int]:
+    """Get nonterminal job ids in a pool."""
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = sqlalchemy.select(
+            spot_table.c.spot_job_id.distinct()).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+        query = query.where(
+            sqlalchemy.and_(
+                ~spot_table.c.status.in_([
+                    status.value
+                    for status in ManagedJobStatus.terminal_statuses()
+                ]), job_info_table.c.pool == pool)).order_by(
+                    spot_table.c.spot_job_id.asc())
+        rows = session.execute(query).fetchall()
+        job_ids = [row[0] for row in rows if row[0] is not None]
+        return job_ids
+
+
+@_init_db
 def get_waiting_job(pool: Optional[str]) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
