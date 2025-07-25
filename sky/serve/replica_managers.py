@@ -872,9 +872,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
-            job_log_file_name = (
-                controller_utils.download_and_stream_latest_job_log(
-                    backend, handle, replica_job_logs_dir))
+            job_log_file_name = (controller_utils.download_and_stream_job_log(
+                backend, handle, replica_job_logs_dir))
             if job_log_file_name is not None:
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',

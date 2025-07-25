@@ -101,8 +101,10 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-        self, task_id: Optional[int],
-        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
+        self,
+        task_id: Optional[int],
+        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle],
+        job_id_on_pool_cluster: Optional[int],
     ) -> None:
         """Downloads and streams the logs of the current job with given task ID.
 
@@ -115,9 +117,14 @@ class JobsController:
                         'Skipping downloading and streaming the logs.')
             return
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                            'managed_jobs')
-        log_file = controller_utils.download_and_stream_latest_job_log(
-            self._backend, handle, managed_job_logs_dir)
+                                            'managed_jobs',
+                                            f'job-id-{self._job_id}')
+        log_file = controller_utils.download_and_stream_job_log(
+            self._backend,
+            handle,
+            managed_job_logs_dir,
+            job_ids=[str(job_id_on_pool_cluster)]
+            if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can be
             # accessed even after the job is finished
@@ -322,6 +329,8 @@ class JobsController:
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
                 try:
+                    logger.info(f'Downloading logs on cluster {cluster_name} '
+                                f'and job id {job_id_on_pool_cluster}.')
                     clusters = backend_utils.get_clusters(
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
@@ -330,7 +339,8 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        self._download_log_and_stream(task_id, handle)
+                        self._download_log_and_stream(task_id, handle,
+                                                      job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -393,7 +403,8 @@ class JobsController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(task_id, handle)
+                    self._download_log_and_stream(task_id, handle,
+                                                  job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '

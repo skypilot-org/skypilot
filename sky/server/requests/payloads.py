@@ -479,7 +479,7 @@ class JobsLaunchBody(RequestBody):
     task: str
     name: Optional[str]
     pool: Optional[str] = None
-    batch_size: Optional[int] = None
+    num_jobs: Optional[int] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

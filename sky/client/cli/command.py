@@ -1968,8 +1968,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 in_progress_hint(False))
 
     if show_pools:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Pools{colorama.Style.RESET_ALL}')
         num_pools = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
@@ -1989,10 +1987,12 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     msg = 'KeyboardInterrupt'
         if num_pools is not None:
             if num_pools > 0:
+                click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Pools{colorama.Style.RESET_ALL}')
                 click.echo(msg)
-            hints.append(
-                controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
-                in_progress_hint(True))
+                hints.append(
+                    controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
+                    in_progress_hint(True))
 
     if num_pending_autostop > 0 and not refresh:
         # Don't print this hint if there's no pending autostop or user has
@@ -4255,12 +4255,11 @@ def jobs():
               type=str,
               required=False,
               help='Which pool to use for jobs submission.')
-@click.option('--batch-size',
-              '-b',
+@click.option('--num-jobs',
               default=None,
               type=int,
               required=False,
-              help='Batch size for jobs submission.')
+              help='Number of jobs to submit.')
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -4295,7 +4294,7 @@ def jobs_launch(
     detach_run: bool,
     yes: bool,
     pool: Optional[str],  # pylint: disable=redefined-outer-name
-    batch_size: Optional[int],
+    num_jobs: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -4315,10 +4314,8 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
-    if pool is None and batch_size is not None:
-        raise click.UsageError('Cannot specify --batch-size without --pool.')
-    if pool is not None and batch_size is None:
-        raise click.UsageError('Cannot specify --pool without --batch-size.')
+    if pool is None and num_jobs is not None:
+        raise click.UsageError('Cannot specify --num-jobs without --pool.')
 
     if cluster is not None:
         if name is not None and name != cluster:
@@ -4371,10 +4368,9 @@ def jobs_launch(
     common_utils.check_cluster_name_is_valid(name)
 
     if pool is not None:
-        click.secho(
-            f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
-            f'{colorama.Style.RESET_ALL} with batch size '
-            f'{colorama.Fore.CYAN}{batch_size}{colorama.Style.RESET_ALL}.')
+        click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
+                    f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
+                    f'{num_jobs}{colorama.Style.RESET_ALL} jobs.')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -4385,7 +4381,7 @@ def jobs_launch(
     request_id = managed_jobs.launch(dag,
                                      name,
                                      pool,
-                                     batch_size,
+                                     num_jobs,
                                      _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
@@ -4398,10 +4394,10 @@ def jobs_launch(
                                                 controller=False)
             sys.exit(returncode)
     else:
-        batch_ids = job_id_handle[0]
-        bids = ','.join(map(str, batch_ids))
-        click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}{bids}'
-                    f'{colorama.Style.RESET_ALL}.\n'
+        job_ids = job_id_handle[0]
+        job_ids_str = ','.join(map(str, job_ids))
+        click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
+                    f'{job_ids_str}{colorama.Style.RESET_ALL}.\n'
                     f'To stream job logs: {colorama.Style.BRIGHT}'
                     f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}')
 

@@ -36,7 +36,7 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     pool: Optional[str] = None,
-    batch_size: Optional[int] = None,
+    num_jobs: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -65,6 +65,8 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
+    if pool is None and num_jobs is not None:
+        raise click.UsageError('Cannot specify num_jobs without pool.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
@@ -80,8 +82,8 @@ def launch(
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
                 click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
-                job_identity = ('a managed job' if batch_size is None else
-                                f'{batch_size} managed jobs')
+                job_identity = ('a managed job' if num_jobs is None else
+                                f'{num_jobs} managed jobs')
             prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
@@ -95,7 +97,7 @@ def launch(
             task=dag_str,
             name=name,
             pool=pool,
-            batch_size=batch_size,
+            num_jobs=num_jobs,
         )
         response = server_common.make_authenticated_request(
             'POST',

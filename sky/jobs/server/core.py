@@ -90,7 +90,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
 
 def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
-                              batch_size: Optional[int]) -> Optional[List[int]]:
+                              num_jobs: Optional[int]) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
     In normal mode the managed job submission is done in the ray job submission.
@@ -105,11 +105,12 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
     job_ids = []
-    for _ in range(batch_size if batch_size is not None else 1):
-        # TODO(tian): We should have a separate name for each job in the batch.
-        # Current blocker is that we are sharing the same dag object for all
-        # jobs in the batch. Maybe we can do copy.copy() for each job and then
-        # give it a unique name (e.g. append job id after the task name).
+    for _ in range(num_jobs if num_jobs is not None else 1):
+        # TODO(tian): We should have a separate name for each job when
+        # submitting multiple jobs. Current blocker is that we are sharing
+        # the same dag object for all jobs. Maybe we can do copy.copy() for
+        # each job and then give it a unique name (e.g. append job id after
+        # the task name).
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -133,7 +134,7 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     pool: Optional[str] = None,
-    batch_size: Optional[int] = None,
+    num_jobs: Optional[int] = None,
     stream_logs: bool = True,
 ) -> Tuple[Optional[Union[int, List[int]]], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -279,35 +280,41 @@ def launch(
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
     prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
-    remote_original_user_yaml_path = (
-        f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
-    remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
-    remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-    remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
     controller_resources = controller_utils.get_controller_resources(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
     consolidation_mode_job_ids = _maybe_submit_job_locally(
-        prefix, dag, pool, batch_size)
+        prefix, dag, pool, num_jobs)
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
     modified_catalogs = {} if consolidation_mode_job_ids is not None else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
-    file_mount_synced = False
-
     def _submit_one(
-        consolidation_mode_job_id: Optional[int]
+        consolidation_mode_job_id: Optional[int] = None,
+        job_rank: Optional[int] = None,
     ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
-        # Has to use `\` to avoid yapf issue.
-        with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                        mode='w') as f, \
-            tempfile.NamedTemporaryFile(prefix=f'managed-user-dag-{dag.name}-',
-                                        mode='w') as original_user_yaml_path:
+        remote_original_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.original_user_yaml')
+        remote_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.yaml')
+        remote_user_config_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.config_yaml')
+        remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.env'
+        with tempfile.NamedTemporaryFile(
+                prefix=f'managed-dag-{dag.name}-{job_rank}-',
+                mode='w',
+        ) as f, tempfile.NamedTemporaryFile(
+                prefix=f'managed-user-dag-{dag.name}-{job_rank}-',
+                mode='w',
+        ) as original_user_yaml_path:
             original_user_yaml_path.write(user_dag_str_redacted)
             original_user_yaml_path.flush()
+            for task_ in dag.tasks:
+                if job_rank is not None:
+                    task_.update_envs({'JOB_RANK': str(job_rank)})
 
             dag_utils.dump_chain_dag_to_yaml(dag, f.name)
 
@@ -352,11 +359,11 @@ def launch(
             # pylint: disable=protected-access
             controller_task._metadata = metadata
 
-            batch_identity = ''
+            job_identity = ''
             if consolidation_mode_job_id is not None:
-                batch_identity = f' (Job ID: {consolidation_mode_job_id})'
+                job_identity = f' (Job ID: {consolidation_mode_job_id})'
             logger.info(f'{colorama.Fore.YELLOW}'
-                        f'Launching managed job {dag.name!r}{batch_identity} '
+                        f'Launching managed job {dag.name!r}{job_identity} '
                         f'from jobs controller...{colorama.Style.RESET_ALL}')
 
             # Launch with the api server's user hash, so that sky status does
@@ -384,14 +391,10 @@ def launch(
                     backend = backend_utils.get_backend_from_handle(
                         local_handle)
                     assert isinstance(backend, backends.CloudVmRayBackend)
-                    # Only sync once since they use the same file mounts.
-                    nonlocal file_mount_synced
-                    if not file_mount_synced:
-                        backend.sync_file_mounts(
-                            handle=local_handle,
-                            all_file_mounts=controller_task.file_mounts,
-                            storage_mounts=controller_task.storage_mounts)
-                        file_mount_synced = True
+                    backend.sync_file_mounts(
+                        handle=local_handle,
+                        all_file_mounts=controller_task.file_mounts,
+                        storage_mounts=controller_task.storage_mounts)
                     run_script = controller_task.run
                     assert isinstance(run_script, str)
                     # Manually add the env variables to the run script.
@@ -412,14 +415,14 @@ def launch(
                     return consolidation_mode_job_id, local_handle
 
     if consolidation_mode_job_ids is None:
-        return _submit_one(None)
+        return _submit_one()
     if pool is None:
         assert len(consolidation_mode_job_ids) == 1
         return _submit_one(consolidation_mode_job_ids[0])
     ids = []
     all_handle = None
-    for job_id in consolidation_mode_job_ids:
-        jid, handle = _submit_one(job_id)
+    for job_rank, job_id in enumerate(consolidation_mode_job_ids):
+        jid, handle = _submit_one(job_id, job_rank)
         assert jid is not None, (job_id, handle)
         ids.append(jid)
         all_handle = handle

@@ -572,8 +572,12 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         if event_callback is None or task is None:
             return
         event_callback = event_callback.strip()
-        cluster_name = generate_managed_job_cluster_name(
-            task.name, job_id) if task.name else None
+        pool = managed_job_state.get_pool_from_job_id(job_id)
+        if pool is not None:
+            cluster_name, _ = (managed_job_state.get_pool_submit_info(job_id))
+        else:
+            cluster_name = generate_managed_job_cluster_name(
+                task.name, job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 'managed_job_event',
@@ -779,12 +783,19 @@ def stream_logs_by_id(job_id: int,
 
         while should_keep_logging(managed_job_status):
             handle = None
+            job_id_to_tail = None
             if task_id is not None:
-                task_name = managed_job_state.get_task_name(job_id, task_id)
-                cluster_name = generate_managed_job_cluster_name(
-                    task_name, job_id)
-                handle = global_user_state.get_handle_from_cluster_name(
-                    cluster_name)
+                pool = managed_job_state.get_pool_from_job_id(job_id)
+                if pool is not None:
+                    cluster_name, job_id_to_tail = (
+                        managed_job_state.get_pool_submit_info(job_id))
+                else:
+                    task_name = managed_job_state.get_task_name(job_id, task_id)
+                    cluster_name = generate_managed_job_cluster_name(
+                        task_name, job_id)
+                if cluster_name is not None:
+                    handle = global_user_state.get_handle_from_cluster_name(
+                        cluster_name)
 
             # Check the handle: The cluster can be preempted and removed from
             # the table before the managed job state is updated by the
@@ -816,7 +827,7 @@ def stream_logs_by_id(job_id: int,
             status_display.stop()
             tail_param = tail if tail is not None else 0
             returncode = backend.tail_logs(handle,
-                                           job_id=None,
+                                           job_id=job_id_to_tail,
                                            managed_job_id=job_id,
                                            follow=follow,
                                            tail=tail_param)
@@ -1134,11 +1145,15 @@ def dump_managed_job_queue() -> str:
         job['status'] = job['status'].value
         job['schedule_state'] = job['schedule_state'].value
 
-        cluster_name, _ = managed_job_state.get_pool_submit_info(job['job_id'])
-        if cluster_name is None:
+        pool = managed_job_state.get_pool_from_job_id(job['job_id'])
+        if pool is not None:
+            cluster_name, _ = managed_job_state.get_pool_submit_info(
+                job['job_id'])
+        else:
             cluster_name = generate_managed_job_cluster_name(
                 job['task_name'], job['job_id'])
-        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name) if cluster_name is not None else None
         if isinstance(handle, backends.CloudVmRayResourceHandle):
             resources_str = resources_utils.get_readable_resources_repr(
                 handle, simplify=True)
