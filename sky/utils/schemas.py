@@ -421,7 +421,7 @@ def get_resources_schema():
 
 def get_volume_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.volumes import volume
+    from sky.utils import volume
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
