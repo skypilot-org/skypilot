@@ -12,8 +12,33 @@ Prerequisites
 * `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_
 * Access to GCP console
 
-Step 1: Create a cloud SQL instance
------------------------------------
+Create a GCP service account to use with the API server
+-------------------------------------------------------
+
+In this step, a GCP service account is created to use with the API server.
+
+.. tab-set::
+
+    .. tab-item:: Password Auth
+
+        - Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the ``IAM and Admin`` console
+        - Click on "Create Service Account"
+        - Set the service account name and ID to ``skypilot-cloud-sql-access``
+        - Click on "Create and Continue" to move to the Permissions page.
+        - Add ``Cloud SQL Client`` role to the service account.
+        - Click on "Continue", then "Done" to create the service account.
+
+    .. tab-item:: IAM Auth
+
+        - Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the ``IAM and Admin`` console
+        - Click on "Create Service Account"
+        - Set the service account name and ID to ``skypilot-cloud-sql-access``
+        - Click on "Create and Continue" to move to the Permissions page.
+        - Add ``Cloud SQL Client`` and ``Cloud SQL Instance User`` roles to the service account.
+        - Click on "Continue", then "Done" to create the service account.
+  
+Create a cloud SQL instance
+---------------------------
 
 - Go to the `Cloud SQL console <https://console.cloud.google.com/sql/instances>`_
 - Click on "Create instance"
@@ -23,19 +48,34 @@ Step 1: Create a cloud SQL instance
 - Select the region (and zone if applicable) where you want to create the instance. The region / zone of the database should match that of the GKE cluster.
 - Click on "Create Instance"
 
-Step 2: Configure the cloud SQL instance
-----------------------------------------
+Configure the cloud SQL instance
+--------------------------------
 
 Once the instance is created, we need to configure the instance to create a user and a database for SkyPilot API server.
 
 To create a user, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ to run the following command:
 
-.. code-block:: bash
+.. tab-set::
 
-    DB_USER=skypilot
-    DB_PASSWORD=<create a password>
-    DB_INSTANCE_NAME=cloud-sql-skypilot-instance
-    gcloud sql users create ${DB_USER} --instance ${DB_INSTANCE_NAME} --password ${DB_PASSWORD}
+    .. tab-item:: Password Auth
+
+        .. code-block:: bash
+
+            DB_USER=skypilot
+            DB_PASSWORD=<create a password>
+            DB_INSTANCE_NAME=cloud-sql-skypilot-instance
+            gcloud sql users create ${DB_USER} --instance ${DB_INSTANCE_NAME} --password ${DB_PASSWORD}
+    
+    .. tab-item:: IAM Auth
+
+        .. code-block:: bash
+
+            GCP_PROJECT_ID=<your gcp project id>
+            GCP_SERVICE_ACCOUNT=skypilot-cloud-sql-access
+            DB_INSTANCE_NAME=cloud-sql-skypilot-instance
+            gcloud sql users create ${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam \
+                --instance=${DB_INSTANCE_NAME} \
+                --type=cloud_iam_service_account
 
 To create a database, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ to run the following command:
 
@@ -45,40 +85,10 @@ To create a database, use `gcloud CLI <https://cloud.google.com/sdk/docs/install
     DB_INSTANCE_NAME=cloud-sql-skypilot-instance
     gcloud sql databases create ${DB_NAME} --instance ${DB_INSTANCE_NAME}
 
-Step 3: Create a service account to give access to the cloud SQL instance
--------------------------------------------------------------------------
+Authorize the API server to use the GCP service account
+-------------------------------------------------------
 
-In this step, a service account is created to give the API server access to the Cloud SQL instance.
-
-- Go to the `Service Accounts <https://console.cloud.google.com/iam-admin/serviceaccounts>`_ page of the ``IAM and Admin`` console
-- Click on "Create Service Account"
-- Set the service account name and ID to ``skypilot-cloud-sql-access``
-- Click on "Create and Continue" to move to the Permissions page.
-- Click on "Select a member" and add ``Cloud SQL Client`` as the role.
-- Click on "Continue", then "Done" to create the service account.
-
-Step 4: Add in IAM policy binding to the service account
---------------------------------------------------------
-
-In this step, an IAM policy binding is created on the GCP service account to bind it to the GKE service account.
-
-This step gives the GKE service account access to the GCP service account.
-
-.. code-block:: bash
-
-    NAMESPACE=skypilot
-    GCP_PROJECT_ID=<your gcp project id>
-    GCP_SERVICE_ACCOUNT=skypilot-cloud-sql-access
-    GKE_SERVICE_ACCOUNT=skypilot-api-sa
-    gcloud iam service-accounts add-iam-policy-binding \
-        --role="roles/iam.workloadIdentityUser" \
-        --member="serviceAccount:${GCP_PROJECT_ID}.svc.id.goog[${NAMESPACE}/${GKE_SERVICE_ACCOUNT}]" \
-        ${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam.gserviceaccount.com
-
-Step 5: Set up the GKE cluster to use the GCP service account
--------------------------------------------------------------
-
-In this step, the GKE cluster is configured so the API server can use the GCP service account.
+In this step, we authorize the GCP service account to be used by the API server.
 
 
 .. code-block:: bash
@@ -86,34 +96,70 @@ In this step, the GKE cluster is configured so the API server can use the GCP se
     NAMESPACE=skypilot
     kubectl create namespace ${NAMESPACE}
 
-.. code-block:: bash
+.. tab-set::
 
-    GCP_PROJECT_ID=<your gcp project id>
-    GCP_SERVICE_ACCOUNT=skypilot-cloud-sql-access
-    gcloud iam service-accounts keys create gcp-key.json \
-         --iam-account=${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
-         --project=${GCP_PROJECT_ID}
+    .. tab-item:: Password Auth
 
-.. code-block:: bash
+        A secret is created in the kubernetes cluster to store the GCP service account key.
 
-    NAMESPACE=skypilot
-    kubectl create secret generic cloud-sql-credentials \
-        --from-file=service-account-key.json=gcp-key.json -n ${NAMESPACE}
+        .. code-block:: bash
+
+            GCP_PROJECT_ID=<your gcp project id>
+            GCP_SERVICE_ACCOUNT=skypilot-cloud-sql-access
+            gcloud iam service-accounts keys create gcp-key.json \
+                --iam-account=${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam.gserviceaccount.com \
+                --project=${GCP_PROJECT_ID}
+
+        .. code-block:: bash
+
+            NAMESPACE=skypilot
+            kubectl create secret generic cloud-sql-credentials \
+                --from-file=service-account-key.json=gcp-key.json -n ${NAMESPACE}
+
+    .. tab-item:: IAM Auth
+
+        An IAM policy binding is created on the GCP service account to bind it to the GKE service account.
+
+        .. code-block:: bash
+
+            NAMESPACE=skypilot
+            GCP_PROJECT_ID=<your gcp project id>
+            GCP_SERVICE_ACCOUNT=skypilot-cloud-sql-access
+            GKE_SERVICE_ACCOUNT=skypilot-api-sa
+            gcloud iam service-accounts add-iam-policy-binding \
+                --role="roles/iam.workloadIdentityUser" \
+                --member="serviceAccount:${GCP_PROJECT_ID}.svc.id.goog[${NAMESPACE}/${GKE_SERVICE_ACCOUNT}]" \
+                ${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 
 Step 6: Create the database connection secret
 ---------------------------------------------
 
 In this step, we create a secret to store the database connection information to be used by the API server.
 
-.. code-block:: bash
+.. tab-set::
 
-    NAMESPACE=skypilot
-    DB_USER=skypilot
-    DB_PASSWORD=<password for the 'skypilot' user>
-    DB_NAME=skypilot-db
-    kubectl create secret generic skypilot-db-connection-uri \
-        --namespace ${NAMESPACE} \
-        --from-literal connection_string=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}
+    .. tab-item:: Password Auth
+
+        .. code-block:: bash
+
+            NAMESPACE=skypilot
+            DB_USER=skypilot
+            DB_PASSWORD=<password for the 'skypilot' user>
+            DB_NAME=skypilot-db
+            kubectl create secret generic skypilot-db-connection-uri \
+                --namespace ${NAMESPACE} \
+                --from-literal connection_string=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}
+
+    .. tab-item:: IAM Auth
+
+        .. code-block:: bash
+
+            NAMESPACE=skypilot
+            DB_NAME=skypilot-db
+            GCP_PROJECT_ID=<your gcp project id>
+            kubectl create secret generic skypilot-db-connection-uri \
+                --namespace ${NAMESPACE} \
+                --from-literal connection_string=postgresql://localhost/${DB_NAME}?user=skypilot-cloud-sql-access%40${GCP_PROJECT_ID}.iam
 
 
 Step 7: Deploy the SkyPilot API server
@@ -123,76 +169,137 @@ Replace ``<GCP_PROJECT_ID>`` and ``<REGION>`` in the following ``values.yaml`` w
 
 ``values.yaml``:
 
-.. code-block:: yaml
+.. tab-set::
 
-    apiService:
-      extraVolumes:
-      - name: cloud-sql-credentials
-        secret:
-          secretName: cloud-sql-credentials
+    .. tab-item:: Password Auth
 
-      dbConnectionSecretName: skypilot-db-connection-uri
+        .. code-block:: yaml
 
-      # config must be null when using an external database.
-      # To set the config, use the web dashboard once the API server is deployed.
-      config: null
+            apiService:
+              extraVolumes:
+              - name: cloud-sql-credentials
+                secret:
+                  secretName: cloud-sql-credentials
 
-    rbac:
-      serviceAccountName: "skypilot-api-sa"
-      serviceAccountAnnotations:
-        # TODO: fill in <GCP_PROJECT_ID>
-        iam.gke.io/gcp-service-account: skypilot-cloud-sql-access@<GCP_PROJECT_ID>.iam.gserviceaccount.com
+              dbConnectionSecretName: skypilot-db-connection-uri
 
-    # Extra init containers to run before the api container
-    extraInitContainers:
-      - name: cloud-sql-proxy
-        restartPolicy: Always
-        # It is recommended to use the latest version of the Cloud SQL Auth Proxy
-        # Make sure to update on a regular schedule!
-        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
-        args:
-          # If connecting from a VPC-native GKE cluster, you can use the
-          # following flag to have the proxy connect over private IP
-          # - "--private-ip"
+              # config must be null when using an external database.
+              # To set the config, use the web dashboard once the API server is deployed.
+              config: null
 
-          # If you are not connecting with Automatic IAM, you can delete
-          # the following flag.
-          # - "--auto-iam-authn"
+            rbac:
+              serviceAccountName: "skypilot-api-sa"
+              serviceAccountAnnotations:
+                # TODO: fill in <GCP_PROJECT_ID>
+                iam.gke.io/gcp-service-account: skypilot-cloud-sql-access@<GCP_PROJECT_ID>.iam.gserviceaccount.com
 
-          # Use service account key file for authentication
-          - "--credentials-file=/var/secrets/google/service-account-key.json"
+            # Extra init containers to run before the api container
+            extraInitContainers:
+              - name: cloud-sql-proxy
+                restartPolicy: Always
+                # It is recommended to use the latest version of the Cloud SQL Auth Proxy
+                # Make sure to update on a regular schedule!
+                image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+                args:
+                  # If connecting from a VPC-native GKE cluster, you can use the
+                  # following flag to have the proxy connect over private IP
+                  # - "--private-ip"
 
-          # Enable structured logging with LogEntry format:
-          - "--structured-logs"
+                  # Use service account key file for authentication
+                  - "--credentials-file=/var/secrets/google/service-account-key.json"
 
-          # Replace DB_PORT with the port the proxy should listen on
-          - "--port=5432"
-          # TODO: fill in <GCP_PROJECT_ID> and <REGION>
-          - "<GCP_PROJECT_ID>:<REGION>:cloud-sql-skypilot-instance"
+                  # Enable structured logging with LogEntry format:
+                  - "--structured-logs"
 
-        securityContext:
-          # The default Cloud SQL Auth Proxy image runs as the
-          # "nonroot" user and group (uid: 65532) by default.
-          runAsNonRoot: true
-        # You should use resource requests/limits as a best practice to prevent
-        # pods from consuming too many resources and affecting the execution of
-        # other pods. You should adjust the following values based on what your
-        # application needs. For details, see
-        # https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
-        resources:
-          requests:
-            # The proxy's memory use scales linearly with the number of active
-            # connections. Fewer open connections will use less memory. Adjust
-            # this value based on your application's requirements.
-            memory: "2Gi"
-            # The proxy's CPU use scales linearly with the amount of IO between
-            # the database and the application. Adjust this value based on your
-            # application's requirements.
-            cpu: "1"
-        volumeMounts:
-        - name: cloud-sql-credentials
-          mountPath: /var/secrets/google
-          readOnly: true
+                  # Replace DB_PORT with the port the proxy should listen on
+                  - "--port=5432"
+                  # TODO: fill in <GCP_PROJECT_ID> and <REGION>
+                  - "<GCP_PROJECT_ID>:<REGION>:cloud-sql-skypilot-instance"
+
+                securityContext:
+                  # The default Cloud SQL Auth Proxy image runs as the
+                  # "nonroot" user and group (uid: 65532) by default.
+                  runAsNonRoot: true
+                # You should use resource requests/limits as a best practice to prevent
+                # pods from consuming too many resources and affecting the execution of
+                # other pods. You should adjust the following values based on what your
+                # application needs. For details, see
+                # https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                resources:
+                  requests:
+                    # The proxy's memory use scales linearly with the number of active
+                    # connections. Fewer open connections will use less memory. Adjust
+                    # this value based on your application's requirements.
+                    memory: "2Gi"
+                    # The proxy's CPU use scales linearly with the amount of IO between
+                    # the database and the application. Adjust this value based on your
+                    # application's requirements.
+                    cpu: "1"
+                volumeMounts:
+                - name: cloud-sql-credentials
+                  mountPath: /var/secrets/google
+                  readOnly: true
+
+    .. tab-item:: IAM Auth
+
+        .. code-block:: yaml
+
+            apiService:
+              dbConnectionSecretName: skypilot-db-connection-uri
+
+              # config must be null when using an external database.
+              # To set the config, use the web dashboard once the API server is deployed.
+              config: null
+
+            rbac:
+              serviceAccountName: "skypilot-api-sa"
+              serviceAccountAnnotations:
+                # TODO: fill in <GCP_PROJECT_ID>
+                iam.gke.io/gcp-service-account: skypilot-cloud-sql-access@<GCP_PROJECT_ID>.iam.gserviceaccount.com
+
+            # Extra init containers to run before the api container
+            extraInitContainers:
+              - name: cloud-sql-proxy
+                restartPolicy: Always
+                # It is recommended to use the latest version of the Cloud SQL Auth Proxy
+                # Make sure to update on a regular schedule!
+                image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+                args:
+                  # If connecting from a VPC-native GKE cluster, you can use the
+                  # following flag to have the proxy connect over private IP
+                  # - "--private-ip"
+
+                  # If you are not connecting with Automatic IAM, you can delete
+                  # the following flag.
+                  - "--auto-iam-authn"
+
+                  # Enable structured logging with LogEntry format:
+                  - "--structured-logs"
+
+                  # Replace DB_PORT with the port the proxy should listen on
+                  - "--port=5432"
+                  # TODO: fill in <GCP_PROJECT_ID> and <REGION>
+                  - "<GCP_PROJECT_ID>:<REGION>:cloud-sql-skypilot-instance"
+
+                securityContext:
+                  # The default Cloud SQL Auth Proxy image runs as the
+                  # "nonroot" user and group (uid: 65532) by default.
+                  runAsNonRoot: true
+                # You should use resource requests/limits as a best practice to prevent
+                # pods from consuming too many resources and affecting the execution of
+                # other pods. You should adjust the following values based on what your
+                # application needs. For details, see
+                # https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                resources:
+                  requests:
+                    # The proxy's memory use scales linearly with the number of active
+                    # connections. Fewer open connections will use less memory. Adjust
+                    # this value based on your application's requirements.
+                    memory: "2Gi"
+                    # The proxy's CPU use scales linearly with the amount of IO between
+                    # the database and the application. Adjust this value based on your
+                    # application's requirements.
+                    cpu: "1"
 
 Then run the following command to deploy the API server using helm:
 
