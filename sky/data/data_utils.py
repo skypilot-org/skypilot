@@ -22,6 +22,8 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -104,6 +106,18 @@ def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
       nebius_path: str; Nebius Path, e.g. nebius://imagenet/train/
     """
     path_parts = nebius_path.replace('nebius://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_tigris_path(tigris_path: str) -> Tuple[str, str]:
+    """Splits Tigris Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      tigris_path: str; Tigris Path, e.g. tigris://imagenet/train/
+    """
+    path_parts = tigris_path.replace('tigris://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -327,6 +341,11 @@ def create_nebius_client() -> Client:
     return nebius.client('s3')
 
 
+def create_tigris_client() -> Client:
+    """Helper method that connects to Boto3 client for Tigris Object Storage"""
+    return tigris.client('s3')
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -349,6 +368,17 @@ def verify_nebius_bucket(name: str) -> bool:
     return bucket in nebius_s.buckets.all()
 
 
+def verify_tigris_bucket(name: str) -> bool:
+    """Helper method that checks if the Tigris bucket exists
+
+    Args:
+      name: str; Name of Tigris Object Storage (without tigris:// prefix)
+    """
+    tigris_s = tigris.resource('s3')
+    bucket = tigris_s.Bucket(name)
+    return bucket in tigris_s.buckets.all()
+
+
 def verify_ibm_cos_bucket(name: str) -> bool:
     """Helper method that checks if the cos bucket exists
 
@@ -356,6 +386,30 @@ def verify_ibm_cos_bucket(name: str) -> bool:
       name: str; Name of a COS Bucket (without cos://region/ prefix)
     """
     return get_ibm_cos_bucket_region(name) != ''
+
+
+def verify_oci_bucket(name: str) -> bool:
+    """Helper method that checks if the OCI bucket exists
+
+    Args:
+      name: str; Name of OCI Bucket (without oci:// prefix)
+
+    Returns:
+      bool: True if the bucket exists, False otherwise
+    """
+    try:
+        # Get OCI client and check if bucket exists
+        client = oci.get_object_storage_client()
+        namespace = client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
+        # Try to get the bucket
+        client.get_bucket(namespace_name=namespace, bucket_name=name)
+        return True
+    except Exception:  # pylint: disable=broad-except
+        # If any exception occurs (bucket not found, permission issues, etc.),
+        # return False
+        return False
 
 
 def _get_ibm_cos_bucket_region(region, bucket_name):
@@ -598,6 +652,7 @@ class Rclone:
         GCS = 'GCS'
         IBM = 'IBM'
         R2 = 'R2'
+        TIGRIS = 'TIGRIS'
         AZURE = 'AZURE'
 
         def get_profile_name(self, bucket_name: str) -> str:
@@ -615,6 +670,7 @@ class Rclone:
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
+                Rclone.RcloneStores.TIGRIS: 'sky-tigris',
                 Rclone.RcloneStores.AZURE: 'sky-azure'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
@@ -689,6 +745,23 @@ class Rclone:
                     [{rclone_profile_name}]
                     type = s3
                     provider = Cloudflare
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint}
+                    region = auto
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.TIGRIS:
+                tigris_session = tigris.session()
+                tigris_credentials = (
+                    tigris.get_tigris_credentials(tigris_session))
+                endpoint = tigris.create_endpoint()
+                access_key_id = tigris_credentials.access_key
+                secret_access_key = tigris_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
                     access_key_id = {access_key_id}
                     secret_access_key = {secret_access_key}
                     endpoint = {endpoint}
