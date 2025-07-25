@@ -953,9 +953,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
               required=False,
               help="""\
 Determines the condition for resetting the idleness timer.
-This option works in conjunction with --idle-minutes-to-autostop.
-
-Choices:
+This option works in conjunction with --idle-minutes-to-autostop. Choices:
 
 \b
 1. "jobs_and_ssh" (default) - Wait for all jobs to complete AND all SSH
@@ -2419,9 +2417,7 @@ def stop(
               required=False,
               help="""\
 Determines the condition for resetting the idleness timer.
-This option works in conjunction with --idle-minutes.
-
-Choices:
+This option works in conjunction with --idle-minutes. Choices:
 
 \b
 1. "jobs_and_ssh" (default) - Wait for all jobs to complete AND all SSH
@@ -2549,9 +2545,7 @@ def autostop(
               required=False,
               help="""\
 Determines the condition for resetting the idleness timer.
-This option works in conjunction with --idle-minutes-to-autostop.
-
-Choices:
+This option works in conjunction with --idle-minutes-to-autostop. Choices:
 
 \b
 1. "jobs_and_ssh" (default) - Wait for all jobs to complete AND all SSH
