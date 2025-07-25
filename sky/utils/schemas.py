@@ -1200,6 +1200,19 @@ def get_config_schema():
                         'type': 'null',
                     }],
                 },
+                'post_provision_runcmd': {
+                    'type': 'array',
+                    'items': {
+                        'oneOf': [{
+                            'type': 'string'
+                        }, {
+                            'type': 'array',
+                            'items': {
+                                'type': 'string'
+                            }
+                        }]
+                    },
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1325,27 +1338,33 @@ def get_config_schema():
         'oci': {
             'type': 'object',
             'required': [],
-            'properties': {},
-            # Properties are either 'default' or a region name.
-            'additionalProperties': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'compartment_ocid': {
-                        'type': 'string',
-                    },
-                    'image_tag_general': {
-                        'type': 'string',
-                    },
-                    'image_tag_gpu': {
-                        'type': 'string',
-                    },
-                    'vcn_ocid': {
-                        'type': 'string',
-                    },
-                    'vcn_subnet': {
-                        'type': 'string',
+            'properties': {
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    # Properties are either 'default' or a region name.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'compartment_ocid': {
+                                'type': 'string',
+                            },
+                            'image_tag_general': {
+                                'type': 'string',
+                            },
+                            'image_tag_gpu': {
+                                'type': 'string',
+                            },
+                            'vcn_ocid': {
+                                'type': 'string',
+                            },
+                            'vcn_subnet': {
+                                'type': 'string',
+                            },
+                        }
                     },
                 }
             },
@@ -1617,7 +1636,7 @@ def get_config_schema():
         'properties': {
             'store': {
                 'type': 'string',
-                'case_insensitive_enum': ['gcp'],
+                'case_insensitive_enum': ['gcp', 'aws'],
             },
             'gcp': {
                 'type': 'object',
@@ -1629,6 +1648,32 @@ def get_config_schema():
                         'type': 'string',
                     },
                     'additional_labels': {
+                        'type': 'object',
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                },
+            },
+            'aws': {
+                'type': 'object',
+                'properties': {
+                    'region': {
+                        'type': 'string',
+                    },
+                    'credentials_file': {
+                        'type': 'string',
+                    },
+                    'log_group_name': {
+                        'type': 'string',
+                    },
+                    'log_stream_prefix': {
+                        'type': 'string',
+                    },
+                    'auto_create_group': {
+                        'type': 'boolean',
+                    },
+                    'additional_tags': {
                         'type': 'object',
                         'additionalProperties': {
                             'type': 'string',

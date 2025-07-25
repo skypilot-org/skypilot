@@ -1,5 +1,7 @@
 apiService:
-  image: berkeleyskypilot/skypilot:0.9.2
+  # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
+  # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
+  image: berkeleyskypilot/skypilot-nightly:latest
   # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-
@@ -162,6 +164,8 @@ ingress:
   path: '/'
   # Ingress class name (for newer Kubernetes versions)
   ingressClassName: nginx
+  # Custom annotations for the ingress
+  annotations: null
 
   # Whether enable an additional NodePort service for the ingress controller
   # Default to null for backward compatibility:
@@ -196,7 +200,9 @@ ingress:
     client-secret: ""
     # Alternative: Get both client ID and client secret from a Kubernetes secret
     # If set to a secret name, both client-id and client-secret values above are ignored
-    # The secret must contain keys named "client-id" and "client-secret"
+    # The secret must contain keys named either "client-id" and "client-secret" OR "client_id" and "client_secret"
+    # Both dash and underscore formats are supported for compatibility with different secret managers
+    # (e.g., HashiCorp Vault requires underscore format due to key naming constraints)
     # If empty/null, the above client-id and client-secret values are used instead
     # See https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#auth-proxy-client-secret
     client-details-from-secret: ""
