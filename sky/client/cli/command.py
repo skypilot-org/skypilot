@@ -1765,9 +1765,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         # Run the sky serve service query in parallel to speed up the
         # status query.
         service_status_request_id = serve_lib.status(service_names=None)
-    show_pools = show_pools and not any([clusters, ip, endpoints])
-    if show_pools:
-        pool_status_request_id = managed_jobs.query_pool(pool_names=None)
 
     workspace_request_id = None
     if ip or show_endpoints:
