@@ -1734,7 +1734,7 @@ def test_gcp_disk_tier(instance_types: List[str]):
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
-        region = 'us-west2'
+        region = 'us-central1'
         instance_type_options = ['']
         if disk_tier == resources_utils.DiskTier.BEST:
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.

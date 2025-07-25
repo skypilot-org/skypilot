@@ -35,6 +35,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -67,7 +68,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -2841,6 +2842,21 @@ def get_clusters(
         force_refresh_statuses = None
 
     def _refresh_cluster(cluster_name):
+        # TODO(syang): we should try not to leak
+        # request info in backend_utils.py.
+        # Refactor this to use some other info to
+        # determine if a launch is in progress.
+        request = requests_lib.get_request_tasks(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=[cluster_name],
+            include_request_names=['sky.launch'])
+        if len(request) > 0:
+            # There is an active launch request on the cluster,
+            # so we don't want to update the cluster status until
+            # the request is completed.
+            logger.debug(f'skipping refresh for cluster {cluster_name} '
+                         'as there is an active launch request')
+            return global_user_state.get_cluster_from_name(cluster_name)
         try:
             record = refresh_cluster_record(
                 cluster_name,
