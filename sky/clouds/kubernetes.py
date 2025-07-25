@@ -29,7 +29,7 @@ from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

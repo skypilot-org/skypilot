@@ -19,7 +19,7 @@ from sky.utils import status_lib
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 _CREDENTIAL_FILES = [
     'scp_credential',

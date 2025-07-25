@@ -10,7 +10,7 @@ from sky import clouds
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
-from sky.volumes import volume
+from sky.utils import volume
 from sky.volumes.server import server
 
 
