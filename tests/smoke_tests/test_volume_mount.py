@@ -225,7 +225,8 @@ def _volume_mounts_commands_generator(f: TextIO, name: str,
     # and MIGs do not support specifying volume name
     if not tpu and not use_mig:
         test_commands.append(
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name, cmd=post_launch_disk_cmd, timeout=10 * 60))
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       cmd=post_launch_disk_cmd,
+                                                       timeout=10 * 60))
 
     return test_commands, clean_cmd
