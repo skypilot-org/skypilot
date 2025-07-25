@@ -31,7 +31,6 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.serve import serve_utils
-from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -40,7 +39,6 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
