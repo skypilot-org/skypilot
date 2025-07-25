@@ -308,10 +308,11 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
+    pool = state.get_pool_from_job_id(job_id)
 
     with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_schedule_next_jobs()
+    maybe_schedule_next_jobs(pool)
 
 
 def _set_alive_waiting(job_id: int) -> None:

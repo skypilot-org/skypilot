@@ -48,8 +48,6 @@ logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
-# TODO(tian): Maybe let user determine this threshold
-_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _RETRY_INIT_GAP_SECONDS = 60
 _DEFAULT_DRAIN_SECONDS = 120
 
@@ -650,6 +648,7 @@ class ReplicaManager:
         We reduce the timeout for pool to 10 seconds to make the pool more
         responsive to the failure.
         """
+        # TODO(tian): Maybe let user determine this threshold
         return 10 if self._is_pool else 180
 
     def scale_up(self,
