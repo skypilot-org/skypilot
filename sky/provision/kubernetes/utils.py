@@ -138,13 +138,17 @@ MEMORY_SIZE_UNITS = {
 # The resource keys used by Kubernetes to track NVIDIA GPUs and Google TPUs on
 # nodes. These keys are typically used in the node's status.allocatable
 # or status.capacity fields to indicate the available resources on the node.
-#GPU_RESOURCE_KEY = 'nvidia.com/gpu'
-GPU_RESOURCE_KEY = 'amd.com/gpu'
+SUPPORTED_GPU_RESOURCE_KEYS = {
+    "amd": "amd.com/gpu",
+    "nvidia": "nvidia.com/gpu" 
+};
 TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
-    f'{GPU_RESOURCE_KEY} or {TPU_RESOURCE_KEY} resource is available '
+    'either' f'{SUPPORTED_GPU_RESOURCE_KEYS["amd"]} or' 
+    f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]} or '
+    f'{TPU_RESOURCE_KEY} resource is available '
     'on the nodes and the node labels for identifying GPUs/TPUs '
     '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
@@ -382,10 +386,6 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
     elif accelerator.startswith('amd-'):
-        return accelerator
-    elif accelerator.startswith('mi300-'):
-        return accelerator
-    elif accelerator.startswith('tpu-'):
         return accelerator
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
@@ -1094,10 +1094,10 @@ def detect_accelerator_resource(
         context: Optional[str]) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has GPU/TPU resource.
 
-    Two types of accelerator resources are available which are each checked
-    with nvidia.com/gpu and google.com/tpu. If nvidia.com/gpu resource is
+    Three types of accelerator resources are available which are each checked
+    with amd.com/gpu, nvidia.com/gpu and google.com/tpu. If nvidia.com/gpu resource is
     missing, that typically means that the Kubernetes cluster does not have
-    GPUs or the nvidia GPU operator and/or device drivers are not installed.
+    GPUs or the amd/nvidia GPU operator and/or device drivers are not installed.
 
     Returns:
         bool: True if the cluster has GPU_RESOURCE_KEY or TPU_RESOURCE_KEY
@@ -1321,14 +1321,14 @@ def get_accelerator_label_key_values(
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
-                (nvidia.com/gpu, google.com/tpu)
+                (amd.com/gpu,nvidia.com/gpu, google.com/tpu)
             - The cluster has GPU/TPU resources, but no node in the cluster has
               an accelerator label.
             - The cluster has a node with an invalid accelerator label value.
             - The cluster doesn't have any nodes with acc_type GPU/TPU
     """
     # Check if the cluster has GPU resources
-    # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
+    # TODO(romilb): This assumes the accelerator is a amd/nvidia GPU. We
     #  need to support TPUs and other accelerators as well.
     # TODO(romilb): Currently, we broadly disable all GPU checks if autoscaling
     #  is configured in config.yaml since the cluster may be scaling up from
@@ -1492,12 +1492,15 @@ def get_accelerator_label_key_values(
                     f'`sky ssh up --infra {context_display_name}`. {suffix}')
             else:
                 msg = (
-                    f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
+                    f'Could not detect GPU/TPU resources ({SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r} or '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]!r} or '
                     f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
                     ' contains GPUs, please ensure GPU drivers are installed on '
                     'the node. Check if the GPUs are setup correctly by running '
                     '`kubectl describe nodes` and looking for the '
-                    f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r} or '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]!r} or '
+                    f'{TPU_RESOURCE_KEY!r} resource. '
                     'Please refer to the documentation on how to set up GPUs.'
                     f'{suffix}')
             raise exceptions.ResourcesUnavailableError(msg)
@@ -3369,7 +3372,7 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
-def get_gpu_resource_key():
+def get_gpu_resource_key(context: Optional[str] = None) -> str:
     """Get the GPU resource name to use in kubernetes.
     The function first checks for an environment variable.
     If defined, it uses its value; otherwise, it returns the default value.
@@ -3381,6 +3384,23 @@ def get_gpu_resource_key():
     # Retrieve GPU resource name from environment variable, if set.
     # Else use default.
     # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
+    global GPU_RESOURCE_KEY # left as a global variable for backward compatibility
+    GPU_RESOURCE_KEY = SUPPORTED_GPU_RESOURCE_KEYS["amd"]
+    try:
+        #auto-detect gpu provider
+        nodes = kubernetes.core_api(context).list_node().items        
+        for gpu_provider, gpu_resource_key in SUPPORTED_GPU_RESOURCE_KEYS.items():
+            for node in nodes:
+                allocatable = node.status.allocatable
+                if gpu_resource_key in allocatable:
+                    GPU_RESOURCE_KEY = gpu_resource_key
+                    break
+            if GPU_RESOURCE_KEY:
+                break
+    except Exception as e:
+        logger.warning(
+            f'Failed to load kube config or query nodes: {e}. '
+            'Falling back to default GPU resource key.')
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
 
 
