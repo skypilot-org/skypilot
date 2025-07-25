@@ -306,10 +306,10 @@ def up(
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
                 f'--batch-size 10 <run-command>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
-                f'{ux_utils.BOLD}sky jobs query-pool {service_name}'
+                f'{ux_utils.BOLD}sky jobs pool status {service_name}'
                 f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}To delete the pool:\t\t'
-                f'{ux_utils.BOLD}sky jobs delete-pool {service_name}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
+                f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
                 '\n\n' +
                 ux_utils.finishing_message('Pool is initializing and '
@@ -411,7 +411,7 @@ def update(
 
     service_statuses = serve_utils.load_service_status(serve_status_payload)
     if not service_statuses:
-        cmd = 'sky jobs create-pool' if pool else 'sky serve up'
+        cmd = 'sky jobs pool up' if pool else 'sky serve up'
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
@@ -506,7 +506,7 @@ def update(
         except exceptions.CommandError as e:
             raise RuntimeError(e.error_msg) from e
 
-    cmd = 'sky jobs query-pool' if pool else 'sky serve status'
+    cmd = 'sky jobs pool status' if pool else 'sky serve status'
     print(f'{colorama.Fore.GREEN}{capnoun} {service_name!r} update scheduled.'
           f'{colorama.Style.RESET_ALL}\n'
           f'Please use {ux_utils.BOLD}{cmd} {service_name} '

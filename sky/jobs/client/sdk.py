@@ -75,13 +75,10 @@ def launch(
                 request_id = sdk.optimize(dag)
                 sdk.stream_and_get(request_id)
             else:
-                request_id = query_pool(pool)
+                request_id = pool_status(pool)
                 pool_statuses = sdk.get(request_id)
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
-                pool_status = pool_statuses[0]
-                if pool_status['status'].value != 'READY':
-                    raise click.UsageError(f'Pool {pool!r} is not ready.')
                 click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
                 job_identity = ('a managed job' if batch_size is None else
                                 f'{batch_size} managed jobs')
@@ -353,7 +350,7 @@ def dashboard() -> None:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def create_pool(
+def pool_up(
     task: Union['sky.Task', 'sky.Dag'],
     pool_name: str,
     # Internal only:
@@ -370,7 +367,7 @@ def create_pool(
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def update_pool(
+def pool_update(
     task: Union['sky.Task', 'sky.Dag'],
     pool_name: str,
     mode: 'serve_utils.UpdateMode',
@@ -388,7 +385,7 @@ def update_pool(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def delete_pool(
+def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
     purge: bool = False,
@@ -399,7 +396,7 @@ def delete_pool(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def query_pool(
+def pool_status(
     pool_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
     """Query a pool."""
     return impl.status(pool_names, pool=True)

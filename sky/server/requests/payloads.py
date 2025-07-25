@@ -674,8 +674,8 @@ class JobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
-class JobsCreatePoolBody(RequestBody):
-    """The request body for the jobs create pool endpoint."""
+class JobsPoolUpBody(RequestBody):
+    """The request body for the jobs pool up endpoint."""
     task: str
     pool_name: str
 
@@ -691,8 +691,8 @@ class JobsCreatePoolBody(RequestBody):
         return kwargs
 
 
-class JobsUpdatePoolBody(RequestBody):
-    """The request body for the jobs update pool endpoint."""
+class JobsPoolUpdateBody(RequestBody):
+    """The request body for the jobs pool update endpoint."""
     task: str
     pool_name: str
     mode: serve.UpdateMode
@@ -709,15 +709,15 @@ class JobsUpdatePoolBody(RequestBody):
         return kwargs
 
 
-class JobsDeletePoolBody(RequestBody):
-    """The request body for the jobs delete pool endpoint."""
+class JobsPoolDownBody(RequestBody):
+    """The request body for the jobs pool down endpoint."""
     pool_names: Optional[Union[str, List[str]]]
     all: bool = False
     purge: bool = False
 
 
-class JobsQueryPoolBody(RequestBody):
-    """The request body for the jobs query pool endpoint."""
+class JobsPoolStatusBody(RequestBody):
+    """The request body for the jobs pool status endpoint."""
     pool_names: Optional[Union[str, List[str]]]
 
 

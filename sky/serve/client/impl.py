@@ -48,7 +48,7 @@ def up(
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
         if pool:
-            body = payloads.JobsCreatePoolBody(
+            body = payloads.JobsPoolUpBody(
                 task=dag_str,
                 pool_name=service_name,
             )
@@ -59,7 +59,7 @@ def up(
             )
         response = server_common.make_authenticated_request(
             'POST',
-            '/jobs/create_pool' if pool else '/serve/up',
+            '/jobs/pool_up' if pool else '/serve/up',
             json=json.loads(body.model_dump_json()),
             timeout=(5, None))
         return server_common.get_request_id(response)
@@ -94,7 +94,7 @@ def update(
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
         if pool:
-            body = payloads.JobsUpdatePoolBody(
+            body = payloads.JobsPoolUpdateBody(
                 task=dag_str,
                 pool_name=service_name,
                 mode=mode,
@@ -108,7 +108,7 @@ def update(
 
         response = server_common.make_authenticated_request(
             'POST',
-            '/jobs/update_pool' if pool else '/serve/update',
+            '/jobs/pool_update' if pool else '/serve/update',
             json=json.loads(body.model_dump_json()),
             timeout=(5, None))
         return server_common.get_request_id(response)
@@ -121,7 +121,7 @@ def down(
     pool: bool = False,
 ) -> server_common.RequestId:
     if pool:
-        body = payloads.JobsDeletePoolBody(
+        body = payloads.JobsPoolDownBody(
             pool_names=service_names,
             all=all,
             purge=purge,
@@ -134,7 +134,7 @@ def down(
         )
     response = server_common.make_authenticated_request(
         'POST',
-        '/jobs/delete_pool' if pool else '/serve/down',
+        '/jobs/pool_down' if pool else '/serve/down',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response)
@@ -145,12 +145,12 @@ def status(
     pool: bool = False,
 ) -> server_common.RequestId:
     if pool:
-        body = payloads.JobsQueryPoolBody(pool_names=service_names)
+        body = payloads.JobsPoolStatusBody(pool_names=service_names)
     else:
         body = payloads.ServeStatusBody(service_names=service_names)
     response = server_common.make_authenticated_request(
         'POST',
-        '/jobs/query_pool' if pool else '/serve/status',
+        '/jobs/pool_status' if pool else '/serve/status',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None))
     return server_common.get_request_id(response)

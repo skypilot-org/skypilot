@@ -690,6 +690,9 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'workers': {
+                'type': 'integer',
+            },
             'load_balancing_policy': {
                 'type': 'string',
                 'case_insensitive_enum': list(

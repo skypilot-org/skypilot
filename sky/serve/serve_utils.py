@@ -818,7 +818,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool,
         # This is a safeguard for a rare case, that is accidentally abort
         # between `serve_state.add_service` and
         # `serve_state.add_or_update_version` in service.py.
-        purge_cmd = (f'sky jobs delete-pool {service_name} --purge'
+        purge_cmd = (f'sky jobs pool down {service_name} --purge'
                      if pool else f'sky serve down {service_name} --purge')
         if (service_status['status']
                 in serve_state.ServiceStatus.failed_statuses()):

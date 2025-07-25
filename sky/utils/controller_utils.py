@@ -128,7 +128,7 @@ class Controllers(enum.Enum):
         in_progress_hint=(
             lambda pool:
             (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
-             f'sky jobs query-pool -v{colorama.Style.RESET_ALL}') if pool else
+             f'sky jobs pool status -v{colorama.Style.RESET_ALL}') if pool else
             (f'* To see detailed service status: {colorama.Style.BRIGHT}'
              f'sky serve status -v{colorama.Style.RESET_ALL}')),
         decline_cancel_hint=(

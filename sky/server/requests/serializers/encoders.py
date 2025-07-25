@@ -128,8 +128,8 @@ def encode_serve_status(
     return _encode_serve_status(service_statuses)
 
 
-@register_encoder('jobs.query_pool')
-def encode_jobs_query_pool(
+@register_encoder('jobs.pool_status')
+def encode_jobs_pool_status(
         pool_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return _encode_serve_status(pool_statuses)
 

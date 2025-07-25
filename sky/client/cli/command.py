@@ -1428,18 +1428,20 @@ def _handle_jobs_queue_request(
 
 
 def _handle_services_request(
-        request_id: str,
-        service_names: Optional[List[str]],
-        show_all: bool,
-        show_endpoint: bool,
-        pool: bool = False,
-        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+    request_id: str,
+    service_names: Optional[List[str]],
+    show_all: bool,
+    show_endpoint: bool,
+    pool: bool = False,  # pylint: disable=redefined-outer-name
+    is_called_by_user: bool = False
+) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
     Args:
         service_names: If not None, only show the statuses of these services.
         show_all: Show all information of each service.
         show_endpoint: If True, only show the endpoint of the service.
+        pool: If True, the request is for a pool. Otherwise for a service.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
 
@@ -1817,7 +1819,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return serve_lib.status(service_names=None)
 
     def submit_pools() -> Optional[str]:
-        return managed_jobs.query_pool(pool_names=None)
+        return managed_jobs.pool_status(pool_names=None)
 
     def submit_workspace() -> Optional[str]:
         try:
@@ -4252,13 +4254,13 @@ def jobs():
               default=None,
               type=str,
               required=False,
-              help='Which pool to use for batch jobs submission.')
+              help='Which pool to use for jobs submission.')
 @click.option('--batch-size',
               '-b',
               default=None,
               type=int,
               required=False,
-              help='Batch size for batch jobs submission.')
+              help='Batch size for jobs submission.')
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -4292,7 +4294,7 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
-    pool: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
     batch_size: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
@@ -4398,7 +4400,7 @@ def jobs_launch(
     else:
         batch_ids = job_id_handle[0]
         bids = ','.join(map(str, batch_ids))
-        click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
+        click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}{bids}'
                     f'{colorama.Style.RESET_ALL}.\n'
                     f'To stream job logs: {colorama.Style.BRIGHT}'
                     f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}')
@@ -4522,8 +4524,14 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 @flags.all_users_option('Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_cancel(name: Optional[str], pool: Optional[str], job_ids: Tuple[int],
-                all: bool, yes: bool, all_users: bool):
+def jobs_cancel(
+    name: Optional[str],
+    pool: Optional[str],  # pylint: disable=redefined-outer-name
+    job_ids: Tuple[int],
+    all: bool,
+    yes: bool,
+    all_users: bool,
+):
     """Cancel managed jobs.
 
     You can provide either a job name or a list of job IDs to be cancelled.
@@ -4651,7 +4659,13 @@ def jobs_dashboard():
     sdk.dashboard(starting_page='jobs')
 
 
-@jobs.command('create-pool', cls=_DocumentedCodeCommand)
+@jobs.group(cls=_NaturalOrderGroup)
+def pool():
+    """Cluster pool management commands."""
+    pass
+
+
+@pool.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_yaml',
                 required=True,
@@ -4669,7 +4683,7 @@ def jobs_dashboard():
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
-def jobs_create_pool(
+def jobs_pool_up(
     pool_yaml: Tuple[str, ...],
     pool_name: Optional[str],
     workdir: Optional[str],
@@ -4724,7 +4738,7 @@ def jobs_create_pool(
         disk_tier=disk_tier,
         network_tier=network_tier,
         ports=ports,
-        not_supported_cmd='sky jobs create-pool',
+        not_supported_cmd='sky jobs pool up',
     )
     assert task.service is not None
     if not task.service.pool:
@@ -4743,16 +4757,16 @@ def jobs_create_pool(
     with sky.Dag() as dag:
         dag.add(task)
 
-    request_id = managed_jobs.create_pool(task,
-                                          pool_name,
-                                          _need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'sky.jobs.create-pool')
+    request_id = managed_jobs.pool_up(task,
+                                      pool_name,
+                                      _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_up')
 
 
 # TODO(MaoZiming): Update Doc.
 # TODO(MaoZiming): Expose mix replica traffic option to user.
 # Currently, we do not mix traffic from old and new replicas.
-@jobs.command('update-pool', cls=_DocumentedCodeCommand)
+@pool.command('update', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_name', required=True, type=str)
 @click.argument('pool_yaml',
@@ -4773,7 +4787,7 @@ def jobs_create_pool(
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
-def jobs_update_pool(
+def jobs_pool_update(
         pool_name: str, pool_yaml: Tuple[str, ...], workdir: Optional[str],
         infra: Optional[str], cloud: Optional[str], region: Optional[str],
         zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
@@ -4807,7 +4821,7 @@ def jobs_update_pool(
         disk_tier=disk_tier,
         network_tier=network_tier,
         ports=ports,
-        not_supported_cmd='sky jobs update-pool',
+        not_supported_cmd='sky jobs pool update',
     )
     assert task.service is not None
     if not task.service.pool:
@@ -4821,20 +4835,20 @@ def jobs_update_pool(
     with sky.Dag() as dag:
         dag.add(task)
 
-    request_id = managed_jobs.update_pool(task,
+    request_id = managed_jobs.pool_update(task,
                                           pool_name,
                                           mode=serve_lib.UpdateMode(mode),
                                           _need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'sky.jobs.update-pool')
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_update')
 
 
-@jobs.command('query-pool', cls=_DocumentedCodeCommand)
+@pool.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
 @click.argument('pool_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_query_pool(verbose: bool, pool_names: List[str]):
+def jobs_pool_status(verbose: bool, pool_names: List[str]):
     """Show statuses of cluster pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
@@ -4844,7 +4858,7 @@ def jobs_query_pool(verbose: bool, pool_names: List[str]):
     if not pool_names:
         pool_names_to_query = None
     with rich_utils.client_status('[cyan]Checking pools[/]'):
-        pool_status_request_id = managed_jobs.query_pool(pool_names_to_query)
+        pool_status_request_id = managed_jobs.pool_status(pool_names_to_query)
         _, msg = _handle_services_request(pool_status_request_id,
                                           service_names=pool_names_to_query,
                                           show_all=verbose,
@@ -4857,7 +4871,7 @@ def jobs_query_pool(verbose: bool, pool_names: List[str]):
     click.echo(msg)
 
 
-@jobs.command('delete-pool', cls=_DocumentedCodeCommand)
+@pool.command('down', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_names', required=False, type=str, nargs=-1)
 @flags.all_option('Delete all pools.')
@@ -4870,7 +4884,7 @@ def jobs_query_pool(verbose: bool, pool_names: List[str]):
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_delete_pool(
+def jobs_pool_down(
     pool_names: List[str],
     all: bool,
     purge: bool,
@@ -4902,8 +4916,8 @@ def jobs_delete_pool(
                       abort=True,
                       show_default=True)
 
-    request_id = managed_jobs.delete_pool(pool_names, all=all, purge=purge)
-    _async_call_or_wait(request_id, async_call, 'sky.jobs.delete-pool')
+    request_id = managed_jobs.pool_down(pool_names, all=all, purge=purge)
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_down')
 
 
 @cli.command(cls=_DocumentedCodeCommand)

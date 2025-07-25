@@ -142,9 +142,9 @@ export async function getManagedJobs({ allUsers = true } = {}) {
   }
 }
 
-export async function getQueryPools() {
+export async function getPoolStatus() {
   try {
-    const response = await apiClient.post(`/jobs/query_pool`, {
+    const response = await apiClient.post(`/jobs/pool_status`, {
       pool_names: null, // null means get all pools
     });
     const id = response.headers.get('X-Skypilot-Request-ID');

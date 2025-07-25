@@ -10,7 +10,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import { getQueryPools } from '@/data/connectors/jobs';
+import { getPoolStatus } from '@/data/connectors/jobs';
 import {
   getJobStatusCounts,
   getInfraSummary,
@@ -68,7 +68,7 @@ export default function PoolDetailPage() {
     setError(null);
 
     try {
-      const poolsResponse = await getQueryPools();
+      const poolsResponse = await getPoolStatus();
       const { pools = [] } = poolsResponse || {};
 
       const foundPool = pools.find((pool) => pool.name === poolName);

@@ -126,8 +126,8 @@ def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
     return _decode_serve_status(return_value)
 
 
-@register_decoders('jobs.query_pool')
-def decode_jobs_query_pool(return_value: List[dict]) -> List[Dict[str, Any]]:
+@register_decoders('jobs.pool_status')
+def decode_jobs_pool_status(return_value: List[dict]) -> List[Dict[str, Any]]:
     return _decode_serve_status(return_value)
 
 

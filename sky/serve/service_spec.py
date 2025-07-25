@@ -192,10 +192,21 @@ class SkyServiceSpec:
         if policy_section is not None and pool_config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify `replica_policy` for cluster '
-                                 'pool. Only `replicas: <num>` is supported '
+                                 'pool. Only `workers: <num>` is supported '
                                  'for cluster pool now.')
 
         simplified_policy_section = config.get('replicas', None)
+        workers_config = config.get('workers', None)
+        if simplified_policy_section is not None and workers_config is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both `replicas` and `workers`.'
+                                 ' Please use one of them.')
+        if simplified_policy_section is not None and pool_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify `replicas` for cluster pool. '
+                                 'Please use `workers` instead.')
+        if simplified_policy_section is None:
+            simplified_policy_section = workers_config
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
@@ -279,8 +290,8 @@ class SkyServiceSpec:
         add_if_not_none('pool', None, self.pool)
 
         if self.pool:
-            # For pool, currently only `replicas: <num>` is supported.
-            add_if_not_none('replicas', None, self.min_replicas)
+            # For pool, currently only `workers: <num>` is supported.
+            add_if_not_none('workers', None, self.min_replicas)
             return config
 
         add_if_not_none('readiness_probe', 'path', self.readiness_path)

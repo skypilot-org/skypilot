@@ -807,7 +807,7 @@ def download_logs(
 
 
 @usage_lib.entrypoint
-def create_pool(
+def pool_up(
     task: 'sky.Task',
     pool_name: Optional[str] = None,
 ) -> Tuple[str, str]:
@@ -816,7 +816,7 @@ def create_pool(
 
 
 @usage_lib.entrypoint
-def update_pool(
+def pool_update(
     task: 'sky.Task',
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
@@ -827,7 +827,7 @@ def update_pool(
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def delete_pool(
+def pool_down(
     pool_names: Optional[Union[str, List[str]]] = None,
     all: bool = False,
     purge: bool = False,
@@ -837,7 +837,7 @@ def delete_pool(
 
 
 @usage_lib.entrypoint
-def query_pool(
+def pool_status(
     pool_names: Optional[Union[str,
                                List[str]]] = None,) -> List[Dict[str, Any]]:
     """Query a pool."""

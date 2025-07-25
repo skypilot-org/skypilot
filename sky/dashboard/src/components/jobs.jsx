@@ -24,7 +24,7 @@ import {
   InfraBadges as SharedInfraBadges,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getManagedJobs, getQueryPools } from '@/data/connectors/jobs';
+import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
@@ -338,7 +338,7 @@ export function ManagedJobs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    dashboardCache.invalidate(getQueryPools, [{}]);
+    dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
@@ -1808,7 +1808,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     setLocalLoading(true);
     setLoading(true);
     try {
-      const poolsResponse = await dashboardCache.get(getQueryPools, [{}]);
+      const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
       const { pools = [] } = poolsResponse || {};
       setData(pools);
       setIsInitialLoad(false);
