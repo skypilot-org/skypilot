@@ -1089,8 +1089,9 @@ class Kubernetes(clouds.Cloud):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
                                     '')
                         if label_key.startswith('ib.coreweave.cloud/'):
-                            return (KubernetesHighPerformanceNetworkType.COREWEAVE,
-                                    '')
+                            return (
+                                KubernetesHighPerformanceNetworkType.COREWEAVE,
+                                '')
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
