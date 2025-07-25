@@ -486,6 +486,7 @@ class SkyServiceSpec:
 
     @property
     def pool(self) -> bool:
+        # This can happen for backward compatibility.
         if not hasattr(self, '_pool'):
             return False
         return bool(self._pool)
