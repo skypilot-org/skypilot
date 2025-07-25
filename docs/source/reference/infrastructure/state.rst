@@ -3,32 +3,24 @@
 SkyPilot State Management
 =========================
 
-This document describes where SkyPilot stores data needed for its operation, or generated as part of its operation.
+This document describes how SkyPilot stores and generates internal states.
 
-SkyPilot stores data in three main locations:
+All SkyPilot internal data stores in `~/.sky/` directory:
 
-``~/.sky/`` **directory**
-
-SkyPilot uses ``~/.sky/`` directory to store most of its state, including:
-
-- SQLite databases for state management (if external database is not configured)
+- SQLite databases for states (if external database is not configured)
 - API server logs
 - Synchronization lock files
 - SkyPilot catalog
 - etc.
 
+.. note::
+  **External database, if configured**
+  
+  Users can optionally configure SkyPilot to use a PostgreSQL database to persists its state.
+  See :ref:`API server database configuration <config-yaml-db>` for more details on how to configure an external database.
 
-**External database, if configured**
+  If configured, SkyPilot uses the external database to store states instead of the SQLite databases in ``~/.sky/`` directory. All the other internal data is emphemeral, and fine to discard during upgrade.
 
-Users can optionally configure SkyPilot to use a PostgreSQL database to store its state.
-See :ref:`API server database configuration <config-yaml-db>` for more details on how to configure an external database.
-
-If configured, SkyPilot uses the external database to store state instead of the SQLite databases in ``~/.sky/`` directory.
-
-
-``~/sky_logs/`` **directory**
-
-SkyPilot uses ``~/sky_logs/`` directory to store logs about individual clusters / jobs.
 
 
 Databases
@@ -65,5 +57,4 @@ See :ref:`API server database configuration <config-yaml-db>` for more details o
 File / directory uploads
 ------------------------
 
-When a user uploads a file or directory to a cluster, the API server stores the file or directory in
-``~/.sky/api_server/clients/<client-hash>/file_mounts`` directory before uploading them to the cluster.
+When a user uploads a file or directory to a cluster with `workdir` or `file_mounts`, the SkyPilot client will automatically upload the files to a remote API server at directory: ``~/.sky/api_server/clients/<client-hash>/file_mounts``, as an intermediate store.
