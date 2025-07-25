@@ -1,14 +1,12 @@
 """Volume utilities."""
 import enum
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky.utils import common_utils
-from sky.utils import infra_utils
-from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import status_lib
 
@@ -20,9 +18,11 @@ class VolumeAccessMode(enum.Enum):
     READ_WRITE_MANY = 'ReadWriteMany'
     READ_ONLY_MANY = 'ReadOnlyMany'
 
+
 class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
+
 
 class VolumeMount:
     """Volume mount specification."""
