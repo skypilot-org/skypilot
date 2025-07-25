@@ -253,6 +253,7 @@ def client(service_name: str, **kwargs):
     """
     _assert_kwargs_builtin_type(kwargs)
 
+    check_credentials = kwargs.pop('check_credentials', True)
     profile_name = kwargs.pop('profile_name', None)
 
     # Need to use the client retrieved from the per-thread session to avoid
@@ -260,7 +261,8 @@ def client(service_name: str, **kwargs):
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
     return _create_aws_object(
-        lambda: session(profile_name=profile_name).client(
+        lambda: session(check_credentials=check_credentials,
+                        profile_name=profile_name).client(
                             service_name, **kwargs), 'client')
 
 
