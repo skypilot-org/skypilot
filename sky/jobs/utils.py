@@ -776,6 +776,11 @@ def stream_logs_by_id(job_id: int,
                           flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
+            # Add the "Job finished" message for terminal states
+            if managed_job_status.is_terminal():
+                print(ux_utils.finishing_message(
+                    f'Job finished (status: {managed_job_status.value}).'),
+                      flush=True)
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '
