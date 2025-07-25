@@ -486,4 +486,6 @@ class SkyServiceSpec:
 
     @property
     def pool(self) -> bool:
+        if not hasattr(self, '_pool'):
+            return False
         return bool(self._pool)
