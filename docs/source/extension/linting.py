@@ -128,7 +128,8 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
         while i < len(words):
             # Check for multi-word terms
             matched_phrase = False
-            for phrase in MULTI_WORD_TERMS:
+            # Sort by length descending to match longer phrases first
+            for phrase in sorted(MULTI_WORD_TERMS, key=len, reverse=True):
                 phrase_words = phrase.split()
                 if i + len(phrase_words) <= len(words):
                     # Join words first, then strip punctuation at the end for comparison
