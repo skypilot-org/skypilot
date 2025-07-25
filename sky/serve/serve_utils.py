@@ -1391,14 +1391,16 @@ class ServeCodeGen:
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
         'from sky.serve import constants',
+        'serve_version = constants.SERVE_VERSION',
     ]
 
     @classmethod
     def get_service_status(cls, service_names: Optional[List[str]],
                            pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
             f'msg = serve_utils.get_service_status_encoded({service_names!r}, '
-            f'pool={pool})', 'print(msg, end="", flush=True)'
+            '**kwargs)', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
@@ -1414,8 +1416,9 @@ class ServeCodeGen:
     def terminate_services(cls, service_names: Optional[List[str]], purge: bool,
                            pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
             f'msg = serve_utils.terminate_services({service_names!r}, '
-            f'purge={purge}, pool={pool})', 'print(msg, end="", flush=True)'
+            f'purge={purge}, **kwargs)', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
@@ -1461,6 +1464,17 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
+    def update_service(cls, service_name: str, version: int, mode: str,
+                       pool: bool) -> str:
+        code = [
+            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
+            f'msg = serve_utils.update_service_encoded({service_name!r}, '
+            f'{version}, mode={mode!r}, **kwargs)',
+            'print(msg, end="", flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
@@ -1470,13 +1484,3 @@ class ServeCodeGen:
                 f'"{common_utils.get_user_hash()}"; '
                 f'{skylet_constants.SKY_PYTHON_CMD} '
                 f'-u -c {shlex.quote(generated_code)}')
-
-    @classmethod
-    def update_service(cls, service_name: str, version: int, mode: str,
-                       pool: bool) -> str:
-        code = [
-            f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, mode={mode!r}, pool={pool})',
-            'print(msg, end="", flush=True)',
-        ]
-        return cls._build(code)
