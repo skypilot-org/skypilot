@@ -189,11 +189,11 @@ class SkyServiceSpec:
             service_config['pool'] = pool_config
 
         policy_section = config.get('replica_policy', None)
-        if policy_section is not None and pool_config is not None:
+        if policy_section is not None and pool_config:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify both `replica_policy` for '
-                                 'cluster pool. Only `replicas: <num>` is '
-                                 'supported for cluster pool now.')
+                raise ValueError('Cannot specify `replica_policy` for cluster '
+                                 'pool. Only `replicas: <num>` is supported '
+                                 'for cluster pool now.')
 
         simplified_policy_section = config.get('replicas', None)
         if policy_section is None or simplified_policy_section is not None:
