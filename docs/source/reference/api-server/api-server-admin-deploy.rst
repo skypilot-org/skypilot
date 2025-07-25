@@ -756,9 +756,9 @@ To uninstall the API server, run:
 
 .. code-block:: bash
 
-    helm uninstall $RELEASE_NAME --namespace $NAMESPACE
+    helm uninstall $RELEASE_NAME --namespace $NAMESPACE --wait
 
-This will delete the API server and all associated resources.
+This will delete the API server and all associated resources. ``--wait`` ensures that all the resources of SkyPilot API server are deleted before the command returns.
 
 
 Other notes
