@@ -34,10 +34,10 @@ import time
 import typing
 from typing import Callable, Literal, Optional, TypeVar
 
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky import skypilot_config
 
 if typing.TYPE_CHECKING:
     import boto3

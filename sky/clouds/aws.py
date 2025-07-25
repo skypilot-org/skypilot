@@ -906,7 +906,6 @@ class AWS(clouds.Cloud):
         identity_str = f'{user_identity[0]} [account={user_identity[1]}]'
         return identity_str
 
-
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # The credentials file should not be uploaded if the user identity is
         # not SHARED_CREDENTIALS_FILE, since we cannot be sure if the currently
