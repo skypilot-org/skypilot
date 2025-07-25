@@ -1816,6 +1816,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     def submit_services() -> Optional[str]:
         return serve_lib.status(service_names=None)
 
+    def submit_pools() -> Optional[str]:
+        return managed_jobs.query_pool(pool_names=None)
+
     def submit_workspace() -> Optional[str]:
         try:
             return sdk.workspaces()
@@ -1832,6 +1835,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     managed_jobs_queue_request_id = None
     service_status_request_id = None
     workspace_request_id = None
+    pool_status_request_id = None
 
     # Submit all requests in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -1839,6 +1843,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             managed_jobs_request_future = executor.submit(submit_managed_jobs)
         if show_services:
             services_request_future = executor.submit(submit_services)
+        if show_pools:
+            pools_request_future = executor.submit(submit_pools)
         if not (ip or show_endpoints):
             workspace_request_future = executor.submit(submit_workspace)
 
@@ -1847,13 +1853,17 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             managed_jobs_queue_request_id = managed_jobs_request_future.result()
         if show_services:
             service_status_request_id = services_request_future.result()
+        if show_pools:
+            pool_status_request_id = pools_request_future.result()
         if not (ip or show_endpoints):
             workspace_request_id = workspace_request_future.result()
 
-    managed_jobs_queue_request_id = '' if not managed_jobs_queue_request_id \
-        else managed_jobs_queue_request_id
-    service_status_request_id = '' if not service_status_request_id \
-        else service_status_request_id
+    managed_jobs_queue_request_id = ('' if not managed_jobs_queue_request_id
+                                     else managed_jobs_queue_request_id)
+    service_status_request_id = ('' if not service_status_request_id else
+                                 service_status_request_id)
+    pool_status_request_id = ('' if not pool_status_request_id else
+                              pool_status_request_id)
 
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
