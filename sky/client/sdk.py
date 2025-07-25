@@ -430,11 +430,12 @@ def launch(
         wait_for: determines the condition for resetting the idleness timer.
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
-                1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-                   AND all SSH sessions to disconnect.
-                2. "jobs" - Wait for all jobs to complete.
-                3. "none" - Stop immediately after idle time expires,
-                   regardless of running jobs or SSH connections.
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -869,11 +870,12 @@ def start(
         wait_for: determines the condition for resetting the idleness timer.
             This option works in conjunction with ``idle_minutes_to_autostop``.
             Choices:
-                1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-                   AND all SSH sessions to disconnect.
-                2. "jobs" - Wait for all jobs to complete.
-                3. "none" - Stop immediately after idle time expires,
-                   regardless of running jobs or SSH connections.
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -1044,11 +1046,12 @@ def autostop(
         wait_for: determines the condition for resetting the idleness timer.
             This option works in conjunction with ``idle_minutes``.
             Choices:
-                1. "jobs_and_ssh" (default) - Wait for all jobs to complete
-                   AND all SSH sessions to disconnect.
-                2. "jobs" - Wait for all jobs to complete.
-                3. "none" - Stop immediately after idle time expires,
-                   regardless of running jobs or SSH connections.
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 
