@@ -1293,7 +1293,8 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'autostop_with_unhealthy_ray_cluster',
         [
-            f'sky launch -y -d -c {name} --down -i 5 --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} -i 5',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "5m"',
             # Stop the ray cluster, but leave the node running.
