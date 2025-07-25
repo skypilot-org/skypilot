@@ -9,7 +9,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.volumes import volume
+from sky.utils import volume
 
 logger = sky_logging.init_logger(__name__)
 
