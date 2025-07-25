@@ -68,9 +68,8 @@ _AUTOSTOP_SCHEMA = {
                 },
                 'wait_for': {
                     'type': 'string',
-                    'case_insensitive_enum': [
-                        type.value for type in autostop_lib.AutostopWaitFor
-                    ]
+                    'case_insensitive_enum':
+                        autostop_lib.AutostopWaitFor.supported_modes(),
                 }
             },
         },

@@ -40,9 +40,26 @@ class AutostopWaitFor(enum.Enum):
     JOBS_AND_SSH: Wait for jobs to finish and all SSH sessions to be closed.
     NONE: Unconditionally stop the cluster after the idle time.
     """
-    JOBS = 'jobs'
     JOBS_AND_SSH = 'jobs_and_ssh'
+    JOBS = 'jobs'
     NONE = 'none'
+
+    @classmethod
+    def supported_modes(cls) -> List[str]:
+        return [mode.value for mode in cls]
+
+    @classmethod
+    def cli_help_message(cls, pair: str) -> str:
+        return f"""\
+Determines the condition for resetting the idleness timer.
+This option works in conjunction with ``--{pair}``. Options:
+
+\b
+1. ``jobs_and_ssh`` (default): Wait for all jobs to complete AND all SSH
+sessions to disconnect.
+2. ``jobs``: Wait for all jobs to complete.
+3. ``none``: Stop immediately after idle time expires, regardless of running
+jobs or SSH connections."""
 
     @classmethod
     def from_str(cls, mode: str) -> 'AutostopWaitFor':
@@ -57,8 +74,8 @@ class AutostopWaitFor(enum.Enum):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported autostop wait mode: '
                                  f'{mode}. The mode must be either '
-                                 f'\'{cls.JOBS.value}\', '
-                                 f'\'{cls.JOBS_AND_SSH.value}\' or '
+                                 f'\'{cls.JOBS_AND_SSH.value}\', '
+                                 f'\'{cls.JOBS.value}\', or '
                                  f'\'{cls.NONE.value}\'. ')
 
 

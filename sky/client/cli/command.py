@@ -953,23 +953,16 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness gets reset depending on the --wait-for flag. '
+          'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
 @click.option('--wait-for',
+              type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
               default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
               required=False,
-              help="""\
-Determines the condition for resetting the idleness timer.
-This option works in conjunction with --idle-minutes-to-autostop. Choices:
-
-\b
-1. "jobs_and_ssh" (default) - Wait for all jobs to complete AND all SSH
-sessions to disconnect.
-2. "jobs" - Wait for all jobs to complete.
-3. "none" - Stop immediately after idle time expires, regardless of running
-jobs or SSH connections.""")
+              help=autostop_lib.AutostopWaitFor.cli_help_message(
+                  pair='idle-minutes-to-autostop'))
 @click.option(
     '--down',
     default=False,
@@ -2452,19 +2445,12 @@ def stop(
               required=False,
               help=('Set the idle minutes before autostopping the cluster. '
                     'See the doc above for detailed semantics.'))
-@click.option('--wait-for',
-              default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
-              required=False,
-              help="""\
-Determines the condition for resetting the idleness timer.
-This option works in conjunction with --idle-minutes. Choices:
-
-\b
-1. "jobs_and_ssh" (default) - Wait for all jobs to complete AND all SSH
-sessions to disconnect.
-2. "jobs" - Wait for all jobs to complete.
-3. "none" - Stop immediately after idle time expires, regardless of running
-jobs or SSH connections.""")
+@click.option(
+    '--wait-for',
+    type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
+    default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
+    required=False,
+    help=autostop_lib.AutostopWaitFor.cli_help_message(pair='idle-minutes'))
 @click.option(
     '--cancel',
     default=False,
@@ -2576,23 +2562,16 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness gets reset depending on the --wait-for flag. '
+          'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
 @click.option('--wait-for',
+              type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
               default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
               required=False,
-              help="""\
-Determines the condition for resetting the idleness timer.
-This option works in conjunction with --idle-minutes-to-autostop. Choices:
-
-\b
-1. "jobs_and_ssh" (default) - Wait for all jobs to complete AND all SSH
-sessions to disconnect.
-2. "jobs" - Wait for all jobs to complete.
-3. "none" - Stop immediately after idle time expires, regardless of running
-jobs or SSH connections.""")
+              help=autostop_lib.AutostopWaitFor.cli_help_message(
+                  pair='idle-minutes-to-autostop'))
 @click.option(
     '--down',
     default=False,
