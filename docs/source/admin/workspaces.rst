@@ -46,7 +46,14 @@ The above is achieved by configuring the following section in the config file:
        gcp:
          project_id: project-id-for-team-b
 
-      team-c:
+     team-c:
+       # Use only GCP.
+       aws:
+         disabled: true
+       gcp:
+         project_id: project-id-for-team-b
+
+      team-d:
          private: true
          allowed_users:
          - alice@example.com
