@@ -287,7 +287,7 @@ class SkyServiceSpec:
                         config[section] = dict()
                     config[section][key] = value
 
-        add_if_not_none('pool', None, self.pool)
+        add_if_not_none('pool', None, self._pool)
 
         if self.pool:
             # For pool, currently only `workers: <num>` is supported.
