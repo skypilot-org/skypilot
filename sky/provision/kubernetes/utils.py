@@ -73,6 +73,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
       (A4/A3 Ultra instances)
     - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
       low-latency networking
+    - COREWEAVE: CoreWeave clusters with InfiniBand support.
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -86,6 +87,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     GCP_TCPXO = 'gcp_tcpxo'
     GCP_GPUDIRECT_RDMA = 'gcp_gpudirect_rdma'
     NEBIUS = 'nebius'
+    COREWEAVE = 'coreweave'
     NONE = 'none'
 
     def get_network_env_vars(self) -> Dict[str, str]:
@@ -96,6 +98,13 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 'NCCL_IB_HCA': 'mlx5',
                 'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
                                     'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
+            }
+        elif self == KubernetesHighPerformanceNetworkType.COREWEAVE:
+            return {
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'NCCL_IB_HCA': 'ibp',
+                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
+                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
             }
         else:
             # GCP clusters and generic clusters - environment variables are

@@ -124,6 +124,7 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. code-block:: bash
 
             $ helm upgrade --namespace $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --reuse-values \
               --set ingress-nginx.controller.service.type=NodePort \
               --set ingress-nginx.controller.service.nodePorts.http=30050 \
               --set ingress-nginx.controller.service.nodePorts.https=30051

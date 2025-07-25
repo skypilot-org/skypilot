@@ -1764,6 +1764,9 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    # Initialize global user state db
+    global_user_state.initialize_and_get_db()
+    # Initialize request db
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
