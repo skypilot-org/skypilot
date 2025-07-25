@@ -385,7 +385,7 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         return accelerator
     elif accelerator.startswith('mi300-'):
         return accelerator
-   elif accelerator.startswith('tpu-'):
+    elif accelerator.startswith('tpu-'):
         return accelerator
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
