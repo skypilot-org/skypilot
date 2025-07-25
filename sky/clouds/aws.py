@@ -750,8 +750,6 @@ class AWS(clouds.Cloud):
         return proc.stdout
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
             sts = aws.client('sts', check_credentials=False)
@@ -832,8 +830,6 @@ class AWS(clouds.Cloud):
         return [user_ids]
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
@@ -869,6 +865,11 @@ class AWS(clouds.Cloud):
             exceptions.CloudUserIdentityError: if the user identity cannot be
                 retrieved.
         """
+        # Include workspace in cache key to support different AWS profiles per workspace
+        current_workspace = skypilot_config.get_active_workspace()
+        workspace_config = skypilot_config.get_workspace_cloud('aws')
+        workspace_profile = workspace_config.get('profile_name', None) if workspace_config else None
+        
         stdout = cls._aws_configure_list()
         if stdout is None:
             # `aws configure list` is not available, possible reasons:
@@ -877,14 +878,19 @@ class AWS(clouds.Cloud):
             # - aws credentials are not set, proceed anyway to get unified error
             #   message for users
             return cls._sts_get_caller_identity()
+        
         config_hash = hashlib.md5(stdout).hexdigest()[:8]
+        # Include workspace and profile in cache key to support workspace-specific AWS identities
+        workspace_hash = hashlib.md5(f'{current_workspace}:{workspace_profile}'.encode()).hexdigest()[:8]
+        cache_key = f'{config_hash}-{workspace_hash}'
+        
         # Getting aws identity cost ~1s, so we cache the result with the output of
         # `aws configure list` as cache key. Different `aws configure list` output
         # can have same aws identity, our assumption is the output would be stable
         # in real world, so the number of cache files would be limited.
         # TODO(aylei): consider using a more stable cache key and evalute eviction.
         cache_path = catalog_common.get_catalog_path(
-            f'aws/.cache/user-identity-{config_hash}.txt')
+            f'aws/.cache/user-identity-{cache_key}.txt')
         if os.path.exists(cache_path):
             try:
                 with open(cache_path, 'r', encoding='utf-8') as f:
