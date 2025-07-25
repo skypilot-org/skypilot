@@ -387,6 +387,7 @@ class FetchClusterInfoError(Exception):
     class Reason(enum.Enum):
         HEAD = 'HEAD'
         WORKER = 'WORKER'
+        UNKNOWN = 'UNKNOWN'
 
     def __init__(self, reason: Reason) -> None:
         super().__init__()
