@@ -37,6 +37,7 @@ from typing import Callable, Literal, Optional, TypeVar
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky import skypilot_config
 
 if typing.TYPE_CHECKING:
     import boto3
@@ -125,7 +126,6 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], T],
 def session(check_credentials: bool = True, profile_name: Optional[str] = None):
     """Create an AWS session."""
     # Check for workspace-specific profile_name configuration
-    from sky import skypilot_config
     workspace_profile_name = (profile_name or
                               skypilot_config.get_workspace_cloud('aws').get(
                                   'profile_name', None))
@@ -141,7 +141,6 @@ def session(check_credentials: bool = True, profile_name: Optional[str] = None):
                 raise botocore_exceptions().NoCredentialsError()
 
             return profile_session
-
         except Exception as e:
             # Provide helpful error message
             error_msg = ('Failed to create session with profile'
@@ -254,7 +253,6 @@ def client(service_name: str, **kwargs):
     """
     _assert_kwargs_builtin_type(kwargs)
 
-    check_credentials = kwargs.pop('check_credentials', True)
     profile_name = kwargs.pop('profile_name', None)
 
     # Need to use the client retrieved from the per-thread session to avoid
@@ -262,8 +260,7 @@ def client(service_name: str, **kwargs):
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials,
-                        profile_name=profile_name).client(
+        lambda: session(profile_name=profile_name).client(
                             service_name, **kwargs), 'client')
 
 
