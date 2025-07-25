@@ -314,7 +314,7 @@ def launch(
             original_user_yaml_path.flush()
             for task_ in dag.tasks:
                 if job_rank is not None:
-                    task_.update_envs({'JOB_RANK': str(job_rank)})
+                    task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
 
             dag_utils.dump_chain_dag_to_yaml(dag, f.name)
 
