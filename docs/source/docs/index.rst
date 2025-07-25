@@ -330,10 +330,10 @@ Read the research:
    :maxdepth: 1
    :caption: References
 
-   SkyPilot Infrastructure <../reference/infrastructure/index>
    Task YAML <../reference/yaml-spec>
    CLI <../reference/cli>
    ../reference/api
    ../reference/config
+   SkyPilot Architecture <../reference/architecture/index>
    ../developers/index
 
