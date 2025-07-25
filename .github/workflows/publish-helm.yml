@@ -99,6 +99,8 @@ jobs:
           sed -i "s/^version:.*$/version: ${semversion}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" src/charts/skypilot/Chart.yaml
+          # Copy the README.md from the root directory to the skypilot chart
+          cp src/README.md src/charts/skypilot/README.md
           
           # Update the version in the external-metrics chart (prometheus server)
           # todo(rohan): update name the way we do for the main skypilot chart?

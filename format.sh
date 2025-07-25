@@ -125,14 +125,14 @@ mypy $(cat tests/mypy_files.txt)
 # Run Pylint
 echo 'Sky Pylint:'
 if [[ "$1" == '--files' ]]; then
-    # If --files is passed, filter to files within sky/ and pass to pylint.
+    # If --files is passed, filter to files within sky/ and examples/ and pass to pylint.
     pylint "${PYLINT_FLAGS[@]}" "${@:2}"
 elif [[ "$1" == '--all' ]]; then
-    # Pylint entire sky directory.
-    pylint "${PYLINT_FLAGS[@]}" sky
+    # Pylint entire sky and examples directories.
+    pylint "${PYLINT_FLAGS[@]}" sky examples
 else
-    # Pylint only files in sky/ that have changed in last commit.
-    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi')
+    # Pylint only files in sky/ and examples/ that have changed in last commit.
+    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi' 'examples/*.py' 'examples/*.pyi')
     if [[ -n "$changed_files" ]]; then
         echo "$changed_files" | tr '\n' '\0' | xargs -0 pylint "${PYLINT_FLAGS[@]}"
     else

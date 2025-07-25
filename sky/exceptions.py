@@ -642,3 +642,11 @@ class RestfulPolicyError(Exception):
 class GitError(Exception):
     """Raised when a git operation fails."""
     pass
+
+
+class RequestInterruptedError(Exception):
+    """Raised when a request is interrupted by the server.
+    Client is expected to retry the request immediately when
+    this error is raised.
+    """
+    pass

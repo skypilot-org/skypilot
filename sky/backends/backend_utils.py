@@ -35,6 +35,7 @@ from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -798,6 +799,12 @@ def write_cluster_config(
                 'volume_name_on_cloud': vol.volume_config.name_on_cloud,
             })
 
+    runcmd = skypilot_config.get_effective_region_config(
+        cloud=str(to_provision.cloud).lower(),
+        region=to_provision.region,
+        keys=('post_provision_runcmd',),
+        default_value=None)
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -833,7 +840,7 @@ def write_cluster_config(
                 # User-supplied remote_identity
                 'remote_identity': remote_identity,
                 # The reservation pools that specified by the user. This is
-                # currently only used by GCP.
+                # currently only used by AWS and GCP.
                 'specific_reservations': specific_reservations,
 
                 # Conda setup
@@ -896,6 +903,10 @@ def write_cluster_config(
 
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
+
+                # runcmd to append to the cloud-init cloud config passed to the
+                # machine's UserData. This is currently only used by AWS.
+                'runcmd': runcmd,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -2831,6 +2842,21 @@ def get_clusters(
         force_refresh_statuses = None
 
     def _refresh_cluster(cluster_name):
+        # TODO(syang): we should try not to leak
+        # request info in backend_utils.py.
+        # Refactor this to use some other info to
+        # determine if a launch is in progress.
+        request = requests_lib.get_request_tasks(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=[cluster_name],
+            include_request_names=['sky.launch'])
+        if len(request) > 0:
+            # There is an active launch request on the cluster,
+            # so we don't want to update the cluster status until
+            # the request is completed.
+            logger.debug(f'skipping refresh for cluster {cluster_name} '
+                         'as there is an active launch request')
+            return global_user_state.get_cluster_from_name(cluster_name)
         try:
             record = refresh_cluster_record(
                 cluster_name,
