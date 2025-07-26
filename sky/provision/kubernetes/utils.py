@@ -155,7 +155,7 @@ TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
-    'either' f'{SUPPORTED_GPU_RESOURCE_KEYS["amd"]} or' 
+    f'one of {SUPPORTED_GPU_RESOURCE_KEYS["amd"]}, ' 
     f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]} or '
     f'{TPU_RESOURCE_KEY} resource is available '
     'on the nodes and the node labels for identifying GPUs/TPUs '
