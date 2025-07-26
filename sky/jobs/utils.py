@@ -732,7 +732,7 @@ def stream_logs_by_id(job_id: int,
                         if log_lib.LOG_FILE_START_STREAMING_AT in line:
                             start_streaming = True
                         if start_streaming:
-                            print(line, end='', flush=True)
+                            print(line, end='' if line.endswith('\r') else '\n', flush=True)
                 # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
                     print(ux_utils.finishing_message(
@@ -1014,7 +1014,7 @@ def stream_logs(job_id: Optional[int],
                 # Read only the last 'tail' lines efficiently using deque
                 read_from = collections.deque(f, maxlen=tail)
             for line in read_from:
-                print(line, end='')
+                print(line, end='' if line.endswith('\r') else '\n')
             # Flush.
             print(end='', flush=True)
 
@@ -1023,7 +1023,7 @@ def stream_logs(job_id: Optional[int],
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':
-                        print(line, end='')
+                        print(line, end='' if line.endswith('\r') else '\n')
                         line = f.readline()
 
                     # Flush.
