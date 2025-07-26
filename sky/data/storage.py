@@ -563,11 +563,13 @@ class Storage(object):
             source: Optional[SourceType],
             mode: Optional[StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
-                                      AbstractStore.StoreMetadata]] = None):
+                                      AbstractStore.StoreMetadata]] = None,
+            mount_options: Optional[str] = None):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
             self.mode = mode
+            self.mount_options = mount_options
             # Only stores managed by sky are stored here in the
             # global_user_state
             self.sky_stores = {} if sky_stores is None else sky_stores
@@ -595,6 +597,7 @@ class Storage(object):
         stores: Optional[List[StoreType]] = None,
         persistent: Optional[bool] = True,
         mode: StorageMode = DEFAULT_STORAGE_MODE,
+        mount_options: Optional[str] = None,
         sync_on_reconstruction: bool = True,
         # pylint: disable=invalid-name
         _is_sky_managed: Optional[bool] = None,
@@ -663,6 +666,7 @@ class Storage(object):
         self.sync_on_reconstruction = sync_on_reconstruction
         self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
+        self.mount_options = mount_options
 
         self._constructed = False
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -1280,6 +1284,7 @@ class Storage(object):
         _is_sky_managed = config.pop('_is_sky_managed', None)
         # pylint: disable=invalid-name
         _bucket_sub_path = config.pop('_bucket_sub_path', None)
+        mount_options = config.pop('mount_options', "").strip()
         if force_delete is None:
             force_delete = False
 
@@ -1299,13 +1304,16 @@ class Storage(object):
             stores = [StoreType(store.upper())]
         else:
             stores = None
+
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
                           mode=mode,
                           stores=stores,
                           _is_sky_managed=_is_sky_managed,
-                          _bucket_sub_path=_bucket_sub_path)
+                          _bucket_sub_path=_bucket_sub_path,
+                          mount_options=mount_options
+                          )
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
@@ -1363,7 +1371,8 @@ class S3Store(AbstractStore):
                  region: Optional[str] = _DEFAULT_REGION,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 **kwargs):
         self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         # TODO(romilb): This is purely a stopgap fix for
@@ -1898,7 +1907,8 @@ class GcsStore(AbstractStore):
                  region: Optional[str] = 'us-central1',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 **kwargs):
         self.client: 'storage.Client'
         self.bucket: StorageHandle
         super().__init__(name, source, region, is_sky_managed,
@@ -2439,12 +2449,14 @@ class AzureBlobStore(AbstractStore):
                      storage_account_name: str,
                      source: Optional[SourceType],
                      region: Optional[str] = None,
-                     is_sky_managed: Optional[bool] = None):
+                     is_sky_managed: Optional[bool] = None,
+                     mount_options: Optional[str] = ""):
             self.storage_account_name = storage_account_name
             super().__init__(name=name,
                              source=source,
                              region=region,
-                             is_sky_managed=is_sky_managed)
+                             is_sky_managed=is_sky_managed,
+                             mount_options=mount_options)
 
         def __repr__(self):
             return (f'AzureBlobStoreMetadata('
@@ -2461,10 +2473,13 @@ class AzureBlobStore(AbstractStore):
                  region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 mount_options: Optional[str] = ""):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.container_name: str
+
+        self.mount_options = mount_options
         # storage_account_name is not None when initializing only
         # when it is being reconstructed from the handle(metadata).
         self.storage_account_name = storage_account_name
@@ -3187,7 +3202,8 @@ class AzureBlobStore(AbstractStore):
                                                     self.storage_account_name,
                                                     mount_path,
                                                     self.storage_account_key,
-                                                    self._bucket_sub_path)
+                                                    self._bucket_sub_path,
+                                                    self.mount_options)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -3300,7 +3316,8 @@ class R2Store(AbstractStore):
                  region: Optional[str] = 'auto',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 **kwargs):
         self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
@@ -3777,7 +3794,8 @@ class IBMCosStore(AbstractStore):
                  region: Optional[str] = 'us-east',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 **kwargs):
         self.client: 'storage.Client'
         self.bucket: 'StorageHandle'
         self.rclone_profile_name = (
@@ -4242,7 +4260,8 @@ class OciStore(AbstractStore):
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 **kwargs):
         self.client: Any
         self.bucket: StorageHandle
         self.oci_config_file: str
@@ -4705,7 +4724,8 @@ class NebiusStore(AbstractStore):
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None):
+                 _bucket_sub_path: Optional[str] = None,
+                 **kwargs):
         self.client: 'mypy_boto3_s3.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
