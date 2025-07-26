@@ -394,6 +394,8 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     elif accelerator == 'H200':
         # H200s on GCP use this label format
         return 'nvidia-h200-141gb'
+    elif accelerator.startswith('tpu-'):
+        return accelerator
     elif accelerator.startswith('amd-'):
         return accelerator
     else:
