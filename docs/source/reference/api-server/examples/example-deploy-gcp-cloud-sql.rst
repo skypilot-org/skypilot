@@ -3,6 +3,17 @@ Deploying a SkyPilot API Server on GKE backed by GCP Cloud SQL
 
 In this example, a SkyPilot API server is deployed on a GKE cluster with a persistent database backed by GCP Cloud SQL.
 
+SkyPilot API server deployed on k8s clusters can use either **password authentication** or **IAM authentication** to access the Cloud SQL instance.
+
+**Password authentication** is the less secure option between the two, but it works with any k8s cluster (not necessarily GKE).
+
+**IAM authentication** is a more secure authentication method that allows the GKE cluster to access the database using a GCP service account.
+However, it requires a GKE cluster with Workload Identity enabled.
+
+.. note::
+
+    IAM authentication is recommended for production deployments on GKE clusters.
+
 Prerequisites
 -------------
 
@@ -37,6 +48,10 @@ Create a GKE cluster
         **Web Console:**
 
         When creating a standard GKE cluster, go to the ``Security`` tab and check ``Enable Workload Identity``.
+
+        .. note::
+        
+            Retroactively enabling Workload Identity on an existing cluster is complicated and is not recommended.
 
 
 Create a GCP service account to use with the API server
