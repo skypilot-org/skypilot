@@ -3382,37 +3382,33 @@ def process_skypilot_pods(
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
 
-
-def get_gpu_resource_key(context: Optional[str] = None) -> str:
-    """Get the GPU resource name to use in kubernetes.
-    The function first checks for an environment variable.
-    If defined, it uses its value; otherwise, it returns the default value.
-    Args:
-        name (str): Default GPU resource name, default is "nvidia.com/gpu".
-    Returns:
-        str: The selected GPU resource name.
-    """
-    # Retrieve GPU resource name from environment variable, if set.
-    # Else use default.
-    # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
-    global GPU_RESOURCE_KEY # left as a global variable for backward compatibility
-    GPU_RESOURCE_KEY = SUPPORTED_GPU_RESOURCE_KEYS["amd"]
+def _gpu_resource_key_helper(context: Optional[str]) -> str:
+    """Helper function to get the GPU resource key."""
+    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS["amd"]
     try:
-        #auto-detect gpu provider
-        nodes = kubernetes.core_api(context).list_node().items        
-        for gpu_provider, gpu_resource_key in SUPPORTED_GPU_RESOURCE_KEYS.items():
-            for node in nodes:
-                allocatable = node.status.allocatable
-                if gpu_resource_key in allocatable:
-                    GPU_RESOURCE_KEY = gpu_resource_key
-                    break
-            if GPU_RESOURCE_KEY:
-                break
+        nodes = kubernetes.core_api(context).list_node().items
+        for gpu_provider, gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.items():
+            if any(gpu_key in node.status.allocatable for node in nodes):
+                return gpu_key
     except Exception as e:
         logger.warning(
             f'Failed to load kube config or query nodes: {e}. '
             'Falling back to default GPU resource key.')
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
+    return gpu_resource_key
+
+def get_gpu_resource_key(context: Optional[str] = None) -> str:
+    """    
+    Get the GPU resource name to use in Kubernetes.
+
+    The function auto-detects the GPU resource key by querying the Kubernetes node API.
+    If detection fails, it falls back to a default value.
+    An environment variable can override the detected or default value.
+
+    Returns:
+        str: The selected GPU resource name.
+    """
+    gpu_resource_key = _gpu_resource_key_helper(context)
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
 
 
 def get_kubeconfig_paths() -> List[str]:
