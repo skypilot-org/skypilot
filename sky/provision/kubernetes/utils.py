@@ -1509,7 +1509,7 @@ def get_accelerator_label_key_values(
                     ' contains GPUs, please ensure GPU drivers are installed on '
                     'the node. Check if the GPUs are setup correctly by running '
                     '`kubectl describe nodes` and looking for the '
-                    f'{SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r} or '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r}, '
                     f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]!r} or '
                     f'{TPU_RESOURCE_KEY!r} resource. '
                     'Please refer to the documentation on how to set up GPUs.'
