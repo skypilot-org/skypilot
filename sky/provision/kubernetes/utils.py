@@ -1106,7 +1106,7 @@ def detect_accelerator_resource(
     """Checks if the Kubernetes cluster has GPU/TPU resource.
 
     Three types of accelerator resources are available which are each checked
-    with amd.com/gpu, nvidia.com/gpu and google.com/tpu. If nvidia.com/gpu resource is
+    with amd.com/gpu, nvidia.com/gpu and google.com/tpu. If amd.com/gpu or nvidia.com/gpu resource is
     missing, that typically means that the Kubernetes cluster does not have
     GPUs or the amd/nvidia GPU operator and/or device drivers are not installed.
 
