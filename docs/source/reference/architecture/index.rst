@@ -6,7 +6,7 @@ SkyPilot Architecture
 SkyPilot state management
 -------------------------
 
-All SkyPilot internal data is stored in ``~/.sky/`` directory:
+All SkyPilot internal data is stored in the ``~/.sky/`` directory of the API server (either your local machine or a remote server):
 
 - SQLite databases for states (if external database is not configured)
 - API server logs
@@ -26,7 +26,7 @@ All SkyPilot internal data is stored in ``~/.sky/`` directory:
 Configuration
 ~~~~~~~~~~~~~
 
-Configuration for SkyPilot API server is stored in ``~/.sky/config.yaml`` file.
+Configuration for the SkyPilot API server is stored in the ``~/.sky/config.yaml`` file.
 
 SkyPilot can be configured to use an external database to store its configuration.
 In this case, the configuration file at ``~/.sky/config.yaml`` can only contain the following field:
