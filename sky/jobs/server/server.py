@@ -106,3 +106,57 @@ async def download_logs(
         if jobs_download_logs_body.refresh else api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
+
+
+@router.post('/pool_up')
+async def pool_up(request: fastapi.Request,
+                  jobs_pool_up_body: payloads.JobsPoolUpBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_up',
+        request_body=jobs_pool_up_body,
+        func=core.pool_up,
+        schedule_type=api_requests.ScheduleType.LONG,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
+@router.post('/pool_update')
+async def pool_update(
+        request: fastapi.Request,
+        jobs_pool_update_body: payloads.JobsPoolUpdateBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_update',
+        request_body=jobs_pool_update_body,
+        func=core.pool_update,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
+@router.post('/pool_down')
+async def pool_down(request: fastapi.Request,
+                    jobs_pool_down_body: payloads.JobsPoolDownBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_down',
+        request_body=jobs_pool_down_body,
+        func=core.pool_down,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
+@router.post('/pool_status')
+async def pool_status(
+        request: fastapi.Request,
+        jobs_pool_status_body: payloads.JobsPoolStatusBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_status',
+        request_body=jobs_pool_status_body,
+        func=core.pool_status,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )

@@ -104,7 +104,8 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # Changelog:
 # v1.0 - Introduce rolling update.
 # v2.0 - Added template-replica feature.
-SERVE_VERSION = 2
+# v3.0 - Added cluster pool.
+SERVE_VERSION = 3
 
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '

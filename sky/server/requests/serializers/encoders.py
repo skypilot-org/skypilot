@@ -112,8 +112,7 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     return jobs
 
 
-@register_encoder('serve.status')
-def encode_serve_status(
+def _encode_serve_status(
         service_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for service_status in service_statuses:
         service_status['status'] = service_status['status'].value
@@ -121,6 +120,18 @@ def encode_serve_status(
             replica_info['status'] = replica_info['status'].value
             replica_info['handle'] = pickle_and_encode(replica_info['handle'])
     return service_statuses
+
+
+@register_encoder('serve.status')
+def encode_serve_status(
+        service_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return _encode_serve_status(service_statuses)
+
+
+@register_encoder('jobs.pool_status')
+def encode_jobs_pool_status(
+        pool_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return _encode_serve_status(pool_statuses)
 
 
 @register_encoder('cost_report')

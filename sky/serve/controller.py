@@ -100,6 +100,11 @@ class SkyServeController:
 
     def run(self) -> None:
 
+        @self._app.get('/autoscaler/info')
+        async def get_autoscaler_info() -> fastapi.Response:
+            return responses.JSONResponse(content=self._autoscaler.info(),
+                                          status_code=200)
+
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(
                 request: fastapi.Request) -> fastapi.Response:
