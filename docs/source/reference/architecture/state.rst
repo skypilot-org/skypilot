@@ -1,10 +1,7 @@
-SkyPilot Architecture
-=====================
-
-.. _infrastructure-state:
+.. _architecture-state:
 
 SkyPilot state management
--------------------------
+=========================
 
 All SkyPilot internal data is stored in the ``~/.sky/`` directory of the API server (either your local machine or a remote server):
 
@@ -21,10 +18,10 @@ All SkyPilot internal data is stored in the ``~/.sky/`` directory of the API ser
   See :ref:`API server database configuration <config-yaml-db>` for more details on how to configure an external database.
 
   If configured, SkyPilot uses the external database to store states instead of the SQLite databases in ``~/.sky/`` directory.
-  All the other internal data is emphemeral, and is fine to discard during upgrade.
+  All the other internal data is emphemeral, and is not critical to the operation of SkyPilot API server.
 
 Configuration
-~~~~~~~~~~~~~
+-------------
 
 Configuration for the SkyPilot API server is stored in the ``~/.sky/config.yaml`` file.
 
@@ -37,7 +34,7 @@ Configuring an external database allows the configuration to be persisted
 even if the local filesystem is lost (e.g. the API server pod is terminated, potentially during an upgrade).
 
 File / directory uploads
-~~~~~~~~~~~~~~~~~~~~~~~~
+------------------------
 
 When a user uploads a file or directory to a cluster with ``workdir`` or ``file_mounts``,
 the SkyPilot client automatically uploads the files to a remote API server at directory:

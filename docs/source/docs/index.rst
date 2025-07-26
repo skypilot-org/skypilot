@@ -334,6 +334,6 @@ Read the research:
    CLI <../reference/cli>
    ../reference/api
    ../reference/config
-   SkyPilot Architecture <../reference/architecture/index>
+   SkyPilot State <../reference/architecture/state>
    ../developers/index
 
