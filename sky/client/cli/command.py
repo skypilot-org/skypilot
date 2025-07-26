@@ -1942,31 +1942,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
                 in_progress_hint(False).format(job_info=job_info))
 
-    if show_services:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Services{colorama.Style.RESET_ALL}')
-        num_services = None
-        if managed_jobs_query_interrupted:
-            msg = 'KeyboardInterrupt'
-        else:
-            with rich_utils.client_status('[cyan]Checking services[/]'):
-                try:
-                    num_services, msg = _handle_services_request(
-                        service_status_request_id,
-                        service_names=None,
-                        show_all=False,
-                        show_endpoint=False,
-                        is_called_by_user=False)
-                except KeyboardInterrupt:
-                    sdk.api_cancel(service_status_request_id, silent=True)
-                    num_services = -1
-                    msg = 'KeyboardInterrupt'
-        click.echo(msg)
-        if num_services is not None:
-            hints.append(
-                controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
-                in_progress_hint(False))
-
     if show_pools:
         num_pools = None
         if managed_jobs_query_interrupted:
@@ -1993,6 +1968,31 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 hints.append(
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
                     in_progress_hint(True))
+
+    if show_services:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Services{colorama.Style.RESET_ALL}')
+        num_services = None
+        if managed_jobs_query_interrupted:
+            msg = 'KeyboardInterrupt'
+        else:
+            with rich_utils.client_status('[cyan]Checking services[/]'):
+                try:
+                    num_services, msg = _handle_services_request(
+                        service_status_request_id,
+                        service_names=None,
+                        show_all=False,
+                        show_endpoint=False,
+                        is_called_by_user=False)
+                except KeyboardInterrupt:
+                    sdk.api_cancel(service_status_request_id, silent=True)
+                    num_services = -1
+                    msg = 'KeyboardInterrupt'
+        click.echo(msg)
+        if num_services is not None:
+            hints.append(
+                controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
+                in_progress_hint(False))
 
     if num_pending_autostop > 0 and not refresh:
         # Don't print this hint if there's no pending autostop or user has
@@ -4254,7 +4254,7 @@ def jobs():
               default=None,
               type=str,
               required=False,
-              help='Which pool to use for jobs submission.')
+              help='(Experimental; optional) Pool to use for jobs submission.')
 @click.option('--num-jobs',
               default=None,
               type=int,
@@ -4368,9 +4368,11 @@ def jobs_launch(
     common_utils.check_cluster_name_is_valid(name)
 
     if pool is not None:
+        num_job_int = num_jobs if num_jobs is not None else 1
+        plural = '' if num_job_int == 1 else 's'
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
-                    f'{num_jobs}{colorama.Style.RESET_ALL} jobs.')
+                    f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -4657,7 +4659,7 @@ def jobs_dashboard():
 
 @jobs.group(cls=_NaturalOrderGroup)
 def pool():
-    """Cluster pool management commands."""
+    """(Experimental) Pool management commands."""
     pass
 
 
