@@ -6,11 +6,38 @@ In this example, a SkyPilot API server is deployed on a GKE cluster with a persi
 Prerequisites
 -------------
 
-* `A GKE cluster <https://cloud.google.com/kubernetes-engine/docs/how-to/creating-a-zonal-cluster>`_
 * `Helm <https://helm.sh/docs/intro/install/>`_
 * `kubectl <https://kubernetes.io/docs/tasks/tools/#kubectl>`_
 * `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_
 * Access to GCP console
+
+Create a GKE cluster
+--------------------
+
+.. tab-set::
+
+    .. tab-item:: Password Auth
+
+        Create a GKE cluster as you normally would.
+
+    .. tab-item:: IAM Auth
+
+        Create a GKE cluster with Workload Identity enabled.
+
+        **CLI:** 
+        
+        Add ``--enable-workload-identity`` flag to ``gcloud container clusters create`` command as shown:
+
+        .. code-block:: bash
+
+            gcloud container clusters create <cluster-name> \
+                ...
+                --enable-workload-identity
+
+        **Web Console:**
+
+        When creating a standard GKE cluster, go to the ``Security`` tab and check ``Enable Workload Identity``.
+
 
 Create a GCP service account to use with the API server
 -------------------------------------------------------
@@ -53,6 +80,14 @@ Configure the cloud SQL instance
 
 Once the instance is created, we need to configure the instance to create a user and a database for SkyPilot API server.
 
+To create a database, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ to run the following command:
+
+.. code-block:: bash
+
+    DB_NAME=skypilot-db
+    DB_INSTANCE_NAME=cloud-sql-skypilot-instance
+    gcloud sql databases create ${DB_NAME} --instance ${DB_INSTANCE_NAME}
+
 To create a user, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ to run the following command:
 
 .. tab-set::
@@ -77,13 +112,18 @@ To create a user, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ 
                 --instance=${DB_INSTANCE_NAME} \
                 --type=cloud_iam_service_account
 
-To create a database, use `gcloud CLI <https://cloud.google.com/sdk/docs/install>`_ to run the following command:
+        Since the service account user is not granted any privileges in the database by default,
+        we need to grant the user the necessary privileges.
 
-.. code-block:: bash
-
-    DB_NAME=skypilot-db
-    DB_INSTANCE_NAME=cloud-sql-skypilot-instance
-    gcloud sql databases create ${DB_NAME} --instance ${DB_INSTANCE_NAME}
+        - Go to the `Cloud SQL console <https://console.cloud.google.com/sql/instances>`_
+        - Click on ``cloud-sql-skypilot-instance``
+        - Click on ``Cloud SQL Studio`` tab on the side bar.
+        - Authenticate to ``skypilot-db`` database using the ``postgres`` user.
+        - Run the following SQL command to grant the user the necessary privileges:
+        
+        .. code-block:: sql
+        
+            GRANT "cloudsqlsuperuser" TO "skypilot-cloud-sql-access@<gcp-project-id>.iam"
 
 Authorize the API server to use the GCP service account
 -------------------------------------------------------
@@ -131,8 +171,8 @@ In this step, we authorize the GCP service account to be used by the API server.
                 --member="serviceAccount:${GCP_PROJECT_ID}.svc.id.goog[${NAMESPACE}/${GKE_SERVICE_ACCOUNT}]" \
                 ${GCP_SERVICE_ACCOUNT}@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 
-Step 6: Create the database connection secret
----------------------------------------------
+Create the database connection secret
+-------------------------------------
 
 In this step, we create a secret to store the database connection information to be used by the API server.
 
@@ -159,11 +199,11 @@ In this step, we create a secret to store the database connection information to
             GCP_PROJECT_ID=<your gcp project id>
             kubectl create secret generic skypilot-db-connection-uri \
                 --namespace ${NAMESPACE} \
-                --from-literal connection_string=postgresql://localhost/${DB_NAME}?user=skypilot-cloud-sql-access%40${GCP_PROJECT_ID}.iam
+                --from-literal connection_string="postgresql://localhost/${DB_NAME}?user=skypilot-cloud-sql-access%40${GCP_PROJECT_ID}.iam"
 
 
-Step 7: Deploy the SkyPilot API server
---------------------------------------
+Deploy the SkyPilot API server
+------------------------------
 
 Replace ``<GCP_PROJECT_ID>`` and ``<REGION>`` in the following ``values.yaml`` with the corresponding values.
 
@@ -186,12 +226,6 @@ Replace ``<GCP_PROJECT_ID>`` and ``<REGION>`` in the following ``values.yaml`` w
               # config must be null when using an external database.
               # To set the config, use the web dashboard once the API server is deployed.
               config: null
-
-            rbac:
-              serviceAccountName: "skypilot-api-sa"
-              serviceAccountAnnotations:
-                # TODO: fill in <GCP_PROJECT_ID>
-                iam.gke.io/gcp-service-account: skypilot-cloud-sql-access@<GCP_PROJECT_ID>.iam.gserviceaccount.com
 
             # Extra init containers to run before the api container
             extraInitContainers:
