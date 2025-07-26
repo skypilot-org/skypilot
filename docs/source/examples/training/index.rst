@@ -8,6 +8,7 @@ Training
    DeepSpeed <deepspeed.md>
    Distributed PyTorch <distributed-pytorch.md>
    Distributed TensorFlow <distributed-tensorflow.md>
+   Finetuning Llama 4 <llama-4-finetuning.md>
    Finetuning Llama 3 <llama-3_1-finetuning.md>
    Finetuning Llama 2 <llama-2-finetuning.md>
    NeMo <nemo.md>
