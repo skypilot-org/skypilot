@@ -1503,7 +1503,7 @@ def get_accelerator_label_key_values(
                     f'`sky ssh up --infra {context_display_name}`. {suffix}')
             else:
                 msg = (
-                    f'Could not detect GPU/TPU resources ({SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r} or '
+                    f'Could not detect GPU/TPU resources ({SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r}, '
                     f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]!r} or '
                     f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
                     ' contains GPUs, please ensure GPU drivers are installed on '
