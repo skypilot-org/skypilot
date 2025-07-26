@@ -14,6 +14,7 @@ from sky import skypilot_config as skypilot_config
 from sky.server import common as server_common
 from sky.server import rest as rest
 from sky.server.requests import payloads as payloads
+from sky.skylet import autostop_lib as autostop_lib
 from sky.skylet import constants as constants
 from sky.usage import usage_lib as usage_lib
 from sky.utils import admin_policy_utils as admin_policy_utils
@@ -104,6 +105,7 @@ def launch(task: Union['sky.Task', 'sky.Dag'],
            cluster_name: Optional[str] = ...,
            retry_until_up: bool = ...,
            idle_minutes_to_autostop: Optional[int] = ...,
+           wait_for: autostop_lib.AutostopWaitFor = ...,
            dryrun: bool = ...,
            down: bool = ...,
            backend: Optional['backends.Backend'] = ...,
@@ -142,6 +144,7 @@ def download_logs(cluster_name: str,
 
 def start(cluster_name: str,
           idle_minutes_to_autostop: Optional[int] = ...,
+          wait_for: autostop_lib.AutostopWaitFor = ...,
           retry_until_up: bool = ...,
           down: bool = ...,
           force: bool = ...) -> server_common.RequestId:
@@ -158,6 +161,7 @@ def stop(cluster_name: str, purge: bool = ...) -> server_common.RequestId:
 
 def autostop(cluster_name: str,
              idle_minutes: int,
+             wait_for: autostop_lib.AutostopWaitFor = ...,
              down: bool = ...) -> server_common.RequestId:
     ...
 

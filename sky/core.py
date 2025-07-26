@@ -25,6 +25,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -403,6 +404,8 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
 def _start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -473,7 +476,7 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
+        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
     return handle
 
 
@@ -481,6 +484,8 @@ def _start(
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -535,6 +540,7 @@ def start(
             '`idle_minutes_to_autostop` must be set if `down` is True.')
     return _start(cluster_name,
                   idle_minutes_to_autostop,
+                  wait_for,
                   retry_until_up,
                   down,
                   force=force)
@@ -651,6 +657,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 def autostop(
         cluster_name: str,
         idle_minutes: int,
+        wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -740,7 +748,7 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, down)
+    backend.set_autostop(handle, idle_minutes, wait_for, down)
 
 
 # ==================

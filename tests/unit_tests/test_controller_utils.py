@@ -8,6 +8,7 @@ import sky
 from sky import clouds
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import registry
@@ -15,6 +16,7 @@ from sky.utils import registry
 _DEFAULT_AUTOSTOP = {
     'down': False,
     'idle_minutes': 10,
+    'wait_for': autostop_lib.AutostopWaitFor.JOBS_AND_SSH.value,
 }
 
 
