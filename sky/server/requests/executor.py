@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import state
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -515,7 +516,8 @@ def prepare_request(
                                    created_at=time.time(),
                                    schedule_type=schedule_type,
                                    user_id=user_id,
-                                   cluster_name=request_cluster_name)
+                                   cluster_name=request_cluster_name,
+                                   host_uuid=state.get_host_uuid())
 
     if not api_requests.create_if_not_exists(request):
         raise exceptions.RequestAlreadyExistsError(
