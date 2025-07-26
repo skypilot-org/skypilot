@@ -496,17 +496,17 @@ def _parse_override_params(
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
-        if cloud.lower() == 'none':
+        if cloud.lower() == 'none' or cloud == '*':
             override_params['cloud'] = None
         else:
             override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
-        if region.lower() == 'none':
+        if region.lower() == 'none' or region == '*':
             override_params['region'] = None
         else:
             override_params['region'] = region
     if zone is not None:
-        if zone.lower() == 'none':
+        if zone.lower() == 'none' or zone == '*':
             override_params['zone'] = None
         else:
             override_params['zone'] = zone

@@ -28,7 +28,8 @@ class TestInfraUtils(unittest.TestCase):
             ('aws/*', 'aws', None, None),
             ('*/*/us-east-1a', None, None, 'us-east-1a'),
             (None, None, None, None),
-            ('*', None, None, None),
+            # Test '*' special case - should set all fields to '*' for CLI override processing
+            ('*', '*', '*', '*'),
             # Test case sensitivity
             ('AWS/US-EAST-1', 'aws', 'US-EAST-1', None),
             ('GCP/US-CENTRAL1', 'gcp', 'US-CENTRAL1', None),

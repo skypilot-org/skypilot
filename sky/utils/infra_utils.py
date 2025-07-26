@@ -23,11 +23,11 @@ class InfraInfo:
                  region: Optional[str] = None,
                  zone: Optional[str] = None):
         assert cloud not in ['none', 'None', 'NONE'], 'cloud must be specified'
-        if not cloud or cloud == '*':
+        if not cloud:
             cloud = None
-        if not region or region == '*':
+        if not region:
             region = None
-        if not zone or zone == '*':
+        if not zone:
             zone = None
 
         self.cloud = cloud
@@ -61,6 +61,10 @@ class InfraInfo:
             return InfraInfo()
 
         infra = infra.strip().strip('/')
+
+        # Handle the special case of '*' meaning "any cloud/region/zone"
+        if infra == '*':
+            return InfraInfo(cloud='*', region='*', zone='*')
 
         # Split on / to get cloud, region, zone
         parts = [p.strip() for p in infra.strip().split('/')]
