@@ -102,9 +102,6 @@ jobs:
           # Copy the non-HTML content from the README.md of root directory to the skypilot chart
           line=$(grep -n "^----$" src/README.md | cut -d: -f1 | head -n 1)
           tail -n +$((line + 1)) src/README.md >> src/charts/skypilot/README.md
-          echo "start"
-          cat src/charts/skypilot/README.md
-          echo "end"
 
           # Update the version in the external-metrics chart (prometheus server)
           # todo(rohan): update name the way we do for the main skypilot chart?
@@ -128,18 +125,18 @@ jobs:
               helm package "$d" -u -d dest
           done
 
-      # - name: Push New Files
-      #   shell: bash
-      #   working-directory: dest
-      #   run: |
-      #     helm repo index . --url ${{ env.HELM_REPO_URL }}
-      #     git config user.name "github-actions[bot]"
-      #     git config user.email "github-actions[bot]@users.noreply.github.com"
-      #     # Add both untracked files and .tgz files explicitly
-      #     git add $(git ls-files -o --exclude-standard)
-      #     git add *.tgz
-      #     git add index.yaml
-      #     # Show what's being committed for debugging
-      #     git status
-      #     git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
-      #     git push origin main
+      - name: Push New Files
+        shell: bash
+        working-directory: dest
+        run: |
+          helm repo index . --url ${{ env.HELM_REPO_URL }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Add both untracked files and .tgz files explicitly
+          git add $(git ls-files -o --exclude-standard)
+          git add *.tgz
+          git add index.yaml
+          # Show what's being committed for debugging
+          git status
+          git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
+          git push origin main
