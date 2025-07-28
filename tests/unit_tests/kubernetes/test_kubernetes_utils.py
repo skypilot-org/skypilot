@@ -352,7 +352,8 @@ def test_heterogenous_gpu_detection_key_counts():
          mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
          mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_node1, mock_node2]), \
-         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[mock_pod1, mock_pod2]):
+         mock.patch('sky.provision.kubernetes.utils.get_all_pods_in_kubernetes_cluster', return_value=[mock_pod1, mock_pod2]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key', return_value='nvidia.com/gpu'):
 
         counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
             True, None, None, None)
