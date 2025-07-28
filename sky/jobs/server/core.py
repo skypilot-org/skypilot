@@ -110,7 +110,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
         # submitting multiple jobs. Current blocker is that we are sharing
         # the same dag object for all jobs. Maybe we can do copy.copy() for
         # each job and then give it a unique name (e.g. append job id after
-        # the task name).
+        # the task name). The name of the dag also needs to be aligned with
+        # the task name.
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
