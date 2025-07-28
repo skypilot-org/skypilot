@@ -1145,6 +1145,10 @@ def get_config_schema():
                 'default': False,
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'force_disable_cloud_bucket': {
+                'type': 'boolean',
+                'default': False,
+            },
         }
         if add_consolidation_mode:
             controller_properties['consolidation_mode'] = {
