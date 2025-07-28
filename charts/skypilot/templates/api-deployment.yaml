@@ -197,52 +197,49 @@ spec:
           {{- end }}
           # AWS credentials mounting
           # Since the ~/.aws directory is also used by the AWS CLI, we mount the credentials to /root/.aws_credentials
-          # and create a symlink to /root/.aws. This cannot be done in the init container because the AWS CLI needs read-write access to ~/.aws.
+          # and copy them to /root/.aws. This cannot be done in the init container because the AWS CLI needs read-write access to ~/.aws.
           {{- if .Values.awsCredentials.enabled }}
           echo "Setting up AWS credentials..."
           mkdir -p /root/.aws
-          # Handle both flat files and directory structures from Kubernetes secret
           if [ -d "/root/.aws_credentials" ]; then
-                         # First, handle the direct symlinks at the root level (avoiding Kubernetes internal dirs)
-             for file in /root/.aws_credentials/*; do
-               if [ -f "$file" ] && [[ "$(basename "$file")" != ..* ]]; then
+            # Handle both flat files and directory structures from Kubernetes secret
+            for file in /root/.aws_credentials/*; do
+              if [ -f "$file" ] && [[ "$(basename "$file")" != ..* ]]; then
                 filename=$(basename "$file")
                 echo "Processing file: $filename"
                 
-                                 # Determine target location based on file type and name
-                 case "$filename" in
-                   config)
-                     cp "$file" "/root/.aws/config"
-                     chmod 600 "/root/.aws/config"
-                     echo "  -> Copied $filename to /root/.aws/config"
-                     ;;
-                   credentials)
-                     cp "$file" "/root/.aws/credentials"
-                     chmod 600 "/root/.aws/credentials"
-                     echo "  -> Copied $filename to /root/.aws/credentials"
-                     ;;
-                   *.json)
-                     # These are cache files that need to be writable for token refresh
-                     # Create both directories and copy to sso/cache/ and cli/cache/
-                     mkdir -p /root/.aws/sso/cache /root/.aws/cli/cache
-                     chmod 700 /root/.aws/sso /root/.aws/cli /root/.aws/sso/cache /root/.aws/cli/cache
-                     cp "$file" "/root/.aws/sso/cache/$filename"
-                     cp "$file" "/root/.aws/cli/cache/$filename"
-                     chmod 600 "/root/.aws/sso/cache/$filename" "/root/.aws/cli/cache/$filename"
-                     echo "  -> Copied $filename to both /root/.aws/sso/cache/ and /root/.aws/cli/cache/ (writable)"
-                     ;;
-                   *)
-                     # For other files, copy them directly to .aws
-                     cp "$file" "/root/.aws/$filename"
-                     chmod 600 "/root/.aws/$filename"
-                     echo "  -> Copied $filename to /root/.aws/$filename"
-                     ;;
-                 esac
+                # Determine target location based on file type and name
+                case "$filename" in
+                  config)
+                    cp "$file" "/root/.aws/config"
+                    chmod 600 "/root/.aws/config"
+                    echo "  -> Copied $filename to /root/.aws/config"
+                    ;;
+                  credentials)
+                    cp "$file" "/root/.aws/credentials"
+                    chmod 600 "/root/.aws/credentials"
+                    echo "  -> Copied $filename to /root/.aws/credentials"
+                    ;;
+                  *.json)
+                    # These are cache files that need to be writable for token refresh
+                    # Create both directories and copy to sso/cache/ and cli/cache/
+                    mkdir -p /root/.aws/sso/cache /root/.aws/cli/cache
+                    chmod 700 /root/.aws/sso /root/.aws/cli /root/.aws/sso/cache /root/.aws/cli/cache
+                    cp "$file" "/root/.aws/sso/cache/$filename"
+                    cp "$file" "/root/.aws/cli/cache/$filename"
+                    chmod 600 "/root/.aws/sso/cache/$filename" "/root/.aws/cli/cache/$filename"
+                    echo "  -> Copied $filename to both /root/.aws/sso/cache/ and /root/.aws/cli/cache/"
+                    ;;
+                  *)
+                    # For other files, copy them directly to .aws
+                    cp "$file" "/root/.aws/$filename"
+                    chmod 600 "/root/.aws/$filename"
+                    echo "  -> Copied $filename to /root/.aws/$filename"
+                    ;;
+                esac
               fi
             done
-                         echo "AWS credentials setup complete."
-             echo "Final AWS directory structure:"
-             find /root/.aws -type f -exec ls -la {} \; 2>/dev/null | head -10 || echo "No files found"
+            echo "AWS credentials setup complete."
           else
             echo "No AWS credentials directory found at /root/.aws_credentials"
           fi
@@ -357,6 +354,8 @@ spec:
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-credentials
           mountPath: /root/.aws_credentials
+        - name: aws-config
+          mountPath: /root/.aws
         {{- end }}
         {{- if .Values.r2Credentials.enabled }}
         - name: r2-credentials
@@ -366,7 +365,49 @@ spec:
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
       initContainers:
-
+      {{- if .Values.awsCredentials.enabled }}
+      - name: create-aws-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up AWS credentials..."
+          if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "AWS credentials found in environment variables."
+            mkdir -p /root/.aws
+            # Create credentials file manually (don't rely on aws CLI being installed)
+            cat > /root/.aws/credentials << EOF
+          [default]
+          aws_access_key_id = $AWS_ACCESS_KEY_ID
+          aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+          EOF
+            chmod 600 /root/.aws/credentials
+            echo "Credentials file created successfully."
+          else
+            echo "AWS credentials not found in environment variables. Skipping credentials setup."
+            echo "This is normal if using file-based credentials instead."
+          fi
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.accessKeyIdKeyName }}
+              optional: true
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.secretAccessKeyKeyName }}
+              optional: true
+        volumeMounts:
+        - name: aws-config
+          mountPath: /root/.aws
+      {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
         {{- with .Values.securityContext }}
@@ -519,6 +560,8 @@ spec:
       - name: aws-credentials
         secret:
           secretName: {{ .Values.awsCredentials.awsSecretName }}
+      - name: aws-config
+        emptyDir: {}
       {{- end }}
       {{- if .Values.r2Credentials.enabled }}
       - name: r2-credentials
