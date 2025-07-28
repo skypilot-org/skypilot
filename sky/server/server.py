@@ -279,8 +279,9 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if (username_encoded == db_username_encoded and
                     apr_md5_crypt.verify(password, user.password)):
                 valid_user = True
-                request.state.auth_user = user
-                await _override_user_info_in_request_body(request, user)
+                if os.getenv(server_constants.API_BASIC_AUTH_RBAC_ENV_VAR):
+                    request.state.auth_user = user
+                    await _override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')

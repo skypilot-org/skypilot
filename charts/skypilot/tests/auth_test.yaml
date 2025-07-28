@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: auth_test
+templates:
+  - templates/auth.yaml
+tests:
+  # Test cases for backward compatibility auth secret creation
+  # Note: The lookup function used in the helper for upgrades cannot be tested in unit tests
+  # These tests focus on the other conditions that can be tested
+  - it: should create auth secret when enableBasicAuth is false and conditions are met
+    set:
+      apiService.enableBasicAuth: false  # Explicitly false makes enableBasicAuthInAPIServer false
+      ingress.authCredentials: "olduser:oldpass"
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Secret
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-basic-auth
+      - equal:
+          path: stringData.auth
+          value: "olduser:oldpass"
+
+  - it: should not create auth secret when enableBasicAuth is explicitly true
+    set:
+      apiService.enableBasicAuth: true
+      ingress.authCredentials: "olduser:oldpass"
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create auth secret when enableBasicAuth is explicitly true
+    set:
+      apiService.enableBasicAuth: true
+      ingress.authCredentials: "olduser:oldpass"
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create auth secret when oauth2-proxy is enabled
+    set:
+      apiService.enableBasicAuth: null
+      ingress.authCredentials: "olduser:oldpass"
+      ingress.oauth2-proxy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create auth secret when authSecret is provided
+    set:
+      apiService.enableBasicAuth: null
+      ingress.authSecret: my-existing-auth-secret
+      ingress.authCredentials: "olduser:oldpass"
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create auth secret when authCredentials is not provided
+    set:
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Test cases for new install behavior
+  - it: should not create auth secret for new install even with authCredentials when enableBasicAuth is null
+    set:
+      apiService.enableBasicAuth: null
+      ingress.authCredentials: "olduser:oldpass"
+      ingress.oauth2-proxy.enabled: false
+    release:
+      upgrade: false
+    asserts:
+      - hasDocuments:
+          count: 0 

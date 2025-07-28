@@ -73,7 +73,7 @@ fi
 helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag \
     --namespace $NAMESPACE \
     --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING
+    --set apiService.initialBasicAuthCredentials=$AUTH_STRING
 
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."

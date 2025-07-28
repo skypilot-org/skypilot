@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: helpers_test
+templates:
+  - templates/api-deployment.yaml
+tests:
+  # Test cases for enableBasicAuth explicitly set to true
+  - it: should enable basic auth when enableBasicAuth is explicitly true
+    set:
+      apiService.enableBasicAuth: true
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-initial-basic-auth
+                key: auth
+
+  - it: should enable basic auth when enableBasicAuth is true even with oauth2-proxy enabled
+    set:
+      apiService.enableBasicAuth: true
+      ingress.oauth2-proxy.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-initial-basic-auth
+                key: auth
+
+  # Test cases for enableBasicAuth explicitly set to false
+  - it: should not enable basic auth when enableBasicAuth is explicitly false
+    set:
+      apiService.enableBasicAuth: false
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  # Test cases for enableBasicAuth = null on fresh install
+  - it: should enable basic auth for new install when enableBasicAuth is null and oauth2-proxy disabled
+    set:
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: false
+    release:
+      upgrade: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-initial-basic-auth
+                key: auth
+
+  - it: should not enable basic auth for new install when enableBasicAuth is null and oauth2-proxy enabled
+    set:
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: true
+    release:
+      upgrade: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  # Test cases for enableBasicAuth = null on upgrade (backward compatibility)
+  # Note: The lookup function used in the helper cannot be fully tested in unit tests
+  # This test just verifies the template renders without error for upgrade scenarios
+  - it: should render correctly for upgrade when enableBasicAuth is null
+    set:
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: false
+    release:
+      upgrade: true
+    asserts:
+      - isKind:
+          of: Deployment
+
+  # Test using external secret
+  - it: should use external secret when initialBasicAuthSecret is provided
+    set:
+      apiService.enableBasicAuth: true
+      apiService.initialBasicAuthSecret: my-external-auth-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: my-external-auth-secret
+                key: auth 

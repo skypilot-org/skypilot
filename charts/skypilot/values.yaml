@@ -19,24 +19,29 @@ apiService:
   # - RollingUpdate: [EXPERIMENTAL] create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
   # Default to Recreate. When set to RollingUpdate, an external database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString.
   upgradeStrategy: Recreate
-  # Enable basic auth and user management in the API server
-  # If enabled, the user can be created, updated, and deleted in the Dashboard,
-  # and the basic auth will be done in the API server instead of the ingress.
-  # If enabled, the basic auth configuration `ingress.authCredentials`
-  # and `ingress.authSecret` in the ingress will be ignored.
+  # If enabled, the basic auth user will be used as the principal for RBAC instead of
+  # client-side whoami
   enableUserManagement: false
   # Enable service account tokens for automated API access
   # If enabled, users can create bearer tokens to bypass SSO authentication
   # for automated systems. This works independently of enableUserManagement.
   # JWT secrets are automatically stored in the database for persistence across restarts.
   enableServiceAccounts: true
+  # Enable basic auth in the API server
+  # Default to null, which has the following behavior:
+  # - For existing deployments, keep the previous setting to avoid breaking existing users;
+  # - For new deployments, enabled if `ingress.oauth2-proxy.enabled` is false to ensure the server is protected by default.
+  # Setting this to true/false explicitly overrides the default behavior.
+  # @schema type: [boolean, null]
+  enableBasicAuth: null
   # Initial basic auth credentials for the API server
-  # The user in the credentials will be used to create a new admin user in the API server,
-  # and the password can be updated by the user in the Dashboard.
-  # If both `initialBasicAuthCredentials` and `initialBasicAuthSecret` are set,
-  # `initialBasicAuthSecret` will be used.
-  # They are only used when `enableUserManagement` is true.
+  # The user in the credentials will be used to create a new admin user in the API server.
+  # After the initial deployment, the password can only be updated in the Dashboard.
+  # This will only be used when `enableBasicAuth` is true.
   initialBasicAuthCredentials: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
+  # Set the initial basic auth secret for the API server
+  # After the initial deployment, the password can only be updated in the Dashboard.
+  # This will only be used when `enableBasicAuth` is true.
   # @schema type: [string, null]
   initialBasicAuthSecret: null
   # Custom header name for user authentication (overrides default 'X-Auth-Request-Email')
@@ -166,11 +171,14 @@ storage:
 
 ingress:
   enabled: true
+  # TODO(aylei): remove basic auth in ingress after 0.12.0
+  # Deprecated: use apiService.initialBasicAuthSecret instead
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   # @schema type: [string, null]
   authSecret: null
+  # Deprecated: use apiService.initialBasicAuthCredentials instead
   # Basic auth credentials in format "username:encrypted_password" (only used if ingress.authSecret is not set)
-  authCredentials: "username:$apr1$encrypted_password"
+  authCredentials: ""
   # Host to exclusively accept traffic from (optional) - will respond to all host requests if not set
   # @schema type: [string, null]
   host: null

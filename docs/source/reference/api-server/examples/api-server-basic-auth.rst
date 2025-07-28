@@ -27,12 +27,12 @@ Use ``helm upgrade`` to redeploy the API server.
 
     $ # --reuse-values is critical to keep the old values that aren't being updated here.
     $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-            --set apiService.enableUserManagement=true \
+            --set apiService.enableBasicAuth=true \
             --set apiService.initialBasicAuthCredentials=$AUTH_STRING
 
 Flags explanation:
 
-* :ref:`--set apiService.enableUserManagement=true <helm-values-apiService-enableUserManagement>`: Enable basic auth and user management in the API server.
+* :ref:`--set apiService.enableBasicAuth=true <helm-values-apiService-enableBasicAuth>`: Enable basic auth in the API server.
 * :ref:`--set apiService.initialBasicAuthCredentials=$AUTH_STRING <helm-values-apiService-initialBasicAuthCredentials>`: Set the initial basic auth credentials in the API server, if this is not set, a default user ``skypilot`` with password ``skypilot`` will be created.
 
 Now, you can use ``sky api login -e <ENDPOINT>``, for example, ``sky api login -e http://skypilot:yourpassword@myendpoint.com:30050`` to go though the login flow for the CLI. All the operations will be done with the user ``skypilot``.

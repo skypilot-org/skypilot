@@ -171,7 +171,7 @@ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
   --namespace $NAMESPACE \
   --create-namespace \
-  --set ingress.authCredentials=$AUTH_STRING
+  --set ingress.initialBasicAuthCredentials=$AUTH_STRING
 ```
 
 Then build the local changes and deploy the new changes to the API Server:

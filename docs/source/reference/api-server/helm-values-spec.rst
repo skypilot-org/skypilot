@@ -37,6 +37,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
+    :ref:`enableBasicAuth <helm-values-apiService-enableBasicAuth>`: nil
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
     :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
     :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
@@ -297,6 +298,26 @@ Default: ``1``
   apiService:
     replicas: 1
 
+
+.. _helm-values-apiService-enableBasicAuth:
+
+``apiService.enableBasicAuth``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable basic auth for the API server. Default to null, which has the following behavior:
+
+* For existing deployments, keep the previous setting to avoid breaking existing users;
+* For new deployments, enabled if :ref:`ingress.oauth2-proxy.enabled <helm-values-ingress-oauth2-proxy-enabled>` is false to ensure the server is protected by default.
+
+Setting this to true/false explicitly overrides the default behavior and may need manual migration of existing deployments. Refer to :ref:`migrating to basic auth <helm-values-migrating-to-basic-auth>` for more details.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    enableBasicAuth: true
+
 .. _helm-values-apiService-enableUserManagement:
 
 ``apiService.enableUserManagement``
@@ -313,6 +334,7 @@ Default: ``false``
   apiService:
     enableUserManagement: false
 
+
 .. _helm-values-apiService-initialBasicAuthCredentials:
 
 ``apiService.initialBasicAuthCredentials``
@@ -322,7 +344,7 @@ Initial basic auth credentials for the API server.
 
 The user in the credentials will be used to create a new admin user in the API server, and the password can be updated by the user in the Dashboard.
 
-If both ``initialBasicAuthCredentials`` and ``initialBasicAuthSecret`` are set, ``initialBasicAuthSecret`` will be used. They are only used when ``enableUserManagement`` is true.
+If both ``initialBasicAuthCredentials`` and ``initialBasicAuthSecret`` are set, ``initialBasicAuthSecret`` will be used. They are only used when ``enableBasicAuth`` is true.
 
 Default: ``"skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"``
 
@@ -1897,3 +1919,27 @@ Default: ``false``
 
   grafana:
     enabled: false
+
+.. _helm-values-migration-guide:
+
+Migration guide
+---------------
+
+.. _helm-values-migrating-to-basic-auth:
+
+Migrate from basic auth on ingress to basic auth in the API server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The basic auth has been migrated from the ingress to the SkyPilot API server after SkyPilot ``0.10.0``. When upgrading from a previous version, the basic auth on ingress will be kept by default to avoid breaking existing users. To migrate to the new basic auth, set the following helm values:
+
+- Set :ref:`apiService.enableBasicAuth<helm-values-apiService-enableBasicAuth>` to ``true`` to enable basic auth in the API server. This will also disable basic auth in the ingress;
+- Set :ref:`apiService.initialBasicAuthCredentials<helm-values-apiService-initialBasicAuthCredentials>` to the same basic auth credentials as :ref:`ingress.authCredentials<helm-values-ingress-authCredentials>` in the previous deployments, so that the existing users can continue to use the same credentials;
+- Run helm upgrade to apply the changes.
+
+.. code-block:: bash
+
+  # NAMESPACE and RELEASE_NAME are the namespace and release name of the SkyPilot API server
+  helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+    --reuse-values \
+    --set apiService.enableBasicAuth=true \
+    --set apiService.initialBasicAuthCredentials="YOUR_BASIC_AUTH_CRYPT_HASH"

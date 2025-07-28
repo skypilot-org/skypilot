@@ -1,4 +1,6 @@
-{{- if and (not .Values.ingress.authSecret) .Values.ingress.authCredentials (not .Values.apiService.enableUserManagement) (not (index .Values.ingress "oauth2-proxy" "enabled")) }}
+{{- /* TODO(aylei): remove backward compatibility in 0.12.0 */ -}}
+{{- $enableBasicAuthInAPIServer := include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" -}}
+{{- if and (not .Values.ingress.authSecret) .Values.ingress.authCredentials (not $enableBasicAuthInAPIServer) (not (index .Values.ingress "oauth2-proxy" "enabled")) }}
 apiVersion: v1
 kind: Secret
 metadata:

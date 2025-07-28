@@ -73,10 +73,25 @@ metadata:
 
 {{/* Whether to enable basic auth */}}
 {{- define "skypilot.enableBasicAuthInAPIServer" -}}
-{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.apiService.enableUserManagement -}}
+{{- if eq .Values.apiService.enableBasicAuth nil -}}
+  {{- if .Release.IsInstall -}}
+    {{- if not (index .Values.ingress "oauth2-proxy" "enabled") -}}
 true
-{{- else -}}
+    {{- else -}}
 false
+    {{- end -}}
+  {{- else -}}
+    {{- /* TODO: remove backward compatbility in 0.12.0 */ -}}
+    {{- /* Keep existing behavior for deployment when the option is unset */ -}}
+    {{- $existingSecret := lookup "v1" "Secret" .Release.Namespace (printf "%s-initial-basic-auth" .Release.Name) -}}
+    {{- if $existingSecret -}}
+true
+    {{- else -}}
+false
+    {{- end -}}
+  {{- end -}}
+{{- else -}}
+{{ .Values.apiService.enableBasicAuth }}
 {{- end -}}
 {{- end -}}
 

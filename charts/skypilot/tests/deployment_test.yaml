@@ -156,6 +156,33 @@ tests:
           content:
             name: SKYPILOT_DB_CONNECTION_URI
 
+  # Test cases for SKYPILOT_API_BASIC_AUTH_RBAC environment variable
+  - it: should set SKYPILOT_API_BASIC_AUTH_RBAC when enableUserManagement is true
+    set:
+      apiService.enableUserManagement: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_BASIC_AUTH_RBAC
+            value: "true"
+
+  - it: should not set SKYPILOT_API_BASIC_AUTH_RBAC when enableUserManagement is false
+    set:
+      apiService.enableUserManagement: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_BASIC_AUTH_RBAC
+
+  - it: should not set SKYPILOT_API_BASIC_AUTH_RBAC when enableUserManagement is not set
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_BASIC_AUTH_RBAC
+
   - it: should mount r2 credentials correctly when r2Credentials is enabled
     set:
       r2Credentials.enabled: true
