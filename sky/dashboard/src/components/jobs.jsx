@@ -38,6 +38,8 @@ import {
   RotateCwIcon,
   MonitorPlay,
   RefreshCcw,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
@@ -285,7 +287,11 @@ function shortenTimeForJobs(timeString) {
 export function ManagedJobs() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const refreshDataRef = React.useRef(null);
+  const jobsRefreshRef = React.useRef(null);
+  const poolsRefreshRef = React.useRef(null);
+  const [jobsData, setJobsData] = useState([]);
+  const [poolsData, setPoolsData] = useState([]);
+  const [isPoolsExpanded, setIsPoolsExpanded] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -294,7 +300,6 @@ export function ManagedJobs() {
   });
   const isMobile = useMobile();
   const [activeMainTab, setActiveMainTab] = useState('jobs');
-
   const [filters, setFilters] = useState([]);
   const [optionValues, setOptionValues] = useState({
     status: [],
@@ -304,18 +309,55 @@ export function ManagedJobs() {
     pool: [],
   }); // Option values for properties
 
-  // Handle URL query parameters for tab selection and filters
-  useEffect(() => {
-    if (router.isReady) {
-      const tab = router.query.tab;
-      if (tab === 'pools') {
-        setActiveMainTab('pools');
-      } else {
-        setActiveMainTab('jobs');
-      }
-      updateFiltersByURLParams();
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [jobsResponse, poolsResponse] = await Promise.all([
+        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
+        dashboardCache.get(getPoolStatus, [{}]),
+      ]);
+      setJobsData(jobsResponse.jobs || []);
+      setPoolsData(poolsResponse.pools || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
     }
-  }, [router.isReady, router.query.tab]);
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const handleRefresh = () => {
+    // Invalidate cache to ensure fresh data is fetched for both jobs and pools
+    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getPoolStatus, [{}]);
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidate(getUsers);
+
+    // Trigger a re-fetch in both tables via their refreshDataRef
+    if (jobsRefreshRef.current) {
+      jobsRefreshRef.current();
+    }
+    if (poolsRefreshRef.current) {
+      poolsRefreshRef.current();
+    }
+  };
+
+  const togglePoolsExpanded = () => {
+    const newIsExpanded = !isPoolsExpanded;
+    setIsPoolsExpanded(newIsExpanded);
+    const newQuery = { ...router.query };
+    if (newIsExpanded) {
+      newQuery.pools = 'true';
+    } else {
+      delete newQuery.pools;
+    }
+    router.replace({ pathname: router.pathname, query: newQuery }, undefined, {
+      shallow: true,
+    });
+  };
 
   // Helper function to update URL query parameters
   const updateURLParams = (filters) => {
@@ -335,17 +377,21 @@ export function ManagedJobs() {
     setFilters(urlFilters);
   };
 
-  const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
-    dashboardCache.invalidate(getPoolStatus, [{}]);
-    dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getUsers);
-
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
+  // Handle URL query parameters for tab selection and filters
+  useEffect(() => {
+    if (router.isReady) {
+      const tab = router.query.tab;
+      // Use tab=pools to auto-expand pools, but always show jobs
+      if (tab === 'pools') {
+        setIsPoolsExpanded(true);
+      }
+      const poolsVisible = router.query.pools === 'true';
+      if (poolsVisible) {
+        setIsPoolsExpanded(poolsVisible);
+      }
+      updateFiltersByURLParams();
     }
-  };
+  }, [router.isReady, router.query.tab, router.query.pools]);
 
   const handleJobAction = async (jobId, action) => {
     try {
@@ -355,8 +401,8 @@ export function ManagedJobs() {
         message: `Are you sure you want to ${action} job ${jobId}?`,
         onConfirm: async () => {
           await handleJobAction(jobId, action);
-          if (refreshDataRef.current) {
-            refreshDataRef.current();
+          if (jobsRefreshRef.current) {
+            jobsRefreshRef.current();
           }
         },
       });
@@ -367,48 +413,24 @@ export function ManagedJobs() {
 
   return (
     <>
+      {/* Main title */}
+      <div className="mb-4">
+        <h1 className="text-lg font-semibold text-gray-900">Managed Jobs</h1>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-8">
-          <div
-            className={`cursor-pointer border-b-2 pb-1 ${
-              activeMainTab === 'jobs'
-                ? 'border-sky-blue text-sky-blue'
-                : 'border-transparent text-gray-600 hover:text-sky-blue'
-            }`}
-            onClick={() => {
-              setActiveMainTab('jobs');
-              router.replace(
-                {
-                  pathname: router.pathname,
-                  query: { ...router.query, tab: 'jobs' },
-                },
-                undefined,
-                { shallow: true }
-              );
-            }}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={togglePoolsExpanded}
+            className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
           >
-            Managed Jobs
-          </div>
-          <div
-            className={`cursor-pointer border-b-2 pb-1 ${
-              activeMainTab === 'pools'
-                ? 'border-sky-blue text-sky-blue'
-                : 'border-transparent text-gray-600 hover:text-sky-blue'
-            }`}
-            onClick={() => {
-              setActiveMainTab('pools');
-              router.replace(
-                {
-                  pathname: router.pathname,
-                  query: { ...router.query, tab: 'pools' },
-                },
-                undefined,
-                { shallow: true }
-              );
-            }}
-          >
-            Pools
-          </div>
+            {isPoolsExpanded ? (
+              <ChevronDown className="w-4 h-4 mr-1" />
+            ) : (
+              <ChevronRight className="w-4 h-4 mr-1" />
+            )}
+            <span className="text-base">Pools</span>
+          </button>
         </div>
         <div className="flex items-center gap-2">
           {loading && (
@@ -428,53 +450,41 @@ export function ManagedJobs() {
         </div>
       </div>
 
-      {/* Filters and Content */}
-      {activeMainTab === 'jobs' && (
-        <>
-          <div className="flex flex-wrap items-center gap-2 min-h-[20px]">
-            <div className="w-full sm:w-auto">
-              <FilterDropdown
-                propertyList={PROPERTY_OPTIONS}
-                valueList={optionValues}
-                setFilters={setFilters}
-                updateURLParams={updateURLParams}
-                placeholder="Filter jobs"
-              />
-            </div>
-          </div>
-
-          <Filters
-            filters={filters}
-            setFilters={setFilters}
-            updateURLParams={updateURLParams}
-          />
-
-          <ManagedJobsTable
+      {isPoolsExpanded && (
+        <div className="mb-4">
+          <PoolsTable
             refreshInterval={REFRESH_INTERVAL}
             setLoading={setLoading}
-            refreshDataRef={refreshDataRef}
-            filters={filters}
-            setOptionValues={setOptionValues}
+            refreshDataRef={poolsRefreshRef}
           />
-        </>
+        </div>
       )}
 
-      {activeMainTab === 'pools' && (
-        <PoolsTable
-          refreshInterval={REFRESH_INTERVAL}
-          setLoading={setLoading}
-          refreshDataRef={refreshDataRef}
-        />
-      )}
+      {/* Jobs section */}
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <div className="w-full sm:w-auto">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={optionValues}
+            setFilters={setFilters}
+            updateURLParams={updateURLParams}
+            placeholder="Filter jobs"
+          />
+        </div>
+      </div>
 
-      <ConfirmationModal
-        isOpen={confirmationModal.isOpen}
-        onClose={() =>
-          setConfirmationModal({ ...confirmationModal, isOpen: false })
-        }
-        onConfirm={confirmationModal.onConfirm}
-        title={confirmationModal.title}
-        message={confirmationModal.message}
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
+      <ManagedJobsTable
+        refreshInterval={REFRESH_INTERVAL}
+        setLoading={setLoading}
+        refreshDataRef={jobsRefreshRef}
+        filters={filters}
+        setOptionValues={setOptionValues}
       />
     </>
   );
@@ -789,9 +799,10 @@ export function ManagedJobsTable({
 
   return (
     <div className="relative">
-      <div className="flex flex-col">
+      <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm">
+        <div className="flex flex-wrap items-center text-sm mb-1">
+          <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
             {!loading && (!data || data.length === 0) && !isInitialLoad && (
               <span className="text-gray-500 mr-2">No jobs found</span>

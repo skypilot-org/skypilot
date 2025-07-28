@@ -363,7 +363,7 @@ class SkyServiceSpec:
     def autoscaling_policy_str(self):
         if self.pool:
             # We only support fixed-size pool for now.
-            return 'Fixed-size'
+            return f'Fixed-size ({self.min_replicas} workers)'
         # TODO(MaoZiming): Update policy_str
         noun = 'worker' if self.pool else 'replica'
         min_plural = '' if self.min_replicas == 1 else 's'
