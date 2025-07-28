@@ -3390,7 +3390,7 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
         for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
             if any(gpu_key in node.status.allocatable for node in nodes):
                 return gpu_key
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
     return gpu_resource_key
