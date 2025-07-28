@@ -190,6 +190,7 @@ export function Clusters() {
     if (router.isReady) {
       updateFiltersByURLParams();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady]);
 
   useEffect(() => {
@@ -551,7 +552,7 @@ export function ClusterTable({
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [setLoading, showHistory]);
+  }, [setLoading, showHistory, setOptionValues]);
 
   // Utility: checks a condition based on operator
   const evaluateCondition = (item, filter) => {
