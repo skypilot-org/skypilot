@@ -88,10 +88,6 @@ export const statusGroups = {
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
   {
-    label: 'Status',
-    value: 'status',
-  },
-  {
     label: 'Name',
     value: 'name',
   },
@@ -301,7 +297,6 @@ export function ManagedJobs() {
   const [activeMainTab, setActiveMainTab] = useState('jobs');
   const [filters, setFilters] = useState([]);
   const [optionValues, setOptionValues] = useState({
-    status: [],
     name: [],
     user: [],
     workspace: [],
