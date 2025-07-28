@@ -68,7 +68,9 @@ def test_get_kubernetes_node_info():
                    return_value=[mock_node_1, mock_node_2]), \
          mock.patch('sky.provision.kubernetes.utils.'
                    'get_all_pods_in_kubernetes_cluster',
-                   return_value=[mock_pod_1, mock_pod_2]):
+                   return_value=[mock_pod_1, mock_pod_2]), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
         node_info = utils.get_kubernetes_node_info()
         assert isinstance(node_info, models.KubernetesNodesInfo)
         assert len(node_info.node_info_dict) == 2
