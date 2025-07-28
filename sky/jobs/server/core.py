@@ -62,7 +62,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
     force_disable_cloud_bucket = skypilot_config.get_nested(
-        ('jobs', 'controller', 'force_disable_cloud_bucket'), False)
+        ('jobs', 'force_disable_cloud_bucket'), False)
     if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
             not force_disable_cloud_bucket):
         for task_ in dag.tasks:

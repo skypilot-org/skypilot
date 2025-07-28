@@ -109,7 +109,7 @@ def up(
         storage_clouds = (
             storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
         force_disable_cloud_bucket = skypilot_config.get_nested(
-            ('serve', 'controller', 'force_disable_cloud_bucket'), False)
+            ('serve', 'force_disable_cloud_bucket'), False)
         if storage_clouds and not force_disable_cloud_bucket:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task, task_type='serve')
