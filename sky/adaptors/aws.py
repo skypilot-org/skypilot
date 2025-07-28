@@ -254,16 +254,14 @@ def client(service_name: str, **kwargs):
     _assert_kwargs_builtin_type(kwargs)
 
     check_credentials = kwargs.pop('check_credentials', True)
-    profile_name = kwargs.pop('profile_name', None)
 
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
     return _create_aws_object(
-        lambda: session(check_credentials=check_credentials,
-                        profile_name=profile_name).client(
-                            service_name, **kwargs), 'client')
+        lambda: session(check_credentials=check_credentials).client(
+            service_name, **kwargs), 'client')
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
