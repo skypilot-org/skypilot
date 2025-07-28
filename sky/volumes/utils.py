@@ -141,6 +141,10 @@ class PVCVolumeTable(VolumeTable):
         return str(self.table)
 
 
+class LustreVolumeTable(PVCVolumeTable):
+    """The Lustre volume table."""
+
+
 def format_volume_table(volumes: List[Dict[str, Any]],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -168,6 +172,9 @@ def format_volume_table(volumes: List[Dict[str, Any]],
     for volume_type, volume_list in volumes_per_type.items():
         if volume_type == volume.VolumeType.PVC.value:
             table = PVCVolumeTable(volume_list, show_all)
+            table_str += table.format()
+        elif volume_type == volume.VolumeType.LUSTRE.value:
+            table = LustreVolumeTable(volume_list, show_all)
             table_str += table.format()
     if table_str:
         return table_str

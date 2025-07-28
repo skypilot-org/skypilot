@@ -10,3 +10,6 @@ from sky.provision.gcp.instance import run_instances
 from sky.provision.gcp.instance import stop_instances
 from sky.provision.gcp.instance import terminate_instances
 from sky.provision.gcp.instance import wait_instances
+from sky.provision.gcp.volume import apply_volume
+from sky.provision.gcp.volume import delete_volume
+from sky.provision.gcp.volume import get_volume_usedby
