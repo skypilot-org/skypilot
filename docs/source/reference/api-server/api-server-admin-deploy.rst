@@ -124,6 +124,7 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. code-block:: bash
 
             $ helm upgrade --namespace $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --reuse-values \
               --set ingress-nginx.controller.service.type=NodePort \
               --set ingress-nginx.controller.service.nodePorts.http=30050 \
               --set ingress-nginx.controller.service.nodePorts.https=30051
@@ -755,9 +756,9 @@ To uninstall the API server, run:
 
 .. code-block:: bash
 
-    helm uninstall $RELEASE_NAME --namespace $NAMESPACE
+    helm uninstall $RELEASE_NAME --namespace $NAMESPACE --wait
 
-This will delete the API server and all associated resources.
+This will delete the API server and all associated resources. ``--wait`` ensures that all the resources of SkyPilot API server are deleted before the command returns.
 
 
 Other notes
@@ -1071,3 +1072,4 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
+    Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>

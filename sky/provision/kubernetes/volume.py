@@ -8,7 +8,7 @@ from sky.adaptors import kubernetes
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 

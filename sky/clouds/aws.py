@@ -32,7 +32,7 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 

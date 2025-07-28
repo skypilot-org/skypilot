@@ -24,7 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
