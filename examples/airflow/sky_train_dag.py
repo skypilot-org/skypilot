@@ -23,7 +23,7 @@ default_args = {
     },
 )
 def run_sky_task(
-    base_path: str,  # pylint: disable=redefined-outer-name
+    base_path: str,
     yaml_path: str,
     gcp_service_account_json: Optional[str] = None,  # pylint: disable=redefined-outer-name
     envs_override: dict = None,
