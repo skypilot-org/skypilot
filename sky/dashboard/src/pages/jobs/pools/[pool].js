@@ -349,6 +349,16 @@ export default function PoolDetailPage() {
                     </div>
                   </div>
 
+                  {/* Worker Resources */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Worker Resources
+                    </div>
+                    <div className="text-base mt-1">
+                      {poolData.requested_resources_str || '-'}
+                    </div>
+                  </div>
+
                   {/* Policy */}
                   <div>
                     <div className="text-gray-600 font-medium text-base">

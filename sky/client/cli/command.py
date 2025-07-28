@@ -272,6 +272,65 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     return list(env_dict.items())
 
 
+def _format_job_ids_str(job_ids: List[int], max_length: int = 30) -> str:
+    """Format job IDs string with ellipsis if too long.
+
+    Args:
+        job_ids: List of job IDs to format.
+        max_length: Maximum length of the output string.
+
+    Returns:
+        Formatted string like "11,12,...,2017,2018" if truncated,
+        or the full string if it fits within max_length.
+    """
+    if not job_ids:
+        return ''
+
+    # Convert all to strings
+    job_strs = [str(job_id) for job_id in job_ids]
+    full_str = ','.join(job_strs)
+
+    # If it fits, return as is
+    if len(full_str) <= max_length:
+        return full_str
+
+    if len(job_strs) <= 2:
+        return full_str  # Can't truncate further
+
+    # Need to truncate with ellipsis
+    ellipsis = '...'
+
+    # Start with minimum: first and last
+    start_count = 1
+    end_count = 1
+
+    while start_count + end_count < len(job_strs):
+        # Try adding one more to start
+        if start_count + 1 + end_count < len(job_strs):
+            start_part = ','.join(job_strs[:start_count + 1])
+            end_part = ','.join(job_strs[-end_count:])
+            candidate = f'{start_part},{ellipsis},{end_part}'
+            if len(candidate) <= max_length:
+                start_count += 1
+                continue
+
+        # Try adding one more to end
+        if start_count + end_count + 1 < len(job_strs):
+            start_part = ','.join(job_strs[:start_count])
+            end_part = ','.join(job_strs[-(end_count + 1):])
+            candidate = f'{start_part},{ellipsis},{end_part}'
+            if len(candidate) <= max_length:
+                end_count += 1
+                continue
+
+        # Can't add more
+        break
+
+    start_part = ','.join(job_strs[:start_count])
+    end_part = ','.join(job_strs[-end_count:])
+    return f'{start_part},{ellipsis},{end_part}'
+
+
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for cluster names."""
@@ -4387,21 +4446,25 @@ def jobs_launch(
                                      _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
-    if pool is None:
-        if not async_call and not detach_run:
+
+    if not async_call and not detach_run:
+        if pool is None:
             job_id = job_id_handle[0]
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
             sys.exit(returncode)
-    else:
-        job_ids = job_id_handle[0]
-        job_ids_str = ','.join(map(str, job_ids))
-        click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
-                    f'{job_ids_str}{colorama.Style.RESET_ALL}.\n'
-                    f'To stream job logs: {colorama.Style.BRIGHT}'
-                    f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}')
+        else:
+            job_ids = job_id_handle[0]
+            job_ids_str = _format_job_ids_str(job_ids)
+            click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
+                        f'{job_ids_str}{colorama.Style.RESET_ALL}.\n'
+                        f'To stream job logs: {colorama.Style.BRIGHT}'
+                        f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}\n'
+                        f'To stream controller logs: {colorama.Style.BRIGHT}'
+                        'sky jobs logs --controller <job-id>'
+                        f'{colorama.Style.RESET_ALL}')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)

@@ -687,7 +687,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         return None
 
     with filelock.FileLock(_get_pool_filelock_path(service_name)):
-        logger.info(f'Get next cluster name for pool {service_name!r}')
+        logger.debug(f'Get next cluster name for pool {service_name!r}')
         idle_replicas = [
             info for info, replica_job_id in
             serve_state.get_replica_infos_and_job_ids(service_name)
@@ -727,7 +727,7 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
         return
 
     with filelock.FileLock(_get_pool_filelock_path(service_name)):
-        logger.info(
+        logger.debug(
             f'Release cluster {cluster_name!r} for pool {service_name!r}')
         replica_id = int(cluster_name.split('-')[-1])
         current_replica_job_id = serve_state.get_replica_job_id(
