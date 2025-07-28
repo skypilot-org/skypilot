@@ -3388,7 +3388,7 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
     try:
         nodes = kubernetes.core_api(context).list_node().items
         for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-            if any(gpu_key in node.status.allocatable for node in nodes):
+            if any(gpu_key in node.status.capacity for node in nodes):
                 return gpu_key
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
