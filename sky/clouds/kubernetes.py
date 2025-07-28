@@ -547,7 +547,8 @@ class Kubernetes(clouds.Cloud):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
+                k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
+                    context)
         else:
             # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
             # maintain GPU isolation. This is to override the default behavior
