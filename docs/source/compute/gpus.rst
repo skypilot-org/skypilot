@@ -95,4 +95,4 @@ See :ref:`tpu`.
    :hidden:
 
    Using Google TPUs <../../reference/tpu>
-
+   Using AMD GPUs <../../reference/kubernetes/amd-gpu>
