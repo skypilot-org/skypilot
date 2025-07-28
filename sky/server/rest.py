@@ -89,6 +89,12 @@ def retry_transient_errors(max_retries: int = 3,
                 for retry_cnt in range(max_retries):
                     try:
                         return func(*args, **kwargs)
+                    # Occurs when the server proactively interrupts the request
+                    # during rolling update, we can retry immediately on the
+                    # new replica.
+                    except exceptions.RequestInterruptedError:
+                        logger.debug('Request interrupted. Retry immediately.')
+                        continue
                     except Exception as e:  # pylint: disable=broad-except
                         if retry_cnt >= max_retries - 1:
                             # Retries exhausted.

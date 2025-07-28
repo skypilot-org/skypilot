@@ -1008,11 +1008,17 @@ available_node_types:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
+              {% if k8s_network_type == 'coreweave' %}
+              rdma/ib: 1
+              {% endif %}
             {% if k8s_resource_key is not none %}
             limits:
               # Limits need to be defined for GPU/TPU requests
               {% if k8s_resource_key is not none %}
               {{k8s_resource_key}}: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_network_type == 'coreweave' %}
+              rdma/ib: 1
               {% endif %}
             {% endif %}
           {% if k8s_ipc_lock_capability %}

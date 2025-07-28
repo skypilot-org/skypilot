@@ -6,6 +6,8 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
+_REGION_CONFIG_CLOUDS = ['nebius', 'oci']
+
 
 class Config(Dict[str, Any]):
     """SkyPilot config that supports setting/getting values with nested keys."""
@@ -248,7 +250,7 @@ def get_cloud_config_value_from_dict(
     region_key = None
     if cloud == 'kubernetes':
         region_key = 'context_configs'
-    if cloud == 'nebius':
+    elif cloud in _REGION_CONFIG_CLOUDS:
         region_key = 'region_configs'
 
     per_context_config = None
@@ -257,18 +259,19 @@ def get_cloud_config_value_from_dict(
             keys=(cloud, region_key, region) + keys,
             default_value=None,
             override_configs=override_configs)
-        if not per_context_config and cloud == 'nebius':
+        if not per_context_config and cloud in _REGION_CONFIG_CLOUDS:
             # TODO (kyuds): Backward compatibility, remove after 0.11.0.
             per_context_config = input_config.get_nested(
                 keys=(cloud, region) + keys,
                 default_value=None,
                 override_configs=override_configs)
-            logger.info(
-                'Nebius configuration is using the legacy format. \n'
-                'This format will be deprecated after 0.11.0, refer to '
-                '`https://docs.skypilot.co/en/latest/reference/config.html#nebius` '  # pylint: disable=line-too-long
-                'for the new format. Please use `region_configs` to specify region specific configuration.'
-            )
+            if per_context_config is not None:
+                logger.info(
+                    f'{cloud} configuration is using the legacy format. \n'
+                    'This format will be deprecated after 0.11.0, refer to '
+                    '`https://docs.skypilot.co/en/latest/reference/config.html` '  # pylint: disable=line-too-long
+                    'for the new format. Please use `region_configs` to specify region specific configuration.'
+                )
     # if no override found for specified region
     general_config = input_config.get_nested(keys=(cloud,) + keys,
                                              default_value=default_value,

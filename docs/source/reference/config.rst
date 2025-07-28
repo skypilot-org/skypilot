@@ -110,6 +110,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`specific_reservations <config-yaml-aws-specific-reservations>`:
       - cr-a1234567
     :ref:`remote_identity <config-yaml-aws-remote-identity>`: LOCAL_CREDENTIALS
+    :ref:`post_provision_runcmd <config-yaml-aws-post-provision-runcmd>`:
+      - echo "hello world!"
 
   :ref:`gcp <config-yaml-gcp>`:
     :ref:`labels <config-yaml-gcp-labels>`:
@@ -135,31 +137,33 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
 
   :ref:`oci <config-yaml-oci>`:
-    :ref:`default <config-yaml-oci>`:
-      oci_config_profile: SKY_PROVISION_PROFILE
-      compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
-      image_tag_general: skypilot:cpu-oraclelinux8
-      image_tag_gpu: skypilot:gpu-oraclelinux8
-    :ref:`ap-seoul-1 <config-yaml-oci>`:
-      vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
-      vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
-    :ref:`us-ashburn-1 <config-yaml-oci>`:
-      vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
-      vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+    region_configs:
+      :ref:`default <config-yaml-oci>`:
+        oci_config_profile: SKY_PROVISION_PROFILE
+        compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
+        image_tag_general: skypilot:cpu-oraclelinux8
+        image_tag_gpu: skypilot:gpu-oraclelinux8
+      :ref:`ap-seoul-1 <config-yaml-oci>`:
+        vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
+        vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
+      :ref:`us-ashburn-1 <config-yaml-oci>`:
+        vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
+        vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
   :ref:`nebius <config-yaml-nebius>`:
-    :ref:`eu-north1 <config-yaml-nebius>`:
-      project_id: project-e00xxxxxxxxxxx
-      fabric: fabric-3
-      filesystems:
-      - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
-        mount_path: /mnt/fsnew
-        attach_mode: READ_WRITE
-    :ref:`eu-west1 <config-yaml-nebius>`:
-      project_id: project-e01xxxxxxxxxxx
-      fabric: fabric-5
-    :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-    :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    region_configs:
+      :ref:`eu-north1 <config-yaml-nebius>`:
+        project_id: project-e00xxxxxxxxxxx
+        fabric: fabric-3
+        filesystems:
+        - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
+          mount_path: /mnt/fsnew
+          attach_mode: READ_WRITE
+      :ref:`eu-west1 <config-yaml-nebius>`:
+        project_id: project-e01xxxxxxxxxxx
+        fabric: fabric-5
+      :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+      :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -708,6 +712,30 @@ Supported values:
       - sky-serve-controller-*: my-service-account-2
       - "*": my-default-service-account
 
+.. _config-yaml-aws-post-provision-runcmd:
+
+``aws.post_provision_runcmd``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run commands during the instance initialization phase (optional).
+
+This is executed through cloud-init's ``runcmd``, which is useful for doing any setup that must happen right after the instance starts, such as:
+
+- Configuring system settings
+- Installing certificates
+- Installing packages
+
+Each item can be either a string or a list.
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    post_provision_runcmd:
+      - echo "hello world!"
+      - [ls, -l, /]
+
 
 .. _config-yaml-gcp:
 
@@ -1237,15 +1265,16 @@ Example:
 
     oci:
         # Region-specific configuration
-        ap-seoul-1:
-          # The OCID of the VCN to use for instances (optional).
-          vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
-          # The OCID of the subnet to use for instances (optional).
-          vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
+        region_configs:
+          ap-seoul-1:
+            # The OCID of the VCN to use for instances (optional).
+            vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
+            # The OCID of the subnet to use for instances (optional).
+            vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
 
-        us-ashburn-1:
-          vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
-          vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+          us-ashburn-1:
+            vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
+            vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
 .. _config-yaml-nebius:
 
@@ -1381,7 +1410,7 @@ Default role for users (optional).  Either ``admin`` or ``user``.
 
 If not specified, the default role is ``admin``.
 
-Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <api-server-basic-auth>` is configured.
+Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <deploy-api-server-basic-auth>` is configured.
 
 .. _config-yaml-db:
 
