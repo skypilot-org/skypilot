@@ -7,11 +7,12 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import filelock
 import pytest
 import requests
+from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
@@ -402,10 +403,11 @@ def setup_policy_server(request, tmp_path_factory):
         raise RuntimeError(f"Policy server not available after {timeout}s")
 
     try:
+        policy_server_url: Optional[str] = None
         with filelock.FileLock(str(fn) + ".lock"):
             if fn.is_file():
-                skypilot_config.reload_config()
                 ref_count(1)
+                policy_server_url = fn.read_text().strip()
             else:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
@@ -428,10 +430,14 @@ def setup_policy_server(request, tmp_path_factory):
                 original_config = config.copy()
                 config['admin_policy'] = policy_server_url
                 common_utils.dump_yaml(str(config_path), config)
-                skypilot_config.reload_config()
                 fn.write_text(policy_server_url)
                 ref_count(1)
-        yield
+        if policy_server_url is not None:
+            with smoke_tests_utils.override_sky_config(
+                    config_dict={'admin_policy': policy_server_url}):
+                yield
+        else:
+            yield
     finally:
         with filelock.FileLock(str(fn) + ".lock"):
             count = ref_count(-1)
