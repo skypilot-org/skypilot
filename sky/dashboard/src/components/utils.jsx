@@ -563,7 +563,7 @@ export const getInfraSummary = (replicaInfo) => {
 
 export const JobStatusBadges = ({ jobCounts, getStatusStyle }) => {
   if (!jobCounts || Object.keys(jobCounts).length === 0) {
-    return <span className="text-gray-500 text-sm">No active jobs</span>;
+    return <span className="text-gray-1000">No active jobs</span>;
   }
 
   return (

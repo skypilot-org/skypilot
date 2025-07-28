@@ -291,7 +291,6 @@ export function ManagedJobs() {
   const poolsRefreshRef = React.useRef(null);
   const [jobsData, setJobsData] = useState([]);
   const [poolsData, setPoolsData] = useState([]);
-  const [isPoolsExpanded, setIsPoolsExpanded] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -345,20 +344,6 @@ export function ManagedJobs() {
     }
   };
 
-  const togglePoolsExpanded = () => {
-    const newIsExpanded = !isPoolsExpanded;
-    setIsPoolsExpanded(newIsExpanded);
-    const newQuery = { ...router.query };
-    if (newIsExpanded) {
-      newQuery.pools = 'true';
-    } else {
-      delete newQuery.pools;
-    }
-    router.replace({ pathname: router.pathname, query: newQuery }, undefined, {
-      shallow: true,
-    });
-  };
-
   // Helper function to update URL query parameters
   const updateURLParams = (filters) => {
     sharedUpdateURLParams(router, filters);
@@ -380,18 +365,9 @@ export function ManagedJobs() {
   // Handle URL query parameters for tab selection and filters
   useEffect(() => {
     if (router.isReady) {
-      const tab = router.query.tab;
-      // Use tab=pools to auto-expand pools, but always show jobs
-      if (tab === 'pools') {
-        setIsPoolsExpanded(true);
-      }
-      const poolsVisible = router.query.pools === 'true';
-      if (poolsVisible) {
-        setIsPoolsExpanded(poolsVisible);
-      }
       updateFiltersByURLParams();
     }
-  }, [router.isReady, router.query.tab, router.query.pools]);
+  }, [router.isReady, router.query.tab]);
 
   const handleJobAction = async (jobId, action) => {
     try {
@@ -413,55 +389,16 @@ export function ManagedJobs() {
 
   return (
     <>
-      {/* Main title */}
-      <div className="mb-4">
-        <h1 className="text-lg font-semibold text-gray-900">Managed Jobs</h1>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={togglePoolsExpanded}
-            className="flex items-center text-left focus:outline-none text-gray-700 hover:text-gray-900 transition-colors duration-200"
-          >
-            {isPoolsExpanded ? (
-              <ChevronDown className="w-4 h-4 mr-1" />
-            ) : (
-              <ChevronRight className="w-4 h-4 mr-1" />
-            )}
-            <span className="text-base">Pools</span>
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          {loading && (
-            <div className="flex items-center">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
-        </div>
-      </div>
-
-      {isPoolsExpanded && (
-        <div className="mb-4">
-          <PoolsTable
-            refreshInterval={REFRESH_INTERVAL}
-            setLoading={setLoading}
-            refreshDataRef={poolsRefreshRef}
-          />
-        </div>
-      )}
-
       {/* Jobs section */}
       <div className="flex flex-wrap items-center gap-2 mb-1">
+        <div className="text-base">
+          <Link
+            href="/jobs"
+            className="text-sky-blue hover:underline leading-none"
+          >
+            Managed Jobs
+          </Link>
+        </div>
         <div className="w-full sm:w-auto">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
@@ -485,7 +422,17 @@ export function ManagedJobs() {
         refreshDataRef={jobsRefreshRef}
         filters={filters}
         setOptionValues={setOptionValues}
+        onRefresh={handleRefresh}
       />
+
+      {/* Pools table - always visible */}
+      <div className="mb-4">
+        <PoolsTable
+          refreshInterval={REFRESH_INTERVAL}
+          setLoading={setLoading}
+          refreshDataRef={poolsRefreshRef}
+        />
+      </div>
     </>
   );
 }
@@ -496,6 +443,7 @@ export function ManagedJobsTable({
   refreshDataRef,
   filters,
   setOptionValues,
+  onRefresh,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -724,7 +672,7 @@ export function ManagedJobsTable({
 
     // If no statuses are selected and we're not in "show all" mode, show no jobs
     return [];
-  }, [data, filters, activeTab, selectedStatuses, showAllMode]);
+  }, [data, filters, activeTab, selectedStatuses, showAllMode]); // Removed poolFilter from dependency array
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -801,84 +749,111 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm mb-1">
-          <span className="mr-2 text-sm font-medium">Statuses:</span>
-          <div className="flex flex-wrap gap-2 items-center">
-            {!loading && (!data || data.length === 0) && !isInitialLoad && (
-              <span className="text-gray-500 mr-2">No jobs found</span>
-            )}
-            {Object.entries(statusCounts).map(([status, count]) => (
-              <button
-                key={status}
-                onClick={() => handleStatusClick(status)}
-                className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                  isStatusHighlighted(status) ||
-                  selectedStatuses.includes(status)
-                    ? getBadgeStyle(status)
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <span>{status}</span>
-                <span
-                  className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                >
-                  {count}
-                </span>
-              </button>
-            ))}
-            {data && data.length > 0 && (
-              <div className="flex items-center ml-2 gap-2">
-                <span className="text-gray-500">(</span>
+        <div className="flex flex-wrap items-center justify-between text-sm mb-1">
+          <div className="flex flex-wrap items-center">
+            <span className="mr-2 text-sm font-medium">Statuses:</span>
+            <div className="flex flex-wrap gap-2 items-center">
+              {!loading && (!data || data.length === 0) && !isInitialLoad && (
+                <span className="text-gray-500 mr-2">No jobs found</span>
+              )}
+              {Object.entries(statusCounts).map(([status, count]) => (
                 <button
-                  onClick={() => {
-                    // When showing all jobs, clear all selected statuses
-                    setActiveTab('all');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'all' && showAllMode
-                      ? 'text-purple-700 underline'
-                      : 'text-gray-600 hover:text-purple-700 hover:underline'
+                  key={status}
+                  onClick={() => handleStatusClick(status)}
+                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                    isStatusHighlighted(status) ||
+                    selectedStatuses.includes(status)
+                      ? getBadgeStyle(status)
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                   }`}
                 >
-                  show all jobs
+                  <span>{status}</span>
+                  <span
+                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
+                    {count}
+                  </span>
                 </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all active jobs, clear all selected statuses
-                    setActiveTab('active');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'active' && showAllMode
-                      ? 'text-green-700 underline'
-                      : 'text-gray-600 hover:text-green-700 hover:underline'
-                  }`}
-                >
-                  show all active jobs
-                </button>
-                <span className="text-gray-500 mx-1">|</span>
-                <button
-                  onClick={() => {
-                    // When showing all finished jobs, clear all selected statuses
-                    setActiveTab('finished');
-                    setSelectedStatuses([]);
-                    setShowAllMode(true);
-                  }}
-                  className={`text-sm font-medium ${
-                    activeTab === 'finished' && showAllMode
-                      ? 'text-blue-700 underline'
-                      : 'text-gray-600 hover:text-blue-700 hover:underline'
-                  }`}
-                >
-                  show all finished jobs
-                </button>
-                <span className="text-gray-500">)</span>
+              ))}
+              {data && data.length > 0 && (
+                <div className="flex items-center ml-2 gap-2">
+                  <span className="text-gray-500">(</span>
+                  <button
+                    onClick={() => {
+                      // When showing all jobs, clear all selected statuses
+                      setActiveTab('all');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'all' && showAllMode
+                        ? 'text-purple-700 underline'
+                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    }`}
+                  >
+                    show all jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all active jobs, clear all selected statuses
+                      setActiveTab('active');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'active' && showAllMode
+                        ? 'text-green-700 underline'
+                        : 'text-gray-600 hover:text-green-700 hover:underline'
+                    }`}
+                  >
+                    show all active jobs
+                  </button>
+                  <span className="text-gray-500 mx-1">|</span>
+                  <button
+                    onClick={() => {
+                      // When showing all finished jobs, clear all selected statuses
+                      setActiveTab('finished');
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                    }}
+                    className={`text-sm font-medium ${
+                      activeTab === 'finished' && showAllMode
+                        ? 'text-blue-700 underline'
+                        : 'text-gray-600 hover:text-blue-700 hover:underline'
+                    }`}
+                  >
+                    show all finished jobs
+                  </button>
+                  <span className="text-gray-500">)</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
               </div>
             )}
+            <button
+              onClick={() => {
+                // Call the refresh function passed from parent
+                if (onRefresh) {
+                  onRefresh();
+                }
+                // Also call the local refresh function to ensure loading state is set
+                if (refreshDataRef && refreshDataRef.current) {
+                  refreshDataRef.current();
+                }
+              }}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center text-sm"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1225,94 +1200,100 @@ export function ManagedJobsTable({
         </div>
       </Card>
 
-      {/* Pagination controls */}
-      {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={10}>10</option>
-                  <option value={30}>30</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+      {/* Pagination controls - always show for visual separation */}
+      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center">
+            <span className="mr-2">Rows per page:</span>
+            <div className="relative inline-block">
+              <select
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
+                style={{ minWidth: '40px' }}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
+                <option value={10}>10</option>
+                <option value={30}>30</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
             </div>
           </div>
+          <div>
+            {sortedData && sortedData.length > 0 && !loading
+              ? `${startIndex + 1} – ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`
+              : '0 – 0 of 0'}
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToPreviousPage}
+              disabled={
+                currentPage === 1 || !sortedData || sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-left"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToNextPage}
+              disabled={
+                currentPage === totalPages ||
+                totalPages === 0 ||
+                !sortedData ||
+                sortedData.length === 0
+              }
+              className="text-gray-500 h-8 w-8 p-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="chevron-right"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </Button>
+          </div>
         </div>
-      )}
+      </div>
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -1920,20 +1901,6 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return `${readyWorkers} (target: ${targetWorkers})`;
   };
 
-  const formatUptime = (uptime) => {
-    if (!uptime) return '-';
-
-    // uptime is a Unix timestamp of when the service became ready
-    // Convert to duration by subtracting from current time
-    const now = Date.now() / 1000; // Convert to seconds
-    const durationSeconds = Math.floor(now - uptime);
-
-    // Only show positive durations
-    if (durationSeconds <= 0) return '-';
-
-    return formatDuration(durationSeconds);
-  };
-
   const JobStatusBadges = ({ jobCounts }) => {
     return (
       <SharedJobStatusBadges
@@ -1999,7 +1966,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <Link
                       href={`/jobs/pools/${pool.name}`}
-                      className="text-blue-600 font-medium hover:text-blue-800"
+                      className="text-blue-600 hover:text-blue-800"
                     >
                       {pool.name}
                     </Link>
