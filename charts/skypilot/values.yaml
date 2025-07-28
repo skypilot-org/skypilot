@@ -1,7 +1,7 @@
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
-  image: berkeleyskypilot/skypilot-nightly:latest
+  image: lucamanolache/skypilot:helm-v1
   # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-
@@ -331,10 +331,14 @@ kubernetesCredentials:
 awsCredentials:
   enabled: false
   # Name of the secret containing the aws credentials. Only used if enabled is true.
+  # The secret can contain:
+  # 1. Simple key-value pairs for access keys (accessKeyIdKeyName and secretAccessKeyKeyName)
+  # 2. Files that will be mounted to ~/.aws/ preserving directory structure (config, credentials, sso/cache/*, cli/cache/*)
+  # For complex setups with AWS SSO, create the secret with: kubectl create secret generic aws-credentials --from-file=/path/to/your/.aws
   awsSecretName: aws-credentials
-  # Key name used to set AWS_ACCESS_KEY_ID.
+  # Key name used to set AWS_ACCESS_KEY_ID environment variable (optional, for simple credential setups).
   accessKeyIdKeyName: aws_access_key_id
-  # Key name used to set AWS_SECRET_ACCESS_KEY.
+  # Key name used to set AWS_SECRET_ACCESS_KEY environment variable (optional, for simple credential setups).
   secretAccessKeyKeyName: aws_secret_access_key
 
 gcpCredentials:
