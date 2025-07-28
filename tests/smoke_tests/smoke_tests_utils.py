@@ -671,7 +671,8 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
 
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
-                             envs: Set[str] = None) -> str:
+                             envs: Set[str] = None,
+                             timeout: int = 180) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
     if sky.server.common.is_api_server_local() and not is_remote_server_test():
@@ -681,7 +682,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
         wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
             cluster_name=cluster_name,
             cluster_status=[sky.ClusterStatus.UP],
-            timeout=180,
+            timeout=timeout,
         )
         envs_str = ''
         if envs is not None:
