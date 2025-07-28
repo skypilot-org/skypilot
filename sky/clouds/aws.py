@@ -868,8 +868,9 @@ class AWS(clouds.Cloud):
         # Include workspace in cache key to support different AWS profiles per workspace
         current_workspace = skypilot_config.get_active_workspace()
         workspace_config = skypilot_config.get_workspace_cloud('aws')
-        workspace_profile = workspace_config.get('profile_name', None) if workspace_config else None
-        
+        workspace_profile = workspace_config.get(
+            'profile_name', None) if workspace_config else None
+
         stdout = cls._aws_configure_list()
         if stdout is None:
             # `aws configure list` is not available, possible reasons:
@@ -878,12 +879,13 @@ class AWS(clouds.Cloud):
             # - aws credentials are not set, proceed anyway to get unified error
             #   message for users
             return cls._sts_get_caller_identity()
-        
+
         config_hash = hashlib.md5(stdout).hexdigest()[:8]
         # Include workspace and profile in cache key to support workspace-specific AWS identities
-        workspace_hash = hashlib.md5(f'{current_workspace}:{workspace_profile}'.encode()).hexdigest()[:8]
+        workspace_hash = hashlib.md5(
+            f'{current_workspace}:{workspace_profile}'.encode()).hexdigest()[:8]
         cache_key = f'{config_hash}-{workspace_hash}'
-        
+
         # Getting aws identity cost ~1s, so we cache the result with the output of
         # `aws configure list` as cache key. Different `aws configure list` output
         # can have same aws identity, our assumption is the output would be stable
