@@ -1,5 +1,7 @@
 """Implementation of the SkyServe core APIs."""
+import os
 import re
+import shutil
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -192,30 +194,32 @@ def up(
                         _disable_controller_check=True,
                     )
         else:
+            from sky.serve import scheduler
             controller_handle = backend_utils.is_controller_accessible(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 stopped_message='')
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
+
+            logger.info(f'Syncing file mounts for controller {controller_task.file_mounts}')
+            logger.info(f'Syncing from {controller_task.storage_mounts}')
+
             backend.sync_file_mounts(
                 handle=controller_handle,
                 all_file_mounts=controller_task.file_mounts,
                 storage_mounts=controller_task.storage_mounts)
-            run_script = controller_task.run
-            assert isinstance(run_script, str)
-            # Manually add the env variables to the run script. Originally
-            # this is done in ray jobs submission but now we have to do it
-            # manually because there is no ray runtime on the API server.
-            env_cmds = [
-                f'export {k}={v!r}' for k, v in controller_task.envs.items()
-            ]
-            run_script = '\n'.join(env_cmds + [run_script])
-            # Dump script for high availability recovery.
-            # if controller_utils.high_availability_specified(
-            #         controller_name):
-            #     managed_job_state.set_ha_recovery_script(
-            #         consolidation_mode_job_id, run_script)
-            backend.run_on_head(controller_handle, run_script)
+            
+            # Copy task yaml to service directory
+            service_dir = os.path.expanduser(
+                serve_utils.generate_remote_service_dir_name(service_name))
+            os.makedirs(service_dir, exist_ok=True)
+            remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
+                service_name, serve_constants.INITIAL_VERSION)
+            shutil.copy(service_file.name, remote_task_yaml_path)
+            
+            # Start controller process using scheduler
+            scheduler.start_controller(service_name, remote_tmp_task_yaml_path,
+                                     controller_job_id, controller_task.envs)
 
         style = colorama.Style
         fore = colorama.Fore

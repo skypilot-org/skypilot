@@ -268,6 +268,44 @@ def is_consolidation_mode() -> bool:
     return consolidation_mode
 
 
+def ha_recovery_for_consolidation_mode():
+    """Recovery logic for HA mode in consolidation mode."""
+    logger.info('Starting HA recovery for consolidation mode')
+
+    if not is_consolidation_mode():
+        return
+    
+    from sky.serve import scheduler
+    import datetime
+    
+    # Get all active services
+    services = serve_state.get_services()
+    for service in services:
+        service_name = service['name']
+        service_status = service['status']
+        
+        # Skip services that are shutting down or failed
+        if service_status in serve_state.ServiceStatus.failed_statuses():
+            continue
+            
+        # Check if controller process is alive
+        # In consolidation mode, we track by service name
+        # TODO: implement proper PID tracking for serve consolidation mode
+        
+        # For now, restart all active services
+        if service_status != serve_state.ServiceStatus.SHUTTING_DOWN:
+            service_dir = os.path.expanduser(
+                generate_remote_service_dir_name(service_name))
+            # Find the latest task yaml
+            task_yaml_files = list(pathlib.Path(service_dir).glob('task_v*.yaml'))
+            if task_yaml_files:
+                latest_task_yaml = max(task_yaml_files, 
+                                       key=lambda f: int(f.stem.split('_v')[1]))
+                # Use job_id 0 for consolidation mode
+                scheduler.start_controller(service_name, str(latest_task_yaml), 0)
+                logger.info(f'Recovered serve controller for {service_name}')
+
+
 def validate_service_task(task: 'sky.Task') -> None:
     """Validate the task for Sky Serve.
 
