@@ -157,7 +157,6 @@ Deploy the API server with helm:
      --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
      --set gcpCredentials.enabled=true \
      --set gcpCredentials.projectId=$GCP_PROJECT_ID \
-     --set gcpCredentials.serviceAccountJson=$GCP_SERVICE_ACCOUNT_JSON \
      --set nebiusCredentials.enabled=true \
      --set nebiusCredentials.tenantId=$NEBIUS_TENANT_ID
 
