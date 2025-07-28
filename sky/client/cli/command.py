@@ -4432,6 +4432,18 @@ def jobs_launch(
         click.secho(f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
                     f'{colorama.Style.RESET_ALL} with {colorama.Fore.CYAN}'
                     f'{num_job_int}{colorama.Style.RESET_ALL} job{plural}.')
+        print_setup_fm_warning = False
+        for task_ in dag.tasks:
+            if (task_.setup is not None or task_.file_mounts or
+                    task_.storage_mounts):
+                print_setup_fm_warning = True
+                break
+        if print_setup_fm_warning:
+            click.secho(f'{colorama.Fore.YELLOW}Warning: '
+                        'setup/file_mounts/storage_mounts will be ignored '
+                        f'in pool. To update a pool, please use '
+                        f'`sky pool update {pool} pool.yaml`. '
+                        f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -4800,13 +4812,14 @@ def jobs_pool_up(
         network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky jobs pool up',
+        pool=True,
     )
     assert task.service is not None
     if not task.service.pool:
         raise click.UsageError('The YAML file needs a `pool` section.')
     click.secho('Pool spec:', fg='cyan')
     click.echo(task.service)
-    serve_lib.validate_service_task(task)
+    serve_lib.validate_service_task(task, pool=True)
 
     if task.run is not None:
         click.secho('The `run` section will be ignored for pool workers.',
@@ -4883,13 +4896,14 @@ def jobs_pool_update(
         network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky jobs pool update',
+        pool=True,
     )
     assert task.service is not None
     if not task.service.pool:
         raise click.UsageError('The YAML file needs a `pool` section.')
     click.secho('Pool spec:', fg='cyan')
     click.echo(task.service)
-    serve_lib.validate_service_task(task)
+    serve_lib.validate_service_task(task, pool=True)
 
     click.secho('New pool worker will use the following resources (estimated):',
                 fg='cyan')
@@ -4996,32 +5010,34 @@ def serve():
 
 
 def _generate_task_with_service(
-    service_name: str,
-    service_yaml_args: Tuple[str, ...],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    secret: Optional[List[Tuple[str, str]]],
-    gpus: Optional[str],
-    instance_type: Optional[str],
-    ports: Optional[Tuple[str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    network_tier: Optional[str],
-    not_supported_cmd: str,
+        service_name: str,
+        service_yaml_args: Tuple[str, ...],
+        workdir: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        zone: Optional[str],
+        num_nodes: Optional[int],
+        use_spot: Optional[bool],
+        image_id: Optional[str],
+        env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]],
+        secret: Optional[List[Tuple[str, str]]],
+        gpus: Optional[str],
+        instance_type: Optional[str],
+        ports: Optional[Tuple[str]],
+        cpus: Optional[str],
+        memory: Optional[str],
+        disk_size: Optional[int],
+        disk_tier: Optional[str],
+        network_tier: Optional[str],
+        not_supported_cmd: str,
+        pool: bool,  # pylint: disable=redefined-outer-name
 ) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
+    yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
     if not is_yaml:
-        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
+        raise click.UsageError(f'{yaml_name} must be a valid YAML file.')
     env = _merge_env_vars(env_file, env)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -5051,9 +5067,11 @@ def _generate_task_with_service(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
 
     if task.service is None:
+        field_name = 'service' if not pool else 'pool'
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the YAML file. '
-                             'To fix, add a valid `service` field.')
+            raise ValueError(f'{field_name.capitalize()} section not found '
+                             'in the YAML file. To fix, add a valid '
+                             f'`{field_name}` field.')
 
     if task.service.pool:
         if task.service.ports is not None or ports:
@@ -5219,13 +5237,14 @@ def serve_up(
         network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve up',
+        pool=False,
     )
     assert task.service is not None
     if task.service.pool:
         raise click.UsageError('The YAML file needs a `service` section.')
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
-    serve_lib.validate_service_task(task)
+    serve_lib.validate_service_task(task, pool=False)
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
@@ -5324,10 +5343,11 @@ def serve_update(
         network_tier=network_tier,
         ports=ports,
         not_supported_cmd='sky serve update',
+        pool=False,
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
-    serve_lib.validate_service_task(task)
+    serve_lib.validate_service_task(task, pool=False)
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')

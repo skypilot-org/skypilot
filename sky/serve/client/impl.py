@@ -6,7 +6,6 @@ from typing import List, Optional, Union
 import click
 
 from sky.client import common as client_common
-from sky.serve import serve_utils
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.utils import admin_policy_utils
@@ -14,6 +13,7 @@ from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky.serve import serve_utils
 
 
 def up(
@@ -26,8 +26,6 @@ def up(
 ) -> server_common.RequestId:
     # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
-    if pool and not serve_utils.is_consolidation_mode():
-        raise click.UsageError('Pool is only supported in consolidation mode.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(

@@ -73,6 +73,7 @@ def launch(
             dag, at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
+            job_identity = 'a managed job'
             if pool is None:
                 request_id = sdk.optimize(dag)
                 sdk.stream_and_get(request_id)
@@ -82,8 +83,8 @@ def launch(
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
                 click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
-                job_identity = ('a managed job' if num_jobs is None else
-                                f'{num_jobs} managed jobs')
+                if num_jobs is not None:
+                    job_identity = f'{num_jobs} managed jobs'
             prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,

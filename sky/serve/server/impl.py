@@ -69,8 +69,12 @@ def up(
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
+    if pool and not serve_utils.is_consolidation_mode():
+        raise ValueError(
+            'Pool is only supported in consolidation mode. To fix, set '
+            '`serve.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
-    serve_utils.validate_service_task(task)
+    serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
     assert task.service.pool == pool, 'Inconsistent pool flag.'
     noun = 'pool' if pool else 'service'
@@ -377,7 +381,7 @@ def update(
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
     task.validate()
-    serve_utils.validate_service_task(task)
+    serve_utils.validate_service_task(task, pool=pool)
 
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
