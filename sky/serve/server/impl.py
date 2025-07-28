@@ -14,6 +14,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -26,7 +27,6 @@ from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.data import storage as storage_lib
 
 logger = sky_logging.init_logger(__name__)
 
