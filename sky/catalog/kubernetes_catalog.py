@@ -214,6 +214,7 @@ def _list_accelerators(
                 # Generate the accelerator quantities
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
+                        context,
                         node.status.allocatable))
 
                 if accelerator_count > 0:
@@ -261,6 +262,7 @@ def _list_accelerators(
                             if container.resources.requests:
                                 allocated_qty += (
                                     kubernetes_utils.get_node_accelerator_count(
+                                        context,
                                         container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty

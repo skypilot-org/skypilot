@@ -1116,7 +1116,7 @@ def detect_accelerator_resource(
     nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_accelerator = (get_gpu_resource_key() in cluster_resources or
+    has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
                        TPU_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
@@ -1266,8 +1266,8 @@ def check_instance_fits(context: Optional[str],
         else:
             # Check if any of the GPU nodes have sufficient number of GPUs.
             gpu_nodes = [
-                node for node in gpu_nodes if
-                get_node_accelerator_count(node.status.allocatable) >= acc_count
+                node for node in gpu_nodes if get_node_accelerator_count(
+                    context, node.status.allocatable) >= acc_count
             ]
             if not gpu_nodes:
                 return False, (
@@ -1329,7 +1329,7 @@ def get_accelerator_label_key_values(
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
-                (amd.com/gpu,nvidia.com/gpu, google.com/tpu)
+                (amd.com/gpu, nvidia.com/gpu, google.com/tpu)
             - The cluster has GPU/TPU resources, but no node in the cluster has
               an accelerator label.
             - The cluster has a node with an invalid accelerator label value.
@@ -2868,7 +2868,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     nodes = get_kubernetes_nodes(context=context)
     nodes_with_accelerator = []
     for node in nodes:
-        if get_gpu_resource_key() in node.status.capacity:
+        if get_gpu_resource_key(context) in node.status.capacity:
             nodes_with_accelerator.append(node)
 
     label_formatter, _ = detect_gpu_label_formatter(context)
@@ -2957,7 +2957,8 @@ def get_kubernetes_node_info(
                         break
 
         allocated_qty = 0
-        accelerator_count = get_node_accelerator_count(node.status.allocatable)
+        accelerator_count = get_node_accelerator_count(context,
+                                                       node.status.allocatable)
 
         if pods is None:
             accelerators_available = -1
@@ -2972,7 +2973,7 @@ def get_kubernetes_node_info(
                     for container in pod.spec.containers:
                         if container.resources.requests:
                             allocated_qty += get_node_accelerator_count(
-                                container.resources.requests)
+                                context, container.resources.requests)
 
             accelerators_available = accelerator_count - allocated_qty
 
@@ -3184,7 +3185,8 @@ def is_tpu_on_gke(accelerator: str) -> bool:
     return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
-def get_node_accelerator_count(attribute_dict: dict) -> int:
+def get_node_accelerator_count(context: Optional[str],
+                               attribute_dict: dict) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
 
     This method checks the node's allocatable resources or the accelerators
@@ -3199,7 +3201,7 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key()
+    gpu_resource_name = get_gpu_resource_key(context)
     assert not (gpu_resource_name in attribute_dict and
                 TPU_RESOURCE_KEY in attribute_dict)
     if gpu_resource_name in attribute_dict:
@@ -3325,7 +3327,7 @@ def process_skypilot_pods(
                 unit='G')
             gpu_count = parse_cpu_or_gpu_resource(
                 pod.spec.containers[0].resources.requests.get(
-                    get_gpu_resource_key(), '0'))
+                    get_gpu_resource_key(context), '0'))
             gpu_name = None
             if gpu_count > 0:
                 label_formatter, _ = (detect_gpu_label_formatter(context))
@@ -3388,12 +3390,13 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
         for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
             if any(gpu_key in node.status.allocatable for node in nodes):
                 return gpu_key
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
     return gpu_resource_key
 
 
+@annotations.lru_cache(scope='request')
 def get_gpu_resource_key(context: Optional[str] = None) -> str:
     """Get the GPU resource name to use in Kubernetes.
 
