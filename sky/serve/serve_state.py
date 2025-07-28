@@ -53,6 +53,10 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         replica_id INTEGER,
         job_id INTEGER DEFAULT NULL,
         PRIMARY KEY (service_name, replica_id))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS ha_recovery_script (
+        service_name TEXT PRIMARY KEY,
+        script TEXT)""")
     conn.commit()
 
     # Backward compatibility.
@@ -725,3 +729,35 @@ def get_service_load_balancer_port(service_name: str) -> int:
         if row is None:
             raise ValueError(f'Service {service_name} does not exist.')
         return row[0]
+
+
+@init_db
+def get_ha_recovery_script(service_name: str) -> Optional[str]:
+    """Gets the HA recovery script for a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT script FROM ha_recovery_script WHERE service_name = ?',
+                       (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+
+@init_db
+def set_ha_recovery_script(service_name: str, script: str) -> None:
+    """Sets the HA recovery script for a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            'INSERT OR REPLACE INTO ha_recovery_script (service_name, script) VALUES (?, ?)',
+            (service_name, script))
+
+
+@init_db
+def remove_ha_recovery_script(service_name: str) -> None:
+    """Removes the HA recovery script for a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('DELETE FROM ha_recovery_script WHERE service_name = ?',
+                       (service_name,))

@@ -5,8 +5,10 @@ from typing import Dict, Optional
 
 from sky import sky_logging
 from sky.serve import constants as serve_constants
+from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -30,6 +32,10 @@ def start_controller(service_name: str, task_yaml_path: str,
                           f'--job-id {service_id}')
 
     run_cmd = ';'.join([activate_python_env_cmd] + env_cmds + [run_controller_cmd])
+
+    controller_name = controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.name
+    if controller_utils.high_availability_specified(controller_name):
+        serve_state.set_ha_recovery_script(service_name, run_cmd)
 
     logs_dir = os.path.expanduser(serve_constants.SKYSERVE_METADATA_DIR)
     os.makedirs(logs_dir, exist_ok=True)

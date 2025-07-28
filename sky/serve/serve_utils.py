@@ -275,9 +275,6 @@ def ha_recovery_for_consolidation_mode():
     if not is_consolidation_mode():
         return
     
-    from sky.serve import scheduler
-    import datetime
-    
     # Get all active services
     services = serve_state.get_services()
     for service in services:
@@ -287,6 +284,23 @@ def ha_recovery_for_consolidation_mode():
         # Skip services that are shutting down or failed
         if service_status in serve_state.ServiceStatus.failed_statuses():
             continue
+            
+        logger.info(f'Attempting HA recovery for service {service_name}')
+        
+        script = serve_state.get_ha_recovery_script(service_name)
+        if script is None:
+            logger.warning(f'No HA recovery script found for service {service_name}')
+            continue
+            
+        try:
+            logs_dir = os.path.expanduser(constants.SKYSERVE_METADATA_DIR)
+            log_path = os.path.join(logs_dir, f'{service_name}_controller_recovery.log')
+            
+            from sky.utils import subprocess_utils
+            pid = subprocess_utils.launch_new_process_tree(script, log_output=log_path)
+            logger.info(f'Service {service_name} recovered with pid {pid}')
+        except Exception as e:
+            logger.error(f'Failed to recover service {service_name}: {e}')
             
         # Check if controller process is alive
         # In consolidation mode, we track by service name
