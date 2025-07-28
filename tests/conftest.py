@@ -376,7 +376,6 @@ def setup_policy_server(request, tmp_path_factory):
 
     fn = root_tmp_dir / 'policy_server.txt'
     policy_server_url = ''
-    original_config = None
     # Reference count and pid for cleanup
     counter_file = root_tmp_dir / 'policy_server_counter.txt'
     pid_file = root_tmp_dir / 'policy_server_pid.txt'
@@ -446,8 +445,6 @@ def setup_policy_server(request, tmp_path_factory):
                 pid = pid_file.read_text().strip()
                 if pid:
                     os.kill(int(pid), signal.SIGKILL)
-                common_utils.dump_yaml(str(config_path), original_config)
-                skypilot_config.reload_config()
 
 
 @pytest.fixture(scope='session', autouse=True)
