@@ -100,7 +100,7 @@ def up(
     assert task.service is not None
     if pool:
         # Use dummy run script for cluster pool.
-        task.run = 'echo "setup done"'
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     with rich_utils.safe_status(
             ux_utils.spinner_message(f'Initializing {noun}')):
@@ -388,7 +388,7 @@ def update(
     task = dag.tasks[0]
     if pool:
         # Use dummy run script for cluster pool.
-        task.run = 'echo "setup done"'
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     assert task.service is not None
     if not pool and task.service.tls_credential is not None:
