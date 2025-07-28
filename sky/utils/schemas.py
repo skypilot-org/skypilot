@@ -1162,6 +1162,10 @@ def get_config_schema():
                             'default': False,
                         },
                         'autostop': _AUTOSTOP_SCHEMA,
+                        'force_disable_cloud_bucket': {
+                            'type': 'boolean',
+                            'default': False,
+                        },
                         'consolidation_mode': {
                             'type': 'boolean',
                             'default': False,
