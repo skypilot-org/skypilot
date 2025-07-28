@@ -147,15 +147,12 @@ MEMORY_SIZE_UNITS = {
 # The resource keys used by Kubernetes to track NVIDIA GPUs and Google TPUs on
 # nodes. These keys are typically used in the node's status.allocatable
 # or status.capacity fields to indicate the available resources on the node.
-SUPPORTED_GPU_RESOURCE_KEYS = {
-    "amd": "amd.com/gpu",
-    "nvidia": "nvidia.com/gpu" 
-};
+SUPPORTED_GPU_RESOURCE_KEYS = {'amd': 'amd.com/gpu', 'nvidia': 'nvidia.com/gpu'}
 TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
-    f'one of {SUPPORTED_GPU_RESOURCE_KEYS["amd"]}, ' 
+    f'one of {SUPPORTED_GPU_RESOURCE_KEYS["amd"]}, '
     f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]} or '
     f'{TPU_RESOURCE_KEY} resource is available '
     'on the nodes and the node labels for identifying GPUs/TPUs '
@@ -3382,23 +3379,23 @@ def process_skypilot_pods(
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
 
+
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS["amd"]
+    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['amd']
     try:
         nodes = kubernetes.core_api(context).list_node().items
-        for gpu_provider, gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.items():
+        for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
             if any(gpu_key in node.status.allocatable for node in nodes):
                 return gpu_key
-    except Exception as e:
-        logger.warning(
-            f'Failed to load kube config or query nodes: {e}. '
-            'Falling back to default GPU resource key.')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to load kube config or query nodes: {e}. '
+                       'Falling back to default GPU resource key.')
     return gpu_resource_key
 
+
 def get_gpu_resource_key(context: Optional[str] = None) -> str:
-    """    
-    Get the GPU resource name to use in Kubernetes.
+    """Get the GPU resource name to use in Kubernetes.
 
     The function auto-detects the GPU resource key by querying the Kubernetes node API.
     If detection fails, it falls back to a default value.
