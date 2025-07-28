@@ -1371,7 +1371,6 @@ class Task:
                                           key=lambda x: len(x.stores),
                                           reverse=True)
             for storage in storage_to_construct:
-                storage.construct()
                 assert storage.name is not None, storage
                 if not storage.stores:
                     store_type, store_region = self._get_preferred_store()

@@ -46,6 +46,20 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+
+def requires_construction(func):
+    """Decorator that ensures storage is constructed before method call."""
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self._constructed:  # pylint: disable=protected-access
+            self._construct_impl()  # pylint: disable=protected-access
+            self._constructed = True  # pylint: disable=protected-access
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
 StorageHandle = Any
 StorageStatus = status_lib.StorageStatus
 Path = str
@@ -65,12 +79,6 @@ STORE_ENABLED_CLOUDS: List[str] = [
     cloudflare.NAME,
 ]
 
-# A function type to register s3-compatible stores
-_S3_COMPATIBLE_STORES: Dict[str, Type['S3CompatibleStore']] = {}
-
-DEFAULT_STORAGE_MODE = 'MOUNT'
-MOUNTABLE_STORAGE_MODES = ['MOUNT', 'MOUNT_CACHED']
-
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
 
@@ -87,22 +95,6 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'It may have been deleted externally.')
 
 _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
-
-
-def requires_construction(func):
-    """Decorator that ensures storage is constructed before method call.
-    
-    This enables lazy construction - storage objects are automatically
-    constructed when their methods are first accessed, rather than requiring
-    explicit construct() calls.
-    """
-    @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if not self._constructed:
-            self._construct_impl()
-            self._constructed = True
-        return func(self, *args, **kwargs)
-    return wrapper
 
 
 def get_cached_enabled_storage_cloud_names_or_refresh(
@@ -710,10 +702,10 @@ class Storage(object):
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
-        self._stores: Dict[StoreType, Optional[AbstractStore]] = {}
+        self.stores: Dict[StoreType, Optional[AbstractStore]] = {}
         if stores is not None:
             for store in stores:
-                self._stores[store] = None
+                self.stores[store] = None
         self.sync_on_reconstruction = sync_on_reconstruction
         self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
@@ -725,10 +717,17 @@ class Storage(object):
         self.force_delete = False
 
     def _construct_impl(self):
-        """Internal implementation of storage construction.
-        
-        Renamed from construct() to support lazy construction pattern.
-        This method actually creates the storage object, including:
+        """Constructs the storage object.
+
+        The Storage object is lazily initialized, so that when a user
+        initializes a Storage object on client side, it does not trigger the
+        actual storage creation on the client side.
+
+        Instead, once the specification of the storage object is uploaded to the
+        SkyPilot API server side, the server side should use this construct()
+        method to actually create the storage object. The construct() method
+        will:
+
         1. Set the stores field if not specified
         2. Create the bucket or check the existence of the bucket
         3. Sync the data from the source to the bucket if necessary
@@ -737,12 +736,8 @@ class Storage(object):
             return
         self._constructed = True
 
-        # Validate and correct inputs if necessary  
-        # Note: using the existing validation logic from the original construct method
-        if self.name is not None:
-            # Basic validation - ensure name is a string
-            if not isinstance(self.name, str):
-                raise ValueError(f'Storage name must be a string, got {type(self.name)}')
+        # Validate and correct inputs if necessary
+        self._validate_storage_spec(self.name)
 
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
@@ -758,10 +753,10 @@ class Storage(object):
             # was not used with the storage object. We should error out in this
             # case, as we don't support having multiple stores for the same
             # storage object.
-            if any(s is None for s in self._stores.values()):
+            if any(s is None for s in self.stores.values()):
                 new_store_type = None
                 previous_store_type = None
-                for store_type, store in self._stores.items():
+                for store_type, store in self.stores.items():
                     if store is not None:
                         previous_store_type = store_type
                     else:
@@ -790,8 +785,8 @@ class Storage(object):
             # Storage does not exist in global_user_state, create new stores
             # Sky optimizer either adds a storage object instance or selects
             # from existing ones
-            input_stores = self._stores
-            self._stores = {}
+            input_stores = self.stores
+            self.stores = {}
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
                                                mode=self.mode)
@@ -803,32 +798,6 @@ class Storage(object):
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
                 if isinstance(self.source, str):
-                    # Extract bucket name from URL if name is None
-                    if self.name is None:
-                        if self.source.startswith('gs://'):
-                            self.name, _ = data_utils.split_gcs_path(self.source)
-                        elif data_utils.is_az_container_endpoint(self.source):
-                            _, self.name, _ = data_utils.split_az_path(self.source)
-                        elif self.source.startswith('cos://'):
-                            self.name, _ = data_utils.split_cos_path(self.source)
-                        elif self.source.startswith('oci://'):
-                            self.name, _ = data_utils.split_oci_path(self.source)
-                        else:
-                            # Check for S3-compatible stores
-                            store_type = StoreType.find_s3_compatible_config_by_prefix(self.source)
-                            if store_type:
-                                if store_type == StoreType.S3:
-                                    self.name, _ = data_utils.split_s3_path(self.source)
-                                elif store_type == StoreType.R2:
-                                    self.name, _ = data_utils.split_r2_path(self.source)
-                                elif store_type == StoreType.NEBIUS:
-                                    self.name, _ = data_utils.split_nebius_path(self.source)
-                        
-                        # Update metadata with extracted name
-                        self.handle = self.StorageMetadata(storage_name=self.name,
-                                                           source=self.source,
-                                                           mode=self.mode)
-
                     if self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
                     elif data_utils.is_az_container_endpoint(self.source):
@@ -843,31 +812,328 @@ class Storage(object):
                     if store_type:
                         self.add_store(store_type)
 
-    def _ensure_constructed(self):
-        """Ensure storage is constructed, called by lazy access methods."""
-        if not self._constructed:
-            self._construct_impl()
-
     def construct(self):
-        """Constructs the storage object.
-        
-        DEPRECATED: Construction now happens automatically when storage 
-        methods are accessed. This method is kept for backward compatibility.
+        """Public method for backward compatibility.
+        This method is kept for backward compatibility with existing code
+        that explicitly calls construct(). With lazy construction, this is
+        no longer necessary as construction happens automatically when needed.
         """
-        self._ensure_constructed()
+        self._construct_impl()
 
-    @property
-    def stores(self) -> Dict[StoreType, Optional[AbstractStore]]:
-        """Get stores dictionary, auto-constructing if needed."""
-        self._ensure_constructed()
-        return self._stores
+    def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
+        """Adds the bucket sub path prefix to the blob path."""
+        if self._bucket_sub_path is not None:
+            return f'{blob_path}/{self._bucket_sub_path}'
+        return blob_path
 
-    @stores.setter  
-    def stores(self, value: Dict[StoreType, Optional[AbstractStore]]):
-        """Set stores dictionary."""
-        self._stores = value
+    @staticmethod
+    def _validate_source(
+            source: SourceType, mode: StorageMode,
+            sync_on_reconstruction: bool) -> Tuple[SourceType, bool]:
+        """Validates the source path.
 
-    @requires_construction
+        Args:
+          source: str; File path where the data is initially stored. Can be a
+            local path or a cloud URI (s3://, gs://, r2:// etc.).
+            Local paths do not need to be absolute.
+          mode: StorageMode; StorageMode of the storage object
+
+        Returns:
+          Tuple[source, is_local_source]
+          source: str; The source path.
+          is_local_path: bool; Whether the source is a local path. False if URI.
+        """
+
+        def _check_basename_conflicts(source_list: List[str]) -> None:
+            """Checks if two paths in source_list have the same basename."""
+            basenames = [os.path.basename(s) for s in source_list]
+            conflicts = {x for x in basenames if basenames.count(x) > 1}
+            if conflicts:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Cannot have multiple files or directories with the '
+                        'same name in source. Conflicts found for: '
+                        f'{", ".join(conflicts)}')
+
+        def _validate_local_source(local_source):
+            if local_source.endswith('/'):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Storage source paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found source={local_source}')
+            # Local path, check if it exists
+            full_src = os.path.abspath(os.path.expanduser(local_source))
+            # Only check if local source exists if it is synced to the bucket
+            if not os.path.exists(full_src) and sync_on_reconstruction:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Local source path does not'
+                        f' exist: {local_source}')
+            # Raise warning if user's path is a symlink
+            elif os.path.islink(full_src):
+                logger.warning(f'Source path {source} is a symlink. '
+                               'Referenced contents are uploaded, matching '
+                               'the default behavior for S3 and GCS syncing.')
+
+        # Check if source is a list of paths
+        if isinstance(source, list):
+            # Check for conflicts in basenames
+            _check_basename_conflicts(source)
+            # Validate each path
+            for local_source in source:
+                _validate_local_source(local_source)
+            is_local_source = True
+        else:
+            # Check if str source is a valid local/remote URL
+            split_path = urllib.parse.urlsplit(source)
+            if split_path.scheme == '':
+                _validate_local_source(source)
+                # Check if source is a file - throw error if it is
+                full_src = os.path.abspath(os.path.expanduser(source))
+                if os.path.isfile(full_src):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSourceError(
+                            'Storage source path cannot be a file - only'
+                            ' directories are supported as a source. '
+                            'To upload a single file, specify it in a list '
+                            f'by writing source: [{source}]. Note '
+                            'that the file will be uploaded to the root of the '
+                            'bucket and will appear at <destination_path>/'
+                            f'{os.path.basename(source)}. Alternatively, you '
+                            'can directly upload the file to the VM without '
+                            'using a bucket by writing <destination_path>: '
+                            f'{source} in the file_mounts section of your YAML')
+                is_local_source = True
+            elif split_path.scheme in [
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius'
+            ]:
+                is_local_source = False
+                # Storage mounting does not support mounting specific files from
+                # cloud store - ensure path points to only a directory
+                if mode in MOUNTABLE_STORAGE_MODES:
+                    if (split_path.scheme != 'https' and
+                        ((split_path.scheme != 'cos' and
+                          split_path.path.strip('/') != '') or
+                         (split_path.scheme == 'cos' and
+                          not re.match(r'^/[-\w]+(/\s*)?$', split_path.path)))):
+                        # regex allows split_path.path to include /bucket
+                        # or /bucket/optional_whitespaces while considering
+                        # cos URI's regions (cos://region/bucket_name)
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.StorageModeError(
+                                'MOUNT mode does not support'
+                                ' mounting specific files from cloud'
+                                ' storage. Please use COPY mode or'
+                                ' specify only the bucket name as'
+                                ' the source.')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        f'Supported paths: local, s3://, gs://, https://, '
+                        f'r2://, cos://, oci://, nebius://. Got: {source}')
+        return source, is_local_source
+
+    def _validate_storage_spec(self, name: Optional[str]) -> None:
+        """Validates the storage spec and updates local fields if necessary."""
+
+        def validate_name(name):
+            """ Checks for validating the storage name.
+
+            Checks if the name starts the s3, gcs or r2 prefix and raise error
+            if it does. Store specific validation checks (e.g., S3 specific
+            rules) happen in the corresponding store class.
+            """
+            prefix = name.split('://')[0]
+            prefix = prefix.lower()
+            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius']:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageNameError(
+                        'Prefix detected: `name` cannot start with '
+                        f'{prefix}://. If you are trying to use an existing '
+                        'bucket created outside of SkyPilot, please specify it '
+                        'using the `source` field (e.g. '
+                        '`source: s3://mybucket/`). If you are trying to '
+                        'create a new bucket, please use the `store` field to '
+                        'specify the store type (e.g. `store: s3`).')
+
+        if self.source is None:
+            # If the mode is COPY, the source must be specified
+            if self.mode == StorageMode.COPY:
+                # Check if a Storage object already exists in global_user_state
+                # (e.g. used as scratch previously). Such storage objects can be
+                # mounted in copy mode even though they have no source in the
+                # yaml spec (the name is the source).
+                handle = global_user_state.get_handle_from_storage_name(name)
+                if handle is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSourceError(
+                            'New storage object: source must be specified when '
+                            'using COPY mode.')
+            else:
+                # If source is not specified in COPY mode, the intent is to
+                # create a bucket and use it as scratch disk. Name must be
+                # specified to create bucket.
+                if not name:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Storage source or storage name must be specified.')
+            assert name is not None, handle
+            validate_name(name)
+            self.name = name
+            return
+        elif self.source is not None:
+            source, is_local_source = Storage._validate_source(
+                self.source, self.mode, self.sync_on_reconstruction)
+            if not name:
+                if is_local_source:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageNameError(
+                            'Storage name must be specified if the source is '
+                            'local.')
+                else:
+                    assert isinstance(source, str)
+                    # Set name to source bucket name and continue
+                    if source.startswith('cos://'):
+                        # cos url requires custom parsing
+                        name = data_utils.split_cos_path(source)[0]
+                    elif data_utils.is_az_container_endpoint(source):
+                        _, name, _ = data_utils.split_az_path(source)
+                    else:
+                        name = urllib.parse.urlsplit(source).netloc
+                    assert name is not None, source
+                    self.name = name
+                    return
+            else:
+                if is_local_source:
+                    # If name is specified and source is local, upload to bucket
+                    assert name is not None, source
+                    validate_name(name)
+                    self.name = name
+                    return
+                else:
+                    # Both name and source should not be specified if the source
+                    # is a URI. Name will be inferred from the URI.
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Storage name should not be specified if the '
+                            'source is a remote URI.')
+        raise exceptions.StorageSpecError(
+            f'Validation failed for storage source {self.source}, name '
+            f'{self.name} and mode {self.mode}. Please check the arguments.')
+
+    def _add_store_from_metadata(
+            self, sky_stores: Dict[StoreType,
+                                   AbstractStore.StoreMetadata]) -> None:
+        """Reconstructs Storage.stores from sky_stores.
+
+        Reconstruct AbstractStore objects from sky_store's metadata and
+        adds them into Storage.stores
+        """
+        for s_type, s_metadata in sky_stores.items():
+            # When initializing from global_user_state, we override the
+            # source from the YAML
+            try:
+                if s_type.value in _S3_COMPATIBLE_STORES:
+                    store_class = _S3_COMPATIBLE_STORES[s_type.value]
+                    store = store_class.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.S3:
+                    store = S3Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.R2:
+                    store = R2Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.GCS:
+                    store = GcsStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.AZURE:
+                    assert isinstance(s_metadata,
+                                      AzureBlobStore.AzureBlobStoreMetadata)
+                    store = AzureBlobStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.IBM:
+                    store = IBMCosStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.OCI:
+                    store = OciStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.NEBIUS:
+                    store = NebiusStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unknown store type: {s_type}')
+            # Following error is caught when an externally removed storage
+            # is attempted to be fetched.
+            except exceptions.StorageExternalDeletionError as e:
+                if isinstance(e, exceptions.NonExistentStorageAccountError):
+                    assert isinstance(s_metadata,
+                                      AzureBlobStore.AzureBlobStoreMetadata)
+                    logger.debug(f'Storage object {self.name!r} was attempted '
+                                 'to be reconstructed while the corresponding '
+                                 'storage account '
+                                 f'{s_metadata.storage_account_name!r} does '
+                                 'not exist.')
+                else:
+                    logger.debug(f'Storage object {self.name!r} was attempted '
+                                 'to be reconstructed while the corresponding '
+                                 'bucket was externally deleted.')
+                continue
+            self._add_store(store, is_reconstructed=True)
+
+    @classmethod
+    def from_metadata(cls, metadata: StorageMetadata,
+                      **override_args) -> 'Storage':
+        """Create Storage from StorageMetadata object.
+
+        Used when reconstructing Storage object and AbstractStore objects from
+        global_user_state.
+        """
+        # Name should not be specified if the source is a cloud store URL.
+        source = override_args.get('source', metadata.source)
+        name = override_args.get('name', metadata.storage_name)
+        # If the source is a list, it consists of local paths
+        if not isinstance(source,
+                          list) and data_utils.is_cloud_store_url(source):
+            name = None
+
+        storage_obj = cls(name=name,
+                          source=source,
+                          sync_on_reconstruction=override_args.get(
+                              'sync_on_reconstruction', True))
+
+        # For backward compatibility
+        if hasattr(metadata, 'mode'):
+            if metadata.mode:
+                storage_obj.mode = override_args.get('mode', metadata.mode)
+
+        return storage_obj
+
     def add_store(self,
                   store_type: Union[str, StoreType],
                   region: Optional[str] = None) -> AbstractStore:
@@ -887,16 +1153,16 @@ class Storage(object):
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
 
-        if self._stores.get(store_type) is not None:
+        if self.stores.get(store_type) is not None:
             if store_type == StoreType.AZURE:
-                azure_store_obj = self._stores[store_type]
+                azure_store_obj = self.stores[store_type]
                 assert isinstance(azure_store_obj, AzureBlobStore)
                 storage_account_name = azure_store_obj.storage_account_name
                 logger.info(f'Storage type {store_type} already exists under '
                             f'storage account {storage_account_name!r}.')
             else:
                 logger.info(f'Storage type {store_type} already exists.')
-            store = self._stores[store_type]
+            store = self.stores[store_type]
             assert store is not None, self
             return store
 
@@ -960,7 +1226,7 @@ class Storage(object):
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
         store_type = StoreType.from_store(store)
-        self._stores[store_type] = store
+        self.stores[store_type] = store
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:
             self.handle.add_store(store)
@@ -980,13 +1246,13 @@ class Storage(object):
             store_type: StoreType; Specific cloud store to remove from the list
               of backing stores.
         """
-        if not self._stores:
+        if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
             assert self.name is not None
             global_user_state.remove_storage(self.name)
         if store_type is not None:
             assert self.name is not None
-            store = self._stores[store_type]
+            store = self.stores[store_type]
             assert store is not None, self
             is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
@@ -997,7 +1263,7 @@ class Storage(object):
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
                 delete = True
-                for store in self._stores.values():
+                for store in self.stores.values():
                     assert store is not None, self
                     if store.is_sky_managed:
                         delete = False
@@ -1009,16 +1275,16 @@ class Storage(object):
             elif self.force_delete:
                 store.delete()
             # Remove store from bookkeeping
-            del self._stores[store_type]
+            del self.stores[store_type]
         else:
-            for _, store in self._stores.items():
+            for _, store in self.stores.items():
                 assert store is not None, self
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
                     store.delete()
                 elif self.force_delete:
                     store.delete()
-            self._stores = {}
+            self.stores = {}
             # Remove storage from global_user_state if present
             if self.name is not None:
                 global_user_state.remove_storage(self.name)
@@ -1026,7 +1292,7 @@ class Storage(object):
     @requires_construction
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""
-        for _, store in self._stores.items():
+        for _, store in self.stores.items():
             assert store is not None, self
             self._sync_store(store)
 
@@ -1059,6 +1325,39 @@ class Storage(object):
         # Upload succeeded - update state
         if store.is_sky_managed:
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
+
+    @requires_construction
+    def to_yaml_config(self) -> Dict[str, Any]:
+        config = {}
+
+        def add_if_not_none(key: str, value: Optional[Any]):
+            if value is not None:
+                config[key] = value
+
+        name = None
+        if (self.source is None or not isinstance(self.source, str) or
+                not data_utils.is_cloud_store_url(self.source)):
+            # Remove name if source is a cloud store URL
+            name = self.name
+        add_if_not_none('name', name)
+        add_if_not_none('source', self.source)
+
+        stores = None
+        is_sky_managed = self._is_sky_managed
+        if self.stores:
+            stores = ','.join([store.value for store in self.stores])
+            store = list(self.stores.values())[0]
+            if store is not None:
+                is_sky_managed = store.is_sky_managed
+        add_if_not_none('store', stores)
+        add_if_not_none('_is_sky_managed', is_sky_managed)
+        add_if_not_none('persistent', self.persistent)
+        add_if_not_none('mode', self.mode.value)
+        if self.force_delete:
+            config['_force_delete'] = True
+        if self._bucket_sub_path is not None:
+            config['_bucket_sub_path'] = self._bucket_sub_path
+        return config
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
@@ -1103,38 +1402,6 @@ class Storage(object):
         # Add force deletion flag
         storage_obj.force_delete = force_delete
         return storage_obj
-
-    def to_yaml_config(self) -> Dict[str, Any]:
-        config = {}
-
-        def add_if_not_none(key: str, value: Optional[Any]):
-            if value is not None:
-                config[key] = value
-
-        name = None
-        if (self.source is None or not isinstance(self.source, str) or
-                not data_utils.is_cloud_store_url(self.source)):
-            # Remove name if source is a cloud store URL
-            name = self.name
-        add_if_not_none('name', name)
-        add_if_not_none('source', self.source)
-
-        stores = None
-        is_sky_managed = self._is_sky_managed
-        if self._stores:
-            stores = ','.join([store.value for store in self._stores])
-            store = list(self._stores.values())[0]
-            if store is not None:
-                is_sky_managed = store.is_sky_managed
-        add_if_not_none('store', stores)
-        add_if_not_none('_is_sky_managed', is_sky_managed)
-        add_if_not_none('persistent', self.persistent)
-        add_if_not_none('mode', self.mode.value)
-        if self.force_delete:
-            config['_force_delete'] = True
-        if self._bucket_sub_path is not None:
-            config['_bucket_sub_path'] = self._bucket_sub_path
-        return config
 
 
 # Registry for S3-compatible stores
@@ -1534,6 +1801,7 @@ class S3CompatibleStore(AbstractStore):
                     f'Transfer from {source_type} to {target_type} '
                     'is not yet supported.')
 
+    @requires_construction
     def delete(self) -> None:
         """Delete the bucket or sub-path."""
         if self._bucket_sub_path is not None and not self.is_sky_managed:
@@ -3310,7 +3578,7 @@ class IBMCosStore(AbstractStore):
                         'should be the same as Nebius Object Storage bucket.')
                 assert data_utils.verify_nebius_bucket(self.name), (
                     f'Source specified as {self.source}, a Nebius Object '
-                    f'Storage bucket. Nebius Object Storage Bucket should '
+                    f'Storage  bucket. Nebius Object Storage Bucket should '
                     f'exist.')
             elif self.source.startswith('cos://'):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
