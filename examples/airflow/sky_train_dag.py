@@ -23,7 +23,7 @@ default_args = {
     },
 )
 def run_sky_task(
-    base_path: str,
+    base_path: str,  # pylint: disable=redefined-outer-name
     yaml_path: str,
     gcp_service_account_json: Optional[str] = None,  # pylint: disable=redefined-outer-name
     envs_override: dict = None,
@@ -40,8 +40,10 @@ def run_sky_task(
         base_path: Base path (local directory or git repo URL)
         yaml_path: Path to the YAML file (relative to base_path)
         gcp_service_account_json: GCP service account JSON-encoded string
-        envs_override: Dictionary of environment variables to override in the task config
-        git_branch: Optional branch name to checkout (only used if base_path is a git repo)
+        envs_override: Dictionary of environment variables to override in the
+            task config
+        git_branch: Optional branch name to checkout (only used if base_path
+            is a git repo)
     """
     # pylint: disable=import-outside-toplevel
     import os
@@ -80,8 +82,8 @@ def run_sky_task(
                                        cluster_name=cluster_name,
                                        down=True)
         job_id, _ = sky.stream_and_get(launch_request_id)
-        # TODO(romilb): In the future, we can use deferrable tasks to avoid blocking
-        # the worker while waiting for cluster to start.
+        # TODO(romilb): In the future, we can use deferrable tasks to avoid
+        # blocking the worker while waiting for cluster to start.
 
         # Stream the logs for airflow logging
         sky.tail_logs(cluster_name=cluster_name, job_id=job_id, follow=True)
@@ -111,7 +113,8 @@ def run_sky_task(
         # Handle git repos vs local paths
         if base_path.startswith(('http://', 'https://', 'git://')):
             with tempfile.TemporaryDirectory() as temp_dir:
-                # TODO(romilb): This assumes git credentials are available in the airflow worker
+                # TODO(romilb): This assumes git credentials are available
+                # in the airflow worker
                 subprocess.run(['git', 'clone', base_path, temp_dir],
                                check=True)
 
@@ -178,7 +181,8 @@ with DAG(dag_id='sky_train_dag', default_args=default_args,
 
     preprocess_task = run_sky_task.override(task_id='data_preprocess')(
         base_path,
-        # Or data_preprocessing_gcp_sa.yaml if you want to use a custom GCP service account
+        # Or data_preprocessing_gcp_sa.yaml if you want
+        # to use a custom GCP service account
         'data_preprocessing.yaml',
         gcp_service_account_json=gcp_service_account_json,
         envs_override=common_envs,
