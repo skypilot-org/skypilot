@@ -180,6 +180,10 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. note::
 
+    Automatically labelling AMD GPUs is not supported at this moment. Please follow the instructions in "Manually labelling nodes" section below.
+
+.. note::
+
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
 Manually labelling nodes
@@ -187,7 +191,7 @@ Manually labelling nodes
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
 
-For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`.
+For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`, and a node with MI300 GPUs must have a label :code:`skypilot.co/accelerator: mi300`.
 
 Use the following command to label a node:
 
