@@ -87,7 +87,7 @@ Verify labels
 
 .. code-block:: bash
 
-    kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, labels: .metadata.labels}' | grep -e "amd.com/gpu" -e "mi300"
+    kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, labels: .metadata.labels}' | grep -e "skypilot.co/accelerator"
 
 
 Launch a cluster with SkyPilot
