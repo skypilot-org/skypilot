@@ -10,6 +10,7 @@ from alembic.config import Config
 from alembic.runtime import migration
 import filelock
 import sqlalchemy
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -37,7 +38,7 @@ def get_engine(db_name: str, async_engine: bool = False):
         if async_engine:
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
-            engine = sqlalchemy.create_async_engine(
+            engine = sqlalchemy_async.create_async_engine(
                 conn_string, poolclass=sqlalchemy.NullPool)
         else:
             engine = sqlalchemy.create_engine(conn_string,
@@ -46,7 +47,7 @@ def get_engine(db_name: str, async_engine: bool = False):
         db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:
-            engine = sqlalchemy.create_async_engine(
+            engine = sqlalchemy_async.create_async_engine(
                 'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
         else:
             engine = sqlalchemy.create_engine('sqlite:///' + db_path,
