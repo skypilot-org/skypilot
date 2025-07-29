@@ -101,7 +101,7 @@ jobs:
           sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" src/charts/skypilot/Chart.yaml
           # Copy the non-HTML content from the README.md of root directory to the skypilot chart
           line=$(grep -n "^----$" src/README.md | cut -d: -f1 | head -n 1)
-          tail -n +$((line + 1)) src/README.md >> src/charts/skypilot/README.md
+          tail -n +$line src/README.md >> src/charts/skypilot/README.md
 
           # Update the version in the external-metrics chart (prometheus server)
           # todo(rohan): update name the way we do for the main skypilot chart?

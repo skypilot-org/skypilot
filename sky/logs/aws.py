@@ -211,35 +211,7 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             }
         }
 
-        # Add fallback outputs for graceful failure handling
-        cfg_dict = self.add_fallback_outputs(cfg_dict)
-
         return common_utils.dump_yaml_str(cfg_dict)
-
-    def add_fallback_outputs(self, cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Add fallback outputs to the Fluent Bit configuration.
-
-        This adds a local file output as a fallback in case
-        CloudWatch logging fails.
-
-        Args:
-            cfg_dict: The Fluent Bit configuration dictionary.
-
-        Returns:
-            The updated configuration dictionary.
-        """
-        # Add a local file output as a fallback
-        fallback_output = {
-            'name': 'file',
-            'match': '*',
-            'path': '/tmp/skypilot_logs_fallback.log',
-            'format': 'out_file',
-        }
-
-        # Add the fallback output to the configuration
-        cfg_dict['pipeline']['outputs'].append(fallback_output)
-
-        return cfg_dict
 
     def fluentbit_output_config(
             self, cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:

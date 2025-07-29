@@ -1173,7 +1173,11 @@ def get_config_schema():
                     'type': 'string',
                     'pattern': '^(https|s3|gs|r2|cos)://.+',
                     'required': [],
-                }
+                },
+                'force_disable_cloud_bucket': {
+                    'type': 'boolean',
+                    'default': False,
+                },
             }
         }
 
