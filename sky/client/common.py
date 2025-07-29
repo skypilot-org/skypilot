@@ -304,14 +304,12 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                         task_.file_mounts_mapping[src] = _full_path(src)
         if (task_.service is not None and
                 task_.service.tls_credential is not None):
-            upload_list.append(task_.service.tls_credential.keyfile)
-            upload_list.append(task_.service.tls_credential.certfile)
-            task_.file_mounts_mapping[
-                task_.service.tls_credential.
-                keyfile] = task_.service.tls_credential.keyfile
-            task_.file_mounts_mapping[
-                task_.service.tls_credential.
-                certfile] = task_.service.tls_credential.certfile
+            keyfile = task_.service.tls_credential.keyfile
+            certfile = task_.service.tls_credential.certfile
+            upload_list.append(_full_path(keyfile))
+            upload_list.append(_full_path(certfile))
+            task_.file_mounts_mapping[keyfile] = _full_path(keyfile)
+            task_.file_mounts_mapping[certfile] = _full_path(certfile)
 
     if upload_list:
         os.makedirs(os.path.expanduser(FILE_UPLOAD_LOGS_DIR), exist_ok=True)
