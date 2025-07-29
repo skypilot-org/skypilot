@@ -86,9 +86,14 @@ You can use ``accelerator:count`` in various places that accept accelerator spec
 See :ref:`auto-failover` for more examples.
 
 Google TPUs
------------------
+-----------
 
 See :ref:`tpu`.
+
+AMG GPUs
+--------
+
+See :ref:`kubernetes-amd-gpu`.
 
 .. toctree::
    :maxdepth: 1

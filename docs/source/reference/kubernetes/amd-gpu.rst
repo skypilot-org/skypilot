@@ -11,6 +11,8 @@ Dependency installation
 Install cert-manager
 ~~~~~~~~~~~~~~~~~~~~
 
+cert-manager is a `dependency <https://github.com/ROCm/gpu-operator?tab=readme-ov-file#prerequisites>`_ for the AMD GPU operator.
+
 .. code-block:: bash
 
     helm repo add jetstack https://charts.jetstack.io --force-update
@@ -143,12 +145,4 @@ Run a sample example with AMD Docker images
 
     sky launch -c amd-cluster examples/amd/amd_pytorch_RL.yaml
 
-More example task YAMLs are available under ``examples/amd`` directory.
-
-Conclusion
-----------
-
-This setup demonstrates that SkyPilot can now:
-
-- Detect AMD GPUs via ``amd.com/gpu`` labels
-- Schedule jobs using ``skypilot.co/accelerator=mi300``
+More example task YAMLs are available under `examples/amd <https://github.com/skypilot-org/skypilot/tree/master/examples/amd>`_ directory.
