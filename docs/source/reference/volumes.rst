@@ -113,7 +113,7 @@ You can also check the volumes in the SkyPilot dashboard.
 Filesystem volume examples
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This section demonstrates how to configure and use distributed filesystems as SkyPilot volumes. We'll cover popular options like `JuiceFS <https://juicefs.com/docs/community/introduction/>`_ (a cloud-native distributed filesystem) and `Nebius shared file system <https://docs.nebius.com/compute/storage/types#filesystems>`_ (a high-performance shared storage solution).
+This section demonstrates how to configure and use distributed filesystems as SkyPilot volumes. We'll cover options like `JuiceFS <https://juicefs.com/docs/community/introduction/>`_ (a cloud-native distributed filesystem) and `Nebius shared file system <https://docs.nebius.com/compute/storage/types#filesystems>`_ (a high-performance shared storage solution).
 
 
 .. tab-set::
@@ -125,7 +125,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
         1. **Install the JuiceFS CSI Driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
 
-        2. **Verify the storage class** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
+        2. **Verify the driver installation** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
 
         .. code-block:: console
 
@@ -136,7 +136,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
         .. note::
            If the ``juicefs-sc`` storage class is not available, refer to the `JuiceFS storage class creation guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ to set it up.
 
-        3. **Create a JuiceFS volume** using SkyPilot's volume configuration:
+        3. **Create a SkyPilot volume for JuiceFS** with a volume YAML:
 
         .. code-block:: yaml
 
@@ -153,7 +153,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           $ sky volumes apply juicefs-volume.yaml
 
-        4. **Mount the volume** in your SkyPilot task configuration:
+        4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
 
         .. code-block:: yaml
 
@@ -193,7 +193,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
           NAME                     PROVISIONER                    RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
           csi-mounted-fs-path-sc   mounted-fs-path.csi.nebius.ai  Delete          WaitForFirstConsumer   false                  10m
 
-        3. **Create a Nebius volume** using SkyPilot's volume configuration:
+        3. **Create a SkyPilot volume for Nebius file system** with a volume YAML:
 
         .. code-block:: yaml
 
