@@ -137,8 +137,6 @@ class JobsController:
             return
         if self._pool is None:
             managed_job_utils.terminate_cluster(cluster_name)
-        else:
-            serve_utils.release_cluster_name(self._pool, cluster_name)
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -641,7 +639,6 @@ def _cleanup(job_id: int, dag_yaml: str, pool: Optional[str]):
             cluster_name, job_id_on_pool_cluster = (
                 managed_job_state.get_pool_submit_info(job_id))
             if cluster_name is not None:
-                serve_utils.release_cluster_name(pool, cluster_name)
                 if job_id_on_pool_cluster is not None:
                     core.cancel(cluster_name=cluster_name,
                                 job_ids=[job_id_on_pool_cluster],

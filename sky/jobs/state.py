@@ -1273,14 +1273,24 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
 
 
 @_init_db
-def set_pool_submit_info(job_id: int, current_cluster_name: str,
-                         job_id_on_pool_cluster: int) -> None:
-    """Set the cluster name and job id on the pool from the managed job id."""
+def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
+    """Set the current cluster name for a job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update(
+                {job_info_table.c.current_cluster_name: current_cluster_name})
+        session.commit()
+
+
+@_init_db
+def set_job_id_on_pool_cluster(job_id: int,
+                               job_id_on_pool_cluster: int) -> None:
+    """Set the job id on the pool cluster for a job."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(job_info_table).filter(
             job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.current_cluster_name: current_cluster_name,
                 job_info_table.c.job_id_on_pool_cluster: job_id_on_pool_cluster
             })
         session.commit()
@@ -1453,7 +1463,9 @@ def get_num_alive_jobs(pool: Optional[str] = None) -> int:
 
 
 @_init_db
-def get_nonterminal_job_ids_by_pool(pool: str) -> List[int]:
+def get_nonterminal_job_ids_by_pool(pool: str,
+                                    cluster_name: Optional[str] = None
+                                   ) -> List[int]:
     """Get nonterminal job ids in a pool."""
     assert _SQLALCHEMY_ENGINE is not None
 
@@ -1463,13 +1475,17 @@ def get_nonterminal_job_ids_by_pool(pool: str) -> List[int]:
                 spot_table.outerjoin(
                     job_info_table,
                     spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
-        query = query.where(
-            sqlalchemy.and_(
-                ~spot_table.c.status.in_([
-                    status.value
-                    for status in ManagedJobStatus.terminal_statuses()
-                ]), job_info_table.c.pool == pool)).order_by(
-                    spot_table.c.spot_job_id.asc())
+        and_conditions = [
+            ~spot_table.c.status.in_([
+                status.value for status in ManagedJobStatus.terminal_statuses()
+            ]),
+            job_info_table.c.pool == pool,
+        ]
+        if cluster_name is not None:
+            and_conditions.append(
+                job_info_table.c.current_cluster_name == cluster_name)
+        query = query.where(sqlalchemy.and_(*and_conditions)).order_by(
+            spot_table.c.spot_job_id.asc())
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids

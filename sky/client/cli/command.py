@@ -4439,11 +4439,11 @@ def jobs_launch(
                 print_setup_fm_warning = True
                 break
         if print_setup_fm_warning:
-            click.secho(f'{colorama.Fore.YELLOW}Warning: '
-                        'setup/file_mounts/storage_mounts will be ignored '
-                        f'in pool. To update a pool, please use '
-                        f'`sky pool update {pool} pool.yaml`. '
-                        f'{colorama.Style.RESET_ALL}')
+            click.secho(
+                f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
+                ' will be ignored in pool. To update a pool, please '
+                f'use `sky pool update {pool} pool.yaml`. '
+                f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -4460,23 +4460,29 @@ def jobs_launch(
                                         'sky.jobs.launch')
 
     if not async_call and not detach_run:
-        if pool is None:
-            job_id = job_id_handle[0]
+        job_ids = job_id_handle[0]
+        if isinstance(job_ids, int) or len(job_ids) == 1:
+            job_id = job_ids if isinstance(job_ids, int) else job_ids[0]
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
             sys.exit(returncode)
         else:
-            job_ids = job_id_handle[0]
             job_ids_str = _format_job_ids_str(job_ids)
-            click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
-                        f'{job_ids_str}{colorama.Style.RESET_ALL}.\n'
-                        f'To stream job logs: {colorama.Style.BRIGHT}'
-                        f'sky jobs logs <job-id>{colorama.Style.RESET_ALL}\n'
-                        f'To stream controller logs: {colorama.Style.BRIGHT}'
-                        'sky jobs logs --controller <job-id>'
-                        f'{colorama.Style.RESET_ALL}')
+            click.secho(
+                f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
+                f'{job_ids_str}{colorama.Style.RESET_ALL}.'
+                f'\n📋 Useful Commands'
+                f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
+                f'{ux_utils.BOLD}sky jobs logs <job-id>'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
+                f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
+                f'{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'{ux_utils.RESET_BOLD}')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)

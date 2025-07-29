@@ -48,12 +48,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
     cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS replica_assignments (
-        service_name TEXT,
-        replica_id INTEGER,
-        job_id INTEGER DEFAULT NULL,
-        PRIMARY KEY (service_name, replica_id))""")
-    cursor.execute("""\
         CREATE TABLE IF NOT EXISTS ha_recovery_script (
         service_name TEXT PRIMARY KEY,
         script TEXT)""")
@@ -320,10 +314,6 @@ def remove_service(service_name: str) -> None:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute("""\
             DELETE FROM services WHERE name=(?)""", (service_name,))
-        cursor.execute(
-            """\
-            DELETE FROM replica_assignments WHERE service_name=(?)""",
-            (service_name,))
 
 
 @init_db
@@ -526,11 +516,6 @@ def add_or_update_replica(service_name: str, replica_id: int,
             (service_name, replica_id, replica_info)
             VALUES (?, ?, ?)""",
             (service_name, replica_id, pickle.dumps(replica_info)))
-        cursor.execute(
-            """\
-            INSERT OR IGNORE INTO replica_assignments
-            (service_name, replica_id)
-            VALUES (?, ?)""", (service_name, replica_id))
 
 
 @init_db
@@ -573,50 +558,6 @@ def get_replica_infos(
             SELECT replica_info FROM replicas
             WHERE service_name=(?)""", (service_name,)).fetchall()
     return [pickle.loads(row[0]) for row in rows]
-
-
-@init_db
-def get_replica_infos_and_job_ids(
-        service_name: str) -> List[Tuple['replica_managers.ReplicaInfo', int]]:
-    """Gets all replica infos and job ids of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT replica_info, job_id FROM replicas JOIN replica_assignments
-            ON replicas.service_name = replica_assignments.service_name
-            AND replicas.replica_id = replica_assignments.replica_id
-            WHERE replicas.service_name=(?)""", (service_name,)).fetchall()
-    return [(pickle.loads(row[0]), row[1]) for row in rows]
-
-
-@init_db
-def set_replica_job_id(service_name: str, replica_id: int,
-                       job_id: Optional[int]) -> None:
-    """Sets the job id of a replica."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE replica_assignments
-            SET job_id=(?)
-            WHERE service_name=(?) AND replica_id=(?)""",
-            (job_id, service_name, replica_id))
-
-
-@init_db
-def get_replica_job_id(service_name: str, replica_id: int) -> Optional[int]:
-    """Gets the job id of a replica."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT job_id FROM replica_assignments
-            WHERE service_name=(?) AND replica_id=(?)""",
-            (service_name, replica_id)).fetchall()
-    if not rows:
-        return None
-    return rows[0][0]
 
 
 @init_db

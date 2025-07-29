@@ -55,16 +55,6 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_pool_filelock_path(pool: Optional[str]) -> str:
-    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR)
-    if pool is not None:
-        path = path / pool
-    path = path / 'pm.lock'
-    path = path.expanduser().absolute()
-    path.parents[0].mkdir(parents=True, exist_ok=True)
-    return str(path)
-
-
 @annotations.lru_cache(scope='request')
 def get_num_service_threshold():
     """Get number of services threshold, calculating it only when needed."""
@@ -480,9 +470,6 @@ def generate_remote_tls_certfile_name(service_name: str) -> str:
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
-    # NOTE: `release_cluster_name` relies on the format of the cluster name.
-    # If the naming schema is updated, `release_cluster_name` should be updated
-    # as well.
     return f'{service_name}-{replica_id}'
 
 
@@ -661,24 +648,23 @@ def _get_service_status(
             _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
             '/autoscaler/info')
         record['target_num_replicas'] = resp.json()['target_num_replicas']
+    except requests.exceptions.RequestException:
+        record['target_num_replicas'] = None
     except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Failed to get autoscaler info for {service_name}: {e}\n'
+        logger.error(f'Failed to get autoscaler info for {service_name}: '
+                     f'{common_utils.format_exception(e)}\n'
                      f'Traceback: {traceback.format_exc()}')
 
     if with_replica_info:
-        if record['pool']:
-            record['replica_info'] = [
-                {
-                    'used_by': replica_job_id,
-                    **info.to_info_dict(with_handle=True, with_url=False)
-                } for info, replica_job_id in
-                serve_state.get_replica_infos_and_job_ids(service_name)
-            ]
-        else:
-            record['replica_info'] = [
-                info.to_info_dict(with_handle=True)
-                for info in serve_state.get_replica_infos(service_name)
-            ]
+        record['replica_info'] = [
+            info.to_info_dict(with_handle=True, with_url=not pool)
+            for info in serve_state.get_replica_infos(service_name)
+        ]
+        if pool:
+            for replica_info in record['replica_info']:
+                job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
+                    service_name, replica_info['name'])
+                replica_info['used_by'] = job_ids[0] if job_ids else None
     return record
 
 
@@ -762,58 +748,28 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         logger.error(f'Service {service_name!r} is not a cluster pool.')
         return None
 
-    with filelock.FileLock(_get_pool_filelock_path(service_name)):
-        logger.debug(f'Get next cluster name for pool {service_name!r}')
-        idle_replicas = [
-            info for info, replica_job_id in
-            serve_state.get_replica_infos_and_job_ids(service_name)
-            if info.status == serve_state.ReplicaStatus.READY and
-            replica_job_id is None
-        ]
-        if not idle_replicas:
-            logger.info(f'No idle replicas found for pool {service_name!r}')
-            return None
+    logger.debug(f'Get next cluster name for pool {service_name!r}')
+    ready_replicas = [
+        info for info in serve_state.get_replica_infos(service_name)
+        if info.status == serve_state.ReplicaStatus.READY
+    ]
+    idle_replicas: List['replica_managers.ReplicaInfo'] = []
+    for replica_info in ready_replicas:
+        jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
+            service_name, replica_info.cluster_name)
+        if not jobs_on_replica:
+            idle_replicas.append(replica_info)
+    if not idle_replicas:
+        logger.info(f'No idle replicas found for pool {service_name!r}')
+        return None
 
-        # Select the first idle replica.
-        # TODO(tian): "Load balancing" policy.
-        replica_info = idle_replicas[0]
-        logger.info(f'Selected replica {replica_info.replica_id} with cluster '
-                    f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
-                    f'{service_name!r}')
-        serve_state.set_replica_job_id(service_name, replica_info.replica_id,
-                                       job_id)
-        return replica_info.cluster_name
-
-
-def release_cluster_name(service_name: str, cluster_name: str) -> None:
-    """Release a cluster back to the pool by setting job id to NULL.
-
-    Args:
-        service_name: The name of the service.
-        cluster_name: The name of the cluster to release.
-    """
-    service_status = _get_service_status(service_name,
-                                         pool=True,
-                                         with_replica_info=False)
-    if service_status is None:
-        logger.error(f'Service {service_name!r} does not exist.')
-        return
-    if not service_status['pool']:
-        logger.error(f'Service {service_name!r} is not a cluster pool.')
-        return
-
-    with filelock.FileLock(_get_pool_filelock_path(service_name)):
-        logger.debug(
-            f'Release cluster {cluster_name!r} for pool {service_name!r}')
-        replica_id = int(cluster_name.split('-')[-1])
-        current_replica_job_id = serve_state.get_replica_job_id(
-            service_name, replica_id)
-        if current_replica_job_id is None:
-            logger.info(f'Skip releasing cluster {cluster_name!r}: '
-                        f'cluster not in use.')
-            return
-        serve_state.set_replica_job_id(service_name, replica_id, None)
-        logger.info(f'Cluster {cluster_name!r} released successfully.')
+    # Select the first idle replica.
+    # TODO(tian): "Load balancing" policy.
+    replica_info = idle_replicas[0]
+    logger.info(f'Selected replica {replica_info.replica_id} with cluster '
+                f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
+                f'{service_name!r}')
+    return replica_info.cluster_name
 
 
 def _terminate_failed_services(

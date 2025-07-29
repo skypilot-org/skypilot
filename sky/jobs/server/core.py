@@ -395,10 +395,11 @@ def launch(
                     backend = backend_utils.get_backend_from_handle(
                         local_handle)
                     assert isinstance(backend, backends.CloudVmRayBackend)
-                    backend.sync_file_mounts(
-                        handle=local_handle,
-                        all_file_mounts=controller_task.file_mounts,
-                        storage_mounts=controller_task.storage_mounts)
+                    with sky_logging.silent():
+                        backend.sync_file_mounts(
+                            handle=local_handle,
+                            all_file_mounts=controller_task.file_mounts,
+                            storage_mounts=controller_task.storage_mounts)
                     run_script = controller_task.run
                     assert isinstance(run_script, str)
                     # Manually add the env variables to the run script.
