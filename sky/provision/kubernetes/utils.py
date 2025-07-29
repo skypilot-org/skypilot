@@ -3179,10 +3179,12 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     return pods
 
 
-def is_tpu_on_gke(accelerator: str) -> bool:
+def is_tpu_on_gke(accelerator: str, normalize: bool = True) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
-    normalized, _ = normalize_tpu_accelerator_name(accelerator)
-    return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
+    if normalize:
+        normalized, _ = normalize_tpu_accelerator_name(accelerator)
+        return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
+    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
 def get_node_accelerator_count(context: Optional[str],
