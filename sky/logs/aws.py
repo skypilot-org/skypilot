@@ -9,6 +9,8 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
+EC2_MD_URL = '"${AWS_EC2_METADATA_SERVICE_ENDPOINT:-http://169.254.169.254/}"'
+
 
 class _CloudwatchLoggingConfig(pydantic.BaseModel):
     """Configuration for AWS CloudWatch logging agent."""
@@ -109,8 +111,8 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             # Check if we're running on EC2 with an IAM role or if
             # AWS credentials are available in the environment
             pre_cmd = (
-                'if ! curl -s -m 1 http://169.254.169.254'
-                '/latest/meta-data/iam/security-credentials/ > /dev/null; '
+                f'if ! curl -s -m 1 {EC2_MD_URL}'
+                'latest/meta-data/iam/security-credentials/ > /dev/null; '
                 'then '
                 # failed EC2 check, look for env vars
                 'if [ -z "$AWS_ACCESS_KEY_ID" ] || '
@@ -211,35 +213,7 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             }
         }
 
-        # Add fallback outputs for graceful failure handling
-        cfg_dict = self.add_fallback_outputs(cfg_dict)
-
         return common_utils.dump_yaml_str(cfg_dict)
-
-    def add_fallback_outputs(self, cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Add fallback outputs to the Fluent Bit configuration.
-
-        This adds a local file output as a fallback in case
-        CloudWatch logging fails.
-
-        Args:
-            cfg_dict: The Fluent Bit configuration dictionary.
-
-        Returns:
-            The updated configuration dictionary.
-        """
-        # Add a local file output as a fallback
-        fallback_output = {
-            'name': 'file',
-            'match': '*',
-            'path': '/tmp/skypilot_logs_fallback.log',
-            'format': 'out_file',
-        }
-
-        # Add the fallback output to the configuration
-        cfg_dict['pipeline']['outputs'].append(fallback_output)
-
-        return cfg_dict
 
     def fluentbit_output_config(
             self, cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:

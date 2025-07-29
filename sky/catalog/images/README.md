@@ -8,7 +8,7 @@ You only need to do this once.
 packer init plugins.pkr.hcl
 ```
 3. Setup cloud credentials
-4. `cd sky/clouds/service_catalog/images`
+4. `cd sky/catalog/images/`
 
 ## Generate Images
 FYI time to packer build images:

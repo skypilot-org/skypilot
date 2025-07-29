@@ -24,6 +24,7 @@ import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { YamlHighlighter } from '@/components/YamlHighlighter';
 
 function JobDetails() {
   const router = useRouter();
@@ -1133,9 +1134,9 @@ function JobDetailsContent({
                       } else if (yamlDocs.length === 1) {
                         // Single document - show directly
                         return (
-                          <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                          <YamlHighlighter className="whitespace-pre-wrap">
                             {yamlDocs[0].content}
-                          </pre>
+                          </YamlHighlighter>
                         );
                       } else {
                         // Multiple documents - show with collapsible sections
@@ -1163,9 +1164,9 @@ function JobDetailsContent({
                                 </button>
                                 {expandedYamlDocs[index] && (
                                   <div className="mt-3 ml-6">
-                                    <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                                    <YamlHighlighter className="whitespace-pre-wrap">
                                       {doc.content}
-                                    </pre>
+                                    </YamlHighlighter>
                                   </div>
                                 )}
                               </div>

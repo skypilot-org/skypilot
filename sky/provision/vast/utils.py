@@ -5,7 +5,7 @@
 # python sdk.
 #
 """Vast library wrapper for SkyPilot."""
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import vast
@@ -34,7 +34,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, preemptible: bool) -> str:
+           image_name: str, ports: Optional[List[int]],
+           preemptible: bool) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -58,6 +59,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          The disk size {xx} GB is not exactly matched the requested
          size {yy} GB. It is possible to charge extra cost on disk.
 
+      *  `ports`: This is a feature flag to expose ports to the internet.
+
       *  `geolocation`: Geolocation on Vast can be as specific as the
          host chooses to be. They can say, for instance, "Yutakachō,
          Shinagawa District, Tokyo, JP." Such a specific geolocation
@@ -79,9 +82,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
       *  Vast instance types are an invention for skypilot. Refer to
          catalog/vast_catalog.py for the current construction
-         of the type.
-
-    """
+         of the type."""
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
@@ -104,11 +105,13 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     instance_touse = instance_list[0]
 
+    port_map = ' '.join([f'-p {p}:{p}' for p in ports]) if ports else ''
+
     launch_params = {
         'id': instance_touse['id'],
         'direct': True,
         'ssh': True,
-        'env': '-e __SOURCE=skypilot',
+        'env': f'-e __SOURCE=skypilot {port_map}',
         'onstart_cmd': ';'.join([
             'touch ~/.no_auto_tmux',
             f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
