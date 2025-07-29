@@ -716,28 +716,41 @@ def stream_logs_by_id(job_id: int,
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file = managed_job_state.get_local_log_file(job_id, None)
-            if log_file is not None:
-                with open(os.path.expanduser(log_file), 'r',
-                          encoding='utf-8') as f:
-                    # Stream the logs to the console without reading the whole
-                    # file into memory.
-                    start_streaming = False
-                    read_from: Union[TextIO, Deque[str]] = f
-                    if tail is not None:
-                        assert tail > 0
-                        # Read only the last 'tail' lines using deque
-                        read_from = collections.deque(f, maxlen=tail)
-                    for line in read_from:
-                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                            start_streaming = True
-                        if start_streaming:
-                            print(line, end='', flush=True)
-                # Add the "Job finished" message for terminal states
-                if managed_job_status.is_terminal():
-                    print(ux_utils.finishing_message(
-                        f'Job finished (status: {managed_job_status.value}).'),
-                          flush=True)
+            log_file_exists = False
+            task_info = managed_job_state.get_all_task_ids_names_statuses(
+                job_id)
+            num_tasks = len(task_info)
+            for task_id, task_name, task_status in task_info:
+                log_file = managed_job_state.get_local_log_file(job_id, task_id)
+                if log_file is not None:
+                    log_file_exists = True
+                    if num_tasks > 1:
+                        if task_name is not None:
+                            print(f'=== Task {task_name}({task_id}) ===')
+                        else:
+                            print(f'=== Task {task_id} ===')
+                    with open(os.path.expanduser(log_file),
+                              'r',
+                              encoding='utf-8') as f:
+                        # Stream the logs to the console without reading the
+                        # whole file into memory.
+                        start_streaming = False
+                        read_from: Union[TextIO, Deque[str]] = f
+                        if tail is not None:
+                            assert tail > 0
+                            # Read only the last 'tail' lines using deque
+                            read_from = collections.deque(f, maxlen=tail)
+                        for line in read_from:
+                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                                start_streaming = True
+                            if start_streaming:
+                                print(line, end='', flush=True)
+                    # Add the "Job finished" message for terminal states
+                    if task_status.is_terminal():
+                        print(ux_utils.finishing_message(
+                            f'Job finished (status: {task_status.value}).'),
+                              flush=True)
+            if log_file_exists:
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (f'{colorama.Fore.YELLOW}'

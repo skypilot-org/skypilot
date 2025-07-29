@@ -1046,6 +1046,21 @@ def _get_all_task_ids_statuses(
 
 
 @_init_db
+def get_all_task_ids_names_statuses(
+        job_id: int) -> List[Tuple[int, str, ManagedJobStatus]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        id_names = session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.task_name,
+                spot_table.c.status,
+            ).where(spot_table.c.spot_job_id == job_id).order_by(
+                spot_table.c.task_id.asc())).fetchall()
+        return [(row[0], row[1], ManagedJobStatus(row[2])) for row in id_names]
+
+
+@_init_db
 def get_job_status_with_task_id(job_id: int,
                                 task_id: int) -> Optional[ManagedJobStatus]:
     assert _SQLALCHEMY_ENGINE is not None
