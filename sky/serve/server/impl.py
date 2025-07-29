@@ -232,16 +232,41 @@ def up(
                                f'--job-id {controller_job_id}')
             serve_state.set_ha_recovery_script(service_name, recovery_script)
 
+            # Sync file mounts before running
+            # This is necessary because run_on_head won't process the YAML file_mounts
+            backend.sync_file_mounts(
+                handle=controller_handle,
+                all_file_mounts=controller_task.file_mounts,
+                storage_mounts=controller_task.storage_mounts)
+            
             # Execute the controller task via backend.run_on_head
-            # This will run the YAML template which calls our launcher
-            assert controller_job_id is not None  # Set to 0 in consolidation mode
-            backend._execute_task_one_node(
+            # This avoids using Ray, which would wrap our controller in a Ray task
+            run_script = controller_task.run
+            assert isinstance(run_script, str), 'Controller task run must be a string'
+            
+            # Manually add the env variables to the run script
+            # This is needed because run_on_head doesn't process the YAML envs section
+            env_cmds = [
+                f'export {k}={v!r}' for k, v in controller_task.envs.items()
+            ]
+            run_script = '\n'.join(env_cmds + [run_script])
+            
+            controller_log_path = os.path.expanduser(
+                os.path.join(serve_utils.generate_remote_service_dir_name(service_name),
+                             'controller.log'))
+            
+            # Run the controller script which will call the launcher
+            # The launcher will start the actual controller and exit immediately
+            returncode = backend.run_on_head(
                 controller_handle,
-                controller_task,
-                controller_job_id,
-                detach_run=False,
-                remote_log_dir=os.path.expanduser(
-                    serve_utils.generate_remote_service_dir_name(service_name)))
+                run_script,
+                log_path=controller_log_path,
+                stream_logs=False,
+                under_remote_workdir=True)
+            
+            subprocess_utils.handle_returncode(
+                returncode, run_script,
+                'Failed to start serve controller')
 
         style = colorama.Style
         fore = colorama.Fore
