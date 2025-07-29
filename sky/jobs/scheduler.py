@@ -110,7 +110,7 @@ def get_number_of_controllers() -> int:
                  config.short_worker_config.burstable_parallelism) * \
             server_config.SHORT_WORKER_MEM_GB * 1024
 
-    return int((free - used) // JOB_MEMORY_MB)
+    return max(1, int((free - used) // JOB_MEMORY_MB))
 
 
 def start_controller() -> None:
