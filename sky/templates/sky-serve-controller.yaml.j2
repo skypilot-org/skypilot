@@ -54,20 +54,13 @@ run: |
   {%- else %}
   python \
   {%- endif %}
-   -u -m sky.serve.service \
+    -u -m sky.serve.{% if consolidation_mode_job_id is not none %}launcher{% else %}service{% endif %} \
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
-    {%- if consolidation_mode_job_id is not none %}
-    --job-id {{consolidation_mode_job_id}} \
-    {%- else %}
-    --job-id $SKYPILOT_INTERNAL_JOB_ID \
+    --job-id {% if consolidation_mode_job_id is not none %}{{consolidation_mode_job_id}}{% else %}$SKYPILOT_INTERNAL_JOB_ID{% endif %} \
+    {%- if consolidation_mode_job_id is none %}
+    >> {{controller_log_file}} 2>&1
     {%- endif %}
-    >> {{controller_log_file}} 2>&1 \
-    {%- if consolidation_mode_job_id is not none %}
-    &
-    {%- endif %}
-    # For consolidation mode, we need to run the service in the background so
-    # that it can immediately return in serve.core.up().
 
 envs:
 {%- for env_name, env_value in controller_envs.items() %}

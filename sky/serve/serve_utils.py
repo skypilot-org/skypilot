@@ -19,6 +19,7 @@ import uuid
 
 import colorama
 import filelock
+import psutil
 
 from sky import backends
 from sky import exceptions
@@ -274,50 +275,46 @@ def ha_recovery_for_consolidation_mode():
 
     if not is_consolidation_mode():
         return
-    
+
     # Get all active services
     services = serve_state.get_services()
     for service in services:
         service_name = service['name']
         service_status = service['status']
-        
-        # Skip services that are shutting down or failed
-        if service_status in serve_state.ServiceStatus.failed_statuses():
+
+        # Skip services that are shutting down or have cleanup failures
+        if service_status in [serve_state.ServiceStatus.SHUTTING_DOWN, serve_state.ServiceStatus.FAILED_CLEANUP]:
             continue
             
+        # Only recover consolidation mode services (controller_job_id == 0)
+        if service.get('controller_job_id') != 0:
+            continue
+
         logger.info(f'Attempting HA recovery for service {service_name}')
-        
+
         script = serve_state.get_ha_recovery_script(service_name)
         if script is None:
-            logger.warning(f'No HA recovery script found for service {service_name}')
+            logger.warning(
+                f'No HA recovery script found for service {service_name}')
             continue
-            
+
         try:
+            # The recovery script is already in the correct format for launcher
+            # Just execute it
             logs_dir = os.path.expanduser(constants.SKYSERVE_METADATA_DIR)
-            log_path = os.path.join(logs_dir, f'{service_name}_controller_recovery.log')
-            
+            log_path = os.path.join(logs_dir,
+                                    f'{service_name}_controller_recovery.log')
+
             from sky.utils import subprocess_utils
-            pid = subprocess_utils.launch_new_process_tree(script, log_output=log_path)
-            logger.info(f'Service {service_name} recovered with pid {pid}')
+
+            pid = subprocess_utils.launch_new_process_tree(script,
+                                                           log_output=log_path)
+            # Note: The launcher will update the PID in the database
+            logger.info(
+                f'Service {service_name} recovery initiated with launcher PID {pid}'
+            )
         except Exception as e:
             logger.error(f'Failed to recover service {service_name}: {e}')
-            
-        # Check if controller process is alive
-        # In consolidation mode, we track by service name
-        # TODO: implement proper PID tracking for serve consolidation mode
-        
-        # For now, restart all active services
-        if service_status != serve_state.ServiceStatus.SHUTTING_DOWN:
-            service_dir = os.path.expanduser(
-                generate_remote_service_dir_name(service_name))
-            # Find the latest task yaml
-            task_yaml_files = list(pathlib.Path(service_dir).glob('task_v*.yaml'))
-            if task_yaml_files:
-                latest_task_yaml = max(task_yaml_files, 
-                                       key=lambda f: int(f.stem.split('_v')[1]))
-                # Use job_id 0 for consolidation mode
-                scheduler.start_controller(service_name, str(latest_task_yaml), 0)
-                logger.info(f'Recovered serve controller for {service_name}')
 
 
 def validate_service_task(task: 'sky.Task', pool: bool) -> None:
@@ -519,21 +516,38 @@ def set_service_status_and_active_versions_from_replica(
 
 
 def update_service_status() -> None:
-    if is_consolidation_mode():
-        # TODO(tian): PID-based tracking.
-        return
+    """Update service status based on controller health."""
     services = serve_state.get_services()
     for record in services:
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
-        controller_job_id = record['controller_job_id']
-        assert controller_job_id is not None
-        controller_status = job_lib.get_status(controller_job_id)
-        if controller_status is None or controller_status.is_terminal():
-            # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status_and_active_versions(
-                record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+
+        if is_consolidation_mode():
+            # In consolidation mode, check controller PID
+            controller_pid = record.get('controller_pid')
+            assert controller_pid is not None, f"Consolidated {record} should have a controller pid"
+            try:
+                process = psutil.Process(controller_pid)
+                if not process.is_running():
+                    # Process is dead
+                    serve_state.set_service_status_and_active_versions(
+                        record['name'],
+                        serve_state.ServiceStatus.CONTROLLER_FAILED)
+            except psutil.NoSuchProcess:
+                # Process doesn't exist
+                serve_state.set_service_status_and_active_versions(
+                    record['name'],
+                    serve_state.ServiceStatus.CONTROLLER_FAILED)
+        else:
+            # Non-consolidation mode: check job status
+            controller_job_id = record['controller_job_id']
+            assert controller_job_id is not None
+            controller_status = job_lib.get_status(controller_job_id)
+            if controller_status is None or controller_status.is_terminal():
+                # If controller job is not running, set it as controller failed.
+                serve_state.set_service_status_and_active_versions(
+                    record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
 def update_service_encoded(service_name: str, version: int, mode: str,

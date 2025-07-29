@@ -2,6 +2,7 @@
 import os
 import re
 import shutil
+import sys
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -217,32 +218,30 @@ def up(
                         _disable_controller_check=True,
                     )
         else:
-            from sky.serve import scheduler
             controller_handle = backend_utils.is_controller_accessible(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 stopped_message='')
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
+            assert isinstance(controller_handle,
+                              backends.CloudVmRayResourceHandle)
 
-            logger.info(f'Syncing file mounts for controller {controller_task.file_mounts}')
-            logger.info(f'Syncing from {controller_task.storage_mounts}')
+            recovery_script = (
+                f'{sys.executable} -u -m sky.serve.launcher '
+                f'--task-yaml {remote_tmp_task_yaml_path} '
+                f'--service-name {service_name} '
+                f'--job-id {controller_job_id}')
+            serve_state.set_ha_recovery_script(service_name, recovery_script)
 
-            backend.sync_file_mounts(
-                handle=controller_handle,
-                all_file_mounts=controller_task.file_mounts,
-                storage_mounts=controller_task.storage_mounts)
-            
-            # Copy task yaml to service directory
-            service_dir = os.path.expanduser(
-                serve_utils.generate_remote_service_dir_name(service_name))
-            os.makedirs(service_dir, exist_ok=True)
-            remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
-                service_name, serve_constants.INITIAL_VERSION)
-            shutil.copy(service_file.name, remote_task_yaml_path)
-            
-            # Start controller process using scheduler
-            scheduler.start_controller(service_name, remote_tmp_task_yaml_path,
-                                     controller_job_id, controller_task.envs)
+            # Execute the controller task via backend.run_on_head
+            # This will run the YAML template which calls our launcher
+            backend._execute_task_one_node(
+                controller_handle,
+                controller_task,
+                controller_job_id,
+                detach_run=False,
+                remote_log_dir=os.path.expanduser(
+                    serve_utils.generate_remote_service_dir_name(service_name)))
 
         style = colorama.Style
         fore = colorama.Fore
