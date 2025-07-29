@@ -45,7 +45,7 @@ import typing
 
 import filelock
 
-from sky import exceptions
+from sky import exceptions, skypilot_config
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
@@ -94,17 +94,21 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
 
 
 def get_number_of_controllers() -> int:
+    consolidation_mode = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
+
     config = server_config.compute_server_config(deploy=True, quiet=True)
     free = psutil.virtual_memory().total // 1024 // 1024
 
     used = 0.0
     used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-    used += ((config.long_worker_config.garanteed_parallelism +
-              config.long_worker_config.burstable_parallelism) *
-             server_config.LONG_WORKER_MEM_GB * 1024)
-    used += ((config.short_worker_config.garanteed_parallelism +
-              config.short_worker_config.burstable_parallelism) *
-             server_config.SHORT_WORKER_MEM_GB * 1024)
+    if consolidation_mode:
+        used += (config.long_worker_config.garanteed_parallelism +
+                 config.long_worker_config.burstable_parallelism) * \
+            server_config.LONG_WORKER_MEM_GB * 1024
+        used += (config.short_worker_config.garanteed_parallelism +
+                 config.short_worker_config.burstable_parallelism) * \
+            server_config.SHORT_WORKER_MEM_GB * 1024
 
     return int((free - used) // JOB_MEMORY_MB)
 
