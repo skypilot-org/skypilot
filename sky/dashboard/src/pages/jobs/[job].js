@@ -1047,11 +1047,6 @@ function JobDetailsContent({
         </div>
       </div>
 
-      <div>
-        <div className="text-gray-600 font-medium text-base">Worker Pool</div>
-        <div className="text-base mt-1">{jobData.pool || '-'}</div>
-      </div>
-
       {/* Entrypoint section - spans both columns */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">

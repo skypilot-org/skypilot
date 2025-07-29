@@ -42,65 +42,91 @@ export async function getManagedJobs({ allUsers = true } = {}) {
     // print out the response for debugging
     const data = await fetchedData.json();
     const managedJobs = data.return_value ? JSON.parse(data.return_value) : [];
-
-    // Process jobs data
     const jobData = managedJobs.map((job) => {
-      let total_duration = 0;
-      if (job.end_at && job.submitted_at) {
-        total_duration = job.end_at - job.submitted_at;
-      } else if (job.submitted_at) {
-        total_duration = Date.now() / 1000 - job.submitted_at;
-      }
-
+      // Create events array correctly
       const events = [];
       if (job.submitted_at) {
         events.push({
-          type: 'PENDING',
-          timestamp: job.submitted_at,
+          time: new Date(job.submitted_at * 1000),
+          event: 'Job submitted.',
         });
       }
       if (job.start_at) {
         events.push({
-          type: 'RUNNING',
-          timestamp: job.start_at,
+          time: new Date(job.start_at * 1000),
+          event: 'Job started.',
         });
       }
+
+      // Add completed event if end_at exists
       if (job.end_at) {
+        if (job.status == 'CANCELLING' || job.status == 'CANCELLED') {
+          events.push({
+            time: new Date(job.end_at * 1000),
+            event: 'Job cancelled.',
+          });
+        } else {
+          events.push({
+            time: new Date(job.end_at * 1000),
+            event: 'Job completed.',
+          });
+        }
+      }
+      if (job.last_recovered_at && job.last_recovered_at != job.start_at) {
         events.push({
-          type: job.status,
-          timestamp: job.end_at,
+          time: new Date(job.last_recovered_at * 1000),
+          event: 'Job recovered.',
         });
       }
 
-      let cloud = '';
-      let region = '';
-      let cluster_resources = '';
-      let infra = '';
-      let full_infra = '';
+      let endTime = job.end_at ? job.end_at : Date.now() / 1000;
+      const total_duration = endTime - job.submitted_at;
 
-      try {
-        cloud = job.cloud || '';
-        cluster_resources = job.cluster_resources;
-        region = job.region || '';
-
-        if (cloud) {
-          infra = cloud;
-          if (region) {
-            infra += `/${region}`;
+      // Extract cloud name if not available (backward compatibility)
+      // TODO(zhwu): remove this after 0.12.0
+      let cloud = job.cloud;
+      let cluster_resources = job.cluster_resources;
+      if (!cloud) {
+        // Backward compatibility for old jobs controller without cloud info
+        // Similar to the logic in sky/jobs/utils.py
+        if (job.cluster_resources && job.cluster_resources !== '-') {
+          try {
+            cloud = job.cluster_resources.split('(')[0].split('x').pop().trim();
+            cluster_resources = job.cluster_resources
+              .replace(`${cloud}(`, '(')
+              .replace('x ', 'x');
+          } catch (error) {
+            // If parsing fails, set a default value
+            cloud = 'Unknown';
           }
+        } else {
+          cloud = 'Unknown';
         }
+      }
 
-        full_infra = infra;
-        if (job.accelerators) {
-          const accel_str = Object.entries(job.accelerators)
-            .map(([key, value]) => `${value}x${key}`)
-            .join(', ');
-          if (accel_str) {
-            full_infra += ` (${accel_str})`;
-          }
-        }
-      } catch (e) {
-        cluster_resources = job.cluster_resources;
+      let region_or_zone = '';
+      if (job.zone) {
+        region_or_zone = job.zone;
+      } else {
+        region_or_zone = job.region;
+      }
+
+      const full_region_or_zone = region_or_zone;
+      if (region_or_zone && region_or_zone.length > 15) {
+        // Use head-and-tail truncation like the cluster page
+        const truncateLength = 15;
+        const startLength = Math.floor((truncateLength - 3) / 2);
+        const endLength = Math.ceil((truncateLength - 3) / 2);
+        region_or_zone = `${region_or_zone.substring(0, startLength)}...${region_or_zone.substring(region_or_zone.length - endLength)}`;
+      }
+
+      let infra = cloud + ' (' + region_or_zone + ')';
+      if (region_or_zone === '-') {
+        infra = cloud;
+      }
+      let full_infra = cloud + ' (' + full_region_or_zone + ')';
+      if (full_region_or_zone === '-') {
+        full_infra = cloud;
       }
 
       return {
@@ -129,9 +155,6 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
-        pool: job.pool,
-        current_cluster_name: job.current_cluster_name,
-        job_id_on_pool_cluster: job.job_id_on_pool_cluster,
       };
     });
 
@@ -139,88 +162,6 @@ export async function getManagedJobs({ allUsers = true } = {}) {
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     return { jobs: [], controllerStopped: false };
-  }
-}
-
-export async function getPoolStatus() {
-  try {
-    const response = await apiClient.post(`/jobs/pool_status`, {
-      pool_names: null, // null means get all pools
-    });
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              return { pools: [], controllerStopped: true };
-            }
-          } catch (jsonError) {
-            console.error('Failed to parse error JSON:', jsonError);
-          }
-        }
-      } catch (dataError) {
-        console.error('Failed to parse response JSON:', dataError);
-      }
-      throw new Error('Server error');
-    }
-
-    // Parse the pools data from the response
-    const data = await fetchedData.json();
-    const poolData = data.return_value ? JSON.parse(data.return_value) : [];
-
-    // Also fetch managed jobs to get job counts by pool
-    let jobsData = { jobs: [] };
-    try {
-      const jobsResponse = await getManagedJobs({ allUsers: true });
-      if (!jobsResponse.controllerStopped) {
-        jobsData = jobsResponse;
-      }
-    } catch (jobsError) {
-      console.warn('Failed to fetch jobs for pool job counts:', jobsError);
-    }
-
-    // Process job counts by pool and status
-    const jobCountsByPool = {};
-    const terminalStatuses = [
-      'SUCCEEDED',
-      'FAILED',
-      'FAILED_SETUP',
-      'FAILED_PRECHECKS',
-      'FAILED_NO_RESOURCE',
-      'FAILED_CONTROLLER',
-      'CANCELLED',
-    ];
-
-    if (jobsData.jobs && Array.isArray(jobsData.jobs)) {
-      jobsData.jobs.forEach((job) => {
-        const poolName = job.pool;
-        const status = job.status;
-
-        if (poolName && !terminalStatuses.includes(status)) {
-          if (!jobCountsByPool[poolName]) {
-            jobCountsByPool[poolName] = {};
-          }
-          jobCountsByPool[poolName][status] =
-            (jobCountsByPool[poolName][status] || 0) + 1;
-        }
-      });
-    }
-
-    // Add job counts to each pool
-    const pools = poolData.map((pool) => ({
-      ...pool,
-      jobCounts: jobCountsByPool[pool.name] || {},
-    }));
-
-    return { pools, controllerStopped: false };
-  } catch (error) {
-    console.error('Error fetching pools:', error);
-    throw error;
   }
 }
 
