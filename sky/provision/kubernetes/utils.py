@@ -3386,7 +3386,7 @@ def process_skypilot_pods(
 
 def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
-    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['amd']
+    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
         nodes = kubernetes.core_api(context).list_node().items
         for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():

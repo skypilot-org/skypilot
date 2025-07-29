@@ -797,6 +797,11 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
+                # TODO(syang): GCP TPU names are supported on both GCP and
+                # kubernetes (GKE), but this logic automatically assumes
+                # GCP TPUs can only be used on GCP.
+                # Fix the logic such that GCP TPU names can failover between
+                # GCP and kubernetes.
                 if self.cloud is None:
                     if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
                         self._cloud = clouds.Kubernetes()
