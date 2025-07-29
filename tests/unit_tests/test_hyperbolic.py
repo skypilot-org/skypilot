@@ -121,7 +121,3 @@ def test_status_mapping():
     # Test unknown status
     assert HyperbolicInstanceStatus.from_raw_status(
         "unknown_status").value == "unknown"
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
