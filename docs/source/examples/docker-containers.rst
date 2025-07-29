@@ -192,6 +192,24 @@ you can provide the registry authentication details using :ref:`task environment
                 SKYPILOT_DOCKER_PASSWORD: ""
                 SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
 
+        .. note::
+
+            ``RunPod`` requires Docker to authenticate to GAR using the `base64-encoded version of the key <https://contact.runpod.io/hc/en-us/articles/39403705226003-Help-to-setup-Google-Cloud-s-Artifact-Registry-GAR-with-RunPod>`_. To base64 encode the JSON key:
+
+            .. code-block:: shell
+
+              base64 -i gcp-key.json -w 0 > gcp-key.json.b64
+            
+            The Docker username should also be changed to ``_json_key_base64``:
+
+            .. code-block:: yaml
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: _json_key_base64
+                ...
+
+            Furthermore, note that the base64 encoding option is only available on `Google Artifact Registry (GAR) <https://cloud.google.com/artifact-registry/docs>`_, not Google Container Registry (GCR), which has been `deprecated <https://cloud.google.com/artifact-registry/docs/transition/transition-from-gcr>`_ by Google.
+
 
     .. tab-item:: NVIDIA NGC
         :sync: nvidia-container-registry-tab

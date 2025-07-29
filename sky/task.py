@@ -24,7 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -245,7 +245,7 @@ class Task:
         run: Optional[CommandOrCommandGen] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
-        workdir: Optional[str] = None,
+        workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
         volumes: Optional[Dict[str, str]] = None,
         # Advanced:
@@ -301,10 +301,14 @@ class Task:
           secrets: A dictionary of secret environment variables to set before
             running the setup and run commands. These will be redacted in logs
             and YAML output.
-          workdir: The local working directory.  This directory will be synced
+          workdir: The local working directory or a git repository.
+            For a local working directory, this directory will be synced
             to a location on the remote VM(s), and ``setup`` and ``run``
             commands will be run under that location (thus, they can rely on
             relative paths when invoking binaries).
+            If a git repository is provided, the repository will be cloned to
+            the working directory and the ``setup`` and ``run`` commands will
+            be run under the cloned repository.
           num_nodes: The number of nodes to provision for this Task.  If None,
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command, where ``run`` can either be a str, meaning all
@@ -497,6 +501,12 @@ class Task:
         remote server.
         """
         if self.workdir is None:
+            return
+        # Only expand the workdir if it is a string
+        if isinstance(self.workdir, dict):
+            git_ref = self.workdir.get('ref')
+            if git_ref is not None:
+                self._metadata['git_commit'] = git_ref
             return
         user_workdir = self.workdir
         self.workdir = os.path.abspath(os.path.expanduser(user_workdir))

@@ -1,3 +1,5 @@
 sky
+examples/admin_policy/example_policy
 
 --exclude sky/backends/monkey_patches
+--exclude examples/admin_policy/example_policy/build

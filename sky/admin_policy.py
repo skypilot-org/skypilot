@@ -121,11 +121,17 @@ class MutatedUserRequest:
                 dict(self.skypilot_config),)).model_dump_json()
 
     @classmethod
-    def decode(cls, mutated_user_request_body: str) -> 'MutatedUserRequest':
+    def decode(cls, mutated_user_request_body: str,
+               original_request: UserRequest) -> 'MutatedUserRequest':
         mutated_user_request_body = _MutatedUserRequestBody.model_validate_json(
             mutated_user_request_body)
-        return cls(task=sky.Task.from_yaml_config(
-            common_utils.read_yaml_all_str(mutated_user_request_body.task)[0]),
+        task = sky.Task.from_yaml_config(
+            common_utils.read_yaml_all_str(mutated_user_request_body.task)[0])
+        # Some internal Task fields are not serialized. We need to manually
+        # restore them from the original request.
+        task.managed_job_dag = original_request.task.managed_job_dag
+        task.service_name = original_request.task.service_name
+        return cls(task=task,
                    skypilot_config=config_utils.Config.from_dict(
                        common_utils.read_yaml_all_str(
                            mutated_user_request_body.skypilot_config)[0],))
@@ -243,7 +249,8 @@ class RestfulAdminPolicy(PolicyTemplate):
                     f'{self.policy_url}: {e}') from None
 
         try:
-            mutated_user_request = MutatedUserRequest.decode(response.json())
+            mutated_user_request = MutatedUserRequest.decode(
+                response.json(), user_request)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.RestfulPolicyError(

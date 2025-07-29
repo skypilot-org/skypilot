@@ -15,7 +15,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import common_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)

@@ -41,30 +41,68 @@ Patch Kueue to support plain pods
 Kueue does not support scheduling plain pods out of the box. Since SkyPilot creates and manages workloads as pods,
 the Kueue config needs to be patched to support plain pods.
 
-.. code-block:: bash
+.. tab-set::
 
-    # Extract and patch the config and save it to /tmp/kueueconfig.yaml
-    # This is required because SkyPilot creates and manages workloads as pods
-    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"]' > /tmp/kueueconfig.yaml
-    # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
-    kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
-    # Restart the kueue-controller-manager pod with the following command
-    kubectl -n kueue-system rollout restart deployment kueue-controller-manager
-    # Wait for the restart to complete
-    kubectl -n kueue-system rollout status deployment kueue-controller-manager
+    .. tab-item:: Patch Kueue
+        :sync: patch-kueue-tab
 
-Check that the patch is applied by running the following command:
+        .. code-block:: bash
 
-.. code-block:: bash
+            # Extract and patch the config and save it to /tmp/kueueconfig.yaml
+            # This is required because SkyPilot creates and manages workloads as pods
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"]' > /tmp/kueueconfig.yaml
+            # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
+            kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
+            # Restart the kueue-controller-manager pod with the following command
+            kubectl -n kueue-system rollout restart deployment kueue-controller-manager
+            # Wait for the restart to complete
+            kubectl -n kueue-system rollout status deployment kueue-controller-manager
 
-    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks'
+        Check that the patch is applied by running the following command:
 
-This should output:
+        .. code-block:: bash
 
-.. code-block:: bash
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks'
 
-    ...
-    - pod
+        This should output:
+
+        .. code-block:: bash
+
+            ...
+            - pod
+
+    .. tab-item:: Patch Kueue with GPUDirect enabled on GKE
+        :sync: patch-kueue-gke-tab
+
+        If you are using GKE, and want to enable the `GPUDirect networking stack <https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#required-features-capabilities>`_ for the GPU nodes, you need to patch the Kueue config to support plain pods and add ``networking.gke.io.networks`` to the ``resources.excludeResourcePrefixes`` to exclude the networking resources from the resource quota.
+
+        .. code-block:: bash
+            :emphasize-lines: 2
+
+            # Extract and patch the config and save it to /tmp/kueueconfig.yaml
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"] | .resources.excludeResourcePrefixes += ["networking.gke.io.networks"]' > /tmp/kueueconfig.yaml
+            # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
+            kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
+            # Restart the kueue-controller-manager pod with the following command
+            kubectl -n kueue-system rollout restart deployment kueue-controller-manager
+            # Wait for the restart to complete
+            kubectl -n kueue-system rollout status deployment kueue-controller-manager
+
+        Check that the patch is applied by running the following command:
+
+        .. code-block:: bash
+
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations, .resources'
+
+        This should output:
+
+        .. code-block:: bash
+
+            frameworks:
+              ...
+              - pod
+            excludeResourcePrefixes:
+              - networking.gke.io.networks
 
 (Optional) Patch Kueue to support gang scheduling
 -----------------------------------------------------------

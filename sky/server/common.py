@@ -13,12 +13,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 from typing import Any, Dict, Literal, Optional, Tuple, Union
 from urllib import parse
 import uuid
 
+import cachetools
 import colorama
 import filelock
 
@@ -132,6 +134,8 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
 def set_api_cookie_jar(cookie_jar: CookieJar,
                        create_if_not_exists: bool = True) -> None:
     """Updates the file cookie jar with the given cookie jar."""
+    if len(cookie_jar) == 0:
+        return
     cookie_path = get_api_cookie_jar_path()
     if not cookie_path.exists() and not create_if_not_exists:
         # if the file doesn't exist and we don't want to create it, do nothing
@@ -252,8 +256,9 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(endpoint: Optional[str] = None):
+    server_url = endpoint if endpoint is not None else get_server_url()
+    return server_url in AVAILABLE_LOCAL_API_SERVER_URLS
 
 
 def _handle_non_200_server_status(
@@ -273,6 +278,10 @@ def _handle_non_200_server_status(
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
 
+@cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
+                                             ttl=5.0,
+                                             timer=time.time),
+                   lock=threading.RLock())
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     """Retrieve the status of the API server.
 
@@ -350,7 +359,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                      error=version_info.error)
 
             cookies = get_cookies_from_response(response)
-            set_api_cookie_jar(cookies, create_if_not_exists=False)
+            # Save or refresh the cookie jar in case of session affinity and
+            # OAuth.
+            set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
         except (json.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
@@ -371,6 +382,10 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 
 
 def handle_request_error(response: 'requests.Response') -> None:
+    # Keep the original HTTPError if the response code >= 400
+    response.raise_for_status()
+    # Other status codes are not expected neither, e.g. we do not expect to
+    # handle redirection here.
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -404,6 +419,7 @@ def _start_api_server(deploy: bool = False,
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
+
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
@@ -479,6 +495,8 @@ def _start_api_server(deploy: bool = False,
                         'SkyPilot API server process exited unexpectedly.\n'
                         f'View logs at: {constants.API_SERVER_LOGS}')
             try:
+                # Clear the cache to ensure fresh checks during startup
+                get_api_server_status.cache_clear()  # type: ignore
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
@@ -562,7 +580,7 @@ def check_server_healthy(
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
         msg = api_server_info.error
-        if is_api_server_local():
+        if is_api_server_local(endpoint):
             # For local server, just hint user to restart the server to get
             # a consistent version.
             msg = _LOCAL_API_SERVER_RESTART_HINT
@@ -706,9 +724,10 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             continue
         if 'workdir' in task_config:
             workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
+            if isinstance(workdir, str):
+                task_config['workdir'] = str(
+                    client_file_mounts_dir /
+                    file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

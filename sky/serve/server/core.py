@@ -18,6 +18,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -151,8 +152,25 @@ def up(
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, task_type='serve')
+        # Handle file mounts using two-hop approach when cloud storage
+        # unavailable
+        storage_clouds = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+        force_disable_cloud_bucket = skypilot_config.get_nested(
+            ('serve', 'force_disable_cloud_bucket'), False)
+        if storage_clouds and not force_disable_cloud_bucket:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, task_type='serve')
+            local_to_controller_file_mounts = {}
+        else:
+            # Fall back to two-hop file_mount uploading when no cloud storage
+            if task.storage_mounts:
+                raise exceptions.NotSupportedError(
+                    'Cloud-based file_mounts are specified, but no cloud '
+                    'storage is available. Please specify local '
+                    'file_mounts only.')
+            local_to_controller_file_mounts = (
+                controller_utils.translate_local_file_mounts_to_two_hop(task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -183,6 +201,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **tls_template_vars,
@@ -740,6 +759,7 @@ def tail_logs(
     target: ServiceComponentOrStr,
     replica_id: Optional[int] = None,
     follow: bool = True,
+    tail: Optional[int] = None,
 ) -> None:
     """Tails logs for a service.
 
@@ -805,11 +825,14 @@ def tail_logs(
             service_name,
             stream_controller=(
                 target == serve_utils.ServiceComponent.CONTROLLER),
-            follow=follow)
+            follow=follow,
+            tail=tail)
     else:
         assert replica_id is not None, service_name
-        code = serve_utils.ServeCodeGen.stream_replica_logs(
-            service_name, replica_id, follow)
+        code = serve_utils.ServeCodeGen.stream_replica_logs(service_name,
+                                                            replica_id,
+                                                            follow,
+                                                            tail=tail)
 
     # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
     # kill the process, so we need to handle it manually here.
@@ -834,6 +857,7 @@ def sync_down_logs(
     targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
                    None] = None,
     replica_ids: Optional[List[int]] = None,
+    tail: Optional[int] = None,
 ) -> str:
     """Sync down logs from the controller for the given service.
 
@@ -936,16 +960,22 @@ def sync_down_logs(
         if component == serve_utils.ServiceComponent.CONTROLLER:
             stream_logs_code = (
                 serve_utils.ServeCodeGen.stream_serve_process_logs(
-                    service_name, stream_controller=True, follow=False))
+                    service_name,
+                    stream_controller=True,
+                    follow=False,
+                    tail=tail))
         elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
             stream_logs_code = (
                 serve_utils.ServeCodeGen.stream_serve_process_logs(
-                    service_name, stream_controller=False, follow=False))
+                    service_name,
+                    stream_controller=False,
+                    follow=False,
+                    tail=tail))
         elif component == serve_utils.ServiceComponent.REPLICA:
             replica_id = target.replica_id
             assert replica_id is not None, service_name
             stream_logs_code = serve_utils.ServeCodeGen.stream_replica_logs(
-                service_name, replica_id, follow=False)
+                service_name, replica_id, follow=False, tail=tail)
         else:
             assert False, component
 

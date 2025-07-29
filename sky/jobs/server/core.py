@@ -59,7 +59,10 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     # as uploading to the controller is only a local copy.
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
-    if not managed_job_utils.is_consolidation_mode() and storage_clouds:
+    force_disable_cloud_bucket = skypilot_config.get_nested(
+        ('jobs', 'force_disable_cloud_bucket'), False)
+    if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
+            not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -147,6 +150,18 @@ def launch(
         None if dryrun.
     """
     entrypoint = task
+    # using hasattr instead of isinstance to avoid importing sky
+    if hasattr(task, 'metadata'):
+        metadata = task.metadata
+    else:
+        # we are a Dag, not a Task
+        if len(task.tasks) == 1:
+            metadata = task.tasks[0].metadata
+        else:
+            # doesn't make sense to have a git commit since there might be
+            # different metadatas for each task
+            metadata = {}
+
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     dag.resolve_and_validate_volumes()
@@ -311,6 +326,8 @@ def launch(
         controller_task.set_resources(controller_resources)
 
         controller_task.managed_job_dag = dag
+        # pylint: disable=protected-access
+        controller_task._metadata = metadata
 
         logger.info(
             f'{colorama.Fore.YELLOW}'

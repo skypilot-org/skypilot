@@ -476,8 +476,11 @@ def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
 
 
 def get_instance_type_for_cpus_mem_impl(
-        df: 'pd.DataFrame', cpus: Optional[str],
-        memory_gb_or_ratio: Optional[str]) -> Optional[str]:
+        df: 'pd.DataFrame',
+        cpus: Optional[str],
+        memory_gb_or_ratio: Optional[str],
+        region: Optional[str] = None,
+        zone: Optional[str] = None) -> Optional[str]:
     """Returns the cheapest instance type that satisfies the requirements.
 
     Args:
@@ -490,7 +493,10 @@ def get_instance_type_for_cpus_mem_impl(
             returned instance type should have at least the given memory size.
             If the string ends with "x", then the returned instance type should
             have at least the given number of vCPUs times the given ratio.
+        region: The region to filter by.
+        zone: The zone to filter by.
     """
+    df = _filter_region_zone(df, region, zone)
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:

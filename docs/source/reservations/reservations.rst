@@ -220,7 +220,7 @@ Using DWS with Kueue
 You can combine a :ref:`Kueue setup <kubernetes-example-kueue>` with DWS on the GKE cluster. This enables gang-scheduling, i.e., all-or-nothing behavior: GKE allocates all resources of the same request at the same time (e.g., multiple nodes/pods of the same job). 
 See `GKE DWS documentation <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`_ for more details.
 
-When using DWS with Kueue, you can additionally specify `max_run_duration`. With shorter duration, the resources are likely easier to get due to GCP's DWS scheduling behavior.
+When using DWS with Kueue, you can additionally specify `max_run_duration` in ``~/.sky/config.yaml``. With shorter duration, the resources are likely easier to get due to GCP's DWS scheduling behavior.
 
 .. code-block:: yaml
   :emphasize-lines: 7-7
@@ -234,26 +234,6 @@ When using DWS with Kueue, you can additionally specify `max_run_duration`. With
       max_run_duration: 10m
     kueue:
       local_queue_name: skypilot-local-queue
-
-Or, specify it in the SkyPilot YAML (see :ref:`here <config-client-job-task-yaml>`):
-
-.. code-block:: yaml
-
-    name: dws-kueue
-
-    resources:
-      infra: k8s
-      accelerators: H100:8
-
-    num_nodes: 2
-
-    config:
-      kubernetes:
-        dws:
-          enabled: true
-          max_run_duration: 10m
-        kueue:
-          local_queue_name: skypilot-local-queue
 
 .. note::
   `Flex-start <https://cloud.google.com/kubernetes-engine/docs/concepts/dws>`__ is always enabled when using DWS on GKE. Depending  on whether Kueue is enabled, the behavior of allocating new resources is different:
