@@ -1217,6 +1217,77 @@ def test_azure_start_stop():
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
+def test_autostop_wait_for_jobs(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
+    # the VM is stopped.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    # Launching and starting Azure clusters can take a long time too. e.g., restart
+    # a stopped Azure cluster can take 7m. So we set the total timeout to 70m.
+    total_timeout_minutes = 70 if generic_cloud == 'azure' else 20
+    test = smoke_tests_utils.Test(
+        'autostop',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} -i 1 --wait-for jobs',
+
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m"',
+
+            # Ensure the cluster is not stopped early.
+            'sleep 40',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+
+            # Ensure the cluster is STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+
+            # Ensure the cluster is UP and the autostop setting is reset ('-').
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+
+            # Ensure the job succeeded.
+            f'sky exec {name} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 2 --status',
+
+            # Test restarting the idleness timer via reset:
+            f'sky autostop -y {name} -i 1 --wait-for jobs',  # Idleness starts counting.
+            'sleep 40',  # Almost reached the threshold.
+            f'sky autostop -y {name} -i 1 --wait-for jobs',  # Should restart the timer.
+            'sleep 40',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+
+            # Test restarting the idleness timer via exec:
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+            f'sky autostop -y {name} -i 1 --wait-for jobs',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky exec {name} echo hi',  # Should restart the timer.
+            'sleep 45',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
 def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
     """Test that autostop is prevented when SSH sessions are active."""
     name = smoke_tests_utils.get_cluster_name()
