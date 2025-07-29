@@ -95,21 +95,17 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
 
 
 def get_number_of_controllers() -> int:
-    consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-
     config = server_config.compute_server_config(deploy=True, quiet=True)
     free = psutil.virtual_memory().total // 1024 // 1024
 
     used = 0.0
     used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
-    if consolidation_mode:
-        used += (config.long_worker_config.garanteed_parallelism +
-                 config.long_worker_config.burstable_parallelism) * \
-            server_config.LONG_WORKER_MEM_GB * 1024
-        used += (config.short_worker_config.garanteed_parallelism +
-                 config.short_worker_config.burstable_parallelism) * \
-            server_config.SHORT_WORKER_MEM_GB * 1024
+    used += (config.long_worker_config.garanteed_parallelism +
+                config.long_worker_config.burstable_parallelism) * \
+        server_config.LONG_WORKER_MEM_GB * 1024
+    used += (config.short_worker_config.garanteed_parallelism +
+                config.short_worker_config.burstable_parallelism) * \
+        server_config.SHORT_WORKER_MEM_GB * 1024
 
     return max(1, int((free - used) // JOB_MEMORY_MB))
 
@@ -119,11 +115,6 @@ def start_controller() -> None:
 
     This requires that the env file is already set up.
     """
-
-    # this should have been made by now
-    if not os.path.exists(JOB_CONTROLLER_ENV_PATH):
-        return
-
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
@@ -135,6 +126,8 @@ def start_controller() -> None:
 
     run_cmd = (f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
+    
+    logger.info(f'Running controller with command: {run_cmd}')
 
     pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
     with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
