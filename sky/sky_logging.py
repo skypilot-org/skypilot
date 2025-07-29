@@ -170,12 +170,13 @@ def set_logging_level(logger: str, level: int):
     finally:
         logger.setLevel(original_level)
 
+
 @contextlib.contextmanager
 def set_sky_logging_levels(level: int):
     """Set the logging level for all loggers."""
     # Turn off logger
     previous_levels = {}
-    for logger_name in logging.Logger.manager.loggerDict.keys():
+    for logger_name in logging.Logger.manager.loggerDict:
         if logger_name.startswith('sky'):
             logger = logging.getLogger(logger_name)
             previous_levels[logger_name] = logger.level
@@ -187,7 +188,7 @@ def set_sky_logging_levels(level: int):
         yield
     finally:
         # Restore logger
-        for logger_name in logging.Logger.manager.loggerDict.keys():
+        for logger_name in logging.Logger.manager.loggerDict:
             if logger_name.startswith('sky'):
                 logger = logging.getLogger(logger_name)
                 logger.setLevel(previous_levels[logger_name])

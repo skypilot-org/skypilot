@@ -34,7 +34,8 @@ class InternalRequestDaemon:
 
         while True:
             # Refresh config within the while loop.
-            # Since this is a long running daemon, reload_config_for_new_request()
+            # Since this is a long running daemon,
+            # reload_config_for_new_request()
             # is not called in between the event runs.
             skypilot_config.safe_reload_config()
             # Get the configured log level for the daemon inside the event loop
@@ -44,7 +45,8 @@ class InternalRequestDaemon:
             try:
                 level = getattr(logging, level_str.upper())
             except AttributeError:
-                # Bad level should be rejected by schema validation, just in case.
+                # Bad level should be rejected by
+                # schema validation, just in case.
                 logger.warning(f'Invalid log level: {level_str}, using DEBUG')
                 level = logging.DEBUG
             with ux_utils.enable_traceback(), \
@@ -73,10 +75,9 @@ def refresh_cluster_status_event():
     # refreshed, but it is OK because other operations will just wait for
     # the lock and get the just refreshed status without refreshing again.
     core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
-    logger.info(
-        'Status refreshed. Sleeping '
-        f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
-        ' seconds for the next refresh...\n')
+    logger.info('Status refreshed. Sleeping '
+                f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
+                ' seconds for the next refresh...\n')
     time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
