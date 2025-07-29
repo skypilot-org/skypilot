@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Line length should not exceed 80 characters.
+Do not use backslashes (`\`) for line continuation.
