@@ -9,6 +9,8 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
+EC2_MD_URL = '"${AWS_EC2_METADATA_SERVICE_ENDPOINT:-http://169.254.169.254/}"'
+
 
 class _CloudwatchLoggingConfig(pydantic.BaseModel):
     """Configuration for AWS CloudWatch logging agent."""
@@ -109,8 +111,8 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             # Check if we're running on EC2 with an IAM role or if
             # AWS credentials are available in the environment
             pre_cmd = (
-                'if ! curl -s -m 1 http://169.254.169.254'
-                '/latest/meta-data/iam/security-credentials/ > /dev/null; '
+                f'if ! curl -s -m 1 {EC2_MD_URL}'
+                'latest/meta-data/iam/security-credentials/ > /dev/null; '
                 'then '
                 # failed EC2 check, look for env vars
                 'if [ -z "$AWS_ACCESS_KEY_ID" ] || '
