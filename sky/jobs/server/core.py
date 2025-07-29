@@ -61,7 +61,10 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     # as uploading to the controller is only a local copy.
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
-    if not managed_job_utils.is_consolidation_mode() and storage_clouds:
+    force_disable_cloud_bucket = skypilot_config.get_nested(
+        ('jobs', 'force_disable_cloud_bucket'), False)
+    if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
+            not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -110,7 +113,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag', pool: Optional[str],
         # submitting multiple jobs. Current blocker is that we are sharing
         # the same dag object for all jobs. Maybe we can do copy.copy() for
         # each job and then give it a unique name (e.g. append job id after
-        # the task name).
+        # the task name). The name of the dag also needs to be aligned with
+        # the task name.
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,

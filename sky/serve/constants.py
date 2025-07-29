@@ -110,3 +110,6 @@ SERVE_VERSION = 3
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# Dummy run command for cluster pool.
+POOL_DUMMY_RUN_COMMAND = 'echo "setup done"'

@@ -16,6 +16,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -70,8 +71,12 @@ def up(
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
+    if pool and not serve_utils.is_consolidation_mode():
+        raise ValueError(
+            'Pool is only supported in consolidation mode. To fix, set '
+            '`serve.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
-    serve_utils.validate_service_task(task)
+    serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
     assert task.service.pool == pool, 'Inconsistent pool flag.'
     noun = 'pool' if pool else 'service'
@@ -101,12 +106,29 @@ def up(
     assert task.service is not None
     if pool:
         # Use dummy run script for cluster pool.
-        task.run = 'echo "setup done"'
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     with rich_utils.safe_status(
             ux_utils.spinner_message(f'Initializing {noun}')):
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, task_type='serve')
+        # Handle file mounts using two-hop approach when cloud storage
+        # unavailable
+        storage_clouds = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+        force_disable_cloud_bucket = skypilot_config.get_nested(
+            ('serve', 'force_disable_cloud_bucket'), False)
+        if storage_clouds and not force_disable_cloud_bucket:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, task_type='serve')
+            local_to_controller_file_mounts = {}
+        else:
+            # Fall back to two-hop file_mount uploading when no cloud storage
+            if task.storage_mounts:
+                raise exceptions.NotSupportedError(
+                    'Cloud-based file_mounts are specified, but no cloud '
+                    'storage is available. Please specify local '
+                    'file_mounts only.')
+            local_to_controller_file_mounts = (
+                controller_utils.translate_local_file_mounts_to_two_hop(task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -140,6 +162,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'consolidation_mode_job_id': controller_job_id,
@@ -362,7 +385,7 @@ def update(
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
     task.validate()
-    serve_utils.validate_service_task(task)
+    serve_utils.validate_service_task(task, pool=pool)
 
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
@@ -373,7 +396,7 @@ def update(
     task = dag.tasks[0]
     if pool:
         # Use dummy run script for cluster pool.
-        task.run = 'echo "setup done"'
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     assert task.service is not None
     if not pool and task.service.tls_credential is not None:

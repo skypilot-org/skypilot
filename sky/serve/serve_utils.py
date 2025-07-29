@@ -320,7 +320,7 @@ def ha_recovery_for_consolidation_mode():
                 logger.info(f'Recovered serve controller for {service_name}')
 
 
-def validate_service_task(task: 'sky.Task') -> None:
+def validate_service_task(task: 'sky.Task', pool: bool) -> None:
     """Validate the task for Sky Serve.
 
     Args:
@@ -343,17 +343,25 @@ def validate_service_task(task: 'sky.Task') -> None:
                 'use `dynamic_ondemand_fallback` or set '
                 'base_ondemand_fallback_replicas.')
 
+    field_name = 'service' if not pool else 'pool'
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
+            raise RuntimeError(f'{field_name.capitalize()} section not found.')
+
+    if pool != task.service.pool:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{field_name.capitalize()} section in the YAML '
+                             f'file does not match the pool argument. '
+                             f'To fix, add a valid `{field_name}` field.')
 
     policy_description = ('on-demand'
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.job_recovery is not None:
+            sys_name = 'SkyServe' if not pool else 'Cluster Pool'
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('job_recovery is disabled for SkyServe. '
-                                 'SkyServe will replenish preempted spot '
+                raise ValueError(f'job_recovery is disabled for {sys_name}. '
+                                 f'{sys_name} will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
@@ -376,7 +384,7 @@ def validate_service_task(task: 'sky.Task') -> None:
                 raise ValueError(
                     '`spot_placer` is only supported for spot resources. '
                     'Please explicitly specify `use_spot: true` in resources.')
-        if not task.service.pool and task.service.ports is None:
+        if not pool and task.service.ports is None:
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
             if len(requested_ports) != 1:
@@ -396,7 +404,7 @@ def validate_service_task(task: 'sky.Task') -> None:
                         f'Got multiple ports: {service_port} and '
                         f'{replica_ingress_port} in different resources. '
                         'Please specify the same port instead.')
-        if task.service.pool:
+        if pool:
             if (task.service.ports is not None or
                     requested_resources.ports is not None):
                 with ux_utils.print_exception_no_traceback():
@@ -739,7 +747,7 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
         return None
 
     with filelock.FileLock(_get_pool_filelock_path(service_name)):
-        logger.info(f'Get next cluster name for pool {service_name!r}')
+        logger.debug(f'Get next cluster name for pool {service_name!r}')
         idle_replicas = [
             info for info, replica_job_id in
             serve_state.get_replica_infos_and_job_ids(service_name)
@@ -779,7 +787,7 @@ def release_cluster_name(service_name: str, cluster_name: str) -> None:
         return
 
     with filelock.FileLock(_get_pool_filelock_path(service_name)):
-        logger.info(
+        logger.debug(
             f'Release cluster {cluster_name!r} for pool {service_name!r}')
         replica_id = int(cluster_name.split('-')[-1])
         current_replica_job_id = serve_state.get_replica_job_id(

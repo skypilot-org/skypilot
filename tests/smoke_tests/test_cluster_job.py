@@ -1281,6 +1281,44 @@ def test_autostop(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    # See test_autostop() for explanation of autostop_timeout.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'autostop_with_unhealthy_ray_cluster',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} -i 5',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "5m"',
+            # Ensure the job succeeded.
+            f'sky logs {name} 1 --status',
+            # Stop the ray cluster, but leave the node running.
+            # TODO(kevin): Find a better way to replicate the issue
+            f'ssh {name} "skypilot-runtime/bin/ray stop"',
+            # Ensure the cluster is not terminated early, and is in INIT,
+            # because the ray cluster is stopped.
+            'sleep 240',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep INIT',
+            # Ensure the cluster is STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
