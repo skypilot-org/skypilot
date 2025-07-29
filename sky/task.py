@@ -598,6 +598,8 @@ class Task:
         if config.get('service') is not None:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
+            config['service'] = _fill_in_env_vars(config['service'],
+                                                  config.get('secrets', {}))
 
         # Fill in any Task.envs into workdir
         if config.get('workdir') is not None:
