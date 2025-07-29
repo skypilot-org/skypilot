@@ -106,7 +106,7 @@ class PrimeIntellect(clouds.Cloud):
                                             region=region,
                                             zone=None)
         for r in regions:
-            assert r.zones is None, r
+            assert r.zones is not None, r
             yield r.zones
 
     def instance_type_to_hourly_cost(self,

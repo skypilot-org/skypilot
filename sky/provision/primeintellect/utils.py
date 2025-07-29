@@ -129,7 +129,7 @@ def get_upstream_cloud_id(instance_type: str) -> Optional[str]:
     global _df, _lookup_dict
     if _df is None:
         _df = catalog_common.read_catalog('primeintellect/vms.csv')
-        _lookup_dict = (_df.set_index('instance_type')['cloud_id'].to_dict())
+        _lookup_dict = (_df.set_index('InstanceType')['UpstreamCloudId'].to_dict())
     return _lookup_dict.get(instance_type)
 
 
