@@ -63,6 +63,38 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
     return tls_template_vars
 
 
+def _get_service_record(
+        service_name: str, pool: bool,
+        handle: backends.CloudVmRayResourceHandle,
+        backend: backends.CloudVmRayBackend) -> Optional[Dict[str, Any]]:
+    """Get the service record."""
+    noun = 'pool' if pool else 'service'
+
+    code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                       pool=pool)
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           f'Failed to get {noun} status',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_statuses = serve_utils.load_service_status(serve_status_payload)
+
+    assert len(service_statuses) <= 1, service_statuses
+    if not service_statuses:
+        return None
+    return service_statuses[0]
+
+
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
@@ -103,6 +135,9 @@ def up(
     task = dag.tasks[0]
     assert task.service is not None
     if pool:
+        if task.run is not None:
+            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
+                           f'ignored for pool.{colorama.Style.RESET_ALL}')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
@@ -393,6 +428,9 @@ def update(
     dag, _ = admin_policy_utils.apply(task)
     task = dag.tasks[0]
     if pool:
+        if task.run is not None:
+            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
+                           f'ignored for pool.{colorama.Style.RESET_ALL}')
         # Use dummy run script for cluster pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
@@ -417,35 +455,15 @@ def update(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code, f'Failed to get {noun} status '
-                                           f'when updating {noun}',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    service_record = _get_service_record(service_name, pool, handle, backend)
 
-    service_statuses = serve_utils.load_service_status(serve_status_payload)
-    if not service_statuses:
+    if service_record is None:
         cmd = 'sky jobs pool up' if pool else 'sky serve up'
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
 
-    if len(service_statuses) > 1:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Multiple {noun}s found for {service_name!r}. ')
-    service_record = service_statuses[0]
     prompt = None
     if (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED
        ):
@@ -500,7 +518,6 @@ def update(
             raise ValueError(f'Failed to parse version: {version_string}; '
                              f'Returncode: {returncode}') from e
 
-    print(f'New version: {current_version}')
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:
@@ -509,9 +526,10 @@ def update(
         remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
             service_name, current_version, expand_user=False)
 
-        backend.sync_file_mounts(handle,
-                                 {remote_task_yaml_path: service_file.name},
-                                 storage_mounts=None)
+        with sky_logging.silent():
+            backend.sync_file_mounts(handle,
+                                     {remote_task_yaml_path: service_file.name},
+                                     storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
                                                        current_version,
@@ -532,10 +550,38 @@ def update(
             raise RuntimeError(e.error_msg) from e
 
     cmd = 'sky jobs pool status' if pool else 'sky serve status'
-    print(f'{colorama.Fore.GREEN}{capnoun} {service_name!r} update scheduled.'
-          f'{colorama.Style.RESET_ALL}\n'
-          f'Please use {ux_utils.BOLD}{cmd} {service_name} '
-          f'{ux_utils.RESET_BOLD}to check the latest status.')
+    logger.info(
+        f'{colorama.Fore.GREEN}{capnoun} {service_name!r} update scheduled.'
+        f'{colorama.Style.RESET_ALL}\n'
+        f'Please use {ux_utils.BOLD}{cmd} {service_name} '
+        f'{ux_utils.RESET_BOLD}to check the latest status.')
+
+    logger.info(
+        ux_utils.finishing_message(
+            f'Successfully updated {noun} {service_name!r} '
+            f'to version {current_version}.'))
+
+
+def apply(
+    task: 'sky.Task',
+    service_name: str,
+    mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+    pool: bool = False,
+) -> None:
+    """Applies the config to the service or pool."""
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+            stopped_message='')
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        service_record = _get_service_record(service_name, pool, handle,
+                                             backend)
+        if service_record is not None:
+            return update(task, service_name, mode, pool)
+    except exceptions.ClusterNotUpError:
+        pass
+    up(task, service_name, pool)
 
 
 def down(

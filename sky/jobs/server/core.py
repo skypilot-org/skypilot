@@ -815,22 +815,13 @@ def download_logs(
 
 
 @usage_lib.entrypoint
-def pool_up(
-    task: 'sky.Task',
-    pool_name: Optional[str] = None,
-) -> Tuple[str, str]:
-    """Spins up a pool."""
-    return impl.up(task, pool_name, pool=True)
-
-
-@usage_lib.entrypoint
-def pool_update(
+def pool_apply(
     task: 'sky.Task',
     pool_name: str,
     mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
 ) -> None:
-    """Update a pool."""
-    return impl.update(task, pool_name, mode, pool=True)
+    """Apply a config to a pool."""
+    return impl.apply(task, pool_name, mode, pool=True)
 
 
 @usage_lib.entrypoint

@@ -355,24 +355,7 @@ def dashboard() -> None:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def pool_up(
-    task: Union['sky.Task', 'sky.Dag'],
-    pool_name: str,
-    # Internal only:
-    # pylint: disable=invalid-name
-    _need_confirmation: bool = False
-) -> server_common.RequestId:
-    """Spins up a pool."""
-    return impl.up(task,
-                   pool_name,
-                   pool=True,
-                   _need_confirmation=_need_confirmation)
-
-
-@context.contextual
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-def pool_update(
+def pool_apply(
     task: Union['sky.Task', 'sky.Dag'],
     pool_name: str,
     mode: 'serve_utils.UpdateMode',
@@ -380,12 +363,12 @@ def pool_update(
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId:
-    """Update a pool."""
-    return impl.update(task,
-                       pool_name,
-                       mode,
-                       pool=True,
-                       _need_confirmation=_need_confirmation)
+    """Apply a config to a pool."""
+    return impl.apply(task,
+                      pool_name,
+                      mode,
+                      pool=True,
+                      _need_confirmation=_need_confirmation)
 
 
 @usage_lib.entrypoint
