@@ -34,7 +34,7 @@ Below is the available helm value keys and the default value of each key:
 .. parsed-literal::
 
   :ref:`apiService <helm-values-apiService>`:
-    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot:0.9.2
+    :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
@@ -94,6 +94,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`nodePortEnabled <helm-values-ingress-nodePortEnabled>`: null
     :ref:`httpNodePort <helm-values-ingress-httpNodePort>`: 30050
     :ref:`httpsNodePort <helm-values-ingress-httpsNodePort>`: 30051
+    :ref:`annotations <helm-values-ingress-annotations>`: null
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
       :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
       # Required when enabled:
@@ -200,6 +201,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-lambdaCredentials-enabled>`: false
     :ref:`lambdaSecretName <helm-values-lambdaCredentials-lambdaSecretName>`: lambda-credentials
 
+  :ref:`vastCredentials <helm-values-vastCredentials>`:
+    :ref:`enabled <helm-values-vastCredentials-enabled>`: false
+    :ref:`vastSecretName <helm-values-vastCredentials-vastSecretName>`: vast-credentials
+
   :ref:`nebiusCredentials <helm-values-nebiusCredentials>`:
     :ref:`enabled <helm-values-nebiusCredentials-enabled>`: false
     :ref:`tenantId <helm-values-nebiusCredentials-tenantId>`: null
@@ -238,14 +243,18 @@ Configuration for the SkyPilot API server deployment.
 ``apiService.image``
 ^^^^^^^^^^^^^^^^^^^^
 
-Docker image to use for the API server.
+Docker image to use for the API server. The default value is depending on the chart you are using:
 
-Default: ``"berkeleyskypilot/skypilot:0.9.2"``
+- Stable release of the chart(``skypilot/skypilot``): the same stable release of SkyPilot will be used by default, i.e. ``berkeleyskypilot/skypilot:$CHART_VERSION``.
+- Nightly release of the chart(``skypilot/skypilot-nightly``): the same nightly build of SkyPilot will be used by default, i.e. ``berkeleyskypilot/skypilot-nightly:$CHART_VERSION``.
+- Installing from `source <https://github.com/skypilot-org/skypilot/tree/master/charts/skypilot>`_: the latest nightly build of SkyPilot will be used by default, i.e. ``berkeleyskypilot/skypilot-nightly:latest``.
+
+To use a specific release version, set the ``image`` value to the desired version:
 
 .. code-block:: yaml
 
   apiService:
-    image: berkeleyskypilot/skypilot:0.9.2
+    image: berkeleyskypilot/skypilot:0.10.0
 
 To use a nightly build, find the desired nightly version on `pypi <https://pypi.org/project/skypilot-nightly/#history>`_ and update the ``image`` value:
 
@@ -904,6 +913,21 @@ Default: ``30051``
   ingress:
     httpsNodePort: 30051
 
+.. _helm-values-ingress-annotations:
+
+``ingress.annotations``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Custom annotations for the ingress controller.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    annotations:
+      my-annotation: "my-value"
+
 .. _helm-values-ingress-oauth2-proxy:
 
 ``ingress.oauth2-proxy``
@@ -1231,15 +1255,15 @@ Default: see the yaml below.
       - apiGroups: ["apps"]
         resources: ["deployments", "deployments/status"]
         verbs: ["*"]
-              - apiGroups: [ "" ]
-          resources: [ "configmaps" ]
-          verbs: [ "get", "patch" ]
-        - apiGroups: ["apps"]
-          resources: ["deployments", "deployments/status"]
-          verbs: ["*"]
-        - apiGroups: [""]
-          resources: ["persistentvolumeclaims"]
-          verbs: ["*"]
+      - apiGroups: [ "" ]
+        resources: [ "configmaps" ]
+        verbs: [ "get", "patch" ]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "deployments/status"]
+        verbs: ["*"]
+      - apiGroups: [""]
+        resources: ["persistentvolumeclaims"]
+        verbs: ["*"]
 
 .. _helm-values-rbac-clusterRules:
 
@@ -1588,6 +1612,39 @@ Default: ``lambda-credentials``
 
   lambdaCredentials:
     lambdaSecretName: lambda-credentials
+
+.. _helm-values-vastCredentials:
+
+``vastCredentials``
+~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-vastCredentials-enabled:
+
+``vastCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable Vast credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  vastCredentials:
+    enabled: false
+
+.. _helm-values-vastCredentials-vastSecretName:
+
+``vastCredentials.vastSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the Vast credentials. Only used if enabled is true.
+
+Default: ``vast-credentials``
+
+.. code-block:: yaml
+
+  vastCredentials:
+    vastSecretName: vast-credentials
 
 .. _helm-values-nebiusCredentials:
 

@@ -19,7 +19,7 @@ docker:
     username: |-
       {{docker_login_config.username}}
     password: |-
-      {{docker_login_config.password}}
+      {{docker_login_config.password | indent(6) }}
     server: |-
       {{docker_login_config.server}}
   {%- endif %}

@@ -283,6 +283,11 @@ spec:
           mountPath: /root/.lambda_cloud
           readOnly: true
         {{- end }}
+        {{- if .Values.vastCredentials.enabled }}
+        - name: vast-config
+          mountPath: /root/.config/vastai
+          readOnly: true
+        {{- end }}
         {{- if .Values.nebiusCredentials.enabled }}
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
@@ -411,6 +416,35 @@ spec:
         - name: lambda-config
           mountPath: /root/.lambda_cloud
       {{- end }}
+      {{- if .Values.vastCredentials.enabled }}
+      - name: create-vast-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up Vast credentials..."
+          if [ -n "$VAST_API_KEY" ]; then
+            echo "Vast credentials found in environment variable."
+            mkdir -p /root/.config/vastai
+            echo "$VAST_API_KEY" > /root/.config/vastai/vast_api_key
+          else
+            echo "Vast credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: VAST_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.vastCredentials.vastSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: vast-config
+          mountPath: /root/.config/vastai
+      {{- end }}
       {{- if .Values.extraInitContainers }}
       {{- toYaml .Values.extraInitContainers | nindent 6 }}
       {{- end }}
@@ -441,6 +475,10 @@ spec:
       {{- end }}
       {{- if .Values.lambdaCredentials.enabled }}
       - name: lambda-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.vastCredentials.enabled }}
+      - name: vast-config
         emptyDir: {}
       {{- end }}
       {{- if .Values.nebiusCredentials.enabled }}

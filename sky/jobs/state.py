@@ -6,15 +6,12 @@ import enum
 import functools
 import ipaddress
 import json
-import os
-import pathlib
 import sqlite3
 import time
 import typing
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 import urllib.parse
 
-from alembic import command as alembic_command
 import colorama
 import sqlalchemy
 from sqlalchemy import exc as sqlalchemy_exc
@@ -142,11 +139,9 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Get alembic config for spot jobs db and run migrations
-    alembic_config = migration_utils.get_alembic_config(
-        engine, migration_utils.SPOT_JOBS_DB_NAME)
-    alembic_config.config_ini_section = migration_utils.SPOT_JOBS_DB_NAME
-    alembic_command.upgrade(alembic_config, migration_utils.SPOT_JOBS_VERSION)
+    migration_utils.safe_alembic_upgrade(engine,
+                                         migration_utils.SPOT_JOBS_DB_NAME,
+                                         migration_utils.SPOT_JOBS_VERSION)
 
 
 def force_no_postgres() -> bool:
@@ -170,68 +165,28 @@ def force_no_postgres() -> bool:
     return False
 
 
-def initialize_and_get_db_async(
-        recursive: bool = False) -> sql_async.AsyncEngine:
+def initialize_and_get_db_async() -> sql_async.AsyncEngine:
     global _SQLALCHEMY_ENGINE_ASYNC
-    if _SQLALCHEMY_ENGINE_ASYNC is not None or recursive:
+    if _SQLALCHEMY_ENGINE_ASYNC is not None:
         return _SQLALCHEMY_ENGINE_ASYNC
-    _SQLALCHEMY_ENGINE_ASYNC = _initialize_and_get_db(
-        sql_async.create_async_engine, initialize_and_get_db_async, True)
+    _SQLALCHEMY_ENGINE_ASYNC = migration_utils.get_engine('spot_jobs',
+                                                          async_engine=True)
     # to create the table in case an async function gets called first
     initialize_and_get_db()
     return _SQLALCHEMY_ENGINE_ASYNC
 
 
-def initialize_and_get_db(recursive: bool = False) -> sqlalchemy.engine.Engine:
+def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
-    if _SQLALCHEMY_ENGINE is not None or recursive:
+    if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    _SQLALCHEMY_ENGINE = _initialize_and_get_db(sqlalchemy.create_engine,
-                                                initialize_and_get_db, False)
-    create_table(_SQLALCHEMY_ENGINE)
+
+    engine = migration_utils.get_engine('spot_jobs')
+
+    create_table(engine)
+
+    _SQLALCHEMY_ENGINE = engine
     return _SQLALCHEMY_ENGINE
-
-
-def _initialize_and_get_db(
-    create_engine_func: Any,
-    get_engine: Callable[[bool], Any],
-    async_override: bool,
-) -> sqlalchemy.engine.Engine:
-    with migration_utils.db_lock(migration_utils.SPOT_JOBS_DB_NAME):
-        # recursive is used to avoid infinite recursion when initializing the
-        # database. we use the get_engine function in order to not reinitalize
-        # it in a multithreadded setting.
-        if get_engine(True) is None:
-            conn_string = None
-            if (os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None
-                    and not force_no_postgres()):
-                conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                logger.debug(f'using db URI from {conn_string}')
-                if async_override:
-                    conn_string = conn_string.replace('sqlite://',
-                                                      'sqlite+aiosqlite://')
-                    conn_string = conn_string.replace('postgresql://',
-                                                      'postgresql+asyncpg://')
-                    engine = create_engine_func(conn_string,
-                                                poolclass=sqlalchemy.NullPool)
-                else:
-                    engine = create_engine_func(conn_string,
-                                                poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = os.path.expanduser('~/.sky/spot_jobs.db')
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                logger.debug(f'using sqlite db at {db_path}')
-                if async_override:
-                    engine = create_engine_func('sqlite+aiosqlite:///' +
-                                                db_path,
-                                                connect_args={'timeout': 30})
-                else:
-                    engine = create_engine_func('sqlite:///' + db_path,
-                                                connect_args={'timeout': 30})
-            return engine
-        return get_engine(True)
 
 
 def _init_db_async(func):

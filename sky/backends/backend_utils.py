@@ -37,8 +37,10 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import utils as managed_job_utils
+from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -71,7 +73,7 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -802,6 +804,12 @@ def write_cluster_config(
                 'volume_name_on_cloud': vol.volume_config.name_on_cloud,
             })
 
+    runcmd = skypilot_config.get_effective_region_config(
+        cloud=str(to_provision.cloud).lower(),
+        region=to_provision.region,
+        keys=('post_provision_runcmd',),
+        default_value=None)
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -837,7 +845,7 @@ def write_cluster_config(
                 # User-supplied remote_identity
                 'remote_identity': remote_identity,
                 # The reservation pools that specified by the user. This is
-                # currently only used by GCP.
+                # currently only used by AWS and GCP.
                 'specific_reservations': specific_reservations,
 
                 # Conda setup
@@ -900,6 +908,10 @@ def write_cluster_config(
 
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
+
+                # runcmd to append to the cloud-init cloud config passed to the
+                # machine's UserData. This is currently only used by AWS.
+                'runcmd': runcmd,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -1831,6 +1843,45 @@ def _query_cluster_status_via_cloud_api(
     return node_statuses
 
 
+def _query_cluster_info_via_cloud_api(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+) -> provision_common.ClusterInfo:
+    """Returns the cluster info.
+
+    Raises:
+        exceptions.NotSupportedError: the cloud does not support the new provisioner.
+        exceptions.FetchClusterInfoError: the cluster info cannot be
+          fetched from the cloud provider.
+    """
+    cloud = handle.launched_resources.cloud
+    assert cloud is not None, handle
+    if cloud.STATUS_VERSION >= clouds.StatusVersion.SKYPILOT:
+        try:
+            cloud_name = repr(cloud)
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            provider_config = ray_config['provider']
+            region = provider_config.get('region') or provider_config.get(
+                'location')
+            cluster_info = provision_lib.get_cluster_info(
+                cloud_name, region, handle.cluster_name_on_cloud,
+                provider_config)
+            logger.debug(
+                f'Querying {cloud_name} cluster '
+                f'{handle.cluster_name_on_cloud} '
+                f'head instance:\n{cluster_info.get_head_instance()}\n'
+                f'worker instances:\n{cluster_info.get_worker_instances()}')
+            return cluster_info
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.FetchClusterInfoError(
+                    reason=exceptions.FetchClusterInfoError.Reason.UNKNOWN
+                ) from e
+    else:
+        raise exceptions.NotSupportedError(
+            f'The cloud {cloud} does not support the SkyPilot provisioner.')
+
+
 def check_can_clone_disk_and_override_task(
     cluster_name: str, target_cluster_name: Optional[str], task: 'task_lib.Task'
 ) -> Tuple['task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']:
@@ -2171,68 +2222,89 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     #   * The cluster is partially or completely in the INIT state, which means
     #     that provisioning was interrupted. This is considered abnormal.
     #
-    # An abnormal cluster will transition to INIT and have any autostop setting
-    # reset (unless it's autostopping/autodowning).
+    # An abnormal cluster will transition to INIT, and one of the following will happen:
+    #  (1) If the SkyPilot provisioner is used AND the head node is alive, we
+    #      will not reset the autostop setting. Because autostop is handled by
+    #      the skylet through the cloud APIs, and will continue to function
+    #      regardless of the ray cluster's health.
+    #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
+    #      autostopping/autodowning.
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
         status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
     if is_abnormal:
         logger.debug('The cluster is abnormal. Setting to INIT status. '
                      f'node_statuses: {node_statuses}')
-        backend = get_backend_from_handle(handle)
-        if isinstance(backend,
-                      backends.CloudVmRayBackend) and record['autostop'] >= 0:
-            if not backend.is_definitely_autostopping(handle,
-                                                      stream_logs=False):
-                # Friendly hint.
-                autostop = record['autostop']
-                maybe_down_str = ' --down' if record['to_down'] else ''
-                noun = 'autodown' if record['to_down'] else 'autostop'
-
-                # Reset the autostopping as the cluster is abnormal, and may
-                # not correctly autostop. Resetting the autostop will let
-                # the user know that the autostop may not happen to avoid
-                # leakages from the assumption that the cluster will autostop.
-                success = True
-                reset_local_autostop = True
+        if record['autostop'] >= 0:
+            is_head_node_alive = False
+            if launched_resources.cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT:
+                # Check if the head node is alive
                 try:
-                    backend.set_autostop(handle, -1, stream_logs=False)
-                except exceptions.CommandError as e:
-                    success = False
-                    if e.returncode == 255:
-                        word = 'autostopped' if noun == 'autostop' else 'autodowned'
-                        logger.debug(f'The cluster is likely {word}.')
-                        reset_local_autostop = False
-                except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-                    success = False
-                    logger.debug(f'Failed to reset autostop. Due to '
-                                 f'{common_utils.format_exception(e)}')
-                if reset_local_autostop:
-                    global_user_state.set_cluster_autostop_value(
-                        handle.cluster_name, -1, to_down=False)
+                    cluster_info = _query_cluster_info_via_cloud_api(handle)
+                    is_head_node_alive = cluster_info.get_head_instance(
+                    ) is not None
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(
+                        f'Failed to get cluster info for {cluster_name!r}: '
+                        f'{common_utils.format_exception(e)}')
 
-                if success:
-                    operation_str = (f'Canceled {noun} on the cluster '
-                                     f'{cluster_name!r}')
+            backend = get_backend_from_handle(handle)
+            if isinstance(backend, backends.CloudVmRayBackend):
+                if is_head_node_alive:
+                    logger.debug(
+                        f'Skipping autostop reset for cluster {cluster_name!r} '
+                        'because the head node is alive.')
+                elif not backend.is_definitely_autostopping(handle,
+                                                            stream_logs=False):
+                    # Friendly hint.
+                    autostop = record['autostop']
+                    maybe_down_str = ' --down' if record['to_down'] else ''
+                    noun = 'autodown' if record['to_down'] else 'autostop'
+
+                    # Reset the autostopping as the cluster is abnormal, and may
+                    # not correctly autostop. Resetting the autostop will let
+                    # the user know that the autostop may not happen to avoid
+                    # leakages from the assumption that the cluster will autostop.
+                    success = True
+                    reset_local_autostop = True
+                    try:
+                        backend.set_autostop(handle, -1, stream_logs=False)
+                    except exceptions.CommandError as e:
+                        success = False
+                        if e.returncode == 255:
+                            word = 'autostopped' if noun == 'autostop' else 'autodowned'
+                            logger.debug(f'The cluster is likely {word}.')
+                            reset_local_autostop = False
+                    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                        success = False
+                        logger.debug(f'Failed to reset autostop. Due to '
+                                     f'{common_utils.format_exception(e)}')
+                    if reset_local_autostop:
+                        global_user_state.set_cluster_autostop_value(
+                            handle.cluster_name, -1, to_down=False)
+
+                    if success:
+                        operation_str = (f'Canceled {noun} on the cluster '
+                                         f'{cluster_name!r}')
+                    else:
+                        operation_str = (
+                            f'Attempted to cancel {noun} on the '
+                            f'cluster {cluster_name!r} with best effort')
+                    yellow = colorama.Fore.YELLOW
+                    bright = colorama.Style.BRIGHT
+                    reset = colorama.Style.RESET_ALL
+                    ux_utils.console_newline()
+                    logger.warning(
+                        f'{yellow}{operation_str}, since it is found to be in an '
+                        f'abnormal state. To fix, try running: {reset}{bright}sky '
+                        f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
+                        f'{reset}')
                 else:
-                    operation_str = (
-                        f'Attempted to cancel {noun} on the '
-                        f'cluster {cluster_name!r} with best effort')
-                yellow = colorama.Fore.YELLOW
-                bright = colorama.Style.BRIGHT
-                reset = colorama.Style.RESET_ALL
-                ux_utils.console_newline()
-                logger.warning(
-                    f'{yellow}{operation_str}, since it is found to be in an '
-                    f'abnormal state. To fix, try running: {reset}{bright}sky '
-                    f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
-                    f'{reset}')
-            else:
-                ux_utils.console_newline()
-                operation_str = 'autodowning' if record[
-                    'to_down'] else 'autostopping'
-                logger.info(
-                    f'Cluster {cluster_name!r} is {operation_str}. Setting to '
-                    'INIT status; try refresh again in a while.')
+                    ux_utils.console_newline()
+                    operation_str = 'autodowning' if record[
+                        'to_down'] else 'autostopping'
+                    logger.info(
+                        f'Cluster {cluster_name!r} is {operation_str}. Setting to '
+                        'INIT status; try refresh again in a while.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
@@ -2861,6 +2933,21 @@ def get_clusters(
         force_refresh_statuses = None
 
     def _refresh_cluster(cluster_name):
+        # TODO(syang): we should try not to leak
+        # request info in backend_utils.py.
+        # Refactor this to use some other info to
+        # determine if a launch is in progress.
+        request = requests_lib.get_request_tasks(
+            status=[requests_lib.RequestStatus.RUNNING],
+            cluster_names=[cluster_name],
+            include_request_names=['sky.launch'])
+        if len(request) > 0:
+            # There is an active launch request on the cluster,
+            # so we don't want to update the cluster status until
+            # the request is completed.
+            logger.debug(f'skipping refresh for cluster {cluster_name} '
+                         'as there is an active launch request')
+            return global_user_state.get_cluster_from_name(cluster_name)
         try:
             record = refresh_cluster_record(
                 cluster_name,
