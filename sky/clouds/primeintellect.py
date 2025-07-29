@@ -100,7 +100,7 @@ class PrimeIntellect(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
+    ) -> Iterator[Optional[List['clouds.Zone']]]:
         """Returns an iterator over zones for provisioning."""
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
