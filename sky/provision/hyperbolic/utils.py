@@ -216,8 +216,8 @@ class HyperbolicClient:
             logger.error(f'Failed to launch instance: {str(e)}')
             raise HyperbolicError(f'Failed to launch instance: {str(e)}') from e
 
-    def _parse_instance(self,
-                        instance: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _parse_instance(self, instance: Dict[str,
+                                             Any]) -> Optional[Dict[str, Any]]:
         """Parse an instance from the API response."""
         instance_id = str(instance.get('id'))
         meta = instance.get('meta', {})
@@ -233,8 +233,8 @@ class HyperbolicClient:
             'id': instance_id,
             'created': instance.get('createdAt'),
             'sshCommand': meta.get('ssh_command'),
-            'status': HyperbolicInstanceStatus.from_raw_status(
-                current_status).value,
+            'status':
+                HyperbolicInstanceStatus.from_raw_status(current_status).value,
             'gpu_count': gpu_count,
             'gpus_total': gpu_count,
             'owner': instance.get('userId'),
@@ -254,8 +254,9 @@ class HyperbolicClient:
             'internal_ip': meta.get('internal_ip')
         }
 
-    def _filter_by_metadata(self, instance: Dict[str, Any],
-                            metadata: Optional[Dict[str, Dict[str, str]]]) -> bool:
+    def _filter_by_metadata(
+            self, instance: Dict[str, Any],
+            metadata: Optional[Dict[str, Dict[str, str]]]) -> bool:
         """Filter instances based on metadata."""
         if not metadata:
             return True
@@ -287,7 +288,8 @@ class HyperbolicClient:
                     if not status or parsed['status'] == status.lower():
                         instances[parsed['id']] = parsed
         except HyperbolicError as e:
-            logger.warning(f'Failed to get instances from Hyperbolic API: {str(e)}')
+            logger.warning(
+                f'Failed to get instances from Hyperbolic API: {str(e)}')
         return instances
 
     def list_instances(
@@ -296,8 +298,8 @@ class HyperbolicClient:
         metadata: Optional[Dict[str, Dict[str, str]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """List all instances, optionally filtered by status and metadata."""
-        return self._get_instances_from_endpoint(API_ENDPOINTS['list'],
-                                                 status, metadata)
+        return self._get_instances_from_endpoint(API_ENDPOINTS['list'], status,
+                                                 metadata)
 
     def terminate_instance(self, instance_id: str) -> None:
         """Terminate an instance by ID."""

@@ -63,8 +63,6 @@ def test_hyperbolic_resource_feasibility():
     assert hasattr(feasible, 'fuzzy_candidate_list')
 
 
-
-
 # Additional tests for error handling and wrapper functions
 
 
@@ -101,7 +99,8 @@ def test_api_endpoints():
     # All GPUs should use the same API endpoints
     assert API_ENDPOINTS['create'] == '/v2/marketplace/virtual-machine-rentals'
     assert API_ENDPOINTS['list'] == '/v2/marketplace/virtual-machine-rentals'
-    assert API_ENDPOINTS['terminate'] == '/v2/marketplace/virtual-machine-rentals/terminate'
+    assert API_ENDPOINTS[
+        'terminate'] == '/v2/marketplace/virtual-machine-rentals/terminate'
 
 
 def test_status_mapping():
