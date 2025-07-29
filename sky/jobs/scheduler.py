@@ -45,8 +45,9 @@ import typing
 
 import filelock
 
-from sky import exceptions, skypilot_config
+from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state

@@ -7,6 +7,7 @@ import functools
 import ipaddress
 import json
 import sqlite3
+import threading
 import time
 import typing
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
@@ -43,6 +44,7 @@ logger = sky_logging.init_logger(__name__)
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_ASYNC: Optional[sql_async.AsyncEngine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 _DB_RETRY_TIMES = 30
 
@@ -169,24 +171,41 @@ def initialize_and_get_db_async() -> sql_async.AsyncEngine:
     global _SQLALCHEMY_ENGINE_ASYNC
     if _SQLALCHEMY_ENGINE_ASYNC is not None:
         return _SQLALCHEMY_ENGINE_ASYNC
-    _SQLALCHEMY_ENGINE_ASYNC = migration_utils.get_engine('spot_jobs',
-                                                          async_engine=True)
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE_ASYNC is not None:
+            return _SQLALCHEMY_ENGINE_ASYNC
+
+        _SQLALCHEMY_ENGINE_ASYNC = migration_utils.get_engine('spot_jobs',
+                                                              async_engine=True)
+
     # to create the table in case an async function gets called first
     initialize_and_get_db()
     return _SQLALCHEMY_ENGINE_ASYNC
 
 
+# We wrap the sqlalchemy engine initialization in a thread
+# lock to ensure that multiple threads do not initialize the
+# engine which could result in a rare race condition where
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
+# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
+# which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
 
-    engine = migration_utils.get_engine('spot_jobs')
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('spot_jobs')
 
-    create_table(engine)
+        # run migrations if needed
+        create_table(engine)
 
-    _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def _init_db_async(func):

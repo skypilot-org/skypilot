@@ -40,7 +40,7 @@ def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     assert (resources is not None and resources.accelerators is not None and
             len(resources.accelerators) == 1)
     acc, _ = list(resources.accelerators.items())[0]
-    if kubernetes_utils.is_tpu_on_gke(acc):
+    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
         return False
     if resources.accelerator_args is None:
         return True
