@@ -123,7 +123,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
         To use JuiceFS as a SkyPilot volume:
 
-        1. **Install the JuiceFS CSI Driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
+        1. **Install the JuiceFS CSI driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
 
         2. **Verify the driver installation** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
 
@@ -144,7 +144,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
           name: juicefs-pvc
           type: k8s-pvc
           infra: k8s
-          size: 1Gi
+          size: 100Gi
           config:
             storage_class_name: juicefs-sc
             access_mode: ReadWriteMany
@@ -201,7 +201,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
           name: nebius-pvc
           type: k8s-pvc
           infra: k8s
-          size: 1Gi
+          size: 100Gi
           config:
             storage_class_name: csi-mounted-fs-path-sc
             access_mode: ReadWriteMany
@@ -210,7 +210,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           $ sky volumes apply nebius-volume.yaml
 
-        4. **Mount the volume** in your SkyPilot task configuration:
+        4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
 
         .. code-block:: yaml
 
