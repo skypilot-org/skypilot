@@ -1478,23 +1478,23 @@ def get_config_schema():
     daemon_config = {
         'type': 'object',
         'required': [],
-        'additionalProperties': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'log_level': {
-                    'type': 'string',
-                    'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
-                },
-            }
+        'properties': {
+            'log_level': {
+                'type': 'string',
+                'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
+            },
         }
     }
 
-    daemon_schema = {}
+    daemon_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {}
+    }
 
     for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
-        daemon_schema[daemon.id] = daemon_config
+        daemon_schema['properties'][daemon.id] = daemon_config
 
     api_server = {
         'type': 'object',

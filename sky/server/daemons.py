@@ -32,22 +32,21 @@ class InternalRequestDaemon:
         # sent multiple times.
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
-        # Get the configured log level for the daemon
-        level_str = skypilot_config.get_nested(
-            ('daemons', self.id, 'log_level'), self.default_log_level)
-        try:
-            level = getattr(logging, level_str.upper())
-        except AttributeError:
-            # Bad level should be rejected by schema validation, just in case.
-            logger.warning(f'Invalid log level: {level_str}, using DEBUG')
-            level = logging.DEBUG
-
         while True:
+            # Get the configured log level for the daemon inside the event loop
+            # in case the log level changes after the API server is started.
+            level_str = skypilot_config.get_nested(
+                ('daemons', self.id, 'log_level'), self.default_log_level)
+            try:
+                level = getattr(logging, level_str.upper())
+            except AttributeError:
+                # Bad level should be rejected by schema validation, just in case.
+                logger.warning(f'Invalid log level: {level_str}, using DEBUG')
+                level = logging.DEBUG
             with ux_utils.enable_traceback(), \
                 sky_logging.set_logging_level('sky', level):
                 try:
                     self.event_fn()
-                    break
                 except Exception:  # pylint: disable=broad-except
                     # It is OK to fail to run the event, as the event is not
                     # critical, but we should log the error.
@@ -64,17 +63,16 @@ def refresh_cluster_status_event():
     # pylint: disable=import-outside-toplevel
     from sky import core
 
-    while True:
-        logger.info('=== Refreshing cluster status ===')
-        # This periodically refresh will hold the lock for the cluster being
-        # refreshed, but it is OK because other operations will just wait for
-        # the lock and get the just refreshed status without refreshing again.
-        core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
-        logger.info(
-            'Status refreshed. Sleeping '
-            f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
-            ' seconds for the next refresh...\n')
-        time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
+    logger.info('=== Refreshing cluster status ===')
+    # This periodically refresh will hold the lock for the cluster being
+    # refreshed, but it is OK because other operations will just wait for
+    # the lock and get the just refreshed status without refreshing again.
+    core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
+    logger.info(
+        'Status refreshed. Sleeping '
+        f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
+        ' seconds for the next refresh...\n')
+    time.sleep(server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
 def refresh_volume_status_event():
@@ -86,13 +84,12 @@ def refresh_volume_status_event():
     # sent multiple times.
     os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
-    while True:
-        logger.info('=== Refreshing volume status ===')
-        core.volume_refresh()
-        logger.info('Volume status refreshed. Sleeping '
-                    f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
-                    ' seconds for the next refresh...\n')
-        time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
+    logger.info('=== Refreshing volume status ===')
+    core.volume_refresh()
+    logger.info('Volume status refreshed. Sleeping '
+                f'{server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS}'
+                ' seconds for the next refresh...\n')
+    time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
 def managed_job_status_refresh_event():
@@ -110,9 +107,8 @@ def managed_job_status_refresh_event():
     # After recovery, we start the event loop.
     from sky.skylet import events
     event = events.ManagedJobEvent()
-    while True:
-        time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
-        event.run()
+    event.run()
+    time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.
