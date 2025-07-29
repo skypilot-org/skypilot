@@ -1154,8 +1154,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             handle = info.handle()
             assert handle is not None, info
             # Use None to fetch latest job, which stands for user task job
-            use_pool = self._get_version_spec(info.version).pool
-            job_ids = [1] if use_pool else None
+            job_ids = [1] if self._is_pool else None
             try:
                 job_statuses = backend.get_job_status(handle,
                                                       job_ids,
@@ -1168,7 +1167,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     continue
                 # Re-raise the exception if it is not preempted.
                 raise
-            job_status = job_statuses[1] if use_pool else list(
+            job_status = job_statuses[1] if self._is_pool else list(
                 job_statuses.values())[0]
             if job_status in job_lib.JobStatus.user_code_failure_states():
                 info.status_property.user_app_failed = True
@@ -1213,7 +1212,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             for info in infos:
                 if not info.status_property.should_track_service_status():
                     continue
-                if self._get_version_spec(info.version).pool:
+                if self._is_pool:
                     replica_to_probe.append(f'replica_{info.replica_id}(cluster'
                                             f'_name={info.cluster_name})')
                     probe_futures.append(pool.apply_async(info.probe_pool))
