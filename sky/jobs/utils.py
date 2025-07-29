@@ -30,7 +30,6 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
-from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -333,8 +332,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 try:
                     if pool is None:
                         terminate_cluster(cluster_name)
-                    else:
-                        serve_utils.release_cluster_name(pool, cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (
                         f'Failed to terminate cluster {cluster_name}: '
