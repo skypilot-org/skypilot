@@ -593,8 +593,11 @@ def _get_service_status(
             _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
             '/autoscaler/info')
         record['target_num_replicas'] = resp.json()['target_num_replicas']
+    except requests.exceptions.RequestException:
+        record['target_num_replicas'] = None
     except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Failed to get autoscaler info for {service_name}: {e}\n'
+        logger.error(f'Failed to get autoscaler info for {service_name}: '
+                     f'{common_utils.format_exception(e)}\n'
                      f'Traceback: {traceback.format_exc()}')
 
     if with_replica_info:

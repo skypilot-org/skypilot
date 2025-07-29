@@ -327,6 +327,9 @@ def up(
                 f'\n📋 Useful Commands'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
+                f'<run-command>{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs to the \t'
+                f'pool:{ux_utils.BOLD}sky jobs launch --pool {service_name} '
                 f'--num-jobs 10 <run-command>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
                 f'{ux_utils.BOLD}sky jobs pool status {service_name}'
@@ -334,9 +337,8 @@ def up(
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
                 f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
-                '\n\n' +
-                ux_utils.finishing_message('Pool is initializing and '
-                                           'workers will be ready shortly.'))
+                '\n\n' + ux_utils.finishing_message('Successfully created pool '
+                                                    f'{service_name!r}.'))
         else:
             logger.info(
                 f'{fore.CYAN}Service name: '

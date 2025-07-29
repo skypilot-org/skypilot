@@ -82,7 +82,9 @@ def launch(
                 pool_statuses = sdk.get(request_id)
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
-                click.secho(f'Use resources from pool {pool!r}.', fg='yellow')
+                resources = pool_statuses[0]['requested_resources_str']
+                click.secho(f'Use resources from pool {pool!r}: {resources}.',
+                            fg='green')
                 if num_jobs is not None:
                     job_identity = f'{num_jobs} managed jobs'
             prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
