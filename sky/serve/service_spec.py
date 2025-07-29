@@ -195,9 +195,30 @@ class SkyServiceSpec:
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
+            keyfile = tls_section.get('keyfile', None)
+            certfile = tls_section.get('certfile', None)
+            
+            # Expand TLS file paths similar to how workdir is handled
+            if keyfile is not None:
+                user_keyfile = keyfile
+                keyfile = os.path.abspath(os.path.expanduser(keyfile))
+                if not os.path.isfile(keyfile):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'TLS keyfile must be a valid file. '
+                            f'{user_keyfile} not found.')
+            if certfile is not None:
+                user_certfile = certfile
+                certfile = os.path.abspath(os.path.expanduser(certfile))
+                if not os.path.isfile(certfile):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'TLS certfile must be a valid file. '
+                            f'{user_certfile} not found.')
+                
             service_config['tls_credential'] = serve_utils.TLSCredential(
-                keyfile=tls_section.get('keyfile', None),
-                certfile=tls_section.get('certfile', None),
+                keyfile=keyfile,
+                certfile=certfile,
             )
 
         return SkyServiceSpec(**service_config)
