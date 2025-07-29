@@ -29,7 +29,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources
     from sky.utils import status_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -436,15 +436,18 @@ class GCP(clouds.Cloud):
         return cls._get_image_size(image_id)
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='gcp')
 
     @classmethod
@@ -681,7 +684,9 @@ class GCP(clouds.Cloud):
             host_vm_type = GCP.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if host_vm_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -1174,7 +1179,7 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-        if instance_type.startswith('a3-ultragpu'):
+        if instance_type.startswith('a3-ultragpu') or series == 'n4':
             # a3-ultragpu instances only support hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 

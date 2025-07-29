@@ -24,7 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -245,7 +245,7 @@ class Task:
         run: Optional[CommandOrCommandGen] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
-        workdir: Optional[str] = None,
+        workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
         volumes: Optional[Dict[str, str]] = None,
         # Advanced:
@@ -255,6 +255,7 @@ class Task:
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
         volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Initializes a Task.
 
@@ -300,10 +301,14 @@ class Task:
           secrets: A dictionary of secret environment variables to set before
             running the setup and run commands. These will be redacted in logs
             and YAML output.
-          workdir: The local working directory.  This directory will be synced
+          workdir: The local working directory or a git repository.
+            For a local working directory, this directory will be synced
             to a location on the remote VM(s), and ``setup`` and ``run``
             commands will be run under that location (thus, they can rely on
             relative paths when invoking binaries).
+            If a git repository is provided, the repository will be cloned to
+            the working directory and the ``setup`` and ``run`` commands will
+            be run under the cloned repository.
           num_nodes: The number of nodes to provision for this Task.  If None,
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command, where ``run`` can either be a str, meaning all
@@ -313,6 +318,7 @@ class Task:
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
           blocked_resources: A set of resources that this task cannot run on.
+          metadata: A dictionary of metadata to be added to the task.
         """
         self.name = name
         self.run = run
@@ -368,6 +374,8 @@ class Task:
         self.file_mounts_mapping: Optional[Dict[str, str]] = file_mounts_mapping
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             volume_mounts)
+
+        self._metadata = metadata if metadata is not None else {}
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -494,6 +502,12 @@ class Task:
         """
         if self.workdir is None:
             return
+        # Only expand the workdir if it is a string
+        if isinstance(self.workdir, dict):
+            git_ref = self.workdir.get('ref')
+            if git_ref is not None:
+                self._metadata['git_commit'] = git_ref
+            return
         user_workdir = self.workdir
         self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
         if not os.path.isdir(self.workdir):
@@ -502,6 +516,8 @@ class Task:
                 raise ValueError(
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
+
+        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
 
     @staticmethod
     def from_yaml_config(
@@ -599,6 +615,7 @@ class Task:
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
             volumes=config.pop('volumes', None),
+            metadata=config.pop('_metadata', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -871,6 +888,14 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        return self._metadata
+
+    @property
+    def metadata_json(self) -> str:
+        return json.dumps(self._metadata)
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -1588,6 +1613,8 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
+        # we manually check if its empty to not clog up the generated yaml
+        add_if_not_none('_metadata', self._metadata if self._metadata else None)
         return config
 
     def get_required_cloud_features(

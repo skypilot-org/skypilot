@@ -32,7 +32,7 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1729,6 +1729,8 @@ class Resources:
             is_matched = False
         if (blocked.accelerators is not None and
                 self.accelerators != blocked.accelerators):
+            is_matched = False
+        if blocked.use_spot is not None and self.use_spot != blocked.use_spot:
             is_matched = False
         return is_matched
 

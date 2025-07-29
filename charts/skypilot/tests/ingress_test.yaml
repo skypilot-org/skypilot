@@ -1,0 +1,255 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: ingress_test
+templates:
+  - templates/ingress.yaml
+tests:
+  - it: should create ingress when enabled
+    set:
+      ingress.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-ingress
+
+  - it: should not create ingress when disabled
+    set:
+      ingress.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Test OAuth2 proxy annotations
+  - it: should add OAuth2 proxy annotations when enabled
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.use-https: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "http://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "http://$host/oauth2/auth"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+      - matchRegex:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]
+          pattern: 'if \(\$http_authorization ~ "\^Bearer sky_\.\+"'
+
+  - it: should add OAuth2 proxy annotations with HTTPS when enabled
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.use-https: true
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "https://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "https://$host/oauth2/auth"
+
+  # Test basic auth annotations
+  - it: should add basic auth annotations when authSecret is provided and user management disabled
+    set:
+      ingress.enabled: true
+      ingress.authSecret: my-auth-secret
+      apiService.enableUserManagement: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
+          value: "basic"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-realm"]
+          value: "SkyPilot API Server"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
+          value: "my-auth-secret"
+
+  - it: should add basic auth annotations when authCredentials is provided and user management disabled
+    set:
+      ingress.enabled: true
+      ingress.authCredentials: "user:pass"
+      apiService.enableUserManagement: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
+          value: "basic"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-realm"]
+          value: "SkyPilot API Server"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
+          value: "RELEASE-NAME-basic-auth"
+
+  - it: should not add basic auth annotations when user management is enabled
+    set:
+      ingress.enabled: true
+      ingress.authCredentials: "user:pass"
+      apiService.enableUserManagement: true
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-realm"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
+
+  # Test common annotations
+  - it: should always include common proxy annotations
+    set:
+      ingress.enabled: true
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"]
+          value: "3600"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-send-timeout"]
+          value: "3600"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-body-size"]
+          value: "1000m"
+
+  # Test path configuration
+  - it: should set rewrite annotations for non-root path
+    set:
+      ingress.enabled: true
+      ingress.path: "/api"
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/rewrite-target"]
+          value: "/$2"
+      - equal:
+          path: metadata.annotations["skypilot.co/ingress-path"]
+          value: "/api"
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: "/api(/|$)(.*)"
+      - equal:
+          path: spec.rules[0].http.paths[0].pathType
+          value: "ImplementationSpecific"
+
+  - it: should not set rewrite annotations for root path
+    set:
+      ingress.enabled: true
+      ingress.path: "/"
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/rewrite-target"]
+      - notExists:
+          path: metadata.annotations["skypilot.co/ingress-path"]
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: "/"
+      - equal:
+          path: spec.rules[0].http.paths[0].pathType
+          value: "Prefix"
+
+  # Test ingress class configuration
+  - it: should set ingressClassName for newer Kubernetes versions
+    set:
+      ingress.enabled: true
+      ingress.ingressClassName: nginx
+    capabilities:
+      majorVersion: 1
+      minorVersion: 19
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+      - notExists:
+          path: metadata.annotations["kubernetes.io/ingress.class"]
+
+  - it: should set legacy ingress class annotation for older Kubernetes versions
+    set:
+      ingress.enabled: true
+      ingress.ingressClassName: nginx
+    capabilities:
+      majorVersion: 1
+      minorVersion: 17
+    asserts:
+      - equal:
+          path: metadata.annotations["kubernetes.io/ingress.class"]
+          value: nginx
+      - notExists:
+          path: spec.ingressClassName
+
+  # Test host configuration
+  - it: should set host when specified
+    set:
+      ingress.enabled: true
+      ingress.host: "api.example.com"
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: "api.example.com"
+
+  - it: should work without host specified
+    set:
+      ingress.enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: null
+
+  # Test backend service configuration
+  - it: should point to correct backend service
+    set:
+      ingress.enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: "RELEASE-NAME-api-service"
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 80 
+
+  # Test cases for upgradeStrategy-related annotations
+  - it: should add session affinity annotations for RollingUpdate strategy
+    set:
+      ingress.enabled: true
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+          value: "cookie"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+          value: "SKYPILOT_ROUTEID"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+          value: "http_502 non_idempotent"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]
+          value: "3"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-change-on-failure"]
+          value: "true"
+
+  - it: should not add session affinity annotations for Recreate strategy
+    set:
+      ingress.enabled: true
+      apiService.upgradeStrategy: Recreate
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/affinity"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/session-cookie-name"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-next-upstream-tries"]

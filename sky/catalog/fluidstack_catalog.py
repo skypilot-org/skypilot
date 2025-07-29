@@ -52,7 +52,9 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+                              disk_tier: Optional[str] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -61,7 +63,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     else:
         memory_gb_or_ratio = memory
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
-                                                      memory_gb_or_ratio)
+                                                      memory_gb_or_ratio,
+                                                      region, zone)
 
 
 def get_accelerators_from_instance_type(

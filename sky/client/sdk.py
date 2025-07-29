@@ -29,7 +29,6 @@ import colorama
 import filelock
 
 from sky import admin_policy
-from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -64,6 +63,7 @@ if typing.TYPE_CHECKING:
     import requests
 
     import sky
+    from sky import backends
 else:
     psutil = adaptors_common.LazyImport('psutil')
 
@@ -71,6 +71,11 @@ logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 _LINE_PROCESSED_KEY = 'line_processed'
+
+
+def reload_config() -> None:
+    """Reloads the client-side config."""
+    skypilot_config.safe_reload_config()
 
 
 def stream_response(request_id: Optional[str],
@@ -372,7 +377,7 @@ def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -530,7 +535,7 @@ def _launch(
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
@@ -639,7 +644,7 @@ def exec(  # pylint: disable=redefined-builtin
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
-    backend: Optional[backends.Backend] = None,
+    backend: Optional['backends.Backend'] = None,
 ) -> server_common.RequestId:
     """Executes a task on an existing cluster.
 
@@ -716,7 +721,7 @@ def exec(  # pylint: disable=redefined-builtin
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-@rest.retry_on_server_unavailable()
+@rest.retry_transient_errors()
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
@@ -1849,6 +1854,18 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
     return server_common.get_request_id(response)
 
 
+def _local_api_server_running(kill: bool = False) -> bool:
+    """Checks if the local api server is running."""
+    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
+        cmdline = process.info['cmdline']
+        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            if kill:
+                subprocess_utils.kill_children_processes(
+                    parent_pids=[process.pid], force=True)
+            return True
+    return False
+
+
 @usage_lib.entrypoint
 @annotations.client_api
 def api_status(
@@ -1867,6 +1884,10 @@ def api_status(
     Returns:
         A list of request payloads.
     """
+    if server_common.is_api_server_local() and not _local_api_server_running():
+        logger.info('SkyPilot API server is not running.')
+        return []
+
     body = payloads.RequestStatusBody(request_ids=request_ids,
                                       all_status=all_status)
     response = server_common.make_authenticated_request(
@@ -1987,13 +2008,7 @@ def api_stop() -> None:
                 f'Cannot kill the API server at {server_url} because it is not '
                 f'the default SkyPilot API server started locally.')
 
-    found = False
-    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
-        cmdline = process.info['cmdline']
-        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
-            subprocess_utils.kill_children_processes(parent_pids=[process.pid],
-                                                     force=True)
-            found = True
+    found = _local_api_server_running(kill=True)
 
     # Remove the database for requests.
     server_common.clear_local_api_server_database()
@@ -2059,6 +2074,22 @@ def _save_config_updates(endpoint: Optional[str] = None,
                 'service_account_token'] = service_account_token
 
         common_utils.dump_yaml(str(config_path), config)
+        skypilot_config.reload_config()
+
+
+def _clear_api_server_config() -> None:
+    """Clear endpoint and service account token from config file."""
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            return
+
+        config = skypilot_config.get_user_config()
+        config = dict(config)
+        del config['api_server']
+
+        common_utils.dump_yaml(str(config_path), config, blank=True)
         skypilot_config.reload_config()
 
 
@@ -2318,3 +2349,22 @@ def api_login(endpoint: Optional[str] = None,
         endpoint)
     _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
                             server_status)
+
+
+@usage_lib.entrypoint
+@annotations.client_api
+def api_logout() -> None:
+    """Logout of the API server.
+
+    Clears all cookies and settings stored in ~/.sky/config.yaml"""
+    if server_common.is_api_server_local():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Local api server cannot be logged out. '
+                               'Use `sky api stop` instead.')
+
+    # no need to clear cookies if it doesn't exist.
+    server_common.set_api_cookie_jar(cookiejar.MozillaCookieJar(),
+                                     create_if_not_exists=False)
+    _clear_api_server_config()
+    logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
+                f'{colorama.Style.RESET_ALL}')

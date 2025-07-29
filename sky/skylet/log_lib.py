@@ -544,9 +544,11 @@ def tail_logs(job_id: Optional[int],
                     if start_streaming:
                         print(line, end='', flush=True)
                 status_str = status.value if status is not None else 'None'
-                print(ux_utils.finishing_message(
-                    f'Job finished (status: {status_str}).'),
-                      flush=True)
+                # Only show "Job finished" for actually terminal states
+                if status is not None and status.is_terminal():
+                    print(ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).'),
+                          flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

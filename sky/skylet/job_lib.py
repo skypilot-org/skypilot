@@ -24,10 +24,10 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -63,6 +63,7 @@ class JobInfoLoc(enum.IntEnum):
     RESOURCES = 8
     PID = 9
     LOG_PATH = 10
+    METADATA = 11
 
 
 def create_table(cursor, conn):
@@ -103,7 +104,8 @@ def create_table(cursor, conn):
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
         pid INTEGER DEFAULT -1,
-        log_dir TEXT DEFAULT NULL)""")
+        log_dir TEXT DEFAULT NULL,
+        metadata TEXT DEFAULT '{}')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -118,6 +120,12 @@ def create_table(cursor, conn):
                                  'INTEGER DEFAULT -1')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
                                  'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'jobs',
+                                 'metadata',
+                                 'TEXT DEFAULT \'{}\'',
+                                 value_to_replace_existing_entries='{}')
     conn.commit()
 
 
@@ -338,16 +346,19 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> Tuple[int, str]:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> Tuple[int, str]:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null)',
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
+         run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
@@ -569,6 +580,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
+            'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
     return records
 
@@ -839,7 +851,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
     """
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
+        'STATUS', 'LOG', 'GIT COMMIT'
     ])
     for job in jobs:
         job_table.add_row([
@@ -854,6 +866,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
             job['resources'],
             job['status'].colored_str(),
             job['log_path'],
+            job.get('metadata', {}).get('git_commit', '-'),
         ])
     return job_table
 
@@ -1055,7 +1068,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+                resources_str: str, metadata: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1066,11 +1079,20 @@ class JobLibCodeGen:
             '\nif int(constants.SKYLET_VERSION) < 9: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
-            '\nresult = job_lib.add_job('
+            '\nresult = None',
+            '\nif int(constants.SKYLET_VERSION) < 15: '
+            '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
+            '\nelse: '
+            '\n result = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r})',
             ('\nif isinstance(result, tuple):'
              '\n  print("Job ID: " + str(result[0]), flush=True)'
              '\n  print("Log Dir: " + str(result[1]), flush=True)'
@@ -1163,6 +1185,10 @@ class JobLibCodeGen:
             # and older did not have JobExitCode, so we use 0 for those versions
             # TODO: Remove this special handling after 0.10.0.
             'exit_code = exceptions.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
+            # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
+            # exit with success (0) since fetching current logs is a successful operation.
+            # This prevents shell wrappers from printing "command terminated with exit code 101".
+            f'exit_code = 0 if not {follow} and exit_code == 101 else exit_code',
             'sys.exit(exit_code)',
         ]
         return cls._build(code)

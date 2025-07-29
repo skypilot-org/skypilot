@@ -14,7 +14,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 _CREDENTIAL_FILE = 'config.yaml'
 
@@ -156,16 +156,19 @@ class DO(clouds.Cloud):
         return self._REPR
 
     @classmethod
-    def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None,
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for DO."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='DO')
 
     @classmethod
@@ -246,7 +249,9 @@ class DO(clouds.Cloud):
             default_instance_type = DO.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
