@@ -26,11 +26,10 @@ def start_controller(service_name: str, task_yaml_path: str,
         job_id: Job ID for the controller (always 0 in consolidation mode)
     """
     # Build the controller command
-    run_controller_cmd = (
-        f'{sys.executable} -u -m sky.serve.service '
-        f'--service-name {service_name} '
-        f'--task-yaml {task_yaml_path} '
-        f'--job-id {job_id}')
+    run_controller_cmd = (f'{sys.executable} -u -m sky.serve.service '
+                          f'--service-name {service_name} '
+                          f'--task-yaml {task_yaml_path} '
+                          f'--job-id {job_id}')
 
     logs_dir = os.path.expanduser(constants.SKYSERVE_METADATA_DIR)
     os.makedirs(logs_dir, exist_ok=True)

@@ -226,15 +226,15 @@ def up(
             assert isinstance(controller_handle,
                               backends.CloudVmRayResourceHandle)
 
-            recovery_script = (
-                f'{sys.executable} -u -m sky.serve.launcher '
-                f'--task-yaml {remote_tmp_task_yaml_path} '
-                f'--service-name {service_name} '
-                f'--job-id {controller_job_id}')
+            recovery_script = (f'{sys.executable} -u -m sky.serve.launcher '
+                               f'--task-yaml {remote_tmp_task_yaml_path} '
+                               f'--service-name {service_name} '
+                               f'--job-id {controller_job_id}')
             serve_state.set_ha_recovery_script(service_name, recovery_script)
 
             # Execute the controller task via backend.run_on_head
             # This will run the YAML template which calls our launcher
+            assert controller_job_id is not None  # Set to 0 in consolidation mode
             backend._execute_task_one_node(
                 controller_handle,
                 controller_task,

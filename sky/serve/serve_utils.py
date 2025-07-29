@@ -283,9 +283,12 @@ def ha_recovery_for_consolidation_mode():
         service_status = service['status']
 
         # Skip services that are shutting down or have cleanup failures
-        if service_status in [serve_state.ServiceStatus.SHUTTING_DOWN, serve_state.ServiceStatus.FAILED_CLEANUP]:
+        if service_status in [
+                serve_state.ServiceStatus.SHUTTING_DOWN,
+                serve_state.ServiceStatus.FAILED_CLEANUP
+        ]:
             continue
-            
+
         # Only recover consolidation mode services (controller_job_id == 0)
         if service.get('controller_job_id') != 0:
             continue
@@ -537,8 +540,7 @@ def update_service_status() -> None:
             except psutil.NoSuchProcess:
                 # Process doesn't exist
                 serve_state.set_service_status_and_active_versions(
-                    record['name'],
-                    serve_state.ServiceStatus.CONTROLLER_FAILED)
+                    record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
         else:
             # Non-consolidation mode: check job status
             controller_job_id = record['controller_job_id']
