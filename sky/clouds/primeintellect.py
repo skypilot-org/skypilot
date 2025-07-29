@@ -39,6 +39,8 @@ class PrimeIntellect(clouds.Cloud):
             ('Custom disk tier not supported yet.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier not supported yet.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Custom multi-network not supported yet.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             ('Custom image not supported yet.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
