@@ -11,6 +11,7 @@ import json
 import os
 import pickle
 import re
+import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -47,6 +48,7 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -246,16 +248,18 @@ def initialize_and_get_db() -> sqlalchemy.engine.Engine:
 
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('state')
 
-    # get an engine to the db
-    engine = migration_utils.get_engine('state')
+        # run migrations if needed
+        create_table(engine)
 
-    # run migrations if needed
-    create_table(engine)
-
-    # return engine
-    _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def _init_db(func):
