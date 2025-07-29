@@ -4,6 +4,7 @@
 import enum
 import functools
 import json
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -33,6 +34,7 @@ CallbackType = Callable[[str], None]
 logger = sky_logging.init_logger(__name__)
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -131,21 +133,30 @@ def create_table(engine: sqlalchemy.engine.Engine):
                                          migration_utils.SPOT_JOBS_VERSION)
 
 
+# We wrap the sqlalchemy engine initialization in a thread
+# lock to ensure that multiple threads do not initialize the
+# engine which could result in a rare race condition where
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
+# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
+# which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
 
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
 
-    # get an engine to the db
-    engine = migration_utils.get_engine('spot_jobs')
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('spot_jobs')
 
-    # run migrations if needed
-    create_table(engine)
+        # run migrations if needed
+        create_table(engine)
 
-    # return engine
-    _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def _init_db(func):
