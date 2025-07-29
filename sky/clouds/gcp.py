@@ -595,6 +595,11 @@ class GCP(clouds.Cloud):
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             if tpu_node_name is None:
                 tpu_node_name = cluster_name.name_on_cloud
+        elif gcp_utils.is_tpu_vm(resources):
+            # For TPU VMs, we should not set tpu_node_name as the TPU VM itself
+            # is the node. Setting this to None prevents the template from 
+            # creating a separate tpu_node section in provider_config.
+            tpu_node_name = None
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
