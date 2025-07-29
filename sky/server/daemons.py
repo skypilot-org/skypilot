@@ -33,6 +33,10 @@ class InternalRequestDaemon:
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
         while True:
+            # Refresh config within the while loop.
+            # Since this is a long running daemon, reload_config_for_new_request()
+            # is not called in between the event runs.
+            skypilot_config.safe_reload_config()
             # Get the configured log level for the daemon inside the event loop
             # in case the log level changes after the API server is started.
             level_str = skypilot_config.get_nested(
@@ -44,7 +48,8 @@ class InternalRequestDaemon:
                 logger.warning(f'Invalid log level: {level_str}, using DEBUG')
                 level = logging.DEBUG
             with ux_utils.enable_traceback(), \
-                sky_logging.set_logging_level('sky', level):
+                sky_logging.set_sky_logging_levels(level):
+                sky_logging.reload_logger()
                 try:
                     self.event_fn()
                 except Exception:  # pylint: disable=broad-except
