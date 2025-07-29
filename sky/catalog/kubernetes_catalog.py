@@ -214,7 +214,7 @@ def _list_accelerators(
                 # Generate the accelerator quantities
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
-                        node.status.allocatable))
+                        context, node.status.allocatable))
 
                 if accelerator_count > 0:
                     # TPUs are counted in a different way compared to GPUs.
@@ -261,7 +261,7 @@ def _list_accelerators(
                             if container.resources.requests:
                                 allocated_qty += (
                                     kubernetes_utils.get_node_accelerator_count(
-                                        container.resources.requests))
+                                        context, container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
                 # Initialize the total_accelerators_available to make sure the

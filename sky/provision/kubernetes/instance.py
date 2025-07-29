@@ -210,7 +210,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             #  case we will need to update this logic.
                             # TODO(Doyoung): Update the error message raised
                             # with the multi-host TPU support.
-                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key()  # pylint: disable=line-too-long
+                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key(context)  # pylint: disable=line-too-long
                             if 'Insufficient google.com/tpu' in event_message:
                                 extra_msg = (
                                     f'Verify if '
@@ -797,7 +797,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
-        needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(), 0) > 0
+        needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(context),
+                                0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
@@ -900,7 +901,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # to the non-DWS case.
         if needs_gpus:
             gpu_toleration = {
-                'key': kubernetes_utils.get_gpu_resource_key(),
+                'key': kubernetes_utils.get_gpu_resource_key(context),
                 'operator': 'Exists',
                 'effect': 'NoSchedule'
             }
