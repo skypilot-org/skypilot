@@ -303,10 +303,6 @@ class StrategyExecutor:
                     try:
                         if not state.force_no_postgres():
                             usage_lib.messages.usage.set_internal()
-                            # Detach setup, so that the setup failure can be
-                            # detected by the controller process (job_status ->
-                            # FAILED_SETUP).
-                            self._logger.info('Launching job with sdk')
                             request_id = sdk.launch(
                                 self.dag,
                                 cluster_name=self.cluster_name,

@@ -2024,9 +2024,13 @@ def api_stop() -> None:
                     subprocess_utils.kill_children_processes(
                         parent_pids=[int(pid.strip())], force=True)
         os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
-    except Exception:  # pylint: disable=broad-except
+    except FileNotFoundError:
+        # its fine we will create it
+        pass
+    except Exception as e:  # pylint: disable=broad-except
         # in case we get perm issues or something is messed up, just ignore it
         # and assume the process is dead
+        logger.error(f'Error looking at job controller pid file: {e}')
         pass
 
     if found:

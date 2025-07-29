@@ -13,6 +13,7 @@ import traceback
 import typing
 from typing import Dict, Optional, Set, Tuple
 
+import dotenv
 import psutil
 
 # This import ensures backward compatibility. Controller processes may not have
@@ -37,6 +38,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
@@ -46,9 +48,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import sky
 
-logging.basicConfig(level=logging.INFO)
-# Default logger for module-level logging
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger('sky.jobs.controller')
 
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
@@ -775,9 +775,47 @@ class Controller:
             # most things in this function are blocking
             await managed_job_utils.to_thread(task_cleanup, task, job_id)
 
-    async def run_job_loop(self, job_id: int, dag_yaml: str,
-                           job_logger: logging.Logger):
+    async def run_job_loop(self,
+                           job_id: int,
+                           dag_yaml: str,
+                           job_logger: logging.Logger,
+                           env_file_path: Optional[str] = None):
         """Background task that runs the job loop."""
+        # Initialize context for this job to provide environment isolation
+        context.initialize()
+
+        # Replace os.environ with ContextualEnviron to enable per-job
+        # environment isolation. This allows each job to have its own
+        # environment variables without affecting other jobs or the main
+        # process.
+        original_environ = os.environ
+        os.environ = context.ContextualEnviron(original_environ)  # type: ignore
+
+        # Load and apply environment variables from the job's environment file
+        if env_file_path and os.path.exists(env_file_path):
+            try:
+                # Load environment variables from the file
+                env_vars = dotenv.dotenv_values(env_file_path)
+                job_logger.info(f'Loading environment from {env_file_path}: '
+                                f'{list(env_vars.keys())}')
+
+                # Apply environment variables to the job's context
+                ctx = context.get()
+                if ctx is not None:
+                    for key, value in env_vars.items():
+                        if value is not None:
+                            ctx.override_envs({key: value})
+                            job_logger.debug(
+                                f'Set environment variable: {key}={value}')
+                else:
+                    job_logger.error(
+                        'Context is None, cannot set environment variables')
+            except Exception as e:  # pylint: disable=broad-except
+                job_logger.error(
+                    f'Failed to load environment file {env_file_path}: {e}')
+        elif env_file_path:
+            job_logger.error(f'Environment file not found: {env_file_path}')
+
         cancelling = False
         try:
             job_logger.info(f'Starting job loop for {job_id}')
@@ -816,6 +854,9 @@ class Controller:
                              f'{common_utils.format_exception(e)}')
             raise
         finally:
+            # Restore original os.environ to avoid affecting other jobs
+            os.environ = original_environ
+
             await self._cleanup(job_id,
                                 dag_yaml=dag_yaml,
                                 job_logger=job_logger)
@@ -863,12 +904,18 @@ class Controller:
                 if job_id in self.job_tasks:
                     del self.job_tasks[job_id]
 
-    async def start_job(self, job_id: int, dag_yaml: str):
+    async def start_job(
+        self,
+        job_id: int,
+        dag_yaml: str,
+        env_file_path: Optional[str] = None,
+    ):
         """Start a new job.
 
         Args:
             job_id: The ID of the job to start.
             dag_yaml: Path to the YAML file containing the DAG definition.
+            env_file_path: Optional path to environment file for the job.
         """
         # Create a job-specific logger
         log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -891,17 +938,18 @@ class Controller:
         # Prevent log propagation to avoid duplicate logs
         job_logger.propagate = False
 
-        job_logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}')
+        job_logger.info(f'Starting job {job_id} with dag_yaml={dag_yaml}, '
+                        f'env_file_path={env_file_path}')
 
         await create_background_task(
-            self.run_job_loop(job_id, dag_yaml, job_logger))
+            self.run_job_loop(job_id, dag_yaml, job_logger, env_file_path))
 
         job_logger.info(f'Job {job_id} started successfully')
 
     async def cancel_job(self):
         """Cancel an existing job."""
         while True:
-            cancels = os.listdir(jobs_constants.SIGNAL_PATH)
+            cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
@@ -915,7 +963,8 @@ class Controller:
                         task.cancel()
                         logger.info(f'Job {job_id} cancelled successfully')
 
-                        os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
+                        os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
+                                  f'{job_id}')
             await asyncio.sleep(1)
 
     async def monitor_loop(self):
@@ -974,11 +1023,12 @@ class Controller:
 
             job_id = waiting_job['job_id']
             dag_yaml_path = waiting_job['dag_yaml_path']
+            env_file_path = waiting_job.get('env_file_path')
 
-            cancels = os.listdir(jobs_constants.SIGNAL_PATH)
+            cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             if str(job_id) in cancels:
                 logger.info(f'Job {job_id} cancelled')
-                os.remove(f'{jobs_constants.SIGNAL_PATH}/{job_id}')
+                os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/{job_id}')
                 await managed_job_state.set_cancelling_async(
                     job_id=job_id,
                     callback_func=managed_job_utils.event_callback_func(
@@ -993,14 +1043,14 @@ class Controller:
             async with self._job_tasks_lock:
                 self.starting.add(job_id)
 
-            await self.start_job(job_id, dag_yaml_path)
+            await self.start_job(job_id, dag_yaml_path, env_file_path)
 
 
 async def main():
     controller = Controller()
 
     # Will happen multiple times, who cares though
-    os.makedirs(jobs_constants.SIGNAL_PATH, exist_ok=True)
+    os.makedirs(jobs_constants.CONSOLIDATED_SIGNAL_PATH, exist_ok=True)
 
     # Increase number of files we can open
     soft = None

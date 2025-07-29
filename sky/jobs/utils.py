@@ -61,7 +61,6 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 # This is a tradeoff between the latency and the resource usage.
 JOB_STATUS_CHECK_GAP_SECONDS = 60
@@ -673,8 +672,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             # with the controller server API
             try:
                 # we create a file as a signal to the controller server
-                signal_file = pathlib.Path(managed_job_constants.SIGNAL_PATH,
-                                           f'{job_id}')
+                signal_file = pathlib.Path(
+                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
                 signal_file.touch()
                 cancelled_job_ids.append(job_id)
             except OSError as e:
@@ -691,7 +690,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         # Send the signal to the jobs controller.
-        signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
+        signal_file = (pathlib.Path(
+            managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):

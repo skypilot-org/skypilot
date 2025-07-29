@@ -124,8 +124,12 @@ def start_controller() -> None:
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, 'controller.log')
 
-    with open(JOB_CONTROLLER_ENV_PATH, 'r', encoding='utf-8') as f:
-        run_cmd = f.read()
+    activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+    run_controller_cmd = (f'{sys.executable} -u -m'
+                          'sky.jobs.controller')
+
+    run_cmd = (f'{activate_python_env_cmd}'
+               f'{run_controller_cmd}')
 
     pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
     with open(JOB_CONTROLLER_PID_PATH, 'a', encoding='utf-8') as f:
@@ -158,7 +162,7 @@ def get_alive_controllers() -> typing.Optional[int]:
     return alive
 
 
-def maybe_start_controllers(env_file_path: typing.Optional[str] = None) -> None:
+def maybe_start_controllers() -> None:
     """Start the job controller process.
 
     If the process is already running, it will not start a new one.
@@ -172,21 +176,6 @@ def maybe_start_controllers(env_file_path: typing.Optional[str] = None) -> None:
                 return
             wanted = get_number_of_controllers()
             started = 0
-
-            if wanted != alive and env_file_path:
-                activate_python_env_cmd = (
-                    f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
-                source_environment_cmd = (f'source {env_file_path};'
-                                          if env_file_path else '')
-                run_controller_cmd = (f'{sys.executable} -u -m'
-                                      'sky.jobs.controller')
-
-                run_cmd = (f'{activate_python_env_cmd}'
-                           f'{source_environment_cmd}'
-                           f'{run_controller_cmd}')
-
-                with open(JOB_CONTROLLER_ENV_PATH, 'w', encoding='utf-8') as f:
-                    f.write(run_cmd)
 
             while alive + started < wanted:
                 start_controller()
@@ -214,7 +203,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
                                 common_utils.get_user_hash(), priority)
-    maybe_start_controllers(env_file_path)
+    maybe_start_controllers()
 
 
 @contextlib.contextmanager
