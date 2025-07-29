@@ -35,6 +35,12 @@
                         "null"
                     ]
                 },
+                "enableBasicAuth": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
                 "enableServiceAccounts": {
                     "type": "boolean"
                 },
