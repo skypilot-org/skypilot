@@ -136,7 +136,7 @@ def create_table(engine: sqlalchemy.engine.Engine):
 # We wrap the sqlalchemy engine initialization in a thread
 # lock to ensure that multiple threads do not initialize the
 # engine which could result in a rare race condition where
-# a session has already been created with _SQLALCHEMY_ENGINE = e1, 
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
 # and then another thread overwrites _SQLALCHEMY_ENGINE = e2
 # which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
