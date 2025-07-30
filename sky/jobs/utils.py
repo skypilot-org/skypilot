@@ -717,11 +717,10 @@ def stream_logs_by_id(job_id: int,
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file_exists = False
-            task_info = managed_job_state.get_all_task_ids_names_statuses(
+            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             num_tasks = len(task_info)
-            for task_id, task_name, task_status in task_info:
-                log_file = managed_job_state.get_local_log_file(job_id, task_id)
+            for task_id, task_name, task_status, log_file in task_info:
                 if log_file is not None:
                     log_file_exists = True
                     if num_tasks > 1:
@@ -745,12 +744,21 @@ def stream_logs_by_id(job_id: int,
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
-                    # Add the "Job finished" message for terminal states
-                    if task_status.is_terminal():
-                        print(ux_utils.finishing_message(
-                            f'Job finished (status: {task_status.value}).'),
-                              flush=True)
+                    if num_tasks > 1:
+                        # Add the "Task finished" message for terminal states
+                        task_str = (f'Task {task_name}({task_id})'
+                                    if task_name else f'Task {task_id}')
+                        if task_status.is_terminal():
+                            print(ux_utils.finishing_message(
+                                f'{task_str} finished '
+                                f'(status: {task_status.value}).'),
+                                  flush=True)
             if log_file_exists:
+                # Add the "Job finished" message for terminal states
+                if managed_job_status.is_terminal():
+                    print(ux_utils.finishing_message(
+                        f'Job finished (status: {managed_job_status.value}).'),
+                          flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (f'{colorama.Fore.YELLOW}'
