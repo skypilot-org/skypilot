@@ -1,5 +1,8 @@
 """Implementation of the SkyServe core APIs."""
+import os
 import re
+import shutil
+import sys
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -188,7 +191,9 @@ def up(
             task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode():
-            controller_job_id = 0
+            # Use negative job IDs for consolidation mode services
+            # This ensures uniqueness and helps detect name conflicts
+            controller_job_id = serve_state.get_next_consolidation_job_id()
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -256,25 +261,50 @@ def up(
                 stopped_message='')
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
+            assert isinstance(controller_handle,
+                              backends.CloudVmRayResourceHandle)
+
+            recovery_script = (f'{sys.executable} -u -m sky.serve.launcher '
+                               f'--task-yaml {remote_tmp_task_yaml_path} '
+                               f'--service-name {service_name} '
+                               f'--job-id {controller_job_id}')
+            serve_state.set_ha_recovery_script(service_name, recovery_script)
+
+            # Sync file mounts before running
+            # This is necessary because run_on_head won't process the YAML file_mounts
             backend.sync_file_mounts(
                 handle=controller_handle,
                 all_file_mounts=controller_task.file_mounts,
                 storage_mounts=controller_task.storage_mounts)
+            
+            # Execute the controller task via backend.run_on_head
+            # This avoids using Ray, which would wrap our controller in a Ray task
             run_script = controller_task.run
-            assert isinstance(run_script, str)
-            # Manually add the env variables to the run script. Originally
-            # this is done in ray jobs submission but now we have to do it
-            # manually because there is no ray runtime on the API server.
+            assert isinstance(run_script, str), 'Controller task run must be a string'
+            
+            # Manually add the env variables to the run script
+            # This is needed because run_on_head doesn't process the YAML envs section
             env_cmds = [
                 f'export {k}={v!r}' for k, v in controller_task.envs.items()
             ]
             run_script = '\n'.join(env_cmds + [run_script])
-            # Dump script for high availability recovery.
-            # if controller_utils.high_availability_specified(
-            #         controller_name):
-            #     managed_job_state.set_ha_recovery_script(
-            #         consolidation_mode_job_id, run_script)
-            backend.run_on_head(controller_handle, run_script)
+            
+            controller_log_path = os.path.expanduser(
+                os.path.join(serve_utils.generate_remote_service_dir_name(service_name),
+                             'controller.log'))
+            
+            # Run the controller script which will call the launcher
+            # The launcher will start the actual controller and exit immediately
+            returncode = backend.run_on_head(
+                controller_handle,
+                run_script,
+                log_path=controller_log_path,
+                stream_logs=False,
+                under_remote_workdir=True)
+            
+            subprocess_utils.handle_returncode(
+                returncode, run_script,
+                'Failed to start serve controller')
 
         style = colorama.Style
         fore = colorama.Fore
