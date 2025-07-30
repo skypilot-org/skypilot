@@ -812,9 +812,9 @@ def translate_local_file_mounts_to_two_hop(
     file_mount_id = 0
 
     file_mounts_to_translate = task.file_mounts or {}
-    if task.workdir is not None and isinstance(task.workdir, str):
+    if isinstance(task.workdir, str):
         file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
-        task.workdir = None
+        task.set_workdir(None)
 
     for job_cluster_path, local_path in file_mounts_to_translate.items():
         if data_utils.is_cloud_store_url(
@@ -931,7 +931,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     new_storage_mounts = {}
     if task.workdir is not None and isinstance(task.workdir, str):
         workdir = task.workdir
-        task.workdir = None
+        task.set_workdir(None)
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
                 constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
             raise ValueError(

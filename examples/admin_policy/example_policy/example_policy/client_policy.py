@@ -29,7 +29,7 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
                     f'Policy {cls.__name__} was not applied at client-side. '
                     'Please install the policy and retry.')
             cv = user_request.task.envs[_LOCAL_GCP_CREDENTIALS_SET_ENV_VAR]
-            if (cv != _POLICY_VERSION):
+            if cv != _POLICY_VERSION:
                 raise RuntimeError(
                     f'Policy {cls.__name__} at {cv} was applied at client-side '
                     f'but the server requires {_POLICY_VERSION} to be applied. '
@@ -39,13 +39,14 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
 
         task = user_request.task
         if task.file_mounts is None:
-            task.file_mounts = {}
+            task.set_file_mounts({})
         # Use the env var to detect whether an explicit credential path is
         # specified.
         cred_path = os.environ.get(_GOOGLE_APPLICATION_CREDENTIALS_ENV)
 
+        task_file_mounts = task.file_mounts or {}
         if cred_path is not None:
-            task.file_mounts[_GOOGLE_APPLICATION_CREDENTIALS_PATH] = cred_path
+            task_file_mounts[_GOOGLE_APPLICATION_CREDENTIALS_PATH] = cred_path
             activate_cmd = (f'gcloud auth activate-service-account --key-file '
                             f'{_GOOGLE_APPLICATION_CREDENTIALS_PATH}')
             if task.run is None:
@@ -59,6 +60,7 @@ class UseLocalGcpCredentialsPolicy(sky.AdminPolicy):
         else:
             # Otherwise upload the entire default credential directory to get
             # consistent identity in the task and the local environment.
-            task.file_mounts['~/.config/gcloud'] = '~/.config/gcloud'
+            task_file_mounts['~/.config/gcloud'] = '~/.config/gcloud'
+        task.set_file_mounts(task_file_mounts)
         task.envs[_LOCAL_GCP_CREDENTIALS_SET_ENV_VAR] = _POLICY_VERSION
         return sky.MutatedUserRequest(task, user_request.skypilot_config)

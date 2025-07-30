@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import collections
+import copy
 import inspect
 import json
 import os
@@ -76,10 +77,26 @@ def _is_valid_name(name: Optional[str]) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
+@typing.overload
+def _fill_in_env_vars(
+    yaml_field: str,
+    task_envs: Dict[str, str],
+) -> str:
+    ...
+
+
+@typing.overload
 def _fill_in_env_vars(
     yaml_field: Dict[str, Any],
     task_envs: Dict[str, str],
 ) -> Dict[str, Any]:
+    ...
+
+
+def _fill_in_env_vars(
+    yaml_field: Union[str, Dict[str, Any]],
+    task_envs: Dict[str, str],
+) -> Union[str, Dict[str, Any]]:
     """Detects env vars in yaml field and fills them with task_envs.
 
     Use cases of env vars in file_mounts:
@@ -107,8 +124,17 @@ def _fill_in_env_vars(
         - ${ENV}
         - $ENV
     where <ENV> must appear in task.envs.
+
+    Args:
+        yaml_field: Either a string or dictionary to process for env vars
+        task_envs: Dictionary of environment variables
+
+    Returns:
+        The processed yaml_field with env vars replaced, same type as input
     """
     # TODO(zongheng): support ${ENV:-default}?
+
+    # Handle both string and dict inputs
     yaml_field_str = json.dumps(yaml_field)
 
     def replace_var(match):
@@ -119,6 +145,7 @@ def _fill_in_env_vars(
     # Pattern for valid env var names in bash.
     pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
     yaml_field_str = re.sub(pattern, replace_var, yaml_field_str)
+
     return json.loads(yaml_field_str)
 
 
@@ -335,7 +362,7 @@ class Task:
         if self._envs or self._secrets:
             _check_docker_login_config(self._envs, self._secrets)
 
-        self.workdir = workdir
+        self._workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.event_callback = event_callback
@@ -358,7 +385,7 @@ class Task:
 
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
-        self.file_mounts: Optional[Dict[str, str]] = None
+        self._file_mounts: Optional[Dict[str, str]] = None
 
         # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
@@ -376,11 +403,6 @@ class Task:
             volume_mounts)
 
         self._metadata = metadata if metadata is not None else {}
-
-        # Initialize redacted versions (used when redact_secrets=True)
-        self._file_mounts_redacted = None
-        self._service_redacted = None
-        self._workdir_redacted = None
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
@@ -458,9 +480,9 @@ class Task:
         it must be after the client side has sync-ed all files to the
         remote server.
         """
-        if self.file_mounts is None:
+        if self._file_mounts is None:
             return
-        for target, source in self.file_mounts.items():
+        for target, source in self._file_mounts.items():
             location = f'file_mounts.{target}: {source}'
             self._validate_mount_path(target, location)
             self._validate_path(source, location)
@@ -469,7 +491,7 @@ class Task:
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
             if not data_utils.is_cloud_store_url(source):
-                self.file_mounts[target] = os.path.abspath(
+                self._file_mounts[target] = os.path.abspath(
                     os.path.expanduser(source))
                 if not os.path.exists(self.file_mounts[target]
                                      ) and not source.startswith('skypilot:'):
@@ -513,8 +535,8 @@ class Task:
             if git_ref is not None:
                 self._metadata['git_commit'] = git_ref
             return
-        user_workdir = self.workdir
-        self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
+        user_workdir = self._workdir
+        self._workdir = os.path.abspath(os.path.expanduser(user_workdir))
         if not os.path.isdir(self.workdir):
             # Symlink to a dir is legal (isdir() follows symlinks).
             with ux_utils.print_exception_no_traceback():
@@ -593,31 +615,6 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --secret {k}="" in CLI).')
 
-        # Fill in any Task.envs into file_mounts (src/dst paths, storage
-        # name/source).
-        if config.get('file_mounts') is not None:
-            config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
-                                                      config.get('envs', {}))
-            config['file_mounts_redacted'] = config['file_mounts']
-            config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
-                                                      config.get('secrets', {}))
-
-        # Fill in any Task.envs into service (e.g. MODEL_NAME).
-        if config.get('service') is not None:
-            config['service'] = _fill_in_env_vars(config['service'],
-                                                  config.get('envs', {}))
-            config['service_redacted'] = config['service']
-            config['service'] = _fill_in_env_vars(config['service'],
-                                                  config.get('secrets', {}))
-
-        # Fill in any Task.envs into workdir
-        if config.get('workdir') is not None:
-            config['workdir'] = _fill_in_env_vars(config['workdir'],
-                                                  config.get('envs', {}))
-            config['workdir_redacted'] = config['workdir']
-            config['workdir'] = _fill_in_env_vars(config['workdir'],
-                                                  config.get('secrets', {}))
-
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -631,11 +628,6 @@ class Task:
             volumes=config.pop('volumes', None),
             metadata=config.pop('_metadata', None),
         )
-
-        # Store redacted versions (before secret substitution)
-        task.set_workdir_redacted(config.pop('workdir_redacted', None))
-        task.set_service_redacted(config.pop('service_redacted', None))
-        task.set_file_mounts_redacted(config.pop('file_mounts_redacted', None))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
@@ -928,29 +920,6 @@ class Task:
     def volumes(self) -> Dict[str, str]:
         return self._volumes
 
-    @property
-    def workdir_redacted(self) -> Optional[str]:
-        return self._workdir_redacted
-
-    @property
-    def service_redacted(self) -> Optional[Dict[str, Any]]:
-        return self._service_redacted
-
-    @property
-    def file_mounts_redacted(self) -> Optional[Dict[str, str]]:
-        return self._file_mounts_redacted
-
-    def set_workdir_redacted(self, workdir_redacted: Optional[str]) -> None:
-        self._workdir_redacted = workdir_redacted
-
-    def set_service_redacted(
-            self, service_redacted: Optional[Dict[str, Any]]) -> None:
-        self._service_redacted = service_redacted
-
-    def set_file_mounts_redacted(
-            self, file_mounts_redacted: Optional[Dict[str, str]]) -> None:
-        self._file_mounts_redacted = file_mounts_redacted
-
     def set_volumes(self, volumes: Dict[str, str]) -> None:
         """Sets the volumes for this task.
 
@@ -1152,7 +1121,12 @@ class Task:
 
     @property
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
-        return self._service
+        if self._service is None:
+            return None
+        service_config = copy.copy(self._service.to_yaml_config())
+        service_config = _fill_in_env_vars(service_config, self._envs)
+        service_config = _fill_in_env_vars(service_config, self._secrets)
+        return service_spec.SkyServiceSpec.from_yaml_config(service_config)
 
     def set_service(self,
                     service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
@@ -1187,6 +1161,29 @@ class Task:
                 'call set_time_estimator() first')
         return self.time_estimator_func(resources)
 
+    @property
+    def workdir(self) -> Optional[Union[str, Dict[str, Any]]]:
+        if self._workdir is None:
+            return None
+        workdir = copy.copy(self._workdir)
+        workdir = _fill_in_env_vars(workdir, self._envs)
+        workdir = _fill_in_env_vars(workdir, self._secrets)
+        return workdir
+
+    def set_workdir(self, workdir: Optional[Union[str, Dict[str,
+                                                            Any]]]) -> 'Task':
+        self._workdir = workdir
+        return self
+
+    @property
+    def file_mounts(self) -> Optional[Dict[str, str]]:
+        if self._file_mounts is None:
+            return None
+        file_mounts = copy.copy(self._file_mounts)
+        file_mounts = _fill_in_env_vars(file_mounts, self._envs)
+        file_mounts = _fill_in_env_vars(file_mounts, self._secrets)
+        return file_mounts
+
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
         """Sets the file mounts for this task.
 
@@ -1216,7 +1213,7 @@ class Task:
         Returns:
           self: the current task, with file mounts set.
         """
-        self.file_mounts = file_mounts
+        self._file_mounts = file_mounts
         return self
 
     def update_file_mounts(self, file_mounts: Dict[str, str]) -> 'Task':
@@ -1247,10 +1244,10 @@ class Task:
         Raises:
           ValueError: if input paths are invalid.
         """
-        if self.file_mounts is None:
-            self.file_mounts = {}
-        assert self.file_mounts is not None
-        self.file_mounts.update(file_mounts)
+        if self._file_mounts is None:
+            self._file_mounts = {}
+        assert self._file_mounts is not None
+        self._file_mounts.update(file_mounts)
         self.expand_and_validate_file_mounts()
         return self
 
@@ -1607,12 +1604,8 @@ class Task:
 
         add_if_not_none('resources', tmp_resource_config)
 
-        # Use redacted service if available and redaction is requested
-        if self.service is not None:
-            if redact_secrets and self.service_redacted is not None:
-                add_if_not_none('service', self.service_redacted)
-            else:
-                add_if_not_none('service', self.service.to_yaml_config())
+        if self._service is not None:
+            add_if_not_none('service', self._service.to_yaml_config())
 
         add_if_not_none('num_nodes', self.num_nodes)
 
@@ -1625,20 +1618,14 @@ class Task:
                 {self.outputs: self.estimated_outputs_size_gigabytes})
 
         add_if_not_none('setup', self.setup)
-
-        # Use redacted workdir if available and redaction is requested
-        workdir_to_use = self.workdir
-        if redact_secrets and self.workdir_redacted is not None:
-            workdir_to_use = self.workdir_redacted
-        add_if_not_none('workdir', workdir_to_use)
-
+        add_if_not_none('workdir', self._workdir)
         add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
 
         # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
 
-        # Add secrets with redaction if requested.
+        # Add secrets with redaction if requested
         secrets = self.secrets
         if secrets and redact_secrets:
             secrets = {
@@ -1649,12 +1636,8 @@ class Task:
 
         add_if_not_none('file_mounts', {})
 
-        # Use redacted file_mounts if available and redaction is requested
         if self.file_mounts is not None:
-            file_mounts_to_use = self.file_mounts
-            if redact_secrets and self.file_mounts_redacted is not None:
-                file_mounts_to_use = self.file_mounts_redacted
-            config['file_mounts'].update(file_mounts_to_use)
+            config['file_mounts'].update(self._file_mounts)
 
         if self.storage_mounts is not None:
             config['file_mounts'].update({
@@ -1671,7 +1654,6 @@ class Task:
             ]
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
-
         return config
 
     def get_required_cloud_features(

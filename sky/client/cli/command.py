@@ -778,19 +778,21 @@ def _update_task_workdir(task: sky.Task, workdir: Optional[str],
     """
     if task.workdir is None or isinstance(task.workdir, str):
         if workdir is not None:
-            task.workdir = workdir
+            task.set_workdir(workdir)
             return
         if git_url is not None:
-            task.workdir = {}
-            task.workdir['url'] = git_url
+            task_workdir = {'url': git_url}
             if git_ref is not None:
-                task.workdir['ref'] = git_ref
+                task_workdir['ref'] = git_ref
+            task.set_workdir(task_workdir)
             return
         return
+    task_workdir = task.workdir
     if git_url is not None:
-        task.workdir['url'] = git_url
+        task_workdir['url'] = git_url
     if git_ref is not None:
-        task.workdir['ref'] = git_ref
+        task_workdir['ref'] = git_ref
+    task.set_workdir(task_workdir)
     return
 
 
