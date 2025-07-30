@@ -75,6 +75,10 @@ spec:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
               key: auth
         {{- end }}
+        {{- if .Values.apiService.enableUserManagement }}
+        - name: SKYPILOT_API_BASIC_AUTH_RBAC
+          value: "true"
+        {{- end }}
         {{- if .Values.apiService.enableServiceAccounts }}
         - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"

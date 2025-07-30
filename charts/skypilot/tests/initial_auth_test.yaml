@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: initial_auth_test
+templates:
+  - templates/initial-auth.yaml
+tests:
+  # Test cases for enableBasicAuth = true
+  - it: should create initial auth secret when enableBasicAuth is true
+    set:
+      apiService.enableBasicAuth: true
+      apiService.initialBasicAuthCredentials: "testuser:testpass"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Secret
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-initial-basic-auth
+      - equal:
+          path: stringData.auth
+          value: "testuser:testpass"
+
+  - it: should not create initial auth secret when enableBasicAuth is false
+    set:
+      apiService.enableBasicAuth: false
+      apiService.initialBasicAuthCredentials: "testuser:testpass"
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Test cases for enableBasicAuth = null (default behavior)
+  - it: should create initial auth secret for new install when enableBasicAuth is null and oauth2-proxy disabled
+    set:
+      apiService.enableBasicAuth: null
+      apiService.initialBasicAuthCredentials: "testuser:testpass"
+      ingress.oauth2-proxy.enabled: false
+    capabilities:
+      majorVersion: 1
+      minorVersion: 20
+    release:
+      upgrade: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Secret
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-initial-basic-auth
+
+  - it: should not create initial auth secret for new install when enableBasicAuth is null and oauth2-proxy enabled
+    set:
+      apiService.enableBasicAuth: null
+      apiService.initialBasicAuthCredentials: "testuser:testpass"
+      ingress.oauth2-proxy.enabled: true
+    capabilities:
+      majorVersion: 1
+      minorVersion: 20
+    release:
+      upgrade: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Test cases when initialBasicAuthSecret is provided
+  - it: should not create initial auth secret when initialBasicAuthSecret is provided
+    set:
+      apiService.enableBasicAuth: true
+      apiService.initialBasicAuthSecret: my-existing-secret
+      apiService.initialBasicAuthCredentials: "testuser:testpass"
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Test cases for using default credentials
+  - it: should use default credentials when enableBasicAuth is true and no credentials provided
+    set:
+      apiService.enableBasicAuth: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Secret
+      - equal:
+          path: stringData.auth
+          value: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/" 

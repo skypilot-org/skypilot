@@ -52,7 +52,7 @@ Install the SkyPilot Helm chart with the following command:
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
       --create-namespace \
-      --set ingress.authCredentials=$AUTH_STRING
+      --set apiService.initialBasicAuthCredentials=$AUTH_STRING
 
 .. dropdown:: Flags explanation
 
@@ -62,7 +62,7 @@ Install the SkyPilot Helm chart with the following command:
     * ``--devel``: Use the latest development version of the SkyPilot helm chart. To use a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
     * ``--namespace $NAMESPACE``: Specify the namespace to deploy the API server in.
     * ``--create-namespace``: Create the namespace if it doesn't exist.
-    * :ref:`--set ingress.authCredentials=$AUTH_STRING <helm-values-ingress-authCredentials>`: Set the basic auth credentials for the API server.
+    * :ref:`--set apiService.intialBasicAuthCredentials=$AUTH_STRING <helm-values-apiService-initialBasicAuthCredentials>`: Set the basic auth credentials for the API server.
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
@@ -951,7 +951,7 @@ To reuse an existing ingress controller, you can set :ref:`ingress-nginx.enabled
         --namespace $ANOTHER_NAMESPACE \
         --set ingress-nginx.enabled=false \
         --set ingress.path=/second-server \
-        --set ingress.authCredentials=$ANOTHER_AUTH_STRING
+        --set apiService.initialBasicAuthCredentials=$ANOTHER_AUTH_STRING
 
 With the above commands, these two API servers will share the same ingress controller and serves under different paths of the same host. To get the endpoints, follow :ref:`Step 2: Get the API server URL <sky-get-api-server-url>` to get the host from the helm release that has the ingress-nginx controller deployed, and then append the basic auth and path to the host:
 
@@ -994,11 +994,6 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
         --set ingress-nginx.enabled=false \
         --set ingress.ingressClassName=custom-ingress-class \
         --set ingress.annotations.custom-ingress-annotation=custom-ingress-annotation-value
-
-.. note::
-
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller. For other ingress controllers, you can refer to :ref:`deploy-api-server-basic-auth` to setup authentication on the API server.
-
 
 .. _sky-api-server-cloud-deploy:
 

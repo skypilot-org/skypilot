@@ -361,4 +361,4 @@ Then run the following command to deploy the API server using helm:
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
     -f values.yaml \
-    --set ingress.authCredentials=$AUTH_STRING
+    --set ingress.initialBasicAuthCredentials=$AUTH_STRING

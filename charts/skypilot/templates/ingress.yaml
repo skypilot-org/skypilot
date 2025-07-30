@@ -35,7 +35,8 @@ metadata:
         set $x_skypilot_auth_mode "token";
         return 200;
       }
-    {{- else if and (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
+    {{/* TODO(aylei): backward compatibility for existing deployments when enableBasicAuth is not explicitly set, remove after 0.12.0 */}}
+    {{- else if and (and (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials)) (eq .Values.apiService.enableBasicAuth nil ) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"

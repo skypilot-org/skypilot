@@ -128,7 +128,7 @@ Next, deploy the API server using Helm with the following command.
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
     --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING \
+    --set apiService.initialBasicAuthCredentials=$AUTH_STRING \
     --set storage.storageClassName=$PV_CLASS_NAME \
     --set storage.size=$DISK_SIZE
 

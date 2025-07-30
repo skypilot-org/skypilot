@@ -56,43 +56,80 @@ tests:
           value: "https://$host/oauth2/auth"
 
   # Test basic auth annotations
-  - it: should add basic auth annotations when authSecret is provided and user management disabled
+  - it: should not add basic auth in ingress when basic auth is explicitly enabled in API server
     set:
       ingress.enabled: true
       ingress.authSecret: my-auth-secret
-      apiService.enableUserManagement: false
+      apiService.enableBasicAuth: true
     asserts:
-      - equal:
+      - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
-          value: "basic"
-      - equal:
+      - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-realm"]
-          value: "SkyPilot API Server"
-      - equal:
+      - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
-          value: "my-auth-secret"
 
-  - it: should add basic auth annotations when authCredentials is provided and user management disabled
+  - it: should not add basic auth in ingress when basic auth is explicitly disabled
     set:
       ingress.enabled: true
       ingress.authCredentials: "user:pass"
-      apiService.enableUserManagement: false
+      apiService.enableBasicAuth: false
     asserts:
-      - equal:
+      - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
-          value: "basic"
-      - equal:
+      - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-realm"]
-          value: "SkyPilot API Server"
-      - equal:
+      - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
-          value: "RELEASE-NAME-basic-auth"
 
-  - it: should not add basic auth annotations when user management is enabled
+  # Test backward compatibility logic when enableBasicAuth is null
+  # Note: The complex helper logic with lookup cannot be fully tested in unit tests
+  # These tests verify the template renders correctly without the complex conditional logic
+  - it: should render ingress correctly when enableBasicAuth is null for backward compatibility
     set:
       ingress.enabled: true
       ingress.authCredentials: "user:pass"
-      apiService.enableUserManagement: true
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-ingress
+
+  - it: should render ingress correctly with authSecret when enableBasicAuth is null
+    set:
+      ingress.enabled: true
+      ingress.authSecret: my-auth-secret
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: false
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-ingress
+
+  - it: should not add basic auth in ingress when enableBasicAuth is null and oauth2-proxy is enabled
+    set:
+      ingress.enabled: true
+      ingress.authCredentials: "user:pass"
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: true
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-realm"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-secret"]
+
+  - it: should not add basic auth in ingress when enableBasicAuth is null and no auth credentials provided
+    set:
+      ingress.enabled: true
+      apiService.enableBasicAuth: null
+      ingress.oauth2-proxy.enabled: false
     asserts:
       - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-type"]
