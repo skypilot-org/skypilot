@@ -721,13 +721,12 @@ def stream_logs_by_id(job_id: int,
                 job_id)
             num_tasks = len(task_info)
             for task_id, task_name, task_status, log_file in task_info:
-                if log_file is not None:
+                if log_file:
                     log_file_exists = True
+                    task_str = (f'Task {task_name}({task_id})'
+                                if task_name else f'Task {task_id}')
                     if num_tasks > 1:
-                        if task_name is not None:
-                            print(f'=== Task {task_name}({task_id}) ===')
-                        else:
-                            print(f'=== Task {task_id} ===')
+                        print(f'=== {task_str} ===')
                     with open(os.path.expanduser(log_file),
                               'r',
                               encoding='utf-8') as f:
@@ -746,8 +745,6 @@ def stream_logs_by_id(job_id: int,
                                 print(line, end='', flush=True)
                     if num_tasks > 1:
                         # Add the "Task finished" message for terminal states
-                        task_str = (f'Task {task_name}({task_id})'
-                                    if task_name else f'Task {task_id}')
                         if task_status.is_terminal():
                             print(ux_utils.finishing_message(
                                 f'{task_str} finished '
