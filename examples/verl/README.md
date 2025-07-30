@@ -98,4 +98,5 @@ Access it via the endpoint shown by `sky status --endpoint 8280 verl-cluster`.
 
 - [Verl Documentation](https://verl.readthedocs.io/)
 - [Verl GitHub Repository](https://github.com/volcengine/verl)
+- [SkyPilot Distributed Ray Setup](https://docs.skypilot.co/en/latest/running-jobs/distributed-jobs.html#executing-a-distributed-ray-program) - For more details on Ray cluster configuration
 - [SkyPilot Documentation](https://skypilot.readthedocs.io/)
