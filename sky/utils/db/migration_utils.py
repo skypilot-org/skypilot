@@ -12,7 +12,6 @@ import filelock
 import sqlalchemy
 
 from sky import sky_logging
-from sky import skypilot_config
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)

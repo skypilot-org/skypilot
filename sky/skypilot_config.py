@@ -567,7 +567,7 @@ def _reload_config_as_server() -> None:
         if len(server_config.keys()) > 1:
             raise ValueError(
                 'if db config is specified, no other config is allowed')
-        logger.debug(f'retrieving config from database')
+        logger.debug('retrieving config from database')
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
@@ -676,7 +676,11 @@ def override_skypilot_config(
         override_config_path = json.loads(override_config_path_serialized)
 
     disallowed_diff_keys = []
-    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS - [('db',)]:
+    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        if key == ('db',):
+            # since db key is popped out of server config, the key is expected
+            # to be different between client and server.
+            continue
         value = override_configs.pop_nested(key, default_value=None)
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
