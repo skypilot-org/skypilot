@@ -138,6 +138,7 @@ run: |
       trainer.save_freq=10 \
       trainer.test_freq=10 \
       trainer.total_epochs=15 \
+      trainer.logger=['console'] \
       trainer.resume_mode=disable 2>&1 | tee verl_training.log
   else
     # Worker nodes: connect to Ray head
