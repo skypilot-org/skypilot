@@ -1345,7 +1345,7 @@ class Task:
 
     @property
     def storage_mounts(self) -> Dict[str, storage_lib.Storage]:
-        storage_mounts = self._storage_mounts
+        storage_mounts = self._storage_mounts.copy()
         for target, storage_obj in storage_mounts.items():
             target = _fill_in_env_vars(target, self.envs_and_secrets)
             storage_obj_dict = storage_obj.to_yaml_config()
