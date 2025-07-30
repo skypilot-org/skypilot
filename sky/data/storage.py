@@ -771,7 +771,7 @@ class Storage(object):
             # Sky optimizer either adds a storage object instance or selects
             # from existing ones
             input_stores = self.stores
-            self.stores = {}
+            self.stores.clear()
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
                                                mode=self.mode)
@@ -1260,7 +1260,7 @@ class Storage(object):
                     store.delete()
                 elif self.force_delete:
                     store.delete()
-            self.stores = {}
+            self.stores.clear()
             # Remove storage from global_user_state if present
             if self.name is not None:
                 global_user_state.remove_storage(self.name)

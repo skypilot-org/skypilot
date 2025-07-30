@@ -1351,6 +1351,9 @@ class Task:
                                                  self.envs_and_secrets)
             storage_mounts[target] = storage_lib.Storage.from_yaml_config(
                 storage_obj_dict)
+            # Restore the stores from the original storage object, so that
+            # constructed storage object will have the correct stores.
+            storage_mounts[target].stores = storage_obj.stores
         return storage_mounts
 
     def _get_preferred_store(
