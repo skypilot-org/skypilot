@@ -24,7 +24,9 @@ Supported volume types:
 Volumes on Kubernetes
 ---------------------
 
-SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters through three commands:
+In Kubernetes clusters, PVCs (Persistent Volume Claims) request and bind to PV (Persistent Volume) resources. These persistent volumes can be backed by various storage backends, including **block storage** solutions (AWS EBS, GCP Persistent Disk) and **distributed file systems** (JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore), etc.
+
+SkyPilot supports creating and managing PVC volumes in Kubernetes clusters through three commands:
 
 - ``sky volumes apply``: Create a new volume
 - ``sky volumes ls``: List all volumes
