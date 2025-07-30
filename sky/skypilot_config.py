@@ -495,6 +495,9 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     try:
         config_dict = common_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
+        db_url = config.pop_nested(('db',), None)
+        if db_url:
+            os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
                          f'{common_utils.dump_yaml_str(dict(config))}')
@@ -556,21 +559,15 @@ def _reload_config_as_server() -> None:
     _set_loaded_config_path(None)
 
     server_config_path = _resolve_server_config_path()
-    db_url_from_env = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     server_config = _get_config_from_path(server_config_path)
-    if db_url_from_env:
-        server_config.set_nested(('db',), db_url_from_env)
-
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(f'server config: \n'
-                     f'{common_utils.dump_yaml_str(dict(server_config))}')
-
-    db_url = server_config.get_nested(('db',), None)
-    if db_url and len(server_config.keys()) > 1:
-        raise ValueError(
-            'if db config is specified, no other config is allowed')
+    # Get the db url, either from the env var or the config file.
+    db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
 
     if db_url:
+        if len(server_config.keys()) > 1:
+            raise ValueError(
+                'if db config is specified, no other config is allowed')
+        logger.debug(f'retrieving config from database')
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
                                                          poolclass=NullPool)
@@ -591,14 +588,13 @@ def _reload_config_as_server() -> None:
 
             db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
             if db_config:
-                if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                    logger.debug(
-                        f'Config loaded from db:\n'
-                        f'{common_utils.dump_yaml_str(dict(db_config))}')
                 server_config = overlay_skypilot_config(server_config,
                                                         db_config)
             # Close the engine to avoid connection leaks
             sqlalchemy_engine.dispose()
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'server config: \n'
+                     f'{common_utils.dump_yaml_str(dict(server_config))}')
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
 
@@ -680,7 +676,7 @@ def override_skypilot_config(
         override_config_path = json.loads(override_config_path_serialized)
 
     disallowed_diff_keys = []
-    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS - [('db',)]:
         value = override_configs.pop_nested(key, default_value=None)
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
