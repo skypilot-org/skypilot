@@ -4659,7 +4659,9 @@ def _generate_task_with_service(
                         'explicitly set the service port in the '
                         '`service.ports` section.')
         assert service_port is not None
-        task.set_service(task.service.set_ports(str(service_port)))
+        service = task.service
+        service.set_ports(str(service_port))
+        task.set_service(service)
     else:
         for requested_resources in list(task.resources):
             if requested_resources.ports is None:

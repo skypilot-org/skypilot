@@ -969,7 +969,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
         assert task.file_mounts is not None
-        task.set_file_mounts(task.set_file_mounts.pop(dst))
+        file_mounts = task.file_mounts
+        file_mounts.pop(dst)
+        task.set_file_mounts(file_mounts)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue

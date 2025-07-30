@@ -69,6 +69,7 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
     }
     service_spec.tls_credential = serve_utils.TLSCredential(
         remote_tls_keyfile, remote_tls_certfile)
+    task.set_service(service_spec)
     return tls_template_vars
 
 
