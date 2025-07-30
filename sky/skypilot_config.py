@@ -570,7 +570,7 @@ def _reload_config_as_server() -> None:
     if db_url:
         if len(server_config.keys()) > 1:
             raise ValueError(
-                'if db config is specified, no other config is allowed')
+                'If db config is specified, no other config is allowed')
         logger.debug('retrieving config from database')
         with _DB_USE_LOCK:
             sqlalchemy_engine = sqlalchemy.create_engine(db_url,
