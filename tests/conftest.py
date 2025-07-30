@@ -418,17 +418,6 @@ def setup_policy_server(request, tmp_path_factory):
                 ])
                 wait_server(port)
                 pid_file.write_text(str(server_process.pid))
-                config_path = pathlib.Path(
-                    skypilot_config.get_user_config_path()).expanduser()
-                if not config_path.exists():
-                    config_path.touch()
-                    config: Dict[str, Any] = {}
-                else:
-                    config = skypilot_config.get_user_config()
-                    config = dict(config)
-                original_config = config.copy()
-                config['admin_policy'] = policy_server_url
-                common_utils.dump_yaml(str(config_path), config)
                 fn.write_text(policy_server_url)
                 ref_count(1)
         if policy_server_url is not None:
