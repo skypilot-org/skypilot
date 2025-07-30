@@ -989,15 +989,18 @@ def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
 
     # mutate per-context config and check if it's updated
     context_a_custom_labels = skypilot_config.get_nested(
-        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata', 'labels'), {})
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
     context_a_custom_labels['contextA_label'] = 'contextA_value_updated'
     mutated_config = skypilot_config.set_nested(
-        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata', 'labels'), 
-        context_a_custom_labels)
-    
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+
     context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=mutated_config,
-        cloud='kubernetes', region='contextA', keys=('custom_metadata',))
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
     assert context_a_custom_metadata == {
         'labels': {
             'global_label': 'global_value',
@@ -1013,7 +1016,9 @@ def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
         ('kubernetes', 'custom_metadata', 'labels'), global_custom_labels)
     context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=mutated_config,
-        cloud='kubernetes', region='contextA', keys=('custom_metadata',))
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
     assert context_a_custom_metadata == {
         'labels': {
             'global_label': 'global_value_updated',
@@ -1023,19 +1028,24 @@ def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
 
     # mutate label defined by global config in per-context config
     context_a_custom_labels = skypilot_config.get_nested(
-        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata', 'labels'), {})
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
     context_a_custom_labels['global_label'] = 'global_value_updated'
     mutated_config = skypilot_config.set_nested(
-        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata', 'labels'), context_a_custom_labels)
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
     context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=mutated_config,
-        cloud='kubernetes', region='contextA', keys=('custom_metadata',))
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
     assert context_a_custom_metadata == {
         'labels': {
             'global_label': 'global_value_updated',
             'contextA_label': 'contextA_value'
         }
     }
+
 
 def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
     """Test that nested per-region standardized config works
