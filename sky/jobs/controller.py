@@ -923,11 +923,11 @@ class Controller:
         log_file = os.path.join(log_dir, f'{job_id}.log')
 
         job_logger = logging.getLogger(f'sky.jobs.{job_id}')
-        job_logger.setLevel(logging.INFO)
+        job_logger.setLevel(logging.DEBUG)
 
         # Create file handler
         file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(logging.DEBUG)
 
         # Use Sky's standard formatter
         file_handler.setFormatter(sky_logging.FORMATTER)
