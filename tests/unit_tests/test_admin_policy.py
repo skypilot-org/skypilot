@@ -324,7 +324,7 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        fresh_task.file_mounts = {'/existing/mount': '/local/path'}
+        fresh_task.set_file_mounts({'/existing/mount': '/local/path'})
         user_request = sky.UserRequest(task=fresh_task,
                                        skypilot_config=None,
                                        at_client_side=True)

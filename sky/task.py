@@ -493,7 +493,9 @@ class Task:
             if not data_utils.is_cloud_store_url(source):
                 self._file_mounts[target] = os.path.abspath(
                     os.path.expanduser(source))
-                if not os.path.exists(self.file_mounts[target]
+                filled_target = _fill_in_env_vars(target, self._envs)
+                filled_target = _fill_in_env_vars(filled_target, self._secrets)
+                if not os.path.exists(self.file_mounts[filled_target]
                                      ) and not source.startswith('skypilot:'):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
