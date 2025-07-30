@@ -193,7 +193,7 @@ By default, the API server is upgraded with the ``Recreate`` strategy, which int
 
 .. note::
     
-    ``RollingUpdate`` is an experimental feature. There is a known limitation that running command might fail when the old version of the API server get removed from the ingress backend. It is recommended to schedule the upgrade during a maintainence window.
+    ``RollingUpdate`` is an experimental feature. There is a known limitation that some running commands might fail when the old version of the API server gets removed from the ingress backend. It is recommended to schedule the upgrade during a maintenance window.
 
 The following table compares the two upgrade strategies:
 
