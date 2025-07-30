@@ -16,6 +16,7 @@ import zipfile
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.data import storage_utils
 from sky.server import common as server_common
@@ -172,6 +173,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
 
     server_url = server_common.get_server_url()
     max_attempts = 3
+    sa_headers = service_account_auth.get_service_account_headers()
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(
@@ -184,7 +186,10 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                 },
                 content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
                                           params.chunk_index),
-                headers={'Content-Type': 'application/octet-stream'},
+                headers={
+                    'Content-Type': 'application/octet-stream',
+                    **sa_headers,
+                },
                 cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
                 data = response.json()
