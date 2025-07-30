@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import copy
 import difflib
 import functools
 import getpass
@@ -510,60 +511,67 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
         return argv or []
 
 
-def redact_substituted_secrets_in_config(config: Dict[str, Any], 
-                                       secrets: Dict[str, str]) -> Dict[str, Any]:
+def redact_substituted_secrets_in_config(
+        config: Dict[str, Any], secrets: Dict[str, str]) -> Dict[str, Any]:
     """Redact secret values that have been substituted into config sections.
-    
+
     This function finds secret values that were substituted into non-secrets
     sections of the config (like workdir, file_mounts, etc.) and replaces
     the entire containing string with '<redacted>'.
-    
+
     Args:
         config: The task configuration dictionary
         secrets: Dictionary of secret name -> secret value pairs
-        
+
     Returns:
         Modified config with entire strings containing secrets redacted
-        
+
     Examples:
-        config = {'workdir': '/path/to/secret-token-123', 'secrets': {'TOKEN': 'secret-token-123'}}
+        config = {'workdir': '/path/to/secret-token-123',
+                 'secrets': {'TOKEN': 'secret-token-123'}}
         secrets = {'TOKEN': 'secret-token-123'}
+        # The entire string '/path/to/secret-token-123' is redacted.
         result = redact_substituted_secrets_in_config(config, secrets)
         # result['workdir'] becomes '<redacted>' (entire string redacted)
     """
-    import copy
-    
     if not secrets:
         return config
-    
+
     # Create a deep copy to avoid modifying the original
     redacted_config = copy.deepcopy(config)
-    
+
     def contains_secret(value: str) -> bool:
         """Check if a string contains any secret value."""
         for secret_value in secrets.values():
-            if secret_value and isinstance(secret_value, str) and secret_value in value:
+            if secret_value and isinstance(secret_value,
+                                           str) and secret_value in value:
                 return True
         return False
-    
+
     def redact_recursive(obj, is_secrets_section=False):
         """Recursively redact any string that contains secret values."""
         if isinstance(obj, dict):
-            return {key: redact_recursive(value, is_secrets_section or key == 'secrets') for key, value in obj.items()}
+            return {
+                key: redact_recursive(value, is_secrets_section or
+                                      key == 'secrets')
+                for key, value in obj.items()
+            }
         elif isinstance(obj, list):
             return [redact_recursive(item, is_secrets_section) for item in obj]
         elif isinstance(obj, str):
             if is_secrets_section:
-                # In the secrets section, redact all string values (including empty strings)
+                # In the secrets section, redact all string values (including
+                # empty strings).
                 return '<redacted>'
             elif contains_secret(obj):
-                # Outside secrets section, redact strings that contain secret values
+                # Outside secrets section, redact strings that contain secret
+                # values.
                 return '<redacted>'
             return obj
         else:
             # For other types (int, bool, None, etc.), return as-is
             return obj
-    
+
     try:
         redacted_config = redact_recursive(redacted_config)
     except (TypeError, AttributeError, RecursionError, MemoryError) as e:
@@ -572,10 +580,11 @@ def redact_substituted_secrets_in_config(config: Dict[str, Any],
         # - AttributeError: calling methods on objects that don't support them
         # - RecursionError: circular references in config structure
         # - MemoryError: config too large to process
-        logger.warning(f'Failed to redact secrets in config due to {type(e).__name__}: {e}. '
-                      'Returning original config to avoid system breakage.')
+        logger.warning(
+            f'Failed to redact secrets in config due to {type(e).__name__}: '
+            f'{e}. Returning original config to avoid system breakage.')
         return config
-    
+
     return redacted_config
 
 

@@ -1592,7 +1592,8 @@ class Task:
         # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
 
-        # Add secrets without redaction initially (will be redacted later if needed)
+        # Add secrets without redaction initially (will be redacted later
+        # if needed).
         add_if_not_none('secrets', self.secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
@@ -1615,14 +1616,15 @@ class Task:
             ]
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
-        
-        # If redact_secrets is True, redact secret values throughout the entire config.
-        # This handles both the secrets section itself and secret values that were 
-        # substituted into other sections (like workdir, file_mounts, etc.)
+
+        # If redact_secrets is True, redact secret values throughout the entire
+        # config. This handles both the secrets section itself and secret values
+        # that were substituted into other sections (like workdir, file_mounts,
+        # etc.)
         if redact_secrets and self.secrets:
             config = common_utils.redact_substituted_secrets_in_config(
                 config, self.secrets)
-        
+
         return config
 
     def get_required_cloud_features(
