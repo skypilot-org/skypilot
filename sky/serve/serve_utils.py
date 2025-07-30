@@ -926,27 +926,21 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         if setup_completed and record is not None:
             # Check for name conflicts
             # We need to verify this is the service we just launched, not a pre-existing one
-            # In consolidation mode: all services have controller_job_id=0, so just check existence
-            # In non-consolidation mode: each service has unique job_id, so compare them
+            # Both modes use unique job_id to detect conflicts:
+            # - Consolidation mode: negative job_ids (-1, -2, -3...)
+            # - Non-consolidation mode: positive job_ids (Ray job IDs)
             
             # If we reach here, a service with this name exists in the database
             # This could be either:
             # 1. The service we just launched (normal case)
             # 2. A pre-existing service with the same name (name conflict)
-            
-            # In consolidation mode, we can't distinguish by job_id (all are 0)
-            # So we rely on the fact that the controller won't create duplicate entries
-            if not is_consolidation_mode():
-                # In non-consolidation mode, use job_id as unique identifier
-                # to detect name conflicts. This is NOT a Ray dependency - job_id
-                # is just a unique identifier assigned to each service.
-                if job_id != record['controller_job_id']:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'The service {service_name!r} is already running. '
-                            'Please specify a different name for your service. '
-                            'To update an existing service, run: sky serve update '
-                            f'{service_name} <new-service-yaml>')
+            if job_id != record['controller_job_id']:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'The service {service_name!r} is already running. '
+                        'Please specify a different name for your service. '
+                        'To update an existing service, run: sky serve update '
+                        f'{service_name} <new-service-yaml>')
             
             lb_port = record['load_balancer_port']
             if lb_port is not None:

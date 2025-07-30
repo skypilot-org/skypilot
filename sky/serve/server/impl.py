@@ -155,7 +155,9 @@ def up(
             task_resources=task.resources)
         controller_job_id = None
         if serve_utils.is_consolidation_mode():
-            controller_job_id = 0
+            # Use negative job IDs for consolidation mode services
+            # This ensures uniqueness and helps detect name conflicts
+            controller_job_id = serve_state.get_next_consolidation_job_id()
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,

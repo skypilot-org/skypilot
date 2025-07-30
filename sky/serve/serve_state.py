@@ -582,6 +582,28 @@ def get_replicas_at_status(
     return [replica for replica in replicas if replica.status == status]
 
 
+@init_db
+def get_next_consolidation_job_id() -> int:
+    """Get the next available negative job ID for consolidation mode.
+    
+    Returns a negative integer that decrements with each call.
+    This ensures unique job IDs for consolidation mode services.
+    """
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        # Find the minimum (most negative) controller_job_id
+        result = cursor.execute(
+            'SELECT MIN(controller_job_id) FROM services WHERE controller_job_id < 0'
+        ).fetchone()
+        
+        if result[0] is None:
+            # No negative job IDs yet, start with -1
+            return -1
+        else:
+            # Return the next negative number
+            return result[0] - 1
+
+
 # === Version functions ===
 @init_db
 def add_version(service_name: str) -> int:
