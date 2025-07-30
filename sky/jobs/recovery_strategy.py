@@ -17,6 +17,7 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import scheduler
@@ -301,43 +302,34 @@ class StrategyExecutor:
                         state.set_restarting(self.job_id, self.task_id,
                                              recovery)
                     try:
-                        if not state.force_no_postgres():
-                            usage_lib.messages.usage.set_internal()
-                            request_id = sdk.launch(
-                                self.dag,
-                                cluster_name=self.cluster_name,
-                                idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                                down=True,
-                                _is_launched_by_jobs_controller=True)
-                            # would be nice to have the async version of this,
-                            # however, scheduled_launch uses scheduler
-                            # functions that acquire filelocks, no async file
-                            # lock exists so it would have to be run in a
-                            # coroutine anyway.
-                            log_file = _get_logger_file(self._logger)
-                            try:
-                                if log_file is None:
-                                    # will get caught by the except block below
-                                    raise OSError('Log file is None')
-                                with open(log_file, 'a', encoding='utf-8') as f:
-                                    sdk.stream_and_get(request_id,
-                                                       output_stream=f)
-                            except OSError as e:
-                                self._logger.error(
-                                    f'Failed to stream logs: {e}')
-                                sdk.get(request_id)
-                            self._logger.info('Managed job cluster launched.')
-                        else:
-                            # use the execution api to launch the job
-                            self._logger.info('Launching job with execution')
-                            execution.launch(
-                                self.dag,
-                                cluster_name=self.cluster_name,
-                                idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                                down=True,
-                                _is_launched_by_jobs_controller=True,
-                                job_logger=self._logger)
-                            self._logger.info('Managed job cluster launched.')
+                        if state.force_no_postgres():
+                            skypilot_config.set_nested(('db',), None)
+
+                        usage_lib.messages.usage.set_internal()
+                        request_id = sdk.launch(
+                            self.dag,
+                            cluster_name=self.cluster_name,
+                            idle_minutes_to_autostop=_AUTODOWN_MINUTES,
+                            down=True,
+                            _is_launched_by_jobs_controller=True)
+                        # would be nice to have the async version of this,
+                        # however, scheduled_launch uses scheduler
+                        # functions that acquire filelocks, no async file
+                        # lock exists so it would have to be run in a
+                        # coroutine anyway.
+                        log_file = _get_logger_file(self._logger)
+                        try:
+                            if log_file is None:
+                                # will get caught by the except block below
+                                raise OSError('Log file is None')
+                            with open(log_file, 'a', encoding='utf-8') as f:
+                                sdk.stream_and_get(request_id,
+                                                    output_stream=f)
+                        except OSError as e:
+                            self._logger.error(
+                                f'Failed to stream logs: {e}')
+                            sdk.get(request_id)
+                        self._logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
                             exceptions.ResourcesMismatchError) as e:
