@@ -302,9 +302,6 @@ class StrategyExecutor:
                         state.set_restarting(self.job_id, self.task_id,
                                              recovery)
                     try:
-                        if state.force_no_postgres():
-                            skypilot_config.set_nested(('db',), None)
-
                         usage_lib.messages.usage.set_internal()
                         request_id = sdk.launch(
                             self.dag,

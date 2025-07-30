@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import ipaddress
 import os
 import pathlib
 import tempfile
@@ -37,6 +38,8 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
+
+from urllib import parse as urlparse
 
 if typing.TYPE_CHECKING:
     import sky
@@ -169,6 +172,14 @@ def launch(
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+    if not managed_job_utils.is_consolidation_mode():
+        db_path = mutated_user_config.get('db', None)
+        if db_path is not None:
+            parsed = urlparse.urlparse(db_path)
+            if ((parsed.hostname == 'localhost' or
+                ipaddress.ip_address(parsed.hostname).is_loopback)):
+                mutated_user_config['db'] = None
+
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
