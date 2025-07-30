@@ -46,7 +46,7 @@ ALL_REGIONS = [
     'eu-west-1',
     'eu-west-2',
     'eu-south-1',
-    # 'eu-south-2', # no supported AMI
+    'eu-south-2',
     'eu-west-3',
     'eu-north-1',
     'me-south-1',
