@@ -52,7 +52,7 @@ def requires_construction(func):
 
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
-        if not self._constructed:  # pylint: disable=protected-access
+        if self._constructed and not self._constructed:  # pylint: disable=protected-access
             self._construct_impl()  # pylint: disable=protected-access
             self._constructed = True  # pylint: disable=protected-access
         return func(self, *args, **kwargs)
@@ -1435,6 +1435,7 @@ class Storage(object):
             config['_bucket_sub_path'] = self._bucket_sub_path
         return config
 
+
 # Registry for S3-compatible stores
 _S3_COMPATIBLE_STORES = {}
 
@@ -1832,7 +1833,6 @@ class S3CompatibleStore(AbstractStore):
                     f'Transfer from {source_type} to {target_type} '
                     'is not yet supported.')
 
-    @requires_construction
     def delete(self) -> None:
         """Delete the bucket or sub-path."""
         if self._bucket_sub_path is not None and not self.is_sky_managed:
