@@ -95,8 +95,8 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
 
 def get_number_of_controllers() -> int:
     config = server_config.compute_server_config(deploy=True, quiet=True)
-    free = psutil.virtual_memory().total // 1024 // 1024
-
+    free = common_utils.get_mem_size_gb() * 1024
+    
     used = 0.0
     used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
     used += (config.long_worker_config.garanteed_parallelism +
