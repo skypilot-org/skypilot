@@ -87,8 +87,9 @@ sudo dpkg -l | grep -i nvidia | head -10 || echo "No NVIDIA packages found"
 # Set up environment for CUDA
 echo ""
 echo "=== Setting up CUDA environment ==="
-echo 'export PATH=/usr/local/cuda/bin:$PATH' | sudo tee -a /etc/environment
-echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' | sudo tee -a /etc/environment
+# Add CUDA to system-wide profile
+echo 'export PATH="/usr/local/cuda/bin:$PATH"' | sudo tee -a /etc/profile
+echo 'export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"' | sudo tee -a /etc/profile
 
 echo ""
 echo "=== Installation Complete ==="
