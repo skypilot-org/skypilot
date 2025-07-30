@@ -1,6 +1,5 @@
 """Task: a coarse-grained stage in an application."""
 import collections
-import copy
 import inspect
 import json
 import os
@@ -349,7 +348,7 @@ class Task:
         """
         self.name = name
         self.run = run
-        self.storage_mounts: Dict[str, storage_lib.Storage] = {}
+        self._storage_mounts: Dict[str, storage_lib.Storage] = {}
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
         self.setup = setup
@@ -493,8 +492,7 @@ class Task:
             if not data_utils.is_cloud_store_url(source):
                 self._file_mounts[target] = os.path.abspath(
                     os.path.expanduser(source))
-                filled_target = _fill_in_env_vars(target, self._envs)
-                filled_target = _fill_in_env_vars(filled_target, self._secrets)
+                filled_target = _fill_in_env_vars(target, self.envs_and_secrets)
                 if not os.path.exists(self.file_mounts[filled_target]
                                      ) and not source.startswith('skypilot:'):
                     with ux_utils.print_exception_no_traceback():
@@ -1125,9 +1123,9 @@ class Task:
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
         if self._service is None:
             return None
-        service_config = copy.copy(self._service.to_yaml_config())
-        service_config = _fill_in_env_vars(service_config, self._envs)
-        service_config = _fill_in_env_vars(service_config, self._secrets)
+        service_config = self._service.to_yaml_config()
+        service_config = _fill_in_env_vars(service_config,
+                                           self.envs_and_secrets)
         return service_spec.SkyServiceSpec.from_yaml_config(service_config)
 
     def set_service(self,
@@ -1167,9 +1165,7 @@ class Task:
     def workdir(self) -> Optional[Union[str, Dict[str, Any]]]:
         if self._workdir is None:
             return None
-        workdir = copy.copy(self._workdir)
-        workdir = _fill_in_env_vars(workdir, self._envs)
-        workdir = _fill_in_env_vars(workdir, self._secrets)
+        workdir = _fill_in_env_vars(self._workdir, self.envs_and_secrets)
         return workdir
 
     def set_workdir(self, workdir: Optional[Union[str, Dict[str,
@@ -1181,9 +1177,8 @@ class Task:
     def file_mounts(self) -> Optional[Dict[str, str]]:
         if self._file_mounts is None:
             return None
-        file_mounts = copy.copy(self._file_mounts)
-        file_mounts = _fill_in_env_vars(file_mounts, self._envs)
-        file_mounts = _fill_in_env_vars(file_mounts, self._secrets)
+        file_mounts = _fill_in_env_vars(self._file_mounts,
+                                        self.envs_and_secrets)
         return file_mounts
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
@@ -1287,7 +1282,7 @@ class Task:
           ValueError: if input paths are invalid.
         """
         if storage_mounts is None:
-            self.storage_mounts = {}
+            self._storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
             for r in self.resources:
                 r.set_requires_fuse(False)
@@ -1317,7 +1312,7 @@ class Task:
                 for r in self.resources:
                     r.set_requires_fuse(True)
         # Storage source validation is done in Storage object
-        self.storage_mounts = storage_mounts
+        self._storage_mounts = storage_mounts
         return self
 
     def update_storage_mounts(
@@ -1343,9 +1338,22 @@ class Task:
         """
         if not storage_mounts:
             return self
-        task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
+        task_storage_mounts = (self._storage_mounts
+                               if self._storage_mounts else {})
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
+
+    @property
+    def storage_mounts(self) -> Dict[str, storage_lib.Storage]:
+        storage_mounts = self._storage_mounts
+        for target, storage_obj in storage_mounts.items():
+            target = _fill_in_env_vars(target, self.envs_and_secrets)
+            storage_obj_dict = storage_obj.to_yaml_config()
+            storage_obj_dict = _fill_in_env_vars(storage_obj_dict,
+                                                 self.envs_and_secrets)
+            storage_mounts[target] = storage_lib.Storage.from_yaml_config(
+                storage_obj_dict)
+        return storage_mounts
 
     def _get_preferred_store(
             self) -> Tuple[storage_lib.StoreType, Optional[str]]:
