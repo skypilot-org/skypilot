@@ -1403,6 +1403,37 @@ class Storage(object):
         storage_obj.force_delete = force_delete
         return storage_obj
 
+    def to_yaml_config(self) -> Dict[str, Any]:
+        config = {}
+
+        def add_if_not_none(key: str, value: Optional[Any]):
+            if value is not None:
+                config[key] = value
+
+        name = None
+        if (self.source is None or not isinstance(self.source, str) or
+                not data_utils.is_cloud_store_url(self.source)):
+            # Remove name if source is a cloud store URL
+            name = self.name
+        add_if_not_none('name', name)
+        add_if_not_none('source', self.source)
+
+        stores = None
+        is_sky_managed = self._is_sky_managed
+        if self.stores:
+            stores = ','.join([store.value for store in self.stores])
+            store = list(self.stores.values())[0]
+            if store is not None:
+                is_sky_managed = store.is_sky_managed
+        add_if_not_none('store', stores)
+        add_if_not_none('_is_sky_managed', is_sky_managed)
+        add_if_not_none('persistent', self.persistent)
+        add_if_not_none('mode', self.mode.value)
+        if self.force_delete:
+            config['_force_delete'] = True
+        if self._bucket_sub_path is not None:
+            config['_bucket_sub_path'] = self._bucket_sub_path
+        return config
 
 # Registry for S3-compatible stores
 _S3_COMPATIBLE_STORES = {}
