@@ -495,6 +495,9 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     try:
         config_dict = common_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
+        # pop the db url from the config, and set it to the env var.
+        # this is to avoid db url (considered a sensitive value)
+        # being printed with the rest of the config.
         db_url = config.pop_nested(('db',), None)
         if db_url:
             os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
@@ -560,7 +563,8 @@ def _reload_config_as_server() -> None:
 
     server_config_path = _resolve_server_config_path()
     server_config = _get_config_from_path(server_config_path)
-    # Get the db url, either from the env var or the config file.
+    # Get the db url from the env var. _get_config_from_path should have moved
+    # the db url specified in config file to the env var.
     db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
 
     if db_url:
