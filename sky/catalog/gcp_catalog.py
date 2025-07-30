@@ -691,7 +691,6 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     elif tag == 'skypilot:custom-gpu-ubuntu-2204':
         image_id = ('projects/sky-dev-465/global/images/'
                     'skypilot-gcp-gpu-ubuntu-250730')
-    logger.info(f'tag: {tag}, region: {region}, image_id: {image_id}')
     return image_id
 
 
