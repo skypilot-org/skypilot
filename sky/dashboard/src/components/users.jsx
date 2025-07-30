@@ -1316,7 +1316,7 @@ function UsersTable({
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
               {/* Show Actions column if basicAuthEnabled */}
-              {basicAuthEnabled && (
+              {(basicAuthEnabled || currentUserRole === 'admin') && (
                 <TableHead className="whitespace-nowrap w-1/7">
                   Actions
                 </TableHead>
@@ -1430,10 +1430,11 @@ function UsersTable({
                   )}
                 </TableCell>
                 {/* Actions cell logic */}
-                {basicAuthEnabled && (
-                  <TableCell className="relative">
-                    <div className="flex items-center gap-2">
-                      {/* Reset password icon: admin can reset any, user can only reset self */}
+                {(basicAuthEnabled || currentUserRole === 'admin') && (
+                <TableCell className="relative">
+                  <div className="flex items-center gap-2">
+                    {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                    {basicAuthEnabled && (
                       <button
                         onClick={
                           currentUserRole === 'admin' ||
@@ -1462,18 +1463,19 @@ function UsersTable({
                       >
                         <KeyRoundIcon className="h-4 w-4" />
                       </button>
-                      {/* Only admin can see delete */}
-                      {currentUserRole === 'admin' && (
-                        <button
-                          onClick={() => onDeleteUser(user)}
-                          className="text-red-600 hover:text-red-700 p-1"
-                          title="Delete User"
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </TableCell>
+                    )}
+                    {/* Delete button - only show for admin */}
+                    {currentUserRole === 'admin' && (
+                      <button
+                        onClick={() => onDeleteUser(user)}
+                        className="text-red-600 hover:text-red-700 p-1"
+                        title="Delete User"
+                      >
+                        <Trash2Icon className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </TableCell>
                 )}
               </TableRow>
             ))}
