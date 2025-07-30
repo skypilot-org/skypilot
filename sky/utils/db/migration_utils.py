@@ -32,7 +32,6 @@ def get_engine(db_name: str):
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        logger.debug(f'using db URI from {conn_string}')
         engine = sqlalchemy.create_engine(conn_string,
                                           poolclass=sqlalchemy.NullPool)
     else:
