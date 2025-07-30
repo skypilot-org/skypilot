@@ -756,9 +756,9 @@ To uninstall the API server, run:
 
 .. code-block:: bash
 
-    helm uninstall $RELEASE_NAME --namespace $NAMESPACE
+    helm uninstall $RELEASE_NAME --namespace $NAMESPACE --wait
 
-This will delete the API server and all associated resources.
+This will delete the API server and all associated resources. ``--wait`` ensures that all the resources of SkyPilot API server are deleted before the command returns.
 
 
 Other notes
@@ -997,7 +997,7 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
 
 .. note::
 
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller. For other ingress controllers, you can refer to :ref:`deploy-api-server-basic-auth` to setup authentication on the API server.
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller.
 
 
 .. _sky-api-server-cloud-deploy:
@@ -1070,6 +1070,5 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     API server metrics monitoring <examples/api-server-metrics-setup>
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
-    Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
     Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>

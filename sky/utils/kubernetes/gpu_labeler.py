@@ -62,8 +62,8 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
     if not unlabeled_gpu_nodes:
         print('No unlabeled GPU nodes found in the cluster. If you have '
               'unlabeled GPU nodes, please ensure that they have the resource '
-              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>` '
-              'in their capacity.')
+              f'`{kubernetes_utils.get_gpu_resource_key(context)}: '
+              '<number of GPUs>` in their capacity.')
         return
 
     print(

@@ -1021,14 +1021,13 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
 
+    keyfile = f'~/test-skyserve-key-{name}.pem'
     with tempfile.TemporaryDirectory() as tempdir:
-        keyfile = os.path.join(tempdir, 'key.pem')
         certfile = os.path.join(tempdir, 'cert.pem')
         subprocess_utils.run_no_outputs(
             f'openssl req -x509 -newkey rsa:2048 -days 36500 -nodes '
@@ -1053,7 +1052,7 @@ def test_skyserve_https(generic_cloud: str):
                 'output=$(curl $http_endpoint 2>&1); echo $output; '
                 'echo $output | grep "Empty reply from server"',
             ],
-            _TEARDOWN_SERVICE.format(name=name),
+            _TEARDOWN_SERVICE.format(name=name) + f'; rm -f {keyfile}',
             timeout=20 * 60,
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
