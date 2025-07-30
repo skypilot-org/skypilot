@@ -169,7 +169,7 @@ Behavior when the API server is being upgraded:
 * For non-critical ongoing requests (e.g., log tailing), it cancels them and returns an error to ask the client to retry.
 * For new requests, it returns an error to ask the client to retry. New requests will be served when the new version of the API server is ready.
 
-To futher reduce the waiting time during upgrade, refer to :ref:`rolling update the API server<sky-api-server-upgrade-strategy>`.
+To further reduce the waiting time during upgrade, you can use :ref:`rolling update for the API server<sky-api-server-upgrade-strategy>`.
 
 SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., log tailing) will automatically resume:
 
@@ -202,8 +202,8 @@ The following table compares the two upgrade strategies:
    :header-rows: 1
 
    * - Aspect
-     - Recreate
-     - RollingUpdate
+     - ``Recreate``
+     - ``RollingUpdate``
    * - **Availability**
      - Brief downtime during upgrade
      - Zero downtime
@@ -211,7 +211,7 @@ The following table compares the two upgrade strategies:
      - New requests wait until upgrade completes
      - New requests served continuously by available replicas
    * - **Database Requirements**
-     - Can use local storage
+     - Can use local storage (SQLite)
      - Must use external persistent database
    * - **Resource Usage**
      - Terminates old pod before starting new one
@@ -241,7 +241,7 @@ Here's an example of deploying the API server with the ``RollingUpdate`` strateg
 Ingress config
 --------------
 
-The SkyPilot helm chart automatically configures the ingress resource to achieve best availability during upgrade. If you are managing the ingress resource out side of the SkyPilot helm chart, you can refer to the following snnipets to improve the availability during upgrades:
+The SkyPilot helm chart automatically configures the ingress resource to achieve higher availability during upgrade. If you are managing the ingress resource outside of the SkyPilot helm chart, refer to the following snippet to improve the availability during upgrades:
 
 .. dropdown:: Example ingress based on nginx-ingress-controller
 
