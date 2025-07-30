@@ -213,9 +213,9 @@ The following table compares the two upgrade strategies:
    * - **Database Requirements**
      - Can use local storage (SQLite)
      - Must use external persistent database
-   * - **Resource Usage**
-     - Terminates old pod before starting new one
-     - Launches new pod before terminating old one
+   * - **Resource Usage During Upgrade**
+     - Terminates old API server pod, then starts new one
+     - Starts new API server pod, then terminates old one
    * - **Use Cases**
      - Development environments, simple setups
      - Production environments requiring high availability
