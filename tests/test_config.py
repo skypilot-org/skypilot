@@ -1030,7 +1030,7 @@ def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
     context_a_custom_labels = skypilot_config.get_nested(
         ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
          'labels'), {})
-    context_a_custom_labels['global_label'] = 'global_value_updated'
+    context_a_custom_labels['global_label'] = 'global_value_contextA_specific'
     mutated_config = skypilot_config.set_nested(
         ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
          'labels'), context_a_custom_labels)
@@ -1041,7 +1041,7 @@ def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
         keys=('custom_metadata',))
     assert context_a_custom_metadata == {
         'labels': {
-            'global_label': 'global_value_updated',
+            'global_label': 'global_value_contextA_specific',
             'contextA_label': 'contextA_value'
         }
     }
