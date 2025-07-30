@@ -4435,7 +4435,7 @@ def jobs_launch(
             click.secho(
                 f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
                 ' will be ignored in pool. To update a pool, please '
-                f'use `sky pool update {pool} pool.yaml`. '
+                f'use `sky pool apply {pool} pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
