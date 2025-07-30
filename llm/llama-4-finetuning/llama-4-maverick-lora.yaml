@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick_gke_llama_factory_lora.yaml -c maverick --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick-lora.yaml -c maverick --env HF_TOKEN
 #
 # This config requires at least 2 nodes with 8x H100 GPUs each.
 
@@ -32,6 +32,9 @@ file_mounts:
   /configs: ./configs
 
 setup: |
+  conda create -n training python=3.10 -y
+  conda activate training
+
   # Download the repository configuration package
   wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
 
@@ -44,13 +47,15 @@ setup: |
   #sudo apt-get install cuda-minimal-build-12-6 -y
   sudo apt-get install cuda-toolkit-12-6 -y
 
-  git clone --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
+  git clone -b v0.9.3 --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
   cd LLaMA-Factory
   pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
   pip install "transformers>=4.51.1"
 
 
 run: |
+  conda activate training
+
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"
 

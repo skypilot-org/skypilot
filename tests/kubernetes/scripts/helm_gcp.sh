@@ -60,20 +60,20 @@ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 
 # Deploy SkyPilot API server
 echo "Deploying SkyPilot API server..."
+
+# Set version-specific flag
 if [ "$HELM_VERSION" = "latest" ]; then
-    helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME --devel \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --set ingress.authCredentials=$AUTH_STRING
+    extra_flag="--devel"
 else
     # Convert PEP440 version to SemVer if needed (e.g., 1.0.0.dev20250609 -> 1.0.0-dev.20250609)
     SEMVER_VERSION=$(echo "$HELM_VERSION" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
-    helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --version "$SEMVER_VERSION" \
-        --set ingress.authCredentials=$AUTH_STRING
+    extra_flag="--version $SEMVER_VERSION"
 fi
+
+helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag \
+    --namespace $NAMESPACE \
+    --create-namespace \
+    --set ingress.authCredentials=$AUTH_STRING
 
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."

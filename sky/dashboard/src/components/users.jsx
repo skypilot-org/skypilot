@@ -1275,205 +1275,213 @@ function UsersTable({
 
   return (
     <Card>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead
-              onClick={() => requestSort('usernameDisplay')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-            >
-              Name{getSortDirection('usernameDisplay')}
-            </TableHead>
-            <TableHead
-              onClick={() => requestSort('fullEmailID')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-            >
-              User ID{getSortDirection('fullEmailID')}
-            </TableHead>
-            <TableHead
-              onClick={() => requestSort('role')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-            >
-              Role{getSortDirection('role')}
-            </TableHead>
-            <TableHead
-              onClick={() => requestSort('created_at')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-            >
-              Joined{getSortDirection('created_at')}
-            </TableHead>
-            <TableHead
-              onClick={() => requestSort('clusterCount')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-            >
-              Clusters{getSortDirection('clusterCount')}
-            </TableHead>
-            <TableHead
-              onClick={() => requestSort('jobCount')}
-              className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-            >
-              Jobs{getSortDirection('jobCount')}
-            </TableHead>
-            {/* Show Actions column if basicAuthEnabled */}
-            {basicAuthEnabled && (
-              <TableHead className="whitespace-nowrap w-1/7">Actions</TableHead>
-            )}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filteredAndSortedUsers.map((user) => (
-            <TableRow key={user.userId}>
-              <TableCell className="truncate" title={user.username}>
-                {user.usernameDisplay}
-              </TableCell>
-              <TableCell className="truncate" title={user.fullEmailID}>
-                {user.fullEmailID}
-              </TableCell>
-              <TableCell className="truncate" title={user.role}>
-                <div className="flex items-center gap-2">
-                  {editingUserId === user.userId ? (
-                    <>
-                      <select
-                        value={currentEditingRole}
-                        onChange={(e) => setCurrentEditingRole(e.target.value)}
-                        className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                      >
-                        <option value="admin">Admin</option>
-                        <option value="user">User</option>
-                      </select>
-                      <button
-                        onClick={() => handleSaveEdit(user.userId)}
-                        className="text-green-600 hover:text-green-800 p-1"
-                        title="Save"
-                      >
-                        <CheckIcon className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="text-gray-500 hover:text-gray-700 p-1"
-                        title="Cancel"
-                      >
-                        <XIcon className="h-4 w-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="capitalize">{user.role}</span>
-                      {/* Only show edit role button if admin */}
-                      {currentUserRole === 'admin' && (
-                        <button
-                          onClick={() =>
-                            handleEditClick(user.userId, user.role)
-                          }
-                          className="text-blue-600 hover:text-blue-700 p-1"
-                          title="Edit role"
-                        >
-                          <PenIcon className="h-3 w-3" />
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="truncate">
-                {user.created_at ? (
-                  <TimestampWithTooltip
-                    date={new Date(user.created_at * 1000)}
-                  />
-                ) : (
-                  '-'
-                )}
-              </TableCell>
-              <TableCell>
-                {user.clusterCount === -1 ? (
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                    <CircularProgress size={10} className="mr-1" />
-                    Loading...
-                  </span>
-                ) : (
-                  <Link
-                    href={`/clusters?user=${encodeURIComponent(user.userId)}`}
-                    className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                      user.clusterCount > 0
-                        ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                    }`}
-                    title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                  >
-                    {user.clusterCount}
-                  </Link>
-                )}
-              </TableCell>
-              <TableCell>
-                {user.jobCount === -1 ? (
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                    <CircularProgress size={10} className="mr-1" />
-                    Loading...
-                  </span>
-                ) : (
-                  <Link
-                    href={`/jobs?user=${encodeURIComponent(user.userId)}`}
-                    className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                      user.jobCount > 0
-                        ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                    }`}
-                    title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                  >
-                    {user.jobCount}
-                  </Link>
-                )}
-              </TableCell>
-              {/* Actions cell logic */}
-              {basicAuthEnabled && (
-                <TableCell className="relative">
+      <div className="overflow-x-auto rounded-lg">
+        <Table className="min-w-full">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                onClick={() => requestSort('usernameDisplay')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                Name{getSortDirection('usernameDisplay')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('fullEmailID')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                User ID{getSortDirection('fullEmailID')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('role')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                Role{getSortDirection('role')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('created_at')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                Joined{getSortDirection('created_at')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('clusterCount')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                Clusters{getSortDirection('clusterCount')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('jobCount')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                Jobs{getSortDirection('jobCount')}
+              </TableHead>
+              {/* Show Actions column if basicAuthEnabled */}
+              {(basicAuthEnabled || currentUserRole === 'admin') && (
+                <TableHead className="whitespace-nowrap w-1/7">
+                  Actions
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredAndSortedUsers.map((user) => (
+              <TableRow key={user.userId}>
+                <TableCell className="truncate" title={user.username}>
+                  {user.usernameDisplay}
+                </TableCell>
+                <TableCell className="truncate" title={user.fullEmailID}>
+                  {user.fullEmailID}
+                </TableCell>
+                <TableCell className="truncate" title={user.role}>
                   <div className="flex items-center gap-2">
-                    {/* Reset password icon: admin can reset any, user can only reset self */}
-                    <button
-                      onClick={
-                        currentUserRole === 'admin' ||
-                        user.userId === currentUserId
-                          ? async () => {
-                              onResetPassword(user);
+                    {editingUserId === user.userId ? (
+                      <>
+                        <select
+                          value={currentEditingRole}
+                          onChange={(e) =>
+                            setCurrentEditingRole(e.target.value)
+                          }
+                          className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="user">User</option>
+                        </select>
+                        <button
+                          onClick={() => handleSaveEdit(user.userId)}
+                          className="text-green-600 hover:text-green-800 p-1"
+                          title="Save"
+                        >
+                          <CheckIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          className="text-gray-500 hover:text-gray-700 p-1"
+                          title="Cancel"
+                        >
+                          <XIcon className="h-4 w-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="capitalize">{user.role}</span>
+                        {/* Only show edit role button if admin */}
+                        {currentUserRole === 'admin' && (
+                          <button
+                            onClick={() =>
+                              handleEditClick(user.userId, user.role)
                             }
-                          : undefined
-                      }
-                      className={
-                        currentUserRole === 'admin' ||
-                        user.userId === currentUserId
-                          ? 'text-blue-600 hover:text-blue-700 p-1'
-                          : 'text-gray-300 cursor-not-allowed p-1'
-                      }
-                      title={
-                        currentUserRole === 'admin' ||
-                        user.userId === currentUserId
-                          ? 'Reset Password'
-                          : 'You can only reset your own password'
-                      }
-                      disabled={
-                        currentUserRole !== 'admin' &&
-                        user.userId !== currentUserId
-                      }
-                    >
-                      <KeyRoundIcon className="h-4 w-4" />
-                    </button>
-                    {/* Only admin can see delete */}
-                    {currentUserRole === 'admin' && (
-                      <button
-                        onClick={() => onDeleteUser(user)}
-                        className="text-red-600 hover:text-red-700 p-1"
-                        title="Delete User"
-                      >
-                        <Trash2Icon className="h-4 w-4" />
-                      </button>
+                            className="text-blue-600 hover:text-blue-700 p-1"
+                            title="Edit role"
+                          >
+                            <PenIcon className="h-3 w-3" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </TableCell>
-              )}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                <TableCell className="truncate">
+                  {user.created_at ? (
+                    <TimestampWithTooltip
+                      date={new Date(user.created_at * 1000)}
+                    />
+                  ) : (
+                    '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {user.clusterCount === -1 ? (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                      <CircularProgress size={10} className="mr-1" />
+                      Loading...
+                    </span>
+                  ) : (
+                    <Link
+                      href={`/clusters?user=${encodeURIComponent(user.userId)}`}
+                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                        user.clusterCount > 0
+                          ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                      }`}
+                      title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                    >
+                      {user.clusterCount}
+                    </Link>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {user.jobCount === -1 ? (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
+                      <CircularProgress size={10} className="mr-1" />
+                      Loading...
+                    </span>
+                  ) : (
+                    <Link
+                      href={`/jobs?user=${encodeURIComponent(user.userId)}`}
+                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                        user.jobCount > 0
+                          ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                      }`}
+                      title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                    >
+                      {user.jobCount}
+                    </Link>
+                  )}
+                </TableCell>
+                {/* Actions cell logic */}
+                {(basicAuthEnabled || currentUserRole === 'admin') && (
+                  <TableCell className="relative">
+                    <div className="flex items-center gap-2">
+                      {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                      {basicAuthEnabled && (
+                        <button
+                          onClick={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? async () => {
+                                  onResetPassword(user);
+                                }
+                              : undefined
+                          }
+                          className={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? 'text-blue-600 hover:text-blue-700 p-1'
+                              : 'text-gray-300 cursor-not-allowed p-1'
+                          }
+                          title={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? 'Reset Password'
+                              : 'You can only reset your own password'
+                          }
+                          disabled={
+                            currentUserRole !== 'admin' &&
+                            user.userId !== currentUserId
+                          }
+                        >
+                          <KeyRoundIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                      {/* Delete button - only show for admin */}
+                      {currentUserRole === 'admin' && (
+                        <button
+                          onClick={() => onDeleteUser(user)}
+                          className="text-red-600 hover:text-red-700 p-1"
+                          title="Delete User"
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </Card>
   );
 }

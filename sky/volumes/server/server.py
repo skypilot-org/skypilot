@@ -8,7 +8,7 @@ from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
-from sky.volumes import volume
+from sky.utils import volume
 from sky.volumes.server import core
 
 logger = sky_logging.init_logger(__name__)

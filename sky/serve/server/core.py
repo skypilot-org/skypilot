@@ -18,6 +18,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -151,8 +152,25 @@ def up(
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, task_type='serve')
+        # Handle file mounts using two-hop approach when cloud storage
+        # unavailable
+        storage_clouds = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+        force_disable_cloud_bucket = skypilot_config.get_nested(
+            ('serve', 'force_disable_cloud_bucket'), False)
+        if storage_clouds and not force_disable_cloud_bucket:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, task_type='serve')
+            local_to_controller_file_mounts = {}
+        else:
+            # Fall back to two-hop file_mount uploading when no cloud storage
+            if task.storage_mounts:
+                raise exceptions.NotSupportedError(
+                    'Cloud-based file_mounts are specified, but no cloud '
+                    'storage is available. Please specify local '
+                    'file_mounts only.')
+            local_to_controller_file_mounts = (
+                controller_utils.translate_local_file_mounts_to_two_hop(task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -183,6 +201,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **tls_template_vars,

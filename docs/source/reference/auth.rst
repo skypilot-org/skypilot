@@ -258,6 +258,10 @@ For better security, you can also store the client details in a Kubernetes secre
       --set ingress.oauth2-proxy.client-details-from-secret=oauth2-proxy-credentials \
       --set ingress.oauth2-proxy.email-domain=<EMAIL DOMAIN> # optional
 
+
+.. note::
+   Both ``client-id``/``client-secret`` (dash format) and ``client_id``/``client_secret`` (underscore format) key names in secrets are supported. The system will automatically detect which format is present in your secret. This provides compatibility with different secret management systems - for example, HashiCorp Vault requires underscores in key names.
+
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to your auth provider to sign in.
 
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
@@ -399,5 +403,5 @@ Admins can click on the **Users** tab in the SkyPilot dashboard to manage users 
 
 Supported operations:
 
-* ``Admin`` role can create users, update the role for all users, and delete users.
+* ``Admin`` role can update the role for all users, and delete users.
 * ``User`` role can view all users and their roles.

@@ -95,13 +95,17 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
                 if os.path.isdir(src_path):
                     # Copy directory contents
                     # The "/." at the end copies the contents of the directory, not the directory itself
-                    copy_cmd = f'docker cp {src_path}/. {target_container_name}:{dst_path}'
+                    copy_cmd = (
+                        f'docker cp {src_path}/. {target_container_name}:{dst_path} && '
+                        f'docker exec {target_container_name} sudo chown -R {username} {dst_path}'
+                    )
                 elif os.path.isfile(src_path):
                     # Copy file
                     # First create the parent directory in the container
                     copy_cmd = (
                         f'docker exec {target_container_name} mkdir -p {os.path.dirname(dst_path)} && '
-                        f'docker cp {src_path} {target_container_name}:{dst_path}'
+                        f'docker cp {src_path} {target_container_name}:{dst_path} && '
+                        f'docker exec {target_container_name} sudo chown -R {username} {dst_path}'
                     )
                 logger.info(f'Running copy command: {copy_cmd}')
                 subprocess.check_call(copy_cmd, shell=True)
