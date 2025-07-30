@@ -1,7 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import collections
 import dataclasses
-import math
 import re
 import textwrap
 import typing
@@ -33,7 +32,7 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -92,7 +91,7 @@ class AutostopConfig:
             return cls(idle_minutes=config, down=False, enabled=True)
 
         if isinstance(config, str):
-            return cls(idle_minutes=parse_time_minutes(config),
+            return cls(idle_minutes=resources_utils.parse_time_minutes(config),
                        down=False,
                        enabled=True)
 
@@ -798,8 +797,13 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
+                # TODO(syang): GCP TPU names are supported on both GCP and
+                # kubernetes (GKE), but this logic automatically assumes
+                # GCP TPUs can only be used on GCP.
+                # Fix the logic such that GCP TPU names can failover between
+                # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc):
+                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -814,7 +818,8 @@ class Resources:
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
-                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                        not kubernetes_utils.is_tpu_on_gke(acc,
+                                                           normalize=False)):
                     if 'runtime_version' not in accelerator_args:
 
                         def _get_default_runtime_version() -> str:
@@ -1731,6 +1736,8 @@ class Resources:
         if (blocked.accelerators is not None and
                 self.accelerators != blocked.accelerators):
             is_matched = False
+        if blocked.use_spot is not None and self.use_spot != blocked.use_spot:
+            is_matched = False
         return is_matched
 
     def is_empty(self) -> bool:
@@ -2415,31 +2422,3 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
-
-
-def parse_time_minutes(time: str) -> int:
-    """Convert a time string to minutes.
-
-    Args:
-        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
-
-    Returns:
-        Time in minutes as an integer
-    """
-    time_str = str(time)
-
-    if time_str.isdecimal():
-        # We assume it is already in minutes to maintain backwards
-        # compatibility
-        return int(time_str)
-
-    time_str = time_str.lower()
-    for unit, multiplier in constants.TIME_UNITS.items():
-        if time_str.endswith(unit):
-            try:
-                value = int(time_str[:-len(unit)])
-                return math.ceil(value * multiplier)
-            except ValueError:
-                continue
-
-    raise ValueError(f'Invalid time format: {time}')

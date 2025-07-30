@@ -10,7 +10,7 @@ import dataclasses
 import json
 import time
 import typing
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cachetools
 
@@ -18,6 +18,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.provision.gcp import constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -39,7 +40,7 @@ def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     assert (resources is not None and resources.accelerators is not None and
             len(resources.accelerators) == 1)
     acc, _ = list(resources.accelerators.items())[0]
-    if kubernetes_utils.is_tpu_on_gke(acc):
+    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
         return False
     if resources.accelerator_args is None:
         return True
@@ -206,3 +207,62 @@ def get_minimal_storage_permissions() -> List[str]:
     permissions += constants.GCP_MINIMAL_PERMISSIONS
 
     return permissions
+
+
+# Get the DWS configuration for the given context in GKE.
+def get_dws_config(
+    context: str,
+    k8s_kueue_local_queue_name: Optional[str],
+    cluster_config_overrides: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, bool, Optional[int]]:
+    """Get the DWS configuration for the given context.
+
+        Args:
+            context: The context to get the DWS configuration for.
+            k8s_kueue_local_queue_name: The name of the Kueue local queue.
+            cluster_config_overrides: The cluster config overrides.
+
+        Returns:
+            A tuple of (enable_flex_start,
+                        enable_flex_start_queued_provisioning,
+                        max_run_duration_seconds).
+
+        Raises:
+            ValueError: If k8s_kueue_local_queue_name is missing to enable
+                        flex start queued provisioning for the given context.
+        """
+    dws_config = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('dws',),
+        default_value={},
+        override_configs=cluster_config_overrides)
+    if not dws_config:
+        return False, False, None
+
+    enabled = dws_config.get('enabled', False)
+    if not enabled:
+        return False, False, None
+
+    enable_flex_start = False
+    enable_flex_start_queued_provisioning = False
+    max_run_duration_seconds = None
+    # If users already use Kueue, use the flex start with queued
+    # provisioning mode.
+    if k8s_kueue_local_queue_name:
+        enable_flex_start_queued_provisioning = True
+    else:
+        enable_flex_start = True
+
+    if not enable_flex_start_queued_provisioning:
+        return (enable_flex_start, enable_flex_start_queued_provisioning,
+                max_run_duration_seconds)
+
+    # Max run duration is only used in the flex start with queued
+    # provisioning mode.
+    max_run_duration = dws_config.get('max_run_duration', None)
+    if max_run_duration:
+        max_run_duration_seconds = resources_utils.parse_time_minutes(
+            max_run_duration) * 60
+    return (enable_flex_start, enable_flex_start_queued_provisioning,
+            max_run_duration_seconds)

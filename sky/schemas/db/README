@@ -1,0 +1,4 @@
+Migrations for sqlalchemy databases. Currently includes:
+global_user_state
+spot_jobs (managed jobs state)
+skypilot_config

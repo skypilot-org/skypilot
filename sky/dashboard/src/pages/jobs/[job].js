@@ -24,6 +24,7 @@ import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { YamlHighlighter } from '@/components/YamlHighlighter';
 
 function JobDetails() {
   const router = useRouter();
@@ -1014,6 +1015,37 @@ function JobDetailsContent({
           {jobData.resources_str_full || jobData.resources_str || '-'}
         </div>
       </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Git Commit</div>
+        <div className="text-base mt-1 flex items-center">
+          {jobData.git_commit && jobData.git_commit !== '-' ? (
+            <span className="flex items-center mr-2">
+              {jobData.git_commit}
+              <Tooltip
+                content={isCopied ? 'Copied!' : 'Copy commit'}
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(jobData.git_commit);
+                    setIsCopied(true);
+                    setTimeout(() => setIsCopied(false), 2000);
+                  }}
+                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                >
+                  {isCopied ? (
+                    <CheckIcon className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <CopyIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </Tooltip>
+            </span>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
 
       {/* Entrypoint section - spans both columns */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
@@ -1097,9 +1129,9 @@ function JobDetailsContent({
                       } else if (yamlDocs.length === 1) {
                         // Single document - show directly
                         return (
-                          <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                          <YamlHighlighter className="whitespace-pre-wrap">
                             {yamlDocs[0].content}
-                          </pre>
+                          </YamlHighlighter>
                         );
                       } else {
                         // Multiple documents - show with collapsible sections
@@ -1127,9 +1159,9 @@ function JobDetailsContent({
                                 </button>
                                 {expandedYamlDocs[index] && (
                                   <div className="mt-3 ml-6">
-                                    <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                                    <YamlHighlighter className="whitespace-pre-wrap">
                                       {doc.content}
-                                    </pre>
+                                    </YamlHighlighter>
                                   </div>
                                 )}
                               </div>

@@ -38,6 +38,7 @@ from sky.utils import config_utils
 def _load_task_and_apply_policy(
     task: sky.Task,
     config_path: str,
+    monkeypatch,
     idle_minutes_to_autostop: Optional[int] = None,
 ) -> Tuple[sky.Dag, config_utils.Config]:
     """Apply admin policy using real SkyPilot patterns.
@@ -45,7 +46,8 @@ def _load_task_and_apply_policy(
     This function is copied from tests/unit_tests/test_admin_policy.py
     to avoid import path complexity while reusing the same proven pattern.
     """
-    os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
+    # Use monkeypatch instead of directly modifying os.environ
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
@@ -247,7 +249,7 @@ def create_test_task() -> sky.Task:
     return sky.Task.from_yaml_config(task_config)
 
 
-def test_none_key_serialization_through_real_policy_flow():
+def test_none_key_serialization_through_real_policy_flow(monkeypatch):
     """Test None key preservation through the real admin policy application flow.
     
     This test verifies that the YAML-based serialization approach correctly
@@ -279,7 +281,8 @@ def test_none_key_serialization_through_real_policy_flow():
 
         try:
             # Apply policy using the existing function from test_admin_policy.py
-            dag, mutated_config = _load_task_and_apply_policy(task, config_path)
+            dag, mutated_config = _load_task_and_apply_policy(
+                task, config_path, monkeypatch)
 
             # Check what the policy server actually received during the real flow
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -331,7 +334,7 @@ def test_none_key_serialization_through_real_policy_flow():
             os.unlink(config_path)
 
 
-def test_restful_policy_with_request_options():
+def test_restful_policy_with_request_options(monkeypatch):
     """Test RESTful admin policy with proper RequestOptions (like real usage)."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -346,7 +349,8 @@ def test_restful_policy_with_request_options():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Verify the policy was called with proper request structure
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -367,7 +371,7 @@ def test_restful_policy_with_request_options():
             os.unlink(config_path)
 
 
-def test_restful_policy_basic_functionality():
+def test_restful_policy_basic_functionality(monkeypatch):
     """Test basic RESTful admin policy functionality using real patterns."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -382,7 +386,8 @@ def test_restful_policy_basic_functionality():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Check that the policy was called
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -396,7 +401,7 @@ def test_restful_policy_basic_functionality():
             os.unlink(config_path)
 
 
-def test_task_without_run_command():
+def test_task_without_run_command(monkeypatch):
     """Test RESTful admin policy with task that has no run command."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -421,7 +426,8 @@ def test_task_without_run_command():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Verify the policy was called and handled the task correctly
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -445,7 +451,7 @@ def test_task_without_run_command():
             os.unlink(config_path)
 
 
-def test_task_without_resources():
+def test_task_without_resources(monkeypatch):
     """Test RESTful admin policy with task that has no resources specified."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -470,7 +476,8 @@ def test_task_without_resources():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Verify the policy was called and handled the task correctly
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -488,7 +495,7 @@ def test_task_without_resources():
             os.unlink(config_path)
 
 
-def test_task_without_skypilot_config():
+def test_task_without_skypilot_config(monkeypatch):
     """Test RESTful admin policy when no skypilot config is provided."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -503,7 +510,8 @@ def test_task_without_skypilot_config():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Verify the policy was called
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -526,7 +534,7 @@ def test_task_without_skypilot_config():
             os.unlink(config_path)
 
 
-def test_minimal_task():
+def test_minimal_task(monkeypatch):
     """Test RESTful admin policy with the most minimal task possible."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -542,7 +550,8 @@ def test_minimal_task():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Verify the policy was called and everything worked
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -563,7 +572,7 @@ def test_minimal_task():
             os.unlink(config_path)
 
 
-def test_complex_task_serialization():
+def test_complex_task_serialization(monkeypatch):
     """Test RESTful admin policy with a complex task to ensure all fields serialize correctly."""
     with PolicyServer() as server:
         ImageIdInspectorPolicy.received_requests.clear()
@@ -600,7 +609,8 @@ def test_complex_task_serialization():
             config_path = f.name
 
         try:
-            dag, config = _load_task_and_apply_policy(task, config_path)
+            dag, config = _load_task_and_apply_policy(task, config_path,
+                                                      monkeypatch)
 
             # Verify the policy was called
             assert len(ImageIdInspectorPolicy.received_requests) == 1
@@ -643,76 +653,3 @@ def test_complex_task_serialization():
                 None] == 'docker:pytorch/pytorch:latest'
         finally:
             os.unlink(config_path)
-
-
-if __name__ == '__main__':
-    print("Testing RESTful admin policy functionality...")
-
-    try:
-        test_none_key_serialization_through_real_policy_flow()
-        print("✓ None key serialization test (real flow) passed")
-    except AssertionError as e:
-        print(f"✗ None key serialization test (real flow) failed: {e}")
-    except Exception as e:
-        print(f"✗ None key serialization test (real flow) error: {e}")
-
-    try:
-        test_restful_policy_with_request_options()
-        print("✓ RequestOptions test passed")
-    except AssertionError as e:
-        print(f"✗ RequestOptions test failed: {e}")
-    except Exception as e:
-        print(f"✗ RequestOptions test error: {e}")
-
-    try:
-        test_restful_policy_basic_functionality()
-        print("✓ Basic functionality test passed")
-    except AssertionError as e:
-        print(f"✗ Basic functionality test failed: {e}")
-    except Exception as e:
-        print(f"✗ Basic functionality test error: {e}")
-
-    try:
-        test_task_without_run_command()
-        print("✓ Task without run command test passed")
-    except AssertionError as e:
-        print(f"✗ Task without run command test failed: {e}")
-    except Exception as e:
-        print(f"✗ Task without run command test error: {e}")
-
-    try:
-        test_task_without_resources()
-        print("✓ Task without resources test passed")
-    except AssertionError as e:
-        print(f"✗ Task without resources test failed: {e}")
-    except Exception as e:
-        print(f"✗ Task without resources test error: {e}")
-
-    try:
-        test_task_without_skypilot_config()
-        print("✓ Task without skypilot config test passed")
-    except AssertionError as e:
-        print(f"✗ Task without skypilot config test failed: {e}")
-    except Exception as e:
-        print(f"✗ Task without skypilot config test error: {e}")
-
-    try:
-        test_minimal_task()
-        print("✓ Minimal task test passed")
-    except AssertionError as e:
-        print(f"✗ Minimal task test failed: {e}")
-    except Exception as e:
-        print(f"✗ Minimal task test error: {e}")
-
-    try:
-        test_complex_task_serialization()
-        print("✓ Complex task serialization test passed")
-    except AssertionError as e:
-        print(f"✗ Complex task serialization test failed: {e}")
-    except Exception as e:
-        print(f"✗ Complex task serialization test error: {e}")
-
-    # Cleanup any remaining servers
-    cleanup_all_servers()
-
-    print("\nRESTful admin policy tests completed.")

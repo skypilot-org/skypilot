@@ -475,3 +475,9 @@ def test_stream_response_no_request_id():
             mock_get.assert_not_called()
             # Verify None is returned when request_id is None
             assert result is None
+
+
+def test_reload_config():
+    with mock.patch('sky.skypilot_config.safe_reload_config') as mock_reload:
+        client_sdk.reload_config()
+        mock_reload.assert_called_once()

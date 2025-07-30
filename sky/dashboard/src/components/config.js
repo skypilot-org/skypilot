@@ -303,7 +303,7 @@ export function Config() {
             <Button
               onClick={handleSave}
               disabled={loading || saving}
-              className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
+              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
             >
               {saving ? (
                 <>

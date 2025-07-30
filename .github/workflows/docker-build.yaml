@@ -229,10 +229,8 @@ jobs:
             INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
           cache-from: |
             type=gha,scope=${{ steps.platform.outputs.name }}
-            type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:cache-${{ steps.platform.outputs.name }}
           cache-to: |
             type=gha,mode=max,scope=${{ steps.platform.outputs.name }}
-            type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:cache-${{ steps.platform.outputs.name }},mode=max
 
   manifest:
     needs: [prepare, build]
@@ -247,23 +245,38 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Create and push multi-platform manifest
+      - name: Create multi-platform manifest
         run: |
-          # Create multi-platform manifest with your original tag names
-          docker buildx imagetools create -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest \
+          # Create multi-platform manifest from temporary tags
+          docker buildx imagetools create \
+            -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest \
             -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }} \
             ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-amd64 \
             ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-arm64
 
-      - name: Note about temporary tags
+      - name: Clean up temporary tags
+        if: always()
         run: |
-          echo "ℹ️  Temporary platform-specific tags created during build:"
-          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-amd64"
-          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-arm64"
-          echo ""
-          echo "✅ Final multi-platform tags available:"
+          echo "🧹 Cleaning up temporary tags..."
+
+          # Get auth token for Docker Hub API
+          TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
+            -d '{"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}' \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+
+          # Delete temporary tags
+          for tag in "${{ needs.prepare.outputs.version }}-linux-amd64" "${{ needs.prepare.outputs.version }}-linux-arm64"; do
+            echo "Deleting tag: $tag"
+            curl -X DELETE \
+              -H "Authorization: JWT $TOKEN" \
+              "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}/tags/$tag/" || true
+          done
+
+      - name: Summary of final tags
+        run: |
+          echo "✅ Multi-platform tags created:"
           echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
           echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}"
           echo ""
-          echo "Note: Temporary tags remain in registry but are implementation details."
-          echo "Users should pull the final multi-platform tags (latest or version number)."
+          echo "🚀 Built with native runners for maximum performance!"
+          echo "🧹 Temporary tags cleaned up automatically!"

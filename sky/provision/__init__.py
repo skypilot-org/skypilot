@@ -167,6 +167,17 @@ def terminate_instances(
 
 
 @_route_to_cloud_impl
+def cleanup_custom_multi_network(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    failover: bool = False,
+) -> None:
+    """Cleanup custom multi-network."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
 def open_ports(
     provider_name: str,
     cluster_name_on_cloud: str,

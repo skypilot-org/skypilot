@@ -122,11 +122,13 @@ def queue(refresh: bool,
                 'resources': (str) resources of the job,
                 'submitted_at': (float) timestamp of submission,
                 'end_at': (float) timestamp of end,
-                'duration': (float) duration in seconds,
+                'job_duration': (float) duration in seconds,
                 'recovery_count': (int) Number of retries,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
               }
             ]
 
@@ -190,7 +192,7 @@ def cancel(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@rest.retry_on_server_unavailable()
+@rest.retry_transient_errors()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,

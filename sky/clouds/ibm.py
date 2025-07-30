@@ -18,7 +18,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -53,6 +53,9 @@ class IBM(clouds.Cloud):
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
                 ('High availability controllers are not supported on IBM.'),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+                ('Customized multiple network interfaces are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -259,14 +262,17 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional['resources_utils.DiskTier'] = None
-    ) -> Optional[str]:
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional['resources_utils.DiskTier'] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='ibm')
 
     def _get_feasible_launchable_resources(
@@ -302,7 +308,9 @@ class IBM(clouds.Cloud):
             default_instance_type = IBM.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:

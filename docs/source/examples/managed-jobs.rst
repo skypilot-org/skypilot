@@ -34,8 +34,7 @@ To start a managed job, use :code:`sky jobs launch`:
   ├── To cancel the job:                sky jobs cancel 1
   ├── To stream job logs:               sky jobs logs 1
   ├── To stream controller logs:        sky jobs logs --controller 1
-  ├── To view all managed jobs:         sky jobs queue
-  └── To view managed job dashboard:    sky jobs dashboard
+  └── To view all managed jobs:         sky jobs queue
 
 The job is launched on a temporary SkyPilot cluster, managed end-to-end, and automatically cleaned up.
 
@@ -430,7 +429,7 @@ dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 
 To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 
-To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky jobs dashboard`.
+To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky dashboard`.
 
 .. code-block:: console
 

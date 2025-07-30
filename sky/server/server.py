@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import base64
 import contextlib
-import dataclasses
 import datetime
 import hashlib
 import json
@@ -27,6 +26,7 @@ import fastapi
 from fastapi.middleware import cors
 from passlib.hash import apr_md5_crypt
 import starlette.middleware.base
+import uvloop
 
 import sky
 from sky import catalog
@@ -49,6 +49,7 @@ from sky.server import constants as server_constants
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
+from sky.server import versions
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -128,7 +129,7 @@ async def _override_user_info_in_request_body(request: fastapi.Request,
     if body:
         try:
             original_json = await request.json()
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(f'Error parsing request JSON: {e}')
         else:
             logger.debug(f'Overriding user for {request.state.request_id}: '
@@ -244,7 +245,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/api/'):
+        if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
             return await call_next(request)
@@ -490,6 +491,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
+                # Request deamon should be retried if the process pool is
+                # broken.
+                retryable=True,
             )
         except exceptions.RequestAlreadyExistsError:
             # Lifespan will be executed in each uvicorn worker process, we
@@ -559,6 +563,35 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add API version to the request."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        version_info = versions.check_compatibility_at_server(request.headers)
+        # Bypass version handling for backward compatibility with clients prior
+        # to v0.11.0, the client will check the version in the body of
+        # /api/health response and hint an upgrade.
+        # TODO(aylei): remove this after v0.13.0 is released.
+        if version_info is None:
+            return await call_next(request)
+        if version_info.error is None:
+            versions.set_remote_api_version(version_info.api_version)
+            versions.set_remote_version(version_info.version)
+            response = await call_next(request)
+        else:
+            response = fastapi.responses.JSONResponse(
+                status_code=400,
+                content={
+                    'error': common.ApiServerStatus.VERSION_MISMATCH.value,
+                    'message': version_info.error,
+                })
+        response.headers[server_constants.API_VERSION_HEADER] = str(
+            server_constants.API_VERSION)
+        response.headers[server_constants.VERSION_HEADER] = \
+            versions.get_local_readable_version()
+        return response
+
+
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Middleware wraps in the order defined here. E.g., given
 #   app.add_middleware(Middleware1)
@@ -571,6 +604,8 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
+app.add_middleware(APIVersionMiddleware)
+app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
 app.add_middleware(PathCleanMiddleware)
@@ -792,7 +827,8 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # added RTTs. For now, we stick to doing the validation inline in the
         # server thread.
         with admin_policy_utils.apply_and_use_config_in_current_request(
-                dag, request_options=validate_body.request_options) as dag:
+                dag,
+                request_options=validate_body.get_request_options()) as dag:
             # Skip validating workdir and file_mounts, as those need to be
             # validated after the files are uploaded to the SkyPilot API server
             # with `upload_mounts_to_api_server`.
@@ -846,10 +882,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
     # TODO(SKY-1271): We need to double check security of uploading zip file.
     client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1335,7 +1376,7 @@ async def local_down(request: fastapi.Request) -> None:
 
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> requests_lib.RequestPayload:
+async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
         request_task = requests_lib.get_request(request_id)
@@ -1350,9 +1391,8 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
                     detail=f'Request {request_id!r} should be retried')
             request_error = request_task.get_error()
             if request_error is not None:
-                raise fastapi.HTTPException(status_code=500,
-                                            detail=dataclasses.asdict(
-                                                request_task.encode()))
+                raise fastapi.HTTPException(
+                    status_code=500, detail=request_task.encode().model_dump())
             return request_task.encode()
         # yield control to allow other coroutines to run, sleep shortly
         # to avoid storming the DB and CPU in the meantime
@@ -1431,6 +1471,12 @@ async def stream(
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
+        if not log_path_to_stream.exists():
+            # The log file might be deleted by the request GC daemon but the
+            # request task is still in the database.
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Log of request {request_id!r} has been deleted')
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
@@ -1490,7 +1536,7 @@ async def api_status(
         None, description='Request IDs to get status for.'),
     all_status: bool = fastapi.Query(
         False, description='Get finished requests as well.'),
-) -> List[requests_lib.RequestPayload]:
+) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
         statuses = None
@@ -1530,7 +1576,10 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
     logger.info(f'Health endpoint: request.state.auth_user = {user}')
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
-        'api_version': server_constants.API_VERSION,
+        # Kept for backward compatibility, clients before 0.11.0 will read this
+        # field to check compatibility and hint the user to upgrade the CLI.
+        # TODO(aylei): remove this field after 0.13.0
+        'api_version': str(server_constants.API_VERSION),
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
@@ -1720,6 +1769,9 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    # Initialize global user state db
+    global_user_state.initialize_and_get_db()
+    # Initialize request db
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
@@ -1742,13 +1794,18 @@ if __name__ == '__main__':
 
     queue_server: Optional[multiprocessing.Process] = None
     workers: List[executor.RequestWorker] = []
+    # Global background tasks that will be scheduled in a separate event loop.
+    global_tasks: List[asyncio.Task] = []
     try:
+        background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
-            metrics_thread = threading.Thread(target=metrics.run_metrics_server,
-                                              args=(cmd_args.host,
-                                                    cmd_args.metrics_port),
-                                              daemon=True)
-            metrics_thread.start()
+            metrics_server = metrics.build_metrics_server(
+                cmd_args.host, cmd_args.metrics_port)
+            global_tasks.append(background.create_task(metrics_server.serve()))
+        global_tasks.append(
+            background.create_task(requests_lib.requests_gc_daemon()))
+        threading.Thread(target=background.run_forever, daemon=True).start()
+
         queue_server, workers = executor.start(config)
 
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
@@ -1766,6 +1823,8 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
 
+        for gt in global_tasks:
+            gt.cancel()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))

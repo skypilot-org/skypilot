@@ -13,16 +13,17 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 from typing import Any, Dict, Literal, Optional, Tuple, Union
 from urllib import parse
 import uuid
 
+import cachetools
 import colorama
 import filelock
 
-import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -31,6 +32,7 @@ from sky.client import service_account_auth
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
+from sky.server import versions
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -66,33 +68,10 @@ RETRY_COUNT_ON_TIMEOUT = 3
 # (e.g. in high contention env) and we will exit eagerly if server exit.
 WAIT_APISERVER_START_TIMEOUT_SEC = 60
 
-_VERSION_INFO = (
-    f'{colorama.Style.RESET_ALL}'
-    f'{colorama.Style.DIM}'
-    'client version: v{client_version} (API version: v{client_api_version})\n'
-    'server version: v{server_version} (API version: v{server_api_version})'
-    f'{colorama.Style.RESET_ALL}')
 _LOCAL_API_SERVER_RESTART_HINT = (
-    f'{colorama.Fore.YELLOW}Please restart the SkyPilot API server with:\n'
+    f'{colorama.Fore.YELLOW}The local SkyPilot API server is not compatible '
+    'with the client. Please restart the API server with:\n'
     f'{colorama.Style.BRIGHT}sky api stop; sky api start'
-    f'{colorama.Style.RESET_ALL}')
-_LOCAL_SERVER_VERSION_MISMATCH_WARNING = (
-    f'{colorama.Fore.YELLOW}Client and local API server version mismatch:\n'
-    '{version_info}\n'
-    f'{_LOCAL_API_SERVER_RESTART_HINT}'
-    f'{colorama.Style.RESET_ALL}')
-_CLIENT_TOO_OLD_WARNING = (
-    f'{colorama.Fore.YELLOW}Your SkyPilot client is too old:\n'
-    '{version_info}\n'
-    f'{colorama.Fore.YELLOW}Upgrade your client with:\n'
-    '{command}'
-    f'{colorama.Style.RESET_ALL}')
-_REMOTE_SERVER_TOO_OLD_WARNING = (
-    f'{colorama.Fore.YELLOW}SkyPilot API server is too old:\n'
-    '{version_info}\n'
-    f'{colorama.Fore.YELLOW}Contact your administrator to upgrade the '
-    'remote API server or downgrade your local client with:\n'
-    '{command}\n'
     f'{colorama.Style.RESET_ALL}')
 _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
     f'{colorama.Fore.YELLOW}SkyPilot API server version does not match the '
@@ -105,10 +84,6 @@ _SERVER_INSTALL_VERSION_MISMATCH_WARNING = (
     f'{colorama.Fore.YELLOW}This can happen if you upgraded SkyPilot without '
     'restarting the API server.'
     f'{colorama.Style.RESET_ALL}')
-# Parse local API version eargly to catch version format errors.
-_LOCAL_API_VERSION: int = int(server_constants.API_VERSION)
-# SkyPilot dev version.
-_DEV_VERSION = '1.0.0-dev0'
 
 RequestId = str
 ApiVersion = Optional[str]
@@ -134,6 +109,7 @@ class ApiServerInfo:
     commit: Optional[str] = None
     user: Optional[Dict[str, Any]] = None
     basic_auth_enabled: bool = False
+    error: Optional[str] = None
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
@@ -158,6 +134,8 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
 def set_api_cookie_jar(cookie_jar: CookieJar,
                        create_if_not_exists: bool = True) -> None:
     """Updates the file cookie jar with the given cookie jar."""
+    if len(cookie_jar) == 0:
+        return
     cookie_path = get_api_cookie_jar_path()
     if not cookie_path.exists() and not create_if_not_exists:
         # if the file doesn't exist and we don't want to create it, do nothing
@@ -278,10 +256,32 @@ def get_dashboard_url(server_url: str,
 
 
 @annotations.lru_cache(scope='global')
-def is_api_server_local():
-    return get_server_url() in AVAILABLE_LOCAL_API_SERVER_URLS
+def is_api_server_local(endpoint: Optional[str] = None):
+    server_url = endpoint if endpoint is not None else get_server_url()
+    return server_url in AVAILABLE_LOCAL_API_SERVER_URLS
 
 
+def _handle_non_200_server_status(
+        response: 'requests.Response') -> ApiServerInfo:
+    if response.status_code == 401:
+        return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+    if response.status_code == 400:
+        # Check if a version mismatch error is returned.
+        try:
+            body = response.json()
+            if (body.get('error',
+                         '') == ApiServerStatus.VERSION_MISMATCH.value):
+                return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
+                                     error=body.get('message', ''))
+        except json.JSONDecodeError:
+            pass
+    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+
+
+@cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
+                                             ttl=5.0,
+                                             timer=time.time),
+                   lock=threading.RLock())
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     """Retrieve the status of the API server.
 
@@ -315,10 +315,10 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
         logger.debug(f'Health check status: {response.status_code}')
-        if response.status_code == 401:
-            return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
-        elif response.status_code != 200:
-            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+
+        if response.status_code != 200:
+            return _handle_non_200_server_status(response)
+
         # The response is 200, so we can parse the response.
         try:
             result = response.json()
@@ -340,10 +340,28 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                f'version info. {server_url} may '
                                f'not be running SkyPilot API server.')
                 server_info.status = ApiServerStatus.UNHEALTHY
-            elif api_version != server_constants.API_VERSION:
-                server_info.status = ApiServerStatus.VERSION_MISMATCH
+            version_info = versions.check_compatibility_at_client(
+                response.headers)
+            if version_info is None:
+                # Backward compatibility for server prior to v0.11.0 which
+                # does not check compatibility at server side.
+                # TODO(aylei): remove this after v0.13.0 is released.
+                return ApiServerInfo(
+                    status=ApiServerStatus.VERSION_MISMATCH,
+                    error=versions.SERVER_TOO_OLD_ERROR.format(
+                        remote_version=version,
+                        local_version=versions.get_local_readable_version(),
+                        min_version=server_constants.MIN_COMPATIBLE_VERSION,
+                        command=versions.install_version_command(
+                            version, commit)))
+            if version_info.error is not None:
+                return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
+                                     error=version_info.error)
+
             cookies = get_cookies_from_response(response)
-            set_api_cookie_jar(cookies, create_if_not_exists=False)
+            # Save or refresh the cookie jar in case of session affinity and
+            # OAuth.
+            set_api_cookie_jar(cookies, create_if_not_exists=True)
             return server_info
         except (json.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
@@ -364,6 +382,10 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 
 
 def handle_request_error(response: 'requests.Response') -> None:
+    # Keep the original HTTPError if the response code >= 400
+    response.raise_for_status()
+    # Other status codes are not expected neither, e.g. we do not expect to
+    # handle redirection here.
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -397,6 +419,7 @@ def _start_api_server(deploy: bool = False,
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
+
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
@@ -472,6 +495,8 @@ def _start_api_server(deploy: bool = False,
                         'SkyPilot API server process exited unexpectedly.\n'
                         f'View logs at: {constants.API_SERVER_LOGS}')
             try:
+                # Clear the cache to ensure fresh checks during startup
+                get_api_server_status.cache_clear()  # type: ignore
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
@@ -490,7 +515,7 @@ def _start_api_server(deploy: bool = False,
         server_url = get_server_url(host)
         dashboard_msg = ''
         api_server_info = get_api_server_status(server_url)
-        if api_server_info.version == _DEV_VERSION:
+        if api_server_info.version == versions.DEV_VERSION:
             dashboard_msg += (
                 f'\n{colorama.Style.RESET_ALL}{ux_utils.INDENT_SYMBOL}'
                 f'{colorama.Fore.YELLOW}')
@@ -554,33 +579,11 @@ def check_server_healthy(
     api_server_info = get_api_server_status(endpoint)
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
-        sv = api_server_info.api_version
-        assert sv is not None, 'Server API version is None'
-        try:
-            server_is_older = int(sv) < _LOCAL_API_VERSION
-        except ValueError:
-            # Raised when the server version using an unknown scheme.
-            # Version compatibility checking is expected to handle all legacy
-            # cases so we safely assume the server is newer when the version
-            # scheme is unknown.
-            logger.debug('API server version using unknown scheme: %s', sv)
-            server_is_older = False
-        version_info = _get_version_info_hint(api_server_info)
-        if is_api_server_local():
+        msg = api_server_info.error
+        if is_api_server_local(endpoint):
             # For local server, just hint user to restart the server to get
             # a consistent version.
-            msg = _LOCAL_SERVER_VERSION_MISMATCH_WARNING.format(
-                version_info=version_info)
-        else:
-            assert api_server_info.version is not None, 'Server version is None'
-            if server_is_older:
-                msg = _REMOTE_SERVER_TOO_OLD_WARNING.format(
-                    version_info=version_info,
-                    command=_install_server_version_command(api_server_info))
-            else:
-                msg = _CLIENT_TOO_OLD_WARNING.format(
-                    version_info=version_info,
-                    command=_install_server_version_command(api_server_info))
+            msg = _LOCAL_API_SERVER_RESTART_HINT
         with ux_utils.print_exception_no_traceback():
             raise exceptions.APIVersionMismatchError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
@@ -612,37 +615,6 @@ def check_server_healthy(
         hinted_for_server_install_version_mismatch = True
 
     return api_server_status, api_server_info
-
-
-def _get_version_info_hint(server_info: ApiServerInfo) -> str:
-    assert server_info.version is not None, 'Server version is None'
-    # version_on_disk may be None if the server is older
-    assert server_info.commit is not None, 'Server commit is None'
-    sv = server_info.version
-    cv = sky.__version__
-    if server_info.version == _DEV_VERSION:
-        sv = f'{sv} with commit {server_info.commit}'
-    if cv == _DEV_VERSION:
-        cv = f'{cv} with commit {sky.__commit__}'
-    return _VERSION_INFO.format(client_version=cv,
-                                server_version=sv,
-                                client_api_version=server_constants.API_VERSION,
-                                server_api_version=server_info.api_version)
-
-
-def _install_server_version_command(server_info: ApiServerInfo) -> str:
-    assert server_info.version is not None, 'Server version is None'
-    assert server_info.commit is not None, 'Server commit is None'
-    if server_info.version == _DEV_VERSION:
-        # Dev build without valid version.
-        return ('pip install git+https://github.com/skypilot-org/skypilot@'
-                f'{server_info.commit}')
-    elif 'dev' in server_info.version:
-        # Nightly version.
-        return f'pip install -U "skypilot-nightly=={server_info.version}"'
-    else:
-        # Stable version.
-        return f'pip install -U "skypilot=={server_info.version}"'
 
 
 # Keep in sync with sky/setup_files/setup.py find_version()
@@ -752,9 +724,10 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             continue
         if 'workdir' in task_config:
             workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
+            if isinstance(workdir, str):
+                task_config['workdir'] = str(
+                    client_file_mounts_dir /
+                    file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

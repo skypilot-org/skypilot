@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -38,6 +39,7 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -64,6 +66,9 @@ JOB_STATUS_CHECK_GAP_SECONDS = 20
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
+
+_JOB_STATUS_FETCH_MAX_RETRIES = 3
+_JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -128,9 +133,15 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
             time.sleep(backoff.current_backoff())
 
 
-def _check_consolidation_mode_consistency(
+def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
-    """Check the consistency of the consolidation mode."""
+    """Validate the consolidation mode config."""
+    if (current_is_consolidation_mode and
+            not env_options.Options.IS_DEVELOPER.get() and
+            server_common.is_api_server_local()):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
@@ -176,7 +187,7 @@ def _check_consolidation_mode_consistency(
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
         ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-    _check_consolidation_mode_consistency(consolidation_mode)
+    _validate_consolidation_mode_config(consolidation_mode)
     return consolidation_mode
 
 
@@ -242,19 +253,31 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-    status = None
-    try:
-        logger.info('=== Checking the job status... ===')
-        statuses = backend.get_job_status(handle, stream_logs=False)
-        status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-    except exceptions.CommandError:
-        logger.info('Failed to connect to the cluster.')
-    logger.info('=' * 34)
-    return status
+    for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
+        try:
+            logger.info('=== Checking the job status... ===')
+            statuses = backend.get_job_status(handle, stream_logs=False)
+            status = list(statuses.values())[0]
+            if status is None:
+                logger.info('No job found.')
+            else:
+                logger.info(f'Job status: {status}')
+            logger.info('=' * 34)
+            return status
+        except exceptions.CommandError as e:
+            # Retry on k8s transient network errors. This is useful when using
+            # coreweave which may have transient network issue sometimes.
+            if (e.detailed_reason is not None and
+                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
+                logger.info('Failed to connect to the cluster. Retrying '
+                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                logger.info('=' * 34)
+                time.sleep(1)
+            else:
+                logger.info(f'Failed to get job status: {e.detailed_reason}')
+                logger.info('=' * 34)
+                return None
+    return None
 
 
 def _controller_process_alive(pid: int, job_id: int) -> bool:
@@ -693,23 +716,46 @@ def stream_logs_by_id(job_id: int,
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file = managed_job_state.get_local_log_file(job_id, None)
-            if log_file is not None:
-                with open(os.path.expanduser(log_file), 'r',
-                          encoding='utf-8') as f:
-                    # Stream the logs to the console without reading the whole
-                    # file into memory.
-                    start_streaming = False
-                    read_from: Union[TextIO, Deque[str]] = f
-                    if tail is not None:
-                        assert tail > 0
-                        # Read only the last 'tail' lines using deque
-                        read_from = collections.deque(f, maxlen=tail)
-                    for line in read_from:
-                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                            start_streaming = True
-                        if start_streaming:
-                            print(line, end='', flush=True)
+            log_file_exists = False
+            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+                job_id)
+            num_tasks = len(task_info)
+            for task_id, task_name, task_status, log_file in task_info:
+                if log_file:
+                    log_file_exists = True
+                    task_str = (f'Task {task_name}({task_id})'
+                                if task_name else f'Task {task_id}')
+                    if num_tasks > 1:
+                        print(f'=== {task_str} ===')
+                    with open(os.path.expanduser(log_file),
+                              'r',
+                              encoding='utf-8') as f:
+                        # Stream the logs to the console without reading the
+                        # whole file into memory.
+                        start_streaming = False
+                        read_from: Union[TextIO, Deque[str]] = f
+                        if tail is not None:
+                            assert tail > 0
+                            # Read only the last 'tail' lines using deque
+                            read_from = collections.deque(f, maxlen=tail)
+                        for line in read_from:
+                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                                start_streaming = True
+                            if start_streaming:
+                                print(line, end='', flush=True)
+                    if num_tasks > 1:
+                        # Add the "Task finished" message for terminal states
+                        if task_status.is_terminal():
+                            print(ux_utils.finishing_message(
+                                f'{task_str} finished '
+                                f'(status: {task_status.value}).'),
+                                  flush=True)
+            if log_file_exists:
+                # Add the "Job finished" message for terminal states
+                if managed_job_status.is_terminal():
+                    print(ux_utils.finishing_message(
+                        f'Job finished (status: {managed_job_status.value}).'),
+                          flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (f'{colorama.Fore.YELLOW}'
@@ -1249,7 +1295,14 @@ def format_job_table(
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
-        columns += ['STARTED', 'INFRA', 'RESOURCES', 'SCHED. STATE', 'DETAILS']
+        columns += [
+            'STARTED',
+            'INFRA',
+            'RESOURCES',
+            'SCHED. STATE',
+            'DETAILS',
+            'GIT_COMMIT',
+        ]
     if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -1362,6 +1415,7 @@ def format_job_table(
                     '-',
                     job_tasks[0]['schedule_state'],
                     generate_details(details, failure_reason),
+                    job_tasks[0].get('metadata', {}).get('git_commit', '-'),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1427,6 +1481,8 @@ def format_job_table(
                     generate_details(task.get('details'),
                                      task['failure_reason']),
                 ])
+
+                values.append(task.get('metadata', {}).get('git_commit', '-'))
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
@@ -1512,6 +1568,22 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_version_and_job_table(cls) -> str:
+        """Generate code to get controller version and raw job table."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
+
+        # Get and print raw job table (load_managed_job_queue can parse this directly)
+        job_table = utils.dump_managed_job_queue()
+        print(job_table, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
         from sky.utils import message_utils
@@ -1565,8 +1637,13 @@ class ManagedJobCodeGen:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r})
+                if managed_job_version < 7:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r})
+                else:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r},
+                                    {task.metadata_json!r})
                 """)
         return cls._build(code)
 

@@ -14,8 +14,8 @@ from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import aws_catalog
 from sky.provision.aws import instance as aws_instance
-from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils.db import db_utils
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
-    global_user_state.create_table()
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 @pytest.mark.parametrize('enable_all_clouds', [[sky.AWS()]], indirect=True)

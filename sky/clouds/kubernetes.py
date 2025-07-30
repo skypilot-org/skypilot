@@ -14,18 +14,22 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
+from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -76,9 +80,12 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported in '
+             'Kubernetes.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is currently not supported in '
-             f'{_REPR}.'),
+            ('Custom network tier is not supported in this Kubernetes '
+             'cluster.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -122,7 +129,9 @@ class Kubernetes(clouds.Cloud):
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
             # Allow custom network tier if supported by the cluster
             # (e.g., Nebius clusters with high performance networking)
-            if cls._cluster_supports_high_performance_networking(context):
+            network_type, _ = cls._detect_network_type(context,
+                                                       resources.network_tier)
+            if network_type.supports_high_performance_networking():
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
                     None)
@@ -281,7 +290,8 @@ class Kubernetes(clouds.Cloud):
                 default_value=None)
             if (autoscaler_type is not None and
                     not kubernetes_utils.get_autoscaler(
-                        autoscaler_type).can_query_backend):
+                        kubernetes_enums.KubernetesAutoscalerType(
+                            autoscaler_type)).can_query_backend):
                 # Unsupported autoscaler type. Rely on the autoscaler to
                 # provision the right instance type without running checks.
                 # Worst case, if autoscaling fails, the pod will be stuck in
@@ -298,7 +308,8 @@ class Kubernetes(clouds.Cloud):
 
             if autoscaler_type is None:
                 continue
-            autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
+            autoscaler = kubernetes_utils.get_autoscaler(
+                kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
             logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
             if autoscaler.can_create_new_instance_of_type(
                     context, instance_type):
@@ -338,10 +349,12 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional['resources_utils.DiskTier'] = None) -> str:
+            disk_tier: Optional['resources_utils.DiskTier'] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier  # Unused.
+        del disk_tier, region, zone  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -406,8 +419,10 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def _calculate_provision_timeout(
-            num_nodes: int,
-            volume_mounts: Optional[List['volume_lib.VolumeMount']]) -> int:
+        num_nodes: int,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']],
+        enable_flex_start: bool,
+    ) -> int:
         """Calculate provision timeout based on number of nodes.
 
         The timeout scales linearly with the number of nodes to account for
@@ -415,6 +430,8 @@ class Kubernetes(clouds.Cloud):
 
         Args:
             num_nodes: Number of nodes being provisioned
+            volume_mounts: Volume mounts for the pod
+            enable_flex_start: Whether flex start is enabled
 
         Returns:
             Timeout in seconds
@@ -422,7 +439,12 @@ class Kubernetes(clouds.Cloud):
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
-        if volume_mounts is not None:
+        if enable_flex_start:
+            # Flex start takes longer to provision.
+            base_timeout = 1200
+            per_node_timeout = 10
+            max_timeout = 2400
+        elif volume_mounts is not None:
             for volume_mount in volume_mounts:
                 if (volume_mount.volume_config.type ==
                         volume_lib.VolumeType.PVC.value):
@@ -525,7 +547,8 @@ class Kubernetes(clouds.Cloud):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
+                k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
+                    context)
         else:
             # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
             # maintain GPU isolation. This is to override the default behavior
@@ -581,40 +604,22 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
-        # Timeout for resource provisioning. This timeout determines how long to
-        # wait for pod to be in pending status before giving up.
-        # Larger timeout may be required for autoscaling clusters, since
-        # autoscaler may take some time to provision new nodes.
-        # Note that this timeout includes time taken by the Kubernetes scheduler
-        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
-        # scheduling 100s of pods.
-        # We use a linear scaling formula to determine the timeout based on the
-        # number of nodes.
-
-        timeout = self._calculate_provision_timeout(num_nodes, volume_mounts)
-        timeout = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('provision_timeout',),
-            default_value=timeout,
-            override_configs=resources.cluster_config_overrides)
+        network_type, machine_type = self._detect_network_type(
+            context, resources.network_tier)
 
         # Check if this cluster supports high performance networking and
-        # configure IPC_LOCK capability for clusters like Nebius that support it
-        k8s_ipc_lock_capability = False
+        # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
             # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
             unsupported_features = self._unsupported_features_for_resources(
                 resources)
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
-                not in unsupported_features:
-                k8s_ipc_lock_capability = True
-
-        if k8s_ipc_lock_capability:
-            k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
-            k8s_env_vars['UCX_NET_DEVICES'] = \
-                'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
+                    not in unsupported_features:
+                # Add high-performance networking environment variables for
+                # clusters with high performance networking
+                network_env_vars = network_type.get_network_env_vars()
+                k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -640,7 +645,46 @@ class Kubernetes(clouds.Cloud):
                 cloud='kubernetes',
                 region=context,
                 keys=('kueue', 'local_queue_name'),
-                default_value=None))
+                default_value=None,
+                override_configs=resources.cluster_config_overrides))
+
+        # Check DWS configuration for GKE.
+        (enable_flex_start, enable_flex_start_queued_provisioning,
+         max_run_duration_seconds) = gcp_utils.get_dws_config(
+             context, k8s_kueue_local_queue_name,
+             resources.cluster_config_overrides)
+        if enable_flex_start_queued_provisioning or enable_flex_start:
+            # DWS is only supported in GKE, check the autoscaler type.
+            autoscaler_type = skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('autoscaler',),
+                default_value=None)
+            if (autoscaler_type !=
+                    kubernetes_enums.KubernetesAutoscalerType.GKE.value):
+                raise ValueError(
+                    f'DWS is only supported in GKE, but the autoscaler type '
+                    f'for context {context} is {autoscaler_type}')
+
+        # Timeout for resource provisioning. This timeout determines how long to
+        # wait for pod to be in pending status before giving up.
+        # Larger timeout may be required for autoscaling clusters, since
+        # autoscaler may take some time to provision new nodes.
+        # Note that this timeout includes time taken by the Kubernetes scheduler
+        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
+        # scheduling 100s of pods.
+        # We use a linear scaling formula to determine the timeout based on the
+        # number of nodes.
+
+        timeout = self._calculate_provision_timeout(
+            num_nodes, volume_mounts, enable_flex_start or
+            enable_flex_start_queued_provisioning)
+        timeout = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('provision_timeout',),
+            default_value=timeout,
+            override_configs=resources.cluster_config_overrides)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -695,7 +739,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
-            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
+            'k8s_enable_flex_start': enable_flex_start,
+            'k8s_max_run_duration_seconds': max_run_duration_seconds,
+            'k8s_network_type': network_type.value,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -705,6 +751,22 @@ class Kubernetes(clouds.Cloud):
 
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
         deploy_vars['k8s_namespace'] = namespace
+
+        # Add backward compatibility template variables for GPUDirect variants
+        deploy_vars['k8s_enable_gpudirect_tcpx'] = (
+            network_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+        deploy_vars['k8s_enable_gpudirect_tcpxo'] = (
+            network_type == KubernetesHighPerformanceNetworkType.GCP_TCPXO)
+        rdma_enabled = (network_type ==
+                        KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+        deploy_vars['k8s_enable_gpudirect_rdma'] = rdma_enabled
+        if rdma_enabled and machine_type.startswith('a4'):
+            deploy_vars['k8s_enable_gpudirect_rdma_a4'] = True
+        else:
+            deploy_vars['k8s_enable_gpudirect_rdma_a4'] = False
+
+        deploy_vars['k8s_ipc_lock_capability'] = (
+            network_type.requires_ipc_lock_capability())
 
         return deploy_vars
 
@@ -745,7 +807,9 @@ class Kubernetes(clouds.Cloud):
         default_instance_type = Kubernetes.get_default_instance_type(
             cpus=resources.cpus,
             memory=resources.memory,
-            disk_tier=resources.disk_tier)
+            disk_tier=resources.disk_tier,
+            region=resources.region,
+            zone=resources.zone)
 
         if accelerators is None:
             # For CPU only clusters, need no special handling
@@ -1000,28 +1064,124 @@ class Kubernetes(clouds.Cloud):
         ]
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=10)
-    def _cluster_supports_high_performance_networking(cls,
-                                                      context: str) -> bool:
-        """Check if the cluster supports high performance networking.
-
-        Currently detects Nebius clusters by checking for nebius.com/ labels
-        on cluster nodes.
+    def _detect_network_type(
+        cls,
+        context: str,
+        network_tier: Optional['resources_utils.NetworkTier'] = None
+    ) -> Tuple[KubernetesHighPerformanceNetworkType, str]:
+        """Detect the type of Kubernetes network based on node labels.
 
         Args:
             context: The Kubernetes context to check.
+            network_tier: The network tier requested. If None or not BEST,
+                         returns NONE (no high-performance networking).
 
         Returns:
-            True if the cluster supports high performance networking.
+            A tuple of the detected network type and the instance type.
         """
+        # If network_tier is None or not BEST, return NONE
+        if (network_tier is None or
+                network_tier != resources_utils.NetworkTier.BEST):
+            return KubernetesHighPerformanceNetworkType.NONE, ''
+
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
             for node in nodes:
                 if node.metadata.labels:
-                    for label_key in node.metadata.labels.keys():
+                    # Check for Nebius clusters
+                    for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
-                            return True
+                            return (KubernetesHighPerformanceNetworkType.NEBIUS,
+                                    '')
+                        if label_key.startswith('ib.coreweave.cloud/'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.COREWEAVE,
+                                '')
+
+                    # Check for GKE clusters with specific GPUDirect variants
+                    machine_family = node.metadata.labels.get(
+                        'cloud.google.com/machine-family', '')
+                    instance_type = node.metadata.labels.get(
+                        'node.kubernetes.io/instance-type', '')
+                    gke_accelerator = node.metadata.labels.get(
+                        'cloud.google.com/gke-accelerator', '')
+
+                    # Check if this is a GKE cluster with A3/A4 machine family
+                    if machine_family in ['a3', 'a4']:
+                        # Check instance type to determine specific GPUDirect
+                        # variant
+                        if 'a3-highgpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                'a3-highgpu-8g')
+                        elif 'a3-edgegpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                'a3-edgegpu-8g')
+                        elif 'a3-megagpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                                'a3-megagpu-8g')
+                        elif 'a4-highgpu-8g' in instance_type:
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g')
+                        elif 'a3-ultragpu-8g' in instance_type:
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g')
+                        # Generic A3/A4 detection as fallback
+                        elif machine_family == 'a4':
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a4')
+
+                    # Fallback: Check for GPU Direct TCPX capable instance
+                    # types with high-perf GPUs
+                    is_gpu_direct_tcpx_instance = (
+                        instance_type
+                        in gcp_constants.GPU_DIRECT_TCPX_INSTANCE_TYPES)
+                    has_high_perf_gpu = ('nvidia-h100' in gke_accelerator or
+                                         'nvidia-h200' in gke_accelerator or
+                                         'nvidia-b200' in gke_accelerator)
+
+                    if is_gpu_direct_tcpx_instance and has_high_perf_gpu:
+                        # Default to TCPX if we can't determine the specific
+                        # variant
+                        return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                instance_type)
+
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
-            return False
-        return False
+            pass
+
+        # If we cannot determine the network type based on nodes
+        # Check if the cluster has any node pools with autoscaling enabled
+        # with machine types that support high perf networking for GKE.
+        autoscaler_type = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('autoscaler',),
+            default_value=None)
+        if (autoscaler_type !=
+                kubernetes_enums.KubernetesAutoscalerType.GKE.value):
+            return KubernetesHighPerformanceNetworkType.NONE, ''
+        autoscaler = kubernetes_utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
+        logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
+        machine_types = autoscaler.get_available_machine_types(context)
+        # Check if any machine type supports high perf networking for GKE.
+        if 'a3-highgpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                    'a3-highgpu-8g')
+        elif 'a3-edgegpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                    'a3-edgegpu-8g')
+        elif 'a3-megagpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                    'a3-megagpu-8g')
+        elif 'a4-highgpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
+                    'a4-highgpu-8g')
+        elif 'a3-ultragpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
+                    'a3-ultragpu-8g')
+
+        return KubernetesHighPerformanceNetworkType.NONE, ''

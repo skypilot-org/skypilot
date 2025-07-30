@@ -387,6 +387,7 @@ class FetchClusterInfoError(Exception):
     class Reason(enum.Enum):
         HEAD = 'HEAD'
         WORKER = 'WORKER'
+        UNKNOWN = 'UNKNOWN'
 
     def __init__(self, reason: Reason) -> None:
         super().__init__()
@@ -506,6 +507,11 @@ class ApiServerAuthenticationError(RuntimeError):
 
 class APIVersionMismatchError(RuntimeError):
     """Raised when the API version mismatch."""
+    pass
+
+
+class APINotSupportedError(RuntimeError):
+    """Raised when the API is not supported by the remote peer."""
     pass
 
 
@@ -631,4 +637,17 @@ class ServerTemporarilyUnavailableError(Exception):
 
 class RestfulPolicyError(Exception):
     """Raised when failed to call a RESTful policy."""
+    pass
+
+
+class GitError(Exception):
+    """Raised when a git operation fails."""
+    pass
+
+
+class RequestInterruptedError(Exception):
+    """Raised when a request is interrupted by the server.
+    Client is expected to retry the request immediately when
+    this error is raised.
+    """
     pass

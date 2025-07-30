@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -89,17 +90,12 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '14'
+SKYLET_VERSION = '15'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 3
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
-
-# `sky jobs dashboard`-related
-#
-# Port on the remote jobs controller that the dashboard is running on.
-SPOT_DASHBOARD_REMOTE_PORT = 5000
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
@@ -375,6 +371,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('ssh', 'pod_config'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
+    ('kubernetes', 'dws'),
+    ('kubernetes', 'kueue'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -460,8 +458,10 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = (
-    f'^[0-9]+({"|".join([unit.lower() for unit in TIME_UNITS])})?$/i')
+TIME_PATTERN: str = ('^[0-9]+('
+                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
+                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
+                     ')?$')
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,
@@ -492,3 +492,6 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
+
+# The directory for file locks.
+SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')

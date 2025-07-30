@@ -1047,3 +1047,92 @@ def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):
     assert loaded_r.cpus == r.cpus
     if 'accelerators' in expected_yaml_config:
         assert loaded_r.accelerators == r.accelerators
+
+
+@pytest.mark.parametrize(
+    'r_kwargs, blocked_kwargs, expected',
+    [
+        # All fields match
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, True),
+        # use_spot mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': False
+        }, False),
+        # cloud mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+        }, {
+            'cloud': clouds.GCP(),
+            'instance_type': 'g2-standard-4',
+            'region': 'us-east4',
+            'zone': 'us-east4-c',
+            'accelerators': {
+                'L4': 1
+            },
+        }, False),
+        # instance_type mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.8xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, False),
+    ])
+def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
+    """Test should_be_blocked_by method."""
+    r = Resources(**r_kwargs)
+    blocked = Resources(**blocked_kwargs)
+    assert r.should_be_blocked_by(blocked) == expected

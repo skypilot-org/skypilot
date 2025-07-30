@@ -27,7 +27,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import status_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -55,6 +55,9 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
     AUTOSTOP = 'autostop'  # Pod/VM can stop itself
     AUTODOWN = 'autodown'  # Pod/VM can down itself
+    # Pod/VM can have customized multiple network interfaces
+    # e.g. GCP GPUDirect TCPX
+    CUSTOM_MULTI_NETWORK = 'custom_multi_network'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
@@ -338,14 +341,15 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
-        """Returns the default instance type with the given #vCPUs, memory and
-        disk tier.
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs, memory,
+        disk tier, region, and zone.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance

@@ -150,7 +150,10 @@ class Server(uvicorn.Server):
             if req is None:
                 return
             if req.pid is not None:
-                os.kill(req.pid, signal.SIGTERM)
+                try:
+                    os.kill(req.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
             req.should_retry = True
         logger.info(
@@ -159,6 +162,8 @@ class Server(uvicorn.Server):
     def run(self, *args, **kwargs):
         """Run the server process."""
         context_utils.hijack_sys_attrs()
+        # Use default loop policy of uvicorn (use uvloop if available).
+        self.config.setup_event_loop()
         with self.capture_signals():
             asyncio.run(self.serve(*args, **kwargs))
 
