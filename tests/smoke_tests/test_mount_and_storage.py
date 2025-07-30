@@ -119,14 +119,14 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
         (f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name} '
-         f'--secret SECRETE_BUCKET_NAME={storage_name}-2'),
+         f'--secret SECRETE_BUCKET_NAME={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
         (f'sky launch -y -c {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name} '
          '--env MY_LOCAL_PATH=tmpfile '
-         f'--secret SECRETE_BUCKET_NAME={storage_name}-2'),
+         f'--secret SECRETE_BUCKET_NAME={storage_name}'),
         f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(
