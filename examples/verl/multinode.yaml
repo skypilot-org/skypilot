@@ -10,7 +10,7 @@
 #
 # Usage:
 #   # Launch a 2-node training cluster:
-#   $ sky launch -c verl-cluster verl_multinode.yaml
+#   $ sky launch -c verl-cluster examples/verl/multinode.yaml
 #
 #   # Monitor the Ray dashboard (optional):
 #   $ sky status --endpoint 8280 verl-cluster

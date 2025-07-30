@@ -10,6 +10,8 @@ Verl is a flexible and efficient reinforcement learning framework designed for t
 - Run distributed PPO training on the GSM8K dataset
 - Train the Qwen2.5-0.5B-Instruct model
 
+**Note**: This example uses Qwen2.5-0.5B-Instruct (a smaller model) for faster demonstration. For production use, you may want to use larger models like Qwen2.5-7B-Instruct as shown in [Verl's official documentation](https://verl.readthedocs.io/).
+
 ## Prerequisites
 
 - GPU nodes with sufficient memory (A100 recommended)
@@ -19,7 +21,7 @@ Verl is a flexible and efficient reinforcement learning framework designed for t
 
 Launch a 2-node training cluster:
 ```bash
-sky launch -c verl-cluster verl_multinode.yaml
+sky launch -c verl-cluster examples/verl/multinode.yaml
 ```
 
 Monitor training progress:
@@ -79,11 +81,18 @@ The Ray dashboard provides real-time monitoring of:
 
 Access it via the endpoint shown by `sky status --endpoint 8280 verl-cluster`.
 
+## Configuration Notes
+
+- **Ray Ports**: This example uses port 6385 for Ray head and 8280 for the dashboard. If these ports are in use, you can modify them in the YAML file.
+- **Model Size**: We use Qwen2.5-0.5B for quick testing. For production, consider using larger models (7B, 14B, etc.).
+- **GPU Memory**: The `gpu_memory_utilization` is set to 0.4 to leave room for other processes. Adjust based on your GPU memory.
+
 ## Troubleshooting
 
 1. **OOM Errors**: Reduce batch sizes or `gpu_memory_utilization`
 2. **Connection Issues**: Ensure ports 6385 (Ray) and 8280 (dashboard) are not blocked
 3. **Model Download**: First run may take longer due to model downloads
+4. **Port Conflicts**: If you see "address already in use" errors, change the HEAD_PORT and DASH_PORT values
 
 ## References
 
