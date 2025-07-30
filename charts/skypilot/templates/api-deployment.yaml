@@ -195,53 +195,17 @@ spec:
           # Create a Nebius profile for the nebius CLI to use as default
           nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
           {{- end }}
-          # AWS credentials mounting
-          # Since the ~/.aws directory is also used by the AWS CLI, we mount the credentials to /root/.aws_credentials
-          # and copy them to /root/.aws. This cannot be done in the init container because the AWS CLI needs read-write access to ~/.aws.
+          # AWS credentials setup
+          # Only copy the credentials file, not the entire ~/.aws directory
           {{- if .Values.awsCredentials.enabled }}
           echo "Setting up AWS credentials..."
           mkdir -p /root/.aws
-          if [ -d "/root/.aws_credentials" ]; then
-            # Handle both flat files and directory structures from Kubernetes secret
-            for file in /root/.aws_credentials/*; do
-              if [ -f "$file" ] && [[ "$(basename "$file")" != ..* ]]; then
-                filename=$(basename "$file")
-                echo "Processing file: $filename"
-                
-                # Determine target location based on file type and name
-                case "$filename" in
-                  config)
-                    cp "$file" "/root/.aws/config"
-                    chmod 600 "/root/.aws/config"
-                    echo "  -> Copied $filename to /root/.aws/config"
-                    ;;
-                  credentials)
-                    cp "$file" "/root/.aws/credentials"
-                    chmod 600 "/root/.aws/credentials"
-                    echo "  -> Copied $filename to /root/.aws/credentials"
-                    ;;
-                  *.json)
-                    # These are cache files that need to be writable for token refresh
-                    # Create both directories and copy to sso/cache/ and cli/cache/
-                    mkdir -p /root/.aws/sso/cache /root/.aws/cli/cache
-                    chmod 700 /root/.aws/sso /root/.aws/cli /root/.aws/sso/cache /root/.aws/cli/cache
-                    cp "$file" "/root/.aws/sso/cache/$filename"
-                    cp "$file" "/root/.aws/cli/cache/$filename"
-                    chmod 600 "/root/.aws/sso/cache/$filename" "/root/.aws/cli/cache/$filename"
-                    echo "  -> Copied $filename to both /root/.aws/sso/cache/ and /root/.aws/cli/cache/"
-                    ;;
-                  *)
-                    # For other files, copy them directly to .aws
-                    cp "$file" "/root/.aws/$filename"
-                    chmod 600 "/root/.aws/$filename"
-                    echo "  -> Copied $filename to /root/.aws/$filename"
-                    ;;
-                esac
-              fi
-            done
-            echo "AWS credentials setup complete."
+          if [ -f "/root/.aws_credentials/credentials" ]; then
+            cp "/root/.aws_credentials/credentials" "/root/.aws/credentials"
+            chmod 600 "/root/.aws/credentials"
+            echo "AWS credentials file copied successfully."
           else
-            echo "No AWS credentials directory found at /root/.aws_credentials"
+            echo "No AWS credentials file found at /root/.aws_credentials/credentials"
           fi
           {{- end }}
           {{- if .Values.apiService.sshKeySecret }}
