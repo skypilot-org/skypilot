@@ -1431,51 +1431,51 @@ function UsersTable({
                 </TableCell>
                 {/* Actions cell logic */}
                 {(basicAuthEnabled || currentUserRole === 'admin') && (
-                <TableCell className="relative">
-                  <div className="flex items-center gap-2">
-                    {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
-                    {basicAuthEnabled && (
-                      <button
-                        onClick={
-                          currentUserRole === 'admin' ||
-                          user.userId === currentUserId
-                            ? async () => {
-                                onResetPassword(user);
-                              }
-                            : undefined
-                        }
-                        className={
-                          currentUserRole === 'admin' ||
-                          user.userId === currentUserId
-                            ? 'text-blue-600 hover:text-blue-700 p-1'
-                            : 'text-gray-300 cursor-not-allowed p-1'
-                        }
-                        title={
-                          currentUserRole === 'admin' ||
-                          user.userId === currentUserId
-                            ? 'Reset Password'
-                            : 'You can only reset your own password'
-                        }
-                        disabled={
-                          currentUserRole !== 'admin' &&
-                          user.userId !== currentUserId
-                        }
-                      >
-                        <KeyRoundIcon className="h-4 w-4" />
-                      </button>
-                    )}
-                    {/* Delete button - only show for admin */}
-                    {currentUserRole === 'admin' && (
-                      <button
-                        onClick={() => onDeleteUser(user)}
-                        className="text-red-600 hover:text-red-700 p-1"
-                        title="Delete User"
-                      >
-                        <Trash2Icon className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </TableCell>
+                  <TableCell className="relative">
+                    <div className="flex items-center gap-2">
+                      {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                      {basicAuthEnabled && (
+                        <button
+                          onClick={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? async () => {
+                                  onResetPassword(user);
+                                }
+                              : undefined
+                          }
+                          className={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? 'text-blue-600 hover:text-blue-700 p-1'
+                              : 'text-gray-300 cursor-not-allowed p-1'
+                          }
+                          title={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? 'Reset Password'
+                              : 'You can only reset your own password'
+                          }
+                          disabled={
+                            currentUserRole !== 'admin' &&
+                            user.userId !== currentUserId
+                          }
+                        >
+                          <KeyRoundIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                      {/* Delete button - only show for admin */}
+                      {currentUserRole === 'admin' && (
+                        <button
+                          onClick={() => onDeleteUser(user)}
+                          className="text-red-600 hover:text-red-700 p-1"
+                          title="Delete User"
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </TableCell>
                 )}
               </TableRow>
             ))}
