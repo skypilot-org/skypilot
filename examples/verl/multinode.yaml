@@ -59,6 +59,15 @@ run: |
   cd verl
   source .venv/bin/activate
   
+  # Create custom runtime environment configuration
+  cat > runtime_env_custom.yaml <<EOF
+  working_dir: ./
+  excludes: ["/.git/", "*.whl", "**/*.whl"]
+  env_vars:
+    TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+    CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  EOF
+  
   # Ray cluster configuration
   HEAD_PORT=6385
   DASH_PORT=8280
@@ -99,7 +108,7 @@ run: |
     echo "Submitting training job to Ray cluster..."
     
     ray job submit --address="$RAY_ADDRESS" --working-dir=. \
-      --runtime-env=verl/trainer/runtime_env.yaml \
+      --runtime-env=runtime_env_custom.yaml \
       -- python3 -m verl.trainer.main_ppo \
       data.train_files=$HOME/data/gsm8k/train.parquet \
       data.val_files=$HOME/data/gsm8k/test.parquet \
