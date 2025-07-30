@@ -145,10 +145,7 @@ run: |
     echo "Setting up worker node..."
     sleep 10  # Wait for head node to start
     
-    if ! is_ray_alive "$head_ip"; then
-      echo "Connecting worker to Ray head at $head_ip:$HEAD_PORT"
-      ray start --address $head_ip:$HEAD_PORT --disable-usage-stats
-    else
-      echo "Worker already connected to Ray at $head_ip:$HEAD_PORT"
-    fi
+    # Check if this worker is already connected to Ray
+    echo "Connecting worker to Ray head at $head_ip:$HEAD_PORT"
+    ray start --address $head_ip:$HEAD_PORT --disable-usage-stats
   fi
