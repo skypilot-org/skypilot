@@ -32,7 +32,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_placer
 from sky.skylet import constants as skylet_constants
-from sky.skylet import job_lib
+from sky.skylet import job_lib  # TODO(andyl): Remove in v0.12.0
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -279,10 +279,6 @@ def ha_recovery_for_consolidation_mode():
         ]:
             continue
 
-        # Only recover consolidation mode services (controller_job_id == 0)
-        if service.get('controller_job_id') != 0:
-            continue
-
         logger.info(f'Attempting HA recovery for service {service_name}')
 
         script = serve_state.get_ha_recovery_script(service_name)
@@ -513,10 +509,8 @@ def update_service_status() -> None:
             # Skip services that is shutting down.
             continue
 
-        if is_consolidation_mode():
-            # In consolidation mode, check controller PID
-            controller_pid = record.get('controller_pid')
-            assert controller_pid is not None, f"Consolidated {record} should have a controller pid"
+        controller_pid = record.get('controller_pid')
+        if controller_pid is not None:
             try:
                 process = psutil.Process(controller_pid)
                 if not process.is_running():
@@ -529,7 +523,10 @@ def update_service_status() -> None:
                 serve_state.set_service_status_and_active_versions(
                     record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
         else:
-            # Non-consolidation mode: check job status
+            # TODO(andyl): Remove in v0.12.0 - backward compatibility for services
+            # started before PID tracking was added. New services always have 
+            # controller_pid set by launcher and don't need Ray job status check.
+            assert not is_consolidation_mode()
             controller_job_id = record['controller_job_id']
             assert controller_job_id is not None
             controller_status = job_lib.get_status(controller_job_id)
@@ -907,46 +904,56 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     """
     start_time = time.time()
     setup_completed = False
+    
     while True:
-        # TODO(tian): PID-based tracking.
-        if not is_consolidation_mode():
-            job_status = job_lib.get_status(job_id)
-            if job_status is None or job_status < job_lib.JobStatus.RUNNING:
-                # Wait for the controller process to finish setting up. It
-                # can be slow if a lot cloud dependencies are being installed.
-                if (time.time() - start_time >
-                        constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError(
-                            f'Failed to start the controller process for '
-                            f'the service {service_name!r} within '
-                            f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
-                            f' seconds.')
-                # No need to check the service status as the controller process
-                # is still setting up.
-                time.sleep(1)
-                continue
-
-            if not setup_completed:
-                setup_completed = True
-                # Reset the start time to wait for the service to be registered.
-                start_time = time.time()
-
         record = serve_state.get_service_from_name(service_name)
-        if record is not None:
-            # TODO(tian): PID-based tracking.
-            if (not is_consolidation_mode() and
-                    job_id != record['controller_job_id']):
+        
+        # First, wait for controller to be set up (PID saved)
+        if not setup_completed:
+            if record is not None and record.get('controller_pid') is not None:
+                setup_completed = True
+                start_time = time.time()
+            elif (time.time() - start_time > 
+                  constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'The service {service_name!r} is already running. '
-                        'Please specify a different name for your service. '
-                        'To update an existing service, run: sky serve update '
-                        f'{service_name} <new-service-yaml>')
+                    raise RuntimeError(
+                        f'Failed to start the controller process for '
+                        f'the service {service_name!r} within '
+                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
+                        f' seconds.')
+        
+        # After setup is complete, wait for service registration
+        if setup_completed and record is not None:
+            # Check for name conflicts
+            # We need to verify this is the service we just launched, not a pre-existing one
+            # In consolidation mode: all services have controller_job_id=0, so just check existence
+            # In non-consolidation mode: each service has unique job_id, so compare them
+            
+            # If we reach here, a service with this name exists in the database
+            # This could be either:
+            # 1. The service we just launched (normal case)
+            # 2. A pre-existing service with the same name (name conflict)
+            
+            # In consolidation mode, we can't distinguish by job_id (all are 0)
+            # So we rely on the fact that the controller won't create duplicate entries
+            if not is_consolidation_mode():
+                # In non-consolidation mode, use job_id as unique identifier
+                # to detect name conflicts. This is NOT a Ray dependency - job_id
+                # is just a unique identifier assigned to each service.
+                if job_id != record['controller_job_id']:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'The service {service_name!r} is already running. '
+                            'Please specify a different name for your service. '
+                            'To update an existing service, run: sky serve update '
+                            f'{service_name} <new-service-yaml>')
+            
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
-        elif len(serve_state.get_services()) >= get_num_service_threshold():
+        
+        # Check if max services reached
+        if len(serve_state.get_services()) >= get_num_service_threshold():
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
