@@ -3,24 +3,23 @@
 Authentication and RBAC
 =========================
 
-SkyPilot API server supports three authentication methods:
+SkyPilot API server supports two authentication methods:
 
 - **Basic auth**: Use an admin-configured username and password to authenticate.
-- **Basic auth with RBAC**: Use an admin-configured username and password to as an ``Admin`` user, and manage other users and their roles.
 - **SSO (recommended)**: Use an auth proxy (e.g.,
   `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__) to
   authenticate. For example, Okta, Google Workspace, or other SSO providers are supported.
 
-Comparison of the three methods:
+Comparison of the two methods:
 
 .. csv-table::
-    :header: "", "Basic Auth", "Basic Auth with RBAC", "SSO (recommended)"
-    :widths: 20, 40, 40, 40
+    :header: "", "Basic Auth", "SSO (recommended)"
+    :widths: 20, 40, 40
     :align: left
 
-    "User identity", "Client's ``whoami`` + hash of MAC address", "Users created by the ``Admin`` user", "User email (e.g., ``who@skypilot.co``), read from ``X-Auth-Request-Email``"
-    "SkyPilot RBAC", "Not supported", "Supported", "Supported"
-    "Setup", "Automatically enabled", "Can be enabled during deployment with Helm", "Bring your Okta, Google Workspace, or other SSO provider"
+    "User identity", "Client's ``whoami`` + hash of MAC address", "User email (e.g., ``who@skypilot.co``), read from ``X-Auth-Request-Email``"
+    "SkyPilot RBAC", "Not supported", "Supported"
+    "Setup", "Automatically enabled", "Bring your Okta, Google Workspace, or other SSO provider"
 
 
 .. _api-server-basic-auth:
@@ -30,21 +29,6 @@ Basic auth
 
 Basic auth is automatically enabled if you use the :ref:`helm chart
 <sky-api-server-deploy>` to deploy the API server. See the ``AUTH_STRING``
-environment variable in the deployment instructions.
-
-Example login command:
-
-.. code-block:: console
-
-    $ sky api login -e http://username:password@<SKYPILOT_API_SERVER_ENDPOINT>
-
-.. _api-server-basic-auth-rbac:
-
-Basic auth with RBAC
---------------------
-
-Basic auth with RBAC can be enabled if you use the :ref:`helm chart
-<deploy-api-server-basic-auth>` to deploy the API server. See the ``AUTH_STRING``
 environment variable in the deployment instructions.
 
 Example login command:
@@ -400,7 +384,7 @@ SkyPilot provides basic RBAC (role-based access control) support. Two roles are 
 - **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
 - **Admin**: Manage SkyPilot API server settings, users, and workspaces.
 
-RBAC support is enabled when :ref:`SSO authentication <api-server-auth-proxy>` or :ref:`basic auth with RBAC <api-server-basic-auth-rbac>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
+RBAC support is enabled only when :ref:`SSO authentication <api-server-auth-proxy>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
 SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is
@@ -409,9 +393,7 @@ set to ``admin`` to ease first-time setup.
 User management
 ~~~~~~~~~~~~~~~
 
-When SSO authentication is used, SkyPilot automatically creates a user for each authenticated user. The user's email is used as the username.
-
-When basic auth with RBAC is used, the initial admin user is created with the ``admin`` role and it can create new users and manage their roles in the dashboard.
+SkyPilot automatically creates a user for each authenticated user. The user's email is used as the username.
 
 Admins can click on the **Users** tab in the SkyPilot dashboard to manage users and their roles.
 
@@ -421,5 +403,5 @@ Admins can click on the **Users** tab in the SkyPilot dashboard to manage users 
 
 Supported operations:
 
-* ``Admin`` role can create users (only when basic auth with RBAC is used), update the role for all users, and delete users.
+* ``Admin`` role can create users, update the role for all users, and delete users.
 * ``User`` role can view all users and their roles.
