@@ -349,8 +349,6 @@ class Task:
         self.name = name
         self.run = run
         self._storage_mounts: Dict[str, storage_lib.Storage] = {}
-        self.storage_plans: Dict[storage_lib.Storage,
-                                 storage_lib.StoreType] = {}
         self.setup = setup
         self._envs = envs or {}
         self._secrets = secrets or {}
@@ -1411,7 +1409,9 @@ class Task:
         # the storage with stores first, so that the storage will be created on
         # the correct cloud.
         name_to_storage = collections.defaultdict(list)
-        for storage in self.storage_mounts.values():
+        storage_plans = {}
+        storage_mounts = self.storage_mounts
+        for storage in storage_mounts.values():
             name_to_storage[storage.name].append(storage)
         for storages in name_to_storage.values():
             # Place the storage with most stores first, so that the storage will
@@ -1424,7 +1424,7 @@ class Task:
                 assert storage.name is not None, storage
                 if not storage.stores:
                     store_type, store_region = self._get_preferred_store()
-                    self.storage_plans[storage] = store_type
+                    storage_plans[storage] = store_type
                     storage.add_store(store_type, store_region)
                 else:
                     # We don't need to sync the storage here as if the stores
@@ -1433,7 +1433,7 @@ class Task:
                     # We will download the first store that is added to remote.
                     assert all(store is not None
                                for store in storage.stores.values()), storage
-                    self.storage_plans[storage] = list(storage.stores.keys())[0]
+                    storage_plans[storage] = list(storage.stores.keys())[0]
 
         # The following logic converts the storage mounts with COPY mode into
         # inline file mounts with cloud URIs, so that the _execute_file_mounts()
@@ -1442,8 +1442,6 @@ class Task:
         # Note that this will cause duplicate destination paths in file_mounts,
         # and storage_mounts, which should be fine as our to_yaml_config() will
         # only dump the storage mount version, i.e. what user specified.
-        storage_mounts = self.storage_mounts
-        storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
             assert storage.name is not None, storage
 
