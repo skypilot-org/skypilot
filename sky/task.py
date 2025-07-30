@@ -377,6 +377,11 @@ class Task:
 
         self._metadata = metadata if metadata is not None else {}
 
+        # Initialize redacted versions (used when redact_secrets=True)
+        self._file_mounts_redacted = None
+        self._service_redacted = None
+        self._workdir_redacted = None
+
         dag = sky.dag.get_current_dag()
         if dag is not None:
             dag.add(self)
@@ -593,6 +598,7 @@ class Task:
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       config.get('envs', {}))
+            config['file_mounts_redacted'] = config['file_mounts']
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       config.get('secrets', {}))
 
@@ -600,6 +606,7 @@ class Task:
         if config.get('service') is not None:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
+            config['service_redacted'] = config['service']
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('secrets', {}))
 
@@ -607,6 +614,7 @@ class Task:
         if config.get('workdir') is not None:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   config.get('envs', {}))
+            config['workdir_redacted'] = config['workdir']
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   config.get('secrets', {}))
 
@@ -623,6 +631,11 @@ class Task:
             volumes=config.pop('volumes', None),
             metadata=config.pop('_metadata', None),
         )
+
+        # Store redacted versions (before secret substitution)
+        task.set_workdir_redacted(config.pop('workdir_redacted', None))
+        task.set_service_redacted(config.pop('service_redacted', None))
+        task.set_file_mounts_redacted(config.pop('file_mounts_redacted', None))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
@@ -914,6 +927,29 @@ class Task:
     @property
     def volumes(self) -> Dict[str, str]:
         return self._volumes
+
+    @property
+    def workdir_redacted(self) -> Optional[str]:
+        return self._workdir_redacted
+
+    @property
+    def service_redacted(self) -> Optional[Dict[str, Any]]:
+        return self._service_redacted
+
+    @property
+    def file_mounts_redacted(self) -> Optional[Dict[str, str]]:
+        return self._file_mounts_redacted
+
+    def set_workdir_redacted(self, workdir_redacted: Optional[str]) -> None:
+        self._workdir_redacted = workdir_redacted
+
+    def set_service_redacted(
+            self, service_redacted: Optional[Dict[str, Any]]) -> None:
+        self._service_redacted = service_redacted
+
+    def set_file_mounts_redacted(
+            self, file_mounts_redacted: Optional[Dict[str, str]]) -> None:
+        self._file_mounts_redacted = file_mounts_redacted
 
     def set_volumes(self, volumes: Dict[str, str]) -> None:
         """Sets the volumes for this task.
@@ -1571,8 +1607,12 @@ class Task:
 
         add_if_not_none('resources', tmp_resource_config)
 
+        # Use redacted service if available and redaction is requested
         if self.service is not None:
-            add_if_not_none('service', self.service.to_yaml_config())
+            if redact_secrets and self.service_redacted is not None:
+                add_if_not_none('service', self.service_redacted)
+            else:
+                add_if_not_none('service', self.service.to_yaml_config())
 
         add_if_not_none('num_nodes', self.num_nodes)
 
@@ -1585,21 +1625,36 @@ class Task:
                 {self.outputs: self.estimated_outputs_size_gigabytes})
 
         add_if_not_none('setup', self.setup)
-        add_if_not_none('workdir', self.workdir)
+
+        # Use redacted workdir if available and redaction is requested
+        workdir_to_use = self.workdir
+        if redact_secrets and self.workdir_redacted is not None:
+            workdir_to_use = self.workdir_redacted
+        add_if_not_none('workdir', workdir_to_use)
+
         add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
 
         # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
 
-        # Add secrets without redaction initially (will be redacted later
-        # if needed).
-        add_if_not_none('secrets', self.secrets, no_empty=True)
+        # Add secrets with redaction if requested.
+        secrets = self.secrets
+        if secrets and redact_secrets:
+            secrets = {
+                k: '<redacted>' if isinstance(v, str) else v
+                for k, v in secrets.items()
+            }
+        add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
 
+        # Use redacted file_mounts if available and redaction is requested
         if self.file_mounts is not None:
-            config['file_mounts'].update(self.file_mounts)
+            file_mounts_to_use = self.file_mounts
+            if redact_secrets and self.file_mounts_redacted is not None:
+                file_mounts_to_use = self.file_mounts_redacted
+            config['file_mounts'].update(file_mounts_to_use)
 
         if self.storage_mounts is not None:
             config['file_mounts'].update({
@@ -1616,14 +1671,6 @@ class Task:
             ]
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
-
-        # If redact_secrets is True, redact secret values throughout the entire
-        # config. This handles both the secrets section itself and secret values
-        # that were substituted into other sections (like workdir, file_mounts,
-        # etc.)
-        if redact_secrets and self.secrets:
-            config = common_utils.redact_substituted_secrets_in_config(
-                config, self.secrets)
 
         return config
 
