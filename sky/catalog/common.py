@@ -631,7 +631,7 @@ def list_accelerators_impl(
         df = df[df['Region'].str.contains(region_filter,
                                           case=case_sensitive,
                                           regex=True)]
-    df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
+    df['AcceleratorCount'] = df['AcceleratorCount']
     if quantity_filter is not None:
         df = df[df['AcceleratorCount'] == quantity_filter]
     grouped = df.groupby('AcceleratorName')
