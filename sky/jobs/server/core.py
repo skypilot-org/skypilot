@@ -1,9 +1,11 @@
 """SDK functions for managed jobs."""
+import ipaddress
 import os
 import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib import parse as urlparse
 import uuid
 
 import colorama
@@ -169,6 +171,14 @@ def launch(
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+    if not managed_job_utils.is_consolidation_mode():
+        db_path = mutated_user_config.get('db', None)
+        if db_path is not None:
+            parsed = urlparse.urlparse(db_path)
+            if ((parsed.hostname == 'localhost' or
+                 ipaddress.ip_address(parsed.hostname).is_loopback)):
+                mutated_user_config.pop('db', None)
+
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '

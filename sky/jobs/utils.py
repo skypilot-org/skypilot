@@ -4,9 +4,14 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+import asyncio
+from asyncio import events
 import collections
+import contextvars
 import datetime
 import enum
+import functools
+import logging
 import os
 import pathlib
 import shlex
@@ -14,11 +19,11 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import Any, Deque, Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import (Any, Deque, Dict, List, Literal, Optional, Set, TextIO,
+                    Tuple, Union)
 
 import colorama
 import filelock
-from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
@@ -30,7 +35,6 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
-from sky.server import common as server_common
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -39,7 +43,6 @@ from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -58,9 +61,9 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
-JOB_STATUS_CHECK_GAP_SECONDS = 20
+# This is a tradeoff between the latency and the resource usage.
+JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
@@ -84,7 +87,7 @@ _JOB_CANCELLED_MESSAGE = (
 # blocking for a long time. This should be significantly longer than the
 # JOB_STATUS_CHECK_GAP_SECONDS to avoid timing out before the controller can
 # update the state.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
 
 class UserSignal(enum.Enum):
@@ -136,12 +139,12 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
 def _validate_consolidation_mode_config(
         current_is_consolidation_mode: bool) -> None:
     """Validate the consolidation mode config."""
-    if (current_is_consolidation_mode and
-            not env_options.Options.IS_DEVELOPER.get() and
-            server_common.is_api_server_local()):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Consolidation mode is not supported when running locally.')
+    # if (current_is_consolidation_mode and
+    #         not env_options.Options.IS_DEVELOPER.get() and
+    #         server_common.is_api_server_local()):
+    #     with ux_utils.print_exception_no_traceback():
+    #         raise exceptions.NotSupportedError(
+    #             'Consolidation mode is not supported when running locally.')
     # Check whether the consolidation mode config is changed.
     if current_is_consolidation_mode:
         controller_cn = (
@@ -239,8 +242,8 @@ def ha_recovery_for_consolidation_mode():
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-def get_job_status(backend: 'backends.CloudVmRayBackend',
-                   cluster_name: str) -> Optional['job_lib.JobStatus']:
+def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                   job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
@@ -250,32 +253,33 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        job_logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
-            logger.info('=== Checking the job status... ===')
+            job_logger.info('=== Checking the job status... ===')
             statuses = backend.get_job_status(handle, stream_logs=False)
             status = list(statuses.values())[0]
             if status is None:
-                logger.info('No job found.')
+                job_logger.info('No job found.')
             else:
-                logger.info(f'Job status: {status}')
-            logger.info('=' * 34)
+                job_logger.info(f'Job status: {status}')
+            job_logger.info('=' * 34)
             return status
         except exceptions.CommandError as e:
             # Retry on k8s transient network errors. This is useful when using
             # coreweave which may have transient network issue sometimes.
             if (e.detailed_reason is not None and
                     _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
-                logger.info('Failed to connect to the cluster. Retrying '
-                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
-                logger.info('=' * 34)
+                job_logger.info('Failed to connect to the cluster. Retrying '
+                                f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                job_logger.info('=' * 34)
                 time.sleep(1)
             else:
-                logger.info(f'Failed to get job status: {e.detailed_reason}')
-                logger.info('=' * 34)
+                job_logger.info(
+                    f'Failed to get job status: {e.detailed_reason}')
+                job_logger.info('=' * 34)
                 return None
     return None
 
@@ -283,9 +287,14 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
 def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
+        new = False
+        if pid < 0:
+            # new job controller process will always be negative
+            new = True
+            pid = -pid
         process = psutil.Process(pid)
         cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and f'--job-id {job_id}' in cmd_str
+        return process.is_running() and (f'--job-id {job_id}' in cmd_str or new)
     except psutil.NoSuchProcess:
         return False
 
@@ -583,7 +592,17 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {status!r} ===')
 
-    return callback_func
+    try:
+        asyncio.get_running_loop()
+
+        # In async context
+        async def async_callback_func(status: str):
+            return await to_thread(callback_func, status)
+
+        return async_callback_func
+    except RuntimeError:
+        # Not in async context
+        return callback_func
 
 
 # ======== user functions ========
@@ -630,8 +649,32 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
+        elif job_status == managed_job_state.ManagedJobStatus.PENDING:
+            # the if is a short circuit, this will be atomic.
+            cancelled = managed_job_state.set_pending_cancelled(job_id)
+            if cancelled:
+                cancelled_job_ids.append(job_id)
+                continue
 
         update_managed_jobs_statuses(job_id)
+
+        job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
+        if job_controller_pid is not None and job_controller_pid < 0:
+            # This is a consolidated job controller, so we need to cancel the
+            # with the controller server API
+            try:
+                # we create a file as a signal to the controller server
+                signal_file = pathlib.Path(
+                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
+                signal_file.touch()
+                cancelled_job_ids.append(job_id)
+            except OSError as e:
+                logger.error(f'Failed to cancel job {job_id} '
+                             f'with controller server: {e}')
+                # don't add it to the to be cancelled job ids, since we don't
+                # know for sure yet.
+                continue
+            continue
 
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
@@ -639,7 +682,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             continue
 
         # Send the signal to the jobs controller.
-        signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
+        signal_file = (pathlib.Path(
+            managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
@@ -1656,3 +1700,17 @@ class ManagedJobCodeGen:
             f'export {constants.USER_ID_ENV_VAR}='
             f'"{common_utils.get_user_hash()}"; '
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
+
+
+async def to_thread(func, /, *args, **kwargs):
+    """This is an identical copy of asyncio.to_thread, however,
+    asyncio.to_thread was added in python 3.9, so we use this for compatibility
+    for 3.7 and 3.8.
+
+    For full documentation, see:
+    https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread
+    """
+    loop = events.get_running_loop()
+    ctx = contextvars.copy_context()
+    func_call = functools.partial(ctx.run, func, *args, **kwargs)
+    return await loop.run_in_executor(None, func_call)
