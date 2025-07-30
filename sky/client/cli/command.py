@@ -24,6 +24,7 @@ listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
 import collections
+import concurrent.futures
 import fnmatch
 import os
 import pathlib
@@ -358,6 +359,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     bashrc_diff = ('\n# For SkyPilot shell completion'
                    '\n. ~/.sky/.sky-complete.bash')
 
+    cmd: Optional[str] = None
+    reload_cmd: Optional[str] = None
+
     if value == 'bash':
         install_cmd = f'_SKY_COMPLETE=bash_source sky > \
                 ~/.sky/.sky-complete.bash && \
@@ -389,6 +393,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         click.secho(f'Unsupported shell: {value}', fg='red')
         ctx.exit()
 
+    assert cmd is not None  # This should never be None due to ctx.exit() above
     try:
         subprocess.run(cmd,
                        shell=True,
@@ -420,6 +425,9 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
         else:
             value = os.path.basename(os.environ['SHELL'])
 
+    cmd: Optional[str] = None
+    reload_cmd: Optional[str] = None
+
     if value == 'bash':
         cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.bashrc && \
                sed -i"" -e "/sky-complete.bash/d" ~/.bashrc && \
@@ -444,6 +452,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
         click.secho(f'Unsupported shell: {value}', fg='red')
         ctx.exit()
 
+    assert cmd is not None  # This should never be None due to ctx.exit() above
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion uninstalled for {value}', fg='green')
@@ -1745,19 +1754,16 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
-    if show_managed_jobs:
-        managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
-                                                           skip_finished=True,
-                                                           all_users=all_users)
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
-    if show_services:
-        # Run the sky serve service query in parallel to speed up the
-        # status query.
-        service_status_request_id = serve_lib.status(service_names=None)
 
-    workspace_request_id = None
+    query_clusters: Optional[List[str]] = None if not clusters else clusters
+    refresh_mode = common.StatusRefreshMode.NONE
+    if refresh:
+        refresh_mode = common.StatusRefreshMode.FORCE
+
+    # Phase 1: Validate arguments for IP/endpoint queries
     if ip or show_endpoints:
         if refresh:
             raise click.UsageError(
@@ -1791,9 +1797,19 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         flag='ip' if ip else
                         ('endpoint port'
                          if show_single_endpoint else 'endpoints')))
-    else:
+
+    # Phase 2: Parallel submission of all API requests
+    def submit_managed_jobs():
+        return managed_jobs.queue(refresh=False,
+                                  skip_finished=True,
+                                  all_users=all_users)
+
+    def submit_services() -> Optional[str]:
+        return serve_lib.status(service_names=None)
+
+    def submit_workspace() -> Optional[str]:
         try:
-            workspace_request_id = sdk.workspaces()
+            return sdk.workspaces()
         except RuntimeError:
             # Backward compatibility for API server before #5660.
             # TODO(zhwu): remove this after 0.10.0.
@@ -1802,12 +1818,35 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                            'workspaces. Update with: sky api stop; '
                            'sky api start'
                            f'{colorama.Style.RESET_ALL}')
-            workspace_request_id = None
+            return None
 
-    query_clusters: Optional[List[str]] = None if not clusters else clusters
-    refresh_mode = common.StatusRefreshMode.NONE
-    if refresh:
-        refresh_mode = common.StatusRefreshMode.FORCE
+    managed_jobs_queue_request_id = None
+    service_status_request_id = None
+    workspace_request_id = None
+
+    # Submit all requests in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        if show_managed_jobs:
+            managed_jobs_request_future = executor.submit(submit_managed_jobs)
+        if show_services:
+            services_request_future = executor.submit(submit_services)
+        if not (ip or show_endpoints):
+            workspace_request_future = executor.submit(submit_workspace)
+
+        # Get the request IDs
+        if show_managed_jobs:
+            managed_jobs_queue_request_id = managed_jobs_request_future.result()
+        if show_services:
+            service_status_request_id = services_request_future.result()
+        if not (ip or show_endpoints):
+            workspace_request_id = workspace_request_future.result()
+
+    managed_jobs_queue_request_id = '' if not managed_jobs_queue_request_id \
+        else managed_jobs_queue_request_id
+    service_status_request_id = '' if not service_status_request_id \
+        else service_status_request_id
+
+    # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
         query_clusters, refresh_mode, all_users)
 
@@ -2143,7 +2182,9 @@ def logs(
     if sync_down:
         with rich_utils.client_status(
                 ux_utils.spinner_message('Downloading logs')):
-            log_local_path_dict = sdk.download_logs(cluster, job_ids)
+            log_local_path_dict = sdk.download_logs(
+                cluster,
+                list(job_ids) if job_ids else None)
         style = colorama.Style
         fore = colorama.Fore
         for job, log_local_path in log_local_path_dict.items():
@@ -2195,8 +2236,7 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    returncode = sdk.tail_logs(cluster, job_id, follow, tail=tail)
-    sys.exit(returncode)
+    sys.exit(sdk.tail_logs(cluster, job_id, follow, tail=tail))
 
 
 @cli.command()
@@ -3023,17 +3063,18 @@ def _down_or_stop_clusters(
                         click.echo(common_utils.format_exception(e))
                     else:
                         raise
-                confirm_str = 'delete'
-                input_prefix = ('Since --purge is set, errors will be ignored '
-                                'and controller will be removed from '
-                                'local state.\n') if purge else ''
-                user_input = click.prompt(
-                    f'{input_prefix}'
-                    f'To proceed, please type {colorama.Style.BRIGHT}'
-                    f'{confirm_str!r}{colorama.Style.RESET_ALL}',
-                    type=str)
-                if user_input != confirm_str:
-                    raise click.Abort()
+                if not purge:
+                    confirm_str = 'delete'
+                    user_input = click.prompt(
+                        f'To proceed, please type {colorama.Style.BRIGHT}'
+                        f'{confirm_str!r}{colorama.Style.RESET_ALL}',
+                        type=str)
+                    if user_input != confirm_str:
+                        raise click.Abort()
+                else:
+                    click.echo('Since --purge is set, errors will be ignored '
+                               'and controller will be removed from '
+                               'local state.\nSkipping confirmation.')
                 no_confirm = True
         names += controllers
 
@@ -3243,7 +3284,7 @@ def show_gpus(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: Optional[bool]):
+        all_regions: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -3386,13 +3427,6 @@ def show_gpus(
         num_filtered_contexts = 0
 
         if realtime_gpu_availability_lists:
-            if len(realtime_gpu_availability_lists[0]) != 2:
-                # TODO(kyuds): for backwards compatibility, as we add new
-                # context to the API server response in #5362. Remove this after
-                # 0.10.0.
-                realtime_gpu_availability_lists = [
-                    (context, realtime_gpu_availability_lists)
-                ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 if not _filter_ctx(ctx):
                     continue
@@ -5397,7 +5431,7 @@ def api():
               required=False,
               help='Enable basic authentication in the SkyPilot API server.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str], foreground: bool,
+def api_start(deploy: bool, host: str, foreground: bool,
               enable_basic_auth: bool):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
@@ -5508,19 +5542,27 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
         columns.append('Cluster')
     columns.extend(['Created', 'Status'])
     table = log_utils.create_table(columns)
-    for request in request_list:
-        r_id = request.request_id
-        if not verbose:
-            r_id = common_utils.truncate_long_string(r_id, 36)
-        req_status = requests.RequestStatus(request.status)
-        row = [r_id, request.user_name, request.name]
+    if len(request_list) > 0:
+        for request in request_list:
+            r_id = request.request_id
+            if not verbose:
+                r_id = common_utils.truncate_long_string(r_id, 36)
+            req_status = requests.RequestStatus(request.status)
+            row = [r_id, request.user_name, request.name]
+            if verbose:
+                row.append(request.cluster_name)
+            row.extend([
+                log_utils.readable_time_duration(request.created_at),
+                req_status.colored_str()
+            ])
+            table.add_row(row)
+    else:
+        # add dummy data for when api server is down.
+        dummy_row = ['-'] * 5
         if verbose:
-            row.append(request.cluster_name)
-        row.extend([
-            log_utils.readable_time_duration(request.created_at),
-            req_status.colored_str()
-        ])
-        table.add_row(row)
+            dummy_row.append('-')
+        table.add_row(dummy_row)
+        click.echo()
     click.echo(table)
 
 
@@ -5566,6 +5608,12 @@ def api_login(endpoint: Optional[str], relogin: bool,
 
     """
     sdk.api_login(endpoint, relogin, service_account_token)
+
+
+@api.command('logout', cls=_DocumentedCodeCommand)
+def api_logout():
+    """Logs out of the api server"""
+    sdk.api_logout()
 
 
 @api.command('info', cls=_DocumentedCodeCommand)

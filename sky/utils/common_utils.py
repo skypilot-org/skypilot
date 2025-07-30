@@ -562,8 +562,9 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return read_yaml_all_str(f.read())
 
 
-def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
-                                       Dict[str, Any]]) -> None:
+def dump_yaml(path: str,
+              config: Union[List[Dict[str, Any]], Dict[str, Any]],
+              blank: bool = False) -> None:
     """Dumps a YAML file.
 
     Args:
@@ -571,7 +572,11 @@ def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
         config: the configuration to dump.
     """
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(dump_yaml_str(config))
+        contents = dump_yaml_str(config)
+        if blank and isinstance(config, dict) and len(config) == 0:
+            # when dumping to yaml, an empty dict will go in as {}.
+            contents = ''
+        f.write(contents)
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:

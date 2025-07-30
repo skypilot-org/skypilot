@@ -543,7 +543,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    zone = 'us-west2-a'
+    zone = 'us-central1-a'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
         f'gcloud compute instances list --filter='
@@ -856,7 +856,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
     elif generic_cloud == 'gcp':
-        region = 'us-west2'
+        region = 'us-central1'
         region_flag = f'/{region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, bucket_name=output_storage_name)

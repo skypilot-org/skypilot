@@ -161,3 +161,347 @@
   content: '';
   font-size: 1.25rem;
 }
+
+/* Shepherd.js Tour Styles - isolated to avoid affecting existing styles */
+
+/* Shepherd.js Tour Styles */
+@import 'shepherd.js/dist/css/shepherd.css';
+
+/* Custom Shepherd.js Theme to match SkyPilot dashboard design */
+.shepherd-modal-overlay-container {
+  z-index: 9998 !important;
+}
+
+.shepherd-element {
+  z-index: 30000 !important;
+  max-width: 480px;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e5e7eb;
+  background: white;
+  font-family: inherit;
+  margin: 8px;
+  position: relative;
+  overflow: visible;
+}
+
+.shepherd-header {
+  display: block; /* Show header so the arrow is rendered above the content */
+  padding: 20px 24px 12px !important; /* Increased top padding for more space */
+  background: transparent !important; /* Remove background to keep it clean */
+  border-bottom: none; /* Remove default bottom border */
+  margin: 0 !important; /* Remove any default margins */
+}
+
+.shepherd-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 !important;
+  padding: 0 !important; /* Remove any default h3 padding */
+  color: #111827;
+  line-height: 1.25;
+  text-align: left;
+}
+
+/* Ensure h3 elements inside shepherd header have no browser defaults */
+.shepherd-header h3.shepherd-title {
+  margin: 0 !important;
+  padding: 0 !important;
+  text-indent: 0 !important;
+  border: none !important;
+}
+
+.shepherd-text {
+  padding: 12px 24px 16px !important;
+  font-size: 16px;
+  line-height: 1.6 !important;
+  color: #4b5563;
+  background: white;
+  margin: 0 !important; /* Remove any default margins */
+}
+
+.shepherd-text p {
+  margin-bottom: 12px;
+  color: #6b7280;
+}
+
+.shepherd-text p:last-child {
+  margin-bottom: 0;
+}
+
+.shepherd-text p:first-child strong {
+  font-weight: 600;
+  color: #111827;
+}
+
+.shepherd-text hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 16px 0;
+}
+
+.shepherd-text ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.shepherd-text li {
+  margin-bottom: 4px;
+  color: #6b7280;
+}
+
+.shepherd-text strong {
+  color: #374151;
+  font-weight: 500;
+}
+
+.shepherd-text a {
+  color: #3b82f6;
+  text-decoration: none;
+  font-weight: normal;
+  transition: color 0.2s ease;
+}
+
+.shepherd-text a:hover {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.shepherd-footer {
+  background: white;
+  padding: 8px 24px 20px;
+  border-radius: 0 0 0.5rem 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.shepherd-progress {
+  font-size: 0.8rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Push the first button to the right, keeping subsequent buttons grouped */
+.shepherd-footer .shepherd-button:first-of-type {
+  margin-left: auto;
+}
+
+.shepherd-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 0.375rem;
+  font-size: 14px;
+  font-weight: 500;
+  transition: none !important;
+  cursor: pointer;
+  padding: 8px 16px;
+  min-height: 32px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.shepherd-button:hover {
+  background: #2563eb !important;
+  color: white !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+.shepherd-button-secondary {
+  background: white !important;
+  color: #111827 !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+
+.shepherd-button-secondary:hover,
+.shepherd-button-secondary:focus,
+.shepherd-button-secondary:active,
+.shepherd-element .shepherd-button-secondary:hover,
+.shepherd-element .shepherd-button-secondary:focus,
+.shepherd-element .shepherd-button-secondary:active {
+  background: white !important;
+  color: #111827 !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
+  cursor: pointer !important;
+}
+
+.shepherd-cancel-icon {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  width: 24px;
+  height: 24px;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.shepherd-cancel-icon:hover {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+/* Arrow styling to match tooltip background */
+.shepherd-arrow {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  position: absolute;
+  z-index: 10000;
+}
+
+.shepherd-element[data-popper-placement^='top'] .shepherd-arrow {
+  border-width: 6px 6px 0 6px;
+  border-color: white transparent transparent transparent;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.shepherd-element[data-popper-placement^='bottom'] .shepherd-arrow {
+  border-width: 0 6px 6px 6px;
+  border-color: transparent transparent white transparent;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.shepherd-element[data-popper-placement^='left'] .shepherd-arrow {
+  border-width: 6px 0 6px 6px;
+  border-color: transparent transparent transparent white;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.shepherd-element[data-popper-placement^='right'] .shepherd-arrow {
+  border-width: 6px 6px 6px 0;
+  border-color: transparent white transparent transparent;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Help button styles - matching sidebar icon style */
+.tour-help-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 50%;
+  background: transparent;
+  color: #6b7280;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: auto;
+  height: auto;
+}
+
+.tour-help-button:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.tour-help-button:active {
+  background: #e5e7eb;
+}
+
+/* Subtle pulse animation for the help button */
+.tour-help-button.pulse {
+  animation: subtle-pulse 2s infinite;
+}
+
+@keyframes subtle-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+/* Shepherd.js target highlighting */
+.shepherd-target-highlight {
+  position: relative;
+  z-index: 9997;
+}
+
+.shepherd-target-highlight::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border: 2px solid #2563eb;
+  border-radius: 0.5rem;
+  background: rgba(37, 99, 235, 0.1);
+  z-index: -1;
+  animation: highlight-pulse 2s ease-in-out infinite;
+}
+
+@keyframes highlight-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
+}
+
+/* Tour code block optimizations */
+.shepherd-element .bg-gray-50 {
+  padding: 8px 12px !important;
+  min-height: auto !important;
+}
+
+.shepherd-element .bg-gray-50 pre {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.4 !important;
+  min-height: auto !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow-x: auto !important;
+}
+
+.shepherd-element .bg-gray-50 code.block {
+  font-size: 14px !important;
+  font-family:
+    'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace !important;
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 1.4 !important;
+  min-height: auto !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+}
