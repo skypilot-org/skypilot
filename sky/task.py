@@ -593,6 +593,8 @@ class Task:
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       config.get('envs', {}))
+            config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
+                                                      config.get('secrets', {}))
 
         # Fill in any Task.envs into service (e.g. MODEL_NAME).
         if config.get('service') is not None:
@@ -605,6 +607,8 @@ class Task:
         if config.get('workdir') is not None:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
                                                   config.get('envs', {}))
+            config['workdir'] = _fill_in_env_vars(config['workdir'],
+                                                  config.get('secrets', {}))
 
         task = Task(
             config.pop('name', None),
