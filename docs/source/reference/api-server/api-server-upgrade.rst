@@ -57,7 +57,7 @@ Optionally, you can watch the upgrade progress with:
 
 .. code-block:: console
 
-    $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
+    $ kubectl get pod --namespace $NAMESPACE -l app=${RELEASE_NAME}-api --watch
     NAME                                       READY   STATUS            RESTARTS   AGE
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2          0          7s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2          0          24s

@@ -13,7 +13,7 @@ from sky.utils.resources_utils import DiskTier
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 
 @registry.CLOUD_REGISTRY.register
@@ -109,14 +109,17 @@ class Hyperbolic(clouds.Cloud):
                                        clouds='hyperbolic')
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[DiskTier] = None) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='hyperbolic')
 
     @classmethod
@@ -199,7 +202,9 @@ class Hyperbolic(clouds.Cloud):
         default_instance_type = self.get_default_instance_type(
             cpus=resources.cpus,
             memory=resources.memory,
-            disk_tier=resources.disk_tier)
+            disk_tier=resources.disk_tier,
+            region=resources.region,
+            zone=resources.zone)
         if default_instance_type is None:
             return resources_utils.FeasibleResources([], [], None)
         else:

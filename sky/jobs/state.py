@@ -4,8 +4,6 @@
 import enum
 import functools
 import json
-import os
-import pathlib
 import threading
 import time
 import typing
@@ -21,10 +19,10 @@ from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
@@ -36,7 +34,7 @@ CallbackType = Callable[[str], None]
 logger = sky_logging.init_logger(__name__)
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_DB_INIT_LOCK = threading.Lock()
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -130,113 +128,35 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
-    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, engine)
-
-    # Backward compatibility: add columns that not exist in older databases
-    with orm.Session(engine) as session:
-        db_utils.add_column_to_table_sqlalchemy(session, 'spot',
-                                                'failure_reason',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'spot_job_id',
-                                                sqlalchemy.Integer(),
-                                                copy_from='job_id')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'task_id',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0',
-            value_to_replace_existing_entries=0)
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'spot',
-                                                'task_name',
-                                                sqlalchemy.Text(),
-                                                copy_from='job_name')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'specs',
-            sqlalchemy.Text(),
-            value_to_replace_existing_entries=json.dumps({
-                'max_restarts_on_errors': 0,
-            }))
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'local_log_file',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'spot',
-            'metadata',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'{}\'',
-            value_to_replace_existing_entries='{}')
-
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'schedule_state',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'controller_pid',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'dag_yaml_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'env_file_path',
-                                                sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'user_hash', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'workspace',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries='default')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'job_info',
-            'priority',
-            sqlalchemy.Integer(),
-            value_to_replace_existing_entries=constants.DEFAULT_PRIORITY)
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'entrypoint', sqlalchemy.Text())
-        db_utils.add_column_to_table_sqlalchemy(session, 'job_info',
-                                                'original_user_yaml_path',
-                                                sqlalchemy.Text())
-        session.commit()
+    migration_utils.safe_alembic_upgrade(engine,
+                                         migration_utils.SPOT_JOBS_DB_NAME,
+                                         migration_utils.SPOT_JOBS_VERSION)
 
 
+# We wrap the sqlalchemy engine initialization in a thread
+# lock to ensure that multiple threads do not initialize the
+# engine which could result in a rare race condition where
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
+# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
+# which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
+
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with _DB_INIT_LOCK:
-        if _SQLALCHEMY_ENGINE is None:
-            conn_string = None
-            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-                conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                logger.debug(f'using db URI from {conn_string}')
-                engine = sqlalchemy.create_engine(conn_string,
-                                                  poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = os.path.expanduser('~/.sky/spot_jobs.db')
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
-            create_table(engine)
-            _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('spot_jobs')
+
+        # run migrations if needed
+        create_table(engine)
+
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def _init_db(func):
@@ -1134,6 +1054,23 @@ def _get_all_task_ids_statuses(
             ).where(spot_table.c.spot_job_id == job_id).order_by(
                 spot_table.c.task_id.asc())).fetchall()
         return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
+
+
+@_init_db
+def get_all_task_ids_names_statuses_logs(
+        job_id: int) -> List[Tuple[int, str, ManagedJobStatus, str]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        id_names = session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.task_name,
+                spot_table.c.status,
+                spot_table.c.local_log_file,
+            ).where(spot_table.c.spot_job_id == job_id).order_by(
+                spot_table.c.task_id.asc())).fetchall()
+        return [(row[0], row[1], ManagedJobStatus(row[2]), row[3])
+                for row in id_names]
 
 
 @_init_db

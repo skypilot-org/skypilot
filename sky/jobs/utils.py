@@ -67,6 +67,9 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+_JOB_STATUS_FETCH_MAX_RETRIES = 3
+_JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
+
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
     '{status_str}. It may take a few minutes.\n'
@@ -250,19 +253,31 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-    status = None
-    try:
-        logger.info('=== Checking the job status... ===')
-        statuses = backend.get_job_status(handle, stream_logs=False)
-        status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-    except exceptions.CommandError:
-        logger.info('Failed to connect to the cluster.')
-    logger.info('=' * 34)
-    return status
+    for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
+        try:
+            logger.info('=== Checking the job status... ===')
+            statuses = backend.get_job_status(handle, stream_logs=False)
+            status = list(statuses.values())[0]
+            if status is None:
+                logger.info('No job found.')
+            else:
+                logger.info(f'Job status: {status}')
+            logger.info('=' * 34)
+            return status
+        except exceptions.CommandError as e:
+            # Retry on k8s transient network errors. This is useful when using
+            # coreweave which may have transient network issue sometimes.
+            if (e.detailed_reason is not None and
+                    _JOB_K8S_TRANSIENT_NW_MSG in e.detailed_reason):
+                logger.info('Failed to connect to the cluster. Retrying '
+                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                logger.info('=' * 34)
+                time.sleep(1)
+            else:
+                logger.info(f'Failed to get job status: {e.detailed_reason}')
+                logger.info('=' * 34)
+                return None
+    return None
 
 
 def _controller_process_alive(pid: int, job_id: int) -> bool:
@@ -701,23 +716,46 @@ def stream_logs_by_id(job_id: int,
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file = managed_job_state.get_local_log_file(job_id, None)
-            if log_file is not None:
-                with open(os.path.expanduser(log_file), 'r',
-                          encoding='utf-8') as f:
-                    # Stream the logs to the console without reading the whole
-                    # file into memory.
-                    start_streaming = False
-                    read_from: Union[TextIO, Deque[str]] = f
-                    if tail is not None:
-                        assert tail > 0
-                        # Read only the last 'tail' lines using deque
-                        read_from = collections.deque(f, maxlen=tail)
-                    for line in read_from:
-                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                            start_streaming = True
-                        if start_streaming:
-                            print(line, end='', flush=True)
+            log_file_exists = False
+            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+                job_id)
+            num_tasks = len(task_info)
+            for task_id, task_name, task_status, log_file in task_info:
+                if log_file:
+                    log_file_exists = True
+                    task_str = (f'Task {task_name}({task_id})'
+                                if task_name else f'Task {task_id}')
+                    if num_tasks > 1:
+                        print(f'=== {task_str} ===')
+                    with open(os.path.expanduser(log_file),
+                              'r',
+                              encoding='utf-8') as f:
+                        # Stream the logs to the console without reading the
+                        # whole file into memory.
+                        start_streaming = False
+                        read_from: Union[TextIO, Deque[str]] = f
+                        if tail is not None:
+                            assert tail > 0
+                            # Read only the last 'tail' lines using deque
+                            read_from = collections.deque(f, maxlen=tail)
+                        for line in read_from:
+                            if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                                start_streaming = True
+                            if start_streaming:
+                                print(line, end='', flush=True)
+                    if num_tasks > 1:
+                        # Add the "Task finished" message for terminal states
+                        if task_status.is_terminal():
+                            print(ux_utils.finishing_message(
+                                f'{task_str} finished '
+                                f'(status: {task_status.value}).'),
+                                  flush=True)
+            if log_file_exists:
+                # Add the "Job finished" message for terminal states
+                if managed_job_status.is_terminal():
+                    print(ux_utils.finishing_message(
+                        f'Job finished (status: {managed_job_status.value}).'),
+                          flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (f'{colorama.Fore.YELLOW}'

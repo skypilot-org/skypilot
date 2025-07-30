@@ -35,4 +35,4 @@ jobs:
         
     - name: Run helm unit tests
       run: |
-        helm unittest -f charts/skypilot/unittests/*.yaml charts/skypilot
+        helm unittest charts/skypilot

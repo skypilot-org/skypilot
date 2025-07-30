@@ -24,10 +24,10 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -1185,6 +1185,10 @@ class JobLibCodeGen:
             # and older did not have JobExitCode, so we use 0 for those versions
             # TODO: Remove this special handling after 0.10.0.
             'exit_code = exceptions.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
+            # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
+            # exit with success (0) since fetching current logs is a successful operation.
+            # This prevents shell wrappers from printing "command terminated with exit code 101".
+            f'exit_code = 0 if not {follow} and exit_code == 101 else exit_code',
             'sys.exit(exit_code)',
         ]
         return cls._build(code)

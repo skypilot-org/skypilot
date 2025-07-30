@@ -588,9 +588,7 @@ def test_invalid_accelerators_regions(enable_all_clouds):
 def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     # Maps to GCP.
     _test_resources_launch(region='us-east1')
-    # TODO(aylei): us-west2-a does not have n4-standard-8, should fix the
-    # optimizer issue that n2-standard-8 is not chosen.
-    _test_resources_launch(zone='us-west2-c')
+    _test_resources_launch(zone='us-west2-a')
 
     # Maps to AWS.
     # Not use us-east-2 or us-west-1 as it is also supported by Lambda.

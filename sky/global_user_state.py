@@ -9,7 +9,6 @@ Concepts:
 import functools
 import json
 import os
-import pathlib
 import pickle
 import re
 import threading
@@ -32,9 +31,10 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import context_utils
-from sky.utils import db_utils
 from sky.utils import registry
 from sky.utils import status_lib
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -48,7 +48,7 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_DB_INIT_LOCK = threading.Lock()
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -238,168 +238,34 @@ def create_table(engine: sqlalchemy.engine.Engine):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
-    db_utils.add_tables_to_db_sqlalchemy(Base.metadata, engine)
-
-    # For backward compatibility.
-    # TODO(zhwu): Remove this function after all users have migrated to
-    # the latest version of SkyPilot.
-    with orm.Session(engine) as session:
-        # Add autostop column to clusters table
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'clusters',
-                                                'autostop',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT -1')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'metadata',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'{}\'')
-
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'clusters',
-                                                'to_down',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT 0')
-
-        # The cloud identity that created the cluster.
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'owner',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'cluster_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'storage_mounts_metadata',
-            sqlalchemy.LargeBinary(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'cluster_ever_up',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0',
-            # Set the value to 1 so that all the existing clusters before #2977
-            # are considered as ever up, i.e:
-            #   existing cluster's default (null) -> 1;
-            #   new cluster's default -> 0;
-            # This is conservative for the existing clusters: even if some INIT
-            # clusters were never really UP, setting it to 1 means they won't be
-            # auto-deleted during any failover.
-            value_to_replace_existing_entries=1)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'status_updated_at',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'user_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries=common_utils.get_current_user(
-            ).id)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'config_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'cluster_history',
-            'user_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'workspace',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'default\'',
-            value_to_replace_existing_entries=constants.
-            SKYPILOT_DEFAULT_WORKSPACE)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'last_creation_yaml',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-        )
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'last_creation_command',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'users',
-            'password',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'users',
-            'created_at',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'cluster_history',
-            'last_creation_yaml',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'cluster_history',
-            'last_creation_command',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        session.commit()
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
 
 
+# We wrap the sqlalchemy engine initialization in a thread
+# lock to ensure that multiple threads do not initialize the
+# engine which could result in a rare race condition where
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
+# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
+# which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
+
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with _DB_INIT_LOCK:
-        if _SQLALCHEMY_ENGINE is None:
-            conn_string = None
-            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-                conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                logger.debug(f'using db URI from {conn_string}')
-                engine = sqlalchemy.create_engine(conn_string,
-                                                  poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = os.path.expanduser('~/.sky/state.db')
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                engine = sqlalchemy.create_engine('sqlite:///' + db_path)
-            create_table(engine)
-            _SQLALCHEMY_ENGINE = engine
-    return _SQLALCHEMY_ENGINE
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = migration_utils.get_engine('state')
+
+        # run migrations if needed
+        create_table(engine)
+
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
 
 
 def _init_db(func):
@@ -520,6 +386,7 @@ def get_user(user_id: str) -> Optional[models.User]:
                        created_at=row.created_at)
 
 
+@_init_db
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -533,6 +400,7 @@ def get_user_by_name(username: str) -> List[models.User]:
     ]
 
 
+@_init_db
 def delete_user(user_id: str) -> None:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(user_table).filter_by(id=user_id).delete()

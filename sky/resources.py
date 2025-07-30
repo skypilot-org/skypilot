@@ -32,7 +32,7 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -797,8 +797,13 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
+                # TODO(syang): GCP TPU names are supported on both GCP and
+                # kubernetes (GKE), but this logic automatically assumes
+                # GCP TPUs can only be used on GCP.
+                # Fix the logic such that GCP TPU names can failover between
+                # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc):
+                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -813,7 +818,8 @@ class Resources:
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
-                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                        not kubernetes_utils.is_tpu_on_gke(acc,
+                                                           normalize=False)):
                     if 'runtime_version' not in accelerator_args:
 
                         def _get_default_runtime_version() -> str:

@@ -59,7 +59,10 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     # as uploading to the controller is only a local copy.
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
-    if not managed_job_utils.is_consolidation_mode() and storage_clouds:
+    force_disable_cloud_bucket = skypilot_config.get_nested(
+        ('jobs', 'force_disable_cloud_bucket'), False)
+    if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
+            not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')

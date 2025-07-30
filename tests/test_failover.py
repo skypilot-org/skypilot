@@ -14,8 +14,8 @@ from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import aws_catalog
 from sky.provision.aws import instance as aws_instance
-from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils.db import db_utils
 
 
 @pytest.fixture

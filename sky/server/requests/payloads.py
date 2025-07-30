@@ -203,17 +203,33 @@ class DagRequestBody(RequestBody):
         return kwargs
 
 
-class ValidateBody(DagRequestBody):
-    """The request body for the validate endpoint."""
-    dag: str
+class DagRequestBodyWithRequestOptions(DagRequestBody):
+    """Request body base class for endpoints with a dag and request options."""
     request_options: Optional[admin_policy.RequestOptions]
 
+    def get_request_options(self) -> Optional[admin_policy.RequestOptions]:
+        """Get the request options."""
+        if self.request_options is None:
+            return None
+        if isinstance(self.request_options, dict):
+            return admin_policy.RequestOptions(**self.request_options)
+        return self.request_options
 
-class OptimizeBody(DagRequestBody):
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        kwargs['request_options'] = self.get_request_options()
+        return kwargs
+
+
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+
+
+class OptimizeBody(DagRequestBodyWithRequestOptions):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: Optional[admin_policy.RequestOptions]
 
 
 class LaunchBody(RequestBody):
@@ -557,6 +573,7 @@ class ServeLogsBody(RequestBody):
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
+    tail: Optional[int] = None
 
 
 class ServeDownloadLogsBody(RequestBody):
@@ -566,6 +583,7 @@ class ServeDownloadLogsBody(RequestBody):
     targets: Optional[Union[str, serve.ServiceComponent,
                             List[Union[str, serve.ServiceComponent]]]]
     replica_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
 
 
 class ServeStatusBody(RequestBody):
