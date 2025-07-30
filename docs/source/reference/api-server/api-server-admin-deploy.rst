@@ -997,7 +997,7 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
 
 .. note::
 
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller. For other ingress controllers, you can refer to :ref:`deploy-api-server-basic-auth` to setup authentication on the API server.
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller.
 
 
 .. _sky-api-server-cloud-deploy:

@@ -403,5 +403,5 @@ Admins can click on the **Users** tab in the SkyPilot dashboard to manage users 
 
 Supported operations:
 
-* ``Admin`` role can create users, update the role for all users, and delete users.
+* ``Admin`` role can update the role for all users, and delete users.
 * ``User`` role can view all users and their roles.
