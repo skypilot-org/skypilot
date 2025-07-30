@@ -14,10 +14,8 @@ from typing import Optional
 import sky
 from sky import backends
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
-from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import scheduler
@@ -320,11 +318,9 @@ class StrategyExecutor:
                                 # will get caught by the except block below
                                 raise OSError('Log file is None')
                             with open(log_file, 'a', encoding='utf-8') as f:
-                                sdk.stream_and_get(request_id,
-                                                    output_stream=f)
+                                sdk.stream_and_get(request_id, output_stream=f)
                         except OSError as e:
-                            self._logger.error(
-                                f'Failed to stream logs: {e}')
+                            self._logger.error(f'Failed to stream logs: {e}')
                             sdk.get(request_id)
                         self._logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,

@@ -47,7 +47,6 @@ import filelock
 
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
@@ -126,7 +125,7 @@ def start_controller() -> None:
 
     run_cmd = (f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
-    
+
     logger.info(f'Running controller with command: {run_cmd}')
 
     pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)

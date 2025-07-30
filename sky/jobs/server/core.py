@@ -5,6 +5,7 @@ import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib import parse as urlparse
 import uuid
 
 import colorama
@@ -38,8 +39,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.workspaces import core as workspaces_core
-
-from urllib import parse as urlparse
 
 if typing.TYPE_CHECKING:
     import sky
@@ -177,8 +176,8 @@ def launch(
         if db_path is not None:
             parsed = urlparse.urlparse(db_path)
             if ((parsed.hostname == 'localhost' or
-                ipaddress.ip_address(parsed.hostname).is_loopback)):
-                mutated_user_config['db'] = None
+                 ipaddress.ip_address(parsed.hostname).is_loopback)):
+                mutated_user_config.pop('db', None)
 
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
