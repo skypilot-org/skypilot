@@ -12,6 +12,7 @@ from sky.client import sdk
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -65,6 +66,12 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if (pool is not None and
+        (remote_api_version is None or remote_api_version < 12)):
+        raise click.UsageError('Pools are not supported in your API server. '
+                               'Please upgrade to a newer API server to use '
+                               'pools.')
     if pool is None and num_jobs is not None:
         raise click.UsageError('Cannot specify num_jobs without pool.')
 
@@ -198,6 +205,12 @@ def cancel(
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if (pool is not None and
+        (remote_api_version is None or remote_api_version < 12)):
+        raise click.UsageError('Pools are not supported in your API server. '
+                               'Please upgrade to a newer API server to use '
+                               'pools.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
@@ -355,6 +368,7 @@ def dashboard() -> None:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(12)
 def pool_apply(
     task: Union['sky.Task', 'sky.Dag'],
     pool_name: str,
@@ -373,6 +387,7 @@ def pool_apply(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(12)
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -384,6 +399,7 @@ def pool_down(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(12)
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
     """Query a pool."""
