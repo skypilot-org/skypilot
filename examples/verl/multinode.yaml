@@ -127,6 +127,7 @@ run: |
       critic.optim.lr=1e-5 \
       critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
       critic.ppo_micro_batch_size_per_gpu=4 \
+      critic.ppo_mini_batch_size=64 \
       algorithm.kl_ctrl.kl_coef=0.001 \
       trainer.project_name=ppo_training \
       trainer.experiment_name=qwen-2.5-0.5B \
