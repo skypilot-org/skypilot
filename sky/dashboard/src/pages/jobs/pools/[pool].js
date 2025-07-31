@@ -62,39 +62,42 @@ export default function PoolDetailPage() {
   const [isPoolYamlExpanded, setIsPoolYamlExpanded] = useState(false);
   const [isPoolYamlCopied, setIsPoolYamlCopied] = useState(false);
 
-  const fetchPoolData = React.useCallback(async (isRefresh = false) => {
-    if (!poolName) return;
+  const fetchPoolData = React.useCallback(
+    async (isRefresh = false) => {
+      if (!poolName) return;
 
-    if (isRefresh) {
-      setLoading(true);
-    } else {
-      setInitialLoading(true);
-    }
-    setError(null);
-
-    try {
-      const poolsResponse = await getPoolStatus();
-      const { pools = [] } = poolsResponse || {};
-
-      const foundPool = pools.find((pool) => pool.name === poolName);
-      if (!foundPool) {
-        setError(`Pool ${poolName} not found`);
-        setPoolData(null);
-      } else {
-        setPoolData(foundPool);
-      }
-    } catch (err) {
-      console.error('Error fetching pool data:', err);
-      setError(`Failed to fetch pool data: ${err.message}`);
-      setPoolData(null);
-    } finally {
       if (isRefresh) {
-        setLoading(false);
+        setLoading(true);
       } else {
-        setInitialLoading(false);
+        setInitialLoading(true);
       }
-    }
-  }, [poolName, setLoading, setInitialLoading, setError, setPoolData]);
+      setError(null);
+
+      try {
+        const poolsResponse = await getPoolStatus();
+        const { pools = [] } = poolsResponse || {};
+
+        const foundPool = pools.find((pool) => pool.name === poolName);
+        if (!foundPool) {
+          setError(`Pool ${poolName} not found`);
+          setPoolData(null);
+        } else {
+          setPoolData(foundPool);
+        }
+      } catch (err) {
+        console.error('Error fetching pool data:', err);
+        setError(`Failed to fetch pool data: ${err.message}`);
+        setPoolData(null);
+      } finally {
+        if (isRefresh) {
+          setLoading(false);
+        } else {
+          setInitialLoading(false);
+        }
+      }
+    },
+    [poolName, setLoading, setInitialLoading, setError, setPoolData]
+  );
 
   useEffect(() => {
     fetchPoolData();
@@ -280,10 +283,7 @@ export default function PoolDetailPage() {
       <div>
         <div className="flex items-center justify-between mb-4 h-5">
           <div className="text-base flex items-center">
-            <Link
-              href="/jobs?tab=pools"
-              className="text-sky-blue hover:underline"
-            >
+            <Link href="/jobs" className="text-sky-blue hover:underline">
               Pools
             </Link>
             <span className="mx-2 text-gray-500">›</span>

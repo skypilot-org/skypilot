@@ -294,7 +294,6 @@ export function ManagedJobs() {
     onConfirm: null,
   });
   const isMobile = useMobile();
-  const [activeMainTab, setActiveMainTab] = useState('jobs');
   const [filters, setFilters] = useState([]);
   const [optionValues, setOptionValues] = useState({
     name: [],
