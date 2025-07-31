@@ -883,10 +883,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
     # TODO(SKY-1271): We need to double check security of uploading zip file.
     client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
