@@ -1,5 +1,4 @@
 {
     "Introduce yourself!": "Hello! I'm here to help you with questions, tasks, or anything else you need. How can I assist you today?",
-    "What is Deep Learning? Explain in less than 30 words.": "Deep Learning is a type of machine learning that uses multiple layers of complex algorithms to learn from data.",
-    "Write a twitter post about skypilot, a framework for running LLMs, AI, and batch jobs on any cloud.": "\"Skypilot is a framework for running machine learning models, AI, and batch jobs on any cloud. With Skypilot, you can easily deploy and manage your machine learning models, AI models, and batch jobs across multiple cloud providers. Say goodbye to the hassle of managing multiple cloud providers and hello to a single platform for all your machine learning and AI needs. Try Skypilot today!\""
+    "What is Deep Learning? Explain in less than 30 words.": "Deep learning is a subset of machine learning where neural networks learn patterns from data, enabling complex tasks like image recognition and speech processing."
 }
