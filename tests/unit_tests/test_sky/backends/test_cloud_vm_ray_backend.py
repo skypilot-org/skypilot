@@ -64,8 +64,8 @@ class TestCloudVmRayBackendTaskRedaction:
         # Empty secrets should not appear in config
         assert 'secrets' not in task_config
 
-    def test_backend_redaction_preserves_non_string_values(self):
-        """Test that non-string values in secrets are preserved during redaction."""
+    def test_backend_redaction_redacts_all_values(self):
+        """Test that all secret values (including non-string) are redacted."""
         test_task = task.Task(run='echo hello',
                               secrets={
                                   'STRING_SECRET': 'actual-secret',
@@ -79,10 +79,10 @@ class TestCloudVmRayBackendTaskRedaction:
         # String values should be redacted
         assert task_config['secrets']['STRING_SECRET'] == '<redacted>'
 
-        # Non-string values should be preserved
-        assert task_config['secrets']['NUMERIC_PORT'] == 5432
-        assert task_config['secrets']['BOOLEAN_FLAG'] is True
-        assert task_config['secrets']['NULL_VALUE'] is None
+        # All values should be redacted (including non-string values)
+        assert task_config['secrets']['NUMERIC_PORT'] == '<redacted>'
+        assert task_config['secrets']['BOOLEAN_FLAG'] == '<redacted>'
+        assert task_config['secrets']['NULL_VALUE'] == '<redacted>'
 
     def test_backend_supports_both_redaction_modes(self):
         """Test that backend can use both redacted and non-redacted configs."""

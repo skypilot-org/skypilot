@@ -130,9 +130,9 @@ def test_to_yaml_config_with_secrets_redaction():
         'API_KEY': 'secret-api-key-123',
         'DATABASE_PASSWORD': 'postgresql://user:password@host:5432/db',
         'JWT_SECRET': 'super-secret-jwt',
-        'PORT': 8080,  # Non-string value should be preserved
+        'PORT': 8080,  # Non-string value will also be redacted
         'EMPTY_SECRET': '',
-        'NONE_SECRET': None  # Non-string value should be preserved
+        'NONE_SECRET': None  # Non-string value will also be redacted
     }
 
     task_obj = task.Task(run='echo hello', secrets=secrets)
@@ -147,9 +147,9 @@ def test_to_yaml_config_with_secrets_redaction():
     assert yaml_config['secrets']['JWT_SECRET'] == '<redacted>'
     assert yaml_config['secrets']['EMPTY_SECRET'] == '<redacted>'
 
-    # Non-string values should be preserved
-    assert yaml_config['secrets']['PORT'] == 8080
-    assert yaml_config['secrets']['NONE_SECRET'] is None
+    # All values should be redacted (including non-string values)
+    assert yaml_config['secrets']['PORT'] == '<redacted>'
+    assert yaml_config['secrets']['NONE_SECRET'] == '<redacted>'
 
     # Test with redaction disabled
     yaml_config_no_redact = task_obj.to_yaml_config(

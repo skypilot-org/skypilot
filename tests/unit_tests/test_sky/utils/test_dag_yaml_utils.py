@@ -84,10 +84,10 @@ class TestDumpChainDagToYamlStr:
         assert 'secret-string' not in yaml_str_redacted
         assert '<redacted>' in yaml_str_redacted
 
-        # Non-string values should be preserved
-        assert '5432' in yaml_str_redacted
-        assert 'true' in yaml_str_redacted.lower()
-        assert 'null' in yaml_str_redacted.lower()
+        # All values should be redacted (including non-string values)
+        assert '5432' not in yaml_str_redacted
+        # Note: we avoid checking for 'true'/'null' as they may appear elsewhere in YAML
+        # The key check is that <redacted> appears and original secret values don't
 
         # Test without redaction
         yaml_str_no_redact = dag_utils.dump_chain_dag_to_yaml_str(
