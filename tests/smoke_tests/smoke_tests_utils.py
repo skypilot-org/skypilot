@@ -388,7 +388,8 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 @contextlib.contextmanager
 def override_sky_config(
     test: Optional[Test] = None,
-    env_dict: Optional[Dict[str, str]] = None
+    env_dict: Optional[Dict[str, str]] = None,
+    config_dict: Optional[Dict[str, Any]] = None,
 ) -> Generator[Optional[tempfile.NamedTemporaryFile], None, None]:
     echo = Test.echo_without_prefix if test is None else test.echo
     env_before_override: Optional[Dict[str, Any]] = None
@@ -397,6 +398,9 @@ def override_sky_config(
     if env_dict is None:
         env_dict = os.environ
         env_before_override = os.environ.copy()
+
+    if config_dict is not None:
+        override_sky_config_dict.update(config_dict)
 
     if is_remote_server_test():
         endpoint = docker_utils.get_api_server_endpoint_inside_docker()
