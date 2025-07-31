@@ -100,6 +100,7 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('foo', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
