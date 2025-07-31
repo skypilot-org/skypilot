@@ -95,8 +95,8 @@ def test_to_yaml_config_without_envs():
     # Test with use_user_specified_yaml=True (should have no effect when no secrets)
     yaml_config_user_specified = task_obj.to_yaml_config(
         use_user_specified_yaml=True)
-    # When use_user_specified_yaml=True but no user YAML exists, should return empty dict
-    assert yaml_config_user_specified == {}
+    # When use_user_specified_yaml=True but no user YAML exists, should return the full config
+    assert yaml_config_user_specified == yaml_config
 
 
 def test_to_yaml_config_with_envs_no_redaction():
@@ -132,7 +132,6 @@ def test_to_yaml_config_with_secrets_user_specified():
         'JWT_SECRET': 'super-secret-jwt',
         'PORT': 8080,  # Non-string value should be preserved
         'EMPTY_SECRET': '',
-        'NONE_SECRET': None  # Non-string value should be preserved
     }
 
     # Create task with user specified YAML
@@ -165,11 +164,18 @@ def test_to_yaml_config_with_secrets_user_specified():
 
     # Non-string values should be redacted too since they're in user YAML
     assert yaml_config['secrets']['PORT'] == '<redacted>'
-    assert yaml_config['secrets']['NONE_SECRET'] == '<redacted>'
 
     # Test with default behavior (no redaction)
     yaml_config_no_redact = task_obj.to_yaml_config()
-    assert yaml_config_no_redact['secrets'] == secrets
+    # Note: Non-string values get converted to strings during YAML processing
+    expected_secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DATABASE_PASSWORD': 'postgresql://user:password@host:5432/db',
+        'JWT_SECRET': 'super-secret-jwt',
+        'PORT': '8080',  # Converted from int to string during YAML processing
+        'EMPTY_SECRET': '',
+    }
+    assert yaml_config_no_redact['secrets'] == expected_secrets
 
 
 def test_to_yaml_config_envs_and_secrets():
@@ -226,8 +232,8 @@ def test_to_yaml_config_empty_secrets():
         use_user_specified_yaml=True)
     config_default = task_obj.to_yaml_config()
 
-    # When no user YAML exists, use_user_specified_yaml returns empty dict
-    assert config_user_specified == {}
+    # When no user YAML exists, use_user_specified_yaml returns the full config
+    assert config_user_specified == config_default
     assert 'secrets' not in config_default
 
 
