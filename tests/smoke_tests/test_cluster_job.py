@@ -739,7 +739,8 @@ def test_runpod_http_server_with_custom_ports():
     test = smoke_tests_utils.Test(
         'runpod_http_server_with_custom_ports',
         [
-            f'sky launch -y -d -c {name} --infra runpod examples/http_server_with_custom_ports/task.yaml',
+            # RunPod CPU instances have a maximum local disk size limit of 20GB.
+            f'sky launch -y -d -c {name} --infra runpod --disk-size 20 examples/http_server_with_custom_ports/task.yaml',
             f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
             # Retry a few times to avoid flakiness in ports being open.
             f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi',
