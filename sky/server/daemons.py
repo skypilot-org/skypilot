@@ -112,7 +112,24 @@ def managed_job_status_refresh_event():
         managed_job_utils.ha_recovery_for_consolidation_mode()
     # After recovery, we start the event loop.
     from sky.skylet import events
-    event = events.ManagedJobEvent()
+    refresh_event = events.ManagedJobEvent()
+    scheduling_event = events.ManagedJobSchedulingEvent()
+    logger.info('=== Running managed job event ===')
+    refresh_event.run()
+    scheduling_event.run()
+    time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
+
+
+def sky_serve_status_refresh_event():
+    """Refresh the sky serve status for controller consolidation mode."""
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import serve_utils
+    if not serve_utils.is_consolidation_mode():
+        return
+    # TODO(tian): Add HA recovery logic.
+    from sky.skylet import events
+    event = events.ServiceUpdateEvent()
+    logger.info('=== Running serve status refresh event ===')
     event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
@@ -133,4 +150,7 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
                           name='managed-job-status',
                           event_fn=managed_job_status_refresh_event),
+    InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
+                          name='sky-serve-status',
+                          event_fn=sky_serve_status_refresh_event),
 ]
