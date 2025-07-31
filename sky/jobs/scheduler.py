@@ -94,6 +94,17 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
 
 
 def get_number_of_controllers() -> int:
+    """Calculate the number of job controller processes that can be started.
+
+    This function determines the number of job controllers that can be safely
+    started on the current machine based on available system memory and the
+    memory requirements of controllers and workers. It subtracts the memory
+    reserved for the API server 
+    The number of controllers is at least 1.
+
+    Returns:
+        int: The number of controllers to start (at least 1).
+    """
     config = server_config.compute_server_config(deploy=True, quiet=True)
     free = common_utils.get_mem_size_gb() * 1024
 
