@@ -1570,7 +1570,10 @@ class Task:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
-                config['secrets'] = {k: '<redacted>' for k in config['secrets']}
+                config['secrets'] = {
+                    k: '<redacted>' if isinstance(v, str) else v
+                    for k, v in config['secrets'].items()
+                }
             return config
         return self._to_yaml_config()
 
@@ -1620,8 +1623,11 @@ class Task:
         add_if_not_none('envs', self.envs, no_empty=True)
 
         secrets = self.secrets
-        if redact_secrets:
-            secrets = {k: '<redacted>' for k in secrets}
+        if secrets and redact_secrets:
+            secrets = {
+                k: '<redacted>' if isinstance(v, str) else v
+                for k, v in secrets.items()
+            }
         add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
