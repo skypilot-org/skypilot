@@ -12,7 +12,6 @@ import filelock
 import sqlalchemy
 
 from sky import sky_logging
-from sky import skypilot_config
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
@@ -24,16 +23,15 @@ GLOBAL_USER_STATE_VERSION = '001'
 GLOBAL_USER_STATE_LOCK_PATH = '~/.sky/locks/.state_db.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '001'
+SPOT_JOBS_VERSION = '002'
 SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 
 
 def get_engine(db_name: str):
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        conn_string = skypilot_config.get_nested(('db',), None)
+        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
-        logger.debug(f'using db URI from {conn_string}')
         engine = sqlalchemy.create_engine(conn_string,
                                           poolclass=sqlalchemy.NullPool)
     else:
