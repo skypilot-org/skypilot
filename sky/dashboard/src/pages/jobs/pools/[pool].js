@@ -11,6 +11,7 @@ import {
   Check,
 } from 'lucide-react';
 import { getPoolStatus } from '@/data/connectors/jobs';
+import dashboardCache from '@/lib/cache';
 import {
   getJobStatusCounts,
   getInfraSummary,
@@ -74,7 +75,7 @@ export default function PoolDetailPage() {
       setError(null);
 
       try {
-        const poolsResponse = await getPoolStatus();
+        const poolsResponse = await dashboardCache.get(getPoolStatus, [{}]);
         const { pools = [] } = poolsResponse || {};
 
         const foundPool = pools.find((pool) => pool.name === poolName);
@@ -264,7 +265,11 @@ export default function PoolDetailPage() {
             <h2 className="text-xl font-semibold mb-2">Error</h2>
             <p>{error || `Pool ${poolName} not found`}</p>
             <button
-              onClick={() => fetchPoolData(true)}
+              onClick={() => {
+                // Invalidate cache to ensure fresh data
+                dashboardCache.invalidate(getPoolStatus, [{}]);
+                fetchPoolData(true);
+              }}
               className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
             >
               Retry
@@ -303,7 +308,11 @@ export default function PoolDetailPage() {
               </div>
             )}
             <button
-              onClick={() => fetchPoolData(true)}
+              onClick={() => {
+                // Invalidate cache to ensure fresh data
+                dashboardCache.invalidate(getPoolStatus, [{}]);
+                fetchPoolData(true);
+              }}
               disabled={loading}
               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
             >
