@@ -517,7 +517,7 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_row.status != status_lib.ClusterStatus.UP.value):
             conditional_values.update({
                 'last_creation_yaml': common_utils.dump_yaml_str(task_config)
-                                      if task_config is not None else None,
+                                      if task_config else None,
                 'last_creation_command': last_use,
             })
 

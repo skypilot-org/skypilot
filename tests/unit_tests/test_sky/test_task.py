@@ -92,11 +92,11 @@ def test_to_yaml_config_without_envs():
     assert 'envs' not in yaml_config
     assert 'secrets' not in yaml_config
 
-    # Test with redact_secrets=True (should have no effect when no secrets)
-    yaml_config_redacted = task_obj.to_yaml_config(redact_secrets=True)
-    assert 'envs' not in yaml_config_redacted
-    assert 'secrets' not in yaml_config_redacted
-    assert yaml_config == yaml_config_redacted
+    # Test with use_user_specified_yaml=True (should have no effect when no secrets)
+    yaml_config_user_specified = task_obj.to_yaml_config(
+        use_user_specified_yaml=True)
+    # When use_user_specified_yaml=True but no user YAML exists, should return empty dict
+    assert yaml_config_user_specified == {}
 
 
 def test_to_yaml_config_with_envs_no_redaction():
@@ -124,8 +124,8 @@ def test_to_yaml_config_with_envs_no_redaction():
     assert yaml_config['envs']['EMPTY_VAR'] == ''
 
 
-def test_to_yaml_config_with_secrets_redaction():
-    """Test to_yaml_config() with secret variables and redaction enabled."""
+def test_to_yaml_config_with_secrets_user_specified():
+    """Test to_yaml_config() with secret variables and user specified YAML."""
     secrets = {
         'API_KEY': 'secret-api-key-123',
         'DATABASE_PASSWORD': 'postgresql://user:password@host:5432/db',
@@ -135,10 +135,26 @@ def test_to_yaml_config_with_secrets_redaction():
         'NONE_SECRET': None  # Non-string value should be preserved
     }
 
-    task_obj = task.Task(run='echo hello', secrets=secrets)
+    # Create task with user specified YAML
+    import tempfile
 
-    # Test with redaction enabled (default)
-    yaml_config = task_obj.to_yaml_config(redact_secrets=True)
+    import yaml
+
+    from sky.utils import common_utils
+
+    user_yaml_config = {'run': 'echo hello', 'secrets': secrets}
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        yaml.dump(user_yaml_config, f)
+        f.flush()
+        task_obj = task.Task.from_yaml(f.name)
+
+    import os
+    os.unlink(f.name)
+
+    # Test with user specified YAML (should redact)
+    yaml_config = task_obj.to_yaml_config(use_user_specified_yaml=True)
     assert 'secrets' in yaml_config
 
     # String values should be redacted
@@ -147,12 +163,12 @@ def test_to_yaml_config_with_secrets_redaction():
     assert yaml_config['secrets']['JWT_SECRET'] == '<redacted>'
     assert yaml_config['secrets']['EMPTY_SECRET'] == '<redacted>'
 
-    # Non-string values should be preserved
-    assert yaml_config['secrets']['PORT'] == 8080
-    assert yaml_config['secrets']['NONE_SECRET'] is None
+    # Non-string values should be redacted too since they're in user YAML
+    assert yaml_config['secrets']['PORT'] == '<redacted>'
+    assert yaml_config['secrets']['NONE_SECRET'] == '<redacted>'
 
-    # Test with redaction disabled
-    yaml_config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    # Test with default behavior (no redaction)
+    yaml_config_no_redact = task_obj.to_yaml_config()
     assert yaml_config_no_redact['secrets'] == secrets
 
 
@@ -164,26 +180,41 @@ def test_to_yaml_config_envs_and_secrets():
         'DATABASE_PASSWORD': 'secret-password'
     }
 
-    task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
+    # Create task with user specified YAML
+    import tempfile
+
+    import yaml
+
+    user_yaml_config = {'run': 'echo hello', 'envs': envs, 'secrets': secrets}
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        yaml.dump(user_yaml_config, f)
+        f.flush()
+        task_obj = task.Task.from_yaml(f.name)
+
+    import os
+    os.unlink(f.name)
 
     # Get both configs
-    config_redact_secrets = task_obj.to_yaml_config(redact_secrets=True)
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    config_user_specified = task_obj.to_yaml_config(
+        use_user_specified_yaml=True)
+    config_default = task_obj.to_yaml_config()
 
     # Envs should always be preserved (not redacted)
-    assert config_redact_secrets['envs'] == envs
-    assert config_no_redact['envs'] == envs
-    assert config_redact_secrets['envs']['PUBLIC_VAR'] == 'public-value'
-    assert config_redact_secrets['envs']['DEBUG'] == 'true'
+    assert config_user_specified['envs'] == envs
+    assert config_default['envs'] == envs
+    assert config_user_specified['envs']['PUBLIC_VAR'] == 'public-value'
+    assert config_user_specified['envs']['DEBUG'] == 'true'
 
-    # Secrets should be redacted when redact_secrets=True
-    assert config_redact_secrets['secrets']['API_KEY'] == '<redacted>'
-    assert config_redact_secrets['secrets']['DATABASE_PASSWORD'] == '<redacted>'
+    # Secrets should be redacted when use_user_specified_yaml=True
+    assert config_user_specified['secrets']['API_KEY'] == '<redacted>'
+    assert config_user_specified['secrets']['DATABASE_PASSWORD'] == '<redacted>'
 
-    # Secrets should be preserved when redact_secrets=False
-    assert config_no_redact['secrets'] == secrets
-    assert config_no_redact['secrets']['API_KEY'] == 'secret-api-key-123'
-    assert config_no_redact['secrets']['DATABASE_PASSWORD'] == 'secret-password'
+    # Secrets should be preserved when using default behavior
+    assert config_default['secrets'] == secrets
+    assert config_default['secrets']['API_KEY'] == 'secret-api-key-123'
+    assert config_default['secrets']['DATABASE_PASSWORD'] == 'secret-password'
 
 
 def test_to_yaml_config_empty_secrets():
@@ -191,37 +222,59 @@ def test_to_yaml_config_empty_secrets():
     task_obj = task.Task(run='echo hello', secrets={})
 
     # Empty secrets should not appear in config due to no_empty=True
-    config_redact = task_obj.to_yaml_config(redact_secrets=True)
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    config_user_specified = task_obj.to_yaml_config(
+        use_user_specified_yaml=True)
+    config_default = task_obj.to_yaml_config()
 
-    assert 'secrets' not in config_redact
-    assert 'secrets' not in config_no_redact
+    # When no user YAML exists, use_user_specified_yaml returns empty dict
+    assert config_user_specified == {}
+    assert 'secrets' not in config_default
 
 
 def test_to_yaml_config_preserves_other_fields():
-    """Test that redaction doesn't affect other task fields."""
+    """Test that user specified YAML mode doesn't affect other task fields."""
+    import tempfile
+
+    import yaml
+
     from sky import resources
 
-    task_obj = task.Task(run='echo hello',
-                         secrets={'SECRET': 'value'},
-                         workdir='/tmp/workdir',
-                         name='test-task')
+    # Create task with user specified YAML
+    user_yaml_config = {
+        'run': 'echo hello',
+        'secrets': {
+            'SECRET': 'value'
+        },
+        'workdir': '/tmp/workdir',
+        'name': 'test-task'
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        yaml.dump(user_yaml_config, f)
+        f.flush()
+        task_obj = task.Task.from_yaml(f.name)
+
+    import os
+    os.unlink(f.name)
+
     # Set resources using the proper method
     task_obj.set_resources(resources.Resources(memory=4))
 
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
-    config_redacted = task_obj.to_yaml_config(redact_secrets=True)
+    config_default = task_obj.to_yaml_config()
+    config_user_specified = task_obj.to_yaml_config(
+        use_user_specified_yaml=True)
 
-    # All non-secret fields should be identical
-    for key in config_no_redact:
-        if key != 'secrets':
-            assert config_no_redact[key] == config_redacted[key]
+    # All non-secret fields should be preserved in user specified config
+    assert config_user_specified.get('run') == 'echo hello'
+    assert config_user_specified.get('workdir') == '/tmp/workdir'
+    assert config_user_specified.get('name') == 'test-task'
 
-    # Verify specific fields are preserved
-    assert config_redacted.get('run') == 'echo hello'
-    assert config_redacted.get('workdir') == '/tmp/workdir'
-    assert config_redacted.get('name') == 'test-task'
-    assert 'resources' in config_redacted
+    # Verify default config has expected fields
+    assert config_default.get('run') == 'echo hello'
+    assert config_default.get('workdir') == '/tmp/workdir'
+    assert config_default.get('name') == 'test-task'
+    assert 'resources' in config_default
 
 
 def test_update_secrets():
