@@ -108,6 +108,20 @@ spec:
         - name: SKYPILOT_AUTH_USER_HEADER
           value: {{ .Values.apiService.authUserHeaderName | quote }}
         {{- end }}
+        {{- if .Values.awsCredentials.enabled }}
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.accessKeyIdKeyName }}
+              optional: true
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.awsCredentials.awsSecretName }}
+              key: {{ .Values.awsCredentials.secretAccessKeyKeyName }}
+              optional: true
+        {{- end }}
         - name: SKYPILOT_GRACE_PERIOD_SECONDS
           value: {{ .Values.apiService.terminationGracePeriodSeconds | quote}}
         {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
@@ -124,7 +138,7 @@ spec:
         # 3. Exec ensures the process is a direct child of tini, enables correct signal handling.
         # Note: this comment is moved here to avoid appearing in the final start script.
         args:
-        - /bin/sh
+        - /bin/bash
         - -c
         - |
           set -e
@@ -180,6 +194,19 @@ spec:
           echo "{{ .Values.nebiusCredentials.tenantId }}" >> /root/.nebius/NEBIUS_TENANT_ID.txt
           # Create a Nebius profile for the nebius CLI to use as default
           nebius profile create --profile sky --endpoint api.nebius.cloud --service-account-file /root/.nebius/credentials.json || echo "Unable to create Nebius profile."
+          {{- end }}
+          # AWS credentials setup
+          # Only copy the credentials file, not the entire ~/.aws directory
+          {{- if .Values.awsCredentials.enabled }}
+          echo "Setting up AWS credentials..."
+          mkdir -p /root/.aws
+          if [ -f "/root/.aws_credentials/credentials" ]; then
+            cp "/root/.aws_credentials/credentials" "/root/.aws/credentials"
+            chmod 600 "/root/.aws/credentials"
+            echo "AWS credentials file copied successfully."
+          else
+            echo "No AWS credentials file found at /root/.aws_credentials/credentials"
+          fi
           {{- end }}
           {{- if .Values.apiService.sshKeySecret }}
           mkdir -p /root/.ssh
@@ -247,11 +274,7 @@ spec:
         - name: skypilot-ssh-identity
           mountPath: /var/skypilot/ssh_keys
         {{- end }}
-        {{- if .Values.awsCredentials.enabled }}
-        - name: aws-config
-          mountPath: /root/.aws
-          readOnly: true
-        {{- end }}
+
         {{- if .Values.gcpCredentials.enabled }}
         - name: gcp-config
           mountPath: /root/.config/gcloud
@@ -292,6 +315,12 @@ spec:
         - name: nebius-credentials
           mountPath: /root/.nebius_credentials
         {{- end }}
+        {{- if .Values.awsCredentials.enabled }}
+        - name: aws-credentials
+          mountPath: /root/.aws_credentials
+        - name: aws-config
+          mountPath: /root/.aws
+        {{- end }}
         {{- if .Values.r2Credentials.enabled }}
         - name: r2-credentials
           mountPath: /root/.cloudflare
@@ -313,12 +342,18 @@ spec:
           echo "Setting up AWS credentials..."
           if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
             echo "AWS credentials found in environment variables."
-            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
-            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+            mkdir -p /root/.aws
+            # Create credentials file manually (don't rely on aws CLI being installed)
+            cat > /root/.aws/credentials << EOF
+          [default]
+          aws_access_key_id = $AWS_ACCESS_KEY_ID
+          aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+          EOF
+            chmod 600 /root/.aws/credentials
             echo "Credentials file created successfully."
           else
             echo "AWS credentials not found in environment variables. Skipping credentials setup."
-            sleep 600
+            echo "This is normal if using file-based credentials instead."
           fi
         env:
         - name: AWS_ACCESS_KEY_ID
@@ -326,11 +361,13 @@ spec:
             secretKeyRef:
               name: {{ .Values.awsCredentials.awsSecretName }}
               key: {{ .Values.awsCredentials.accessKeyIdKeyName }}
+              optional: true
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
               name: {{ .Values.awsCredentials.awsSecretName }}
               key: {{ .Values.awsCredentials.secretAccessKeyKeyName }}
+              optional: true
         volumeMounts:
         - name: aws-config
           mountPath: /root/.aws
@@ -458,10 +495,7 @@ spec:
       - name: state-volume
         emptyDir: {}
       {{- end }}
-      {{- if .Values.awsCredentials.enabled }}
-      - name: aws-config
-        emptyDir: {}
-      {{- end }}
+
       {{- if .Values.gcpCredentials.enabled }}
       - name: gcp-credentials
         secret:
@@ -485,6 +519,13 @@ spec:
       - name: nebius-credentials
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
+      {{- end }}
+      {{- if .Values.awsCredentials.enabled }}
+      - name: aws-credentials
+        secret:
+          secretName: {{ .Values.awsCredentials.awsSecretName }}
+      - name: aws-config
+        emptyDir: {}
       {{- end }}
       {{- if .Values.r2Credentials.enabled }}
       - name: r2-credentials
