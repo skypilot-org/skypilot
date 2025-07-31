@@ -1567,14 +1567,14 @@ class Task:
         """
         if use_user_specified_yaml:
             if self._user_specified_yaml is None:
-                return self._to_yaml_config()
+                return self._to_yaml_config(redact_secrets=True)
             config = yaml.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
                 config['secrets'] = {k: '<redacted>' for k in config['secrets']}
             return config
         return self._to_yaml_config()
 
-    def _to_yaml_config(self) -> Dict[str, Any]:
+    def _to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         config = {}
 
         def add_if_not_none(key, value, no_empty: bool = False):
@@ -1619,7 +1619,10 @@ class Task:
         # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
 
-        add_if_not_none('secrets', self.secrets, no_empty=True)
+        secrets = self.secrets
+        if redact_secrets:
+            secrets = {k: '<redacted>' for k in secrets}
+        add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
 

@@ -10,6 +10,7 @@ import os
 import tempfile
 
 import pytest
+import yaml
 
 from sky import dag as dag_lib
 from sky import task as task_lib
@@ -26,21 +27,31 @@ class TestManagedJobSecrets:
         redacted secrets instead of actual secrets for execution.
         """
         # Create a DAG with secrets that a managed job would use
-        dag = dag_lib.Dag()
-        dag.name = 'test-managed-job'
-
-        task = task_lib.Task(
-            run='echo "Using secrets for job execution"',
-            envs={
+        # Use YAML-based task creation to ensure proper _user_specified_yaml behavior        
+        task_config = {
+            'run': 'echo "Using secrets for job execution"',
+            'envs': {
                 'PUBLIC_API_URL': 'https://api.example.com',
                 'DEBUG_MODE': 'true'
             },
-            secrets={
+            'secrets': {
                 'API_KEY': 'sk-1234567890abcdef',
                 'DATABASE_PASSWORD': 'super-secret-db-password',
                 'JWT_SECRET': 'jwt-signing-secret-key',
                 'OAUTH_TOKEN': 'oauth-token-for-api-access'
-            })
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', 
+                                         delete=False) as f:
+            yaml.dump(task_config, f)
+            f.flush()
+            task = task_lib.Task.from_yaml(f.name)
+        
+        os.unlink(f.name)
+        
+        dag = dag_lib.Dag()
+        dag.name = 'test-managed-job'
         dag.add(task)
 
         # Simulate what happens in jobs/server/core.py
@@ -92,9 +103,6 @@ class TestManagedJobSecrets:
         This ensures the default behavior doesn't accidentally redact secrets
         that jobs need for execution.
         """
-        import tempfile
-
-        import yaml
 
         # Create task from user YAML to test user specified behavior
         user_yaml_config = {
@@ -114,7 +122,6 @@ class TestManagedJobSecrets:
             f.flush()
             task = task_lib.Task.from_yaml(f.name)
 
-        import os
         os.unlink(f.name)
 
         # Default behavior should NOT redact (for execution)
@@ -151,14 +158,25 @@ class TestManagedJobSecrets:
         This ensures dump_chain_dag_to_yaml_str() and dump_chain_dag_to_yaml()
         have correct default behavior for job execution vs display.
         """
+        # Create task from YAML to ensure proper _user_specified_yaml behavior        
+        task_config = {
+            'run': 'echo "Testing DAG secret handling"',
+            'secrets': {
+                'EXECUTION_SECRET': 'job-needs-this-value',
+                'SERVICE_KEY': 'service-authentication-key'
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            yaml.dump(task_config, f)
+            f.flush()
+            task = task_lib.Task.from_yaml(f.name)
+        
+        os.unlink(f.name)
+        
         dag = dag_lib.Dag()
         dag.name = 'regression-test-dag'
-
-        task = task_lib.Task(run='echo "Testing DAG secret handling"',
-                             secrets={
-                                 'EXECUTION_SECRET': 'job-needs-this-value',
-                                 'SERVICE_KEY': 'service-authentication-key'
-                             })
         dag.add(task)
 
         # Default string dumping (for execution) - should preserve secrets
@@ -210,21 +228,30 @@ class TestManagedJobSecrets:
         This simulates the exact pattern used in sky/jobs/server/core.py
         to ensure managed jobs get real secrets while display is secure.
         """
-        # Simulate a user's DAG with secrets
-        dag = dag_lib.Dag()
-        dag.name = 'user-job-with-secrets'
-
-        task = task_lib.Task(
-            run='python train.py --api-key=$API_KEY --db-pass=$DB_PASSWORD',
-            envs={
+        # Simulate a user's DAG with secrets created from YAML        
+        task_config = {
+            'run': 'python train.py --api-key=$API_KEY --db-pass=$DB_PASSWORD',
+            'envs': {
                 'MODEL_NAME': 'my-model',
                 'BATCH_SIZE': '32'
             },
-            secrets={
+            'secrets': {
                 'API_KEY': 'sk-prod-api-key-12345',
                 'DB_PASSWORD': 'prod-database-secret-password',
                 'WANDB_API_KEY': 'wandb-secret-key-67890'
-            })
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            yaml.dump(task_config, f)
+            f.flush()
+            task = task_lib.Task.from_yaml(f.name)
+        
+        os.unlink(f.name)
+        
+        dag = dag_lib.Dag()
+        dag.name = 'user-job-with-secrets'
         dag.add(task)
 
         # Simulate what jobs/server/core.py does:
@@ -304,24 +331,42 @@ class TestManagedJobSecrets:
         This prevents regression where some tasks in a chain might get 
         redacted secrets while others get real secrets.
         """
+        # Create tasks from YAML to ensure proper _user_specified_yaml behavior        
+        task1_config = {
+            'run': 'python preprocess.py',
+            'secrets': {
+                'DATA_API_KEY': 'data-api-secret-key',
+                'S3_SECRET': 's3-access-secret'
+            }
+        }
+        
+        task2_config = {
+            'run': 'python train.py',
+            'secrets': {
+                'MODEL_API_KEY': 'model-api-secret-key',
+                'WANDB_KEY': 'wandb-logging-secret'
+            }
+        }
+        
+        # Create first task from YAML
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            yaml.dump(task1_config, f)
+            f.flush()
+            task1 = task_lib.Task.from_yaml(f.name)
+        os.unlink(f.name)
+        
+        # Create second task from YAML
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            yaml.dump(task2_config, f)
+            f.flush()
+            task2 = task_lib.Task.from_yaml(f.name)
+        os.unlink(f.name)
+        
+        # Create chain
         dag = dag_lib.Dag()
         dag.name = 'multi-task-secrets-chain'
-
-        # First task with secrets
-        task1 = task_lib.Task(run='python preprocess.py',
-                              secrets={
-                                  'DATA_API_KEY': 'data-api-secret-key',
-                                  'S3_SECRET': 's3-access-secret'
-                              })
-
-        # Second task with different secrets
-        task2 = task_lib.Task(run='python train.py',
-                              secrets={
-                                  'MODEL_API_KEY': 'model-api-secret-key',
-                                  'WANDB_KEY': 'wandb-logging-secret'
-                              })
-
-        # Create chain
         dag.add(task1)
         dag.add(task2)
         dag.add_edge(task1, task2)
@@ -362,10 +407,6 @@ class TestManagedJobSecrets:
         This prevents regression where environment variables might be 
         accidentally redacted or secrets might leak into logs.
         """
-        import tempfile
-
-        import yaml
-
         # Create task from user YAML to test user specified behavior
         user_yaml_config = {
             'run': 'echo "Job with mixed envs and secrets"',
@@ -387,7 +428,6 @@ class TestManagedJobSecrets:
             f.flush()
             task = task_lib.Task.from_yaml(f.name)
 
-        import os
         os.unlink(f.name)
 
         # Test execution behavior (default)
