@@ -327,14 +327,17 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_service_name()
+    auth_token = '123456'
 
     def generate_llm_test_command(prompt: str, expected_output: str) -> str:
         prompt = shlex.quote(prompt)
         expected_output = shlex.quote(expected_output)
         return (
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'python tests/skyserve/llm/get_response.py --endpoint $endpoint '
-            f'--prompt {prompt} | grep {expected_output}')
+            's=$(python tests/skyserve/llm/get_response.py --endpoint $endpoint '
+            f'--prompt {prompt} --auth_token {auth_token}); '
+            'echo "$s"; '
+            f'echo "$s" | grep {expected_output}')
 
     with open('tests/skyserve/llm/prompt_output.json', 'r',
               encoding='utf-8') as f:
@@ -343,7 +346,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     test = smoke_tests_utils.Test(
         'test-skyserve-llm',
         [
-            f'sky serve up -n {name} --infra {generic_cloud} --gpus {accelerator} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --infra {generic_cloud} --gpus {accelerator} -y --secret AUTH_TOKEN={auth_token} tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
