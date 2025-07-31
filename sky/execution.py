@@ -178,10 +178,6 @@ def _execute(
         # Only process pre-mount operations on API server.
         dag.pre_mount_volumes()
     for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                # Ensure the storage is constructed.
-                storage.construct()
         for resource in task.resources:
             # For backward compatibility, we need to override the autostop
             # config at server-side for legacy clients.
