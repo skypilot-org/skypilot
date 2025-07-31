@@ -9,8 +9,10 @@ import click
 from sky import sky_logging
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -23,6 +25,7 @@ if typing.TYPE_CHECKING:
     import io
 
     import sky
+    from sky.serve import serve_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -33,6 +36,8 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
+    pool: Optional[str] = None,
+    num_jobs: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -61,15 +66,35 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if (pool is not None and
+        (remote_api_version is None or remote_api_version < 12)):
+        raise click.UsageError('Pools are not supported in your API server. '
+                               'Please upgrade to a newer API server to use '
+                               'pools.')
+    if pool is None and num_jobs is not None:
+        raise click.UsageError('Cannot specify num_jobs without pool.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag, at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
-            request_id = sdk.optimize(dag)
-            sdk.stream_and_get(request_id)
-            prompt = f'Launching a managed job {dag.name!r}. Proceed?'
+            job_identity = 'a managed job'
+            if pool is None:
+                request_id = sdk.optimize(dag)
+                sdk.stream_and_get(request_id)
+            else:
+                request_id = pool_status(pool)
+                pool_statuses = sdk.get(request_id)
+                if not pool_statuses:
+                    raise click.UsageError(f'Pool {pool!r} not found.')
+                resources = pool_statuses[0]['requested_resources_str']
+                click.secho(f'Use resources from pool {pool!r}: {resources}.',
+                            fg='green')
+                if num_jobs is not None:
+                    job_identity = f'{num_jobs} managed jobs'
+            prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
                               default=True,
@@ -81,6 +106,8 @@ def launch(
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
+            pool=pool,
+            num_jobs=num_jobs,
         )
         response = server_common.make_authenticated_request(
             'POST',
@@ -158,6 +185,7 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
+    pool: Optional[str] = None,
 ) -> server_common.RequestId:
     """Cancels managed jobs.
 
@@ -168,6 +196,7 @@ def cancel(
         job_ids: IDs of the managed jobs to cancel.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
+        pool: Pool name to cancel.
 
     Returns:
         The request ID of the cancel request.
@@ -176,11 +205,18 @@ def cancel(
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if (pool is not None and
+        (remote_api_version is None or remote_api_version < 12)):
+        raise click.UsageError('Pools are not supported in your API server. '
+                               'Please upgrade to a newer API server to use '
+                               'pools.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
         all=all,
         all_users=all_users,
+        pool=pool,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -327,3 +363,44 @@ def dashboard() -> None:
     url = f'{api_server_url}/jobs/dashboard?{params}'
     logger.info(f'Opening dashboard in browser: {url}')
     webbrowser.open(url)
+
+
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(12)
+def pool_apply(
+    task: Union['sky.Task', 'sky.Dag'],
+    pool_name: str,
+    mode: 'serve_utils.UpdateMode',
+    # Internal only:
+    # pylint: disable=invalid-name
+    _need_confirmation: bool = False
+) -> server_common.RequestId:
+    """Apply a config to a pool."""
+    return impl.apply(task,
+                      pool_name,
+                      mode,
+                      pool=True,
+                      _need_confirmation=_need_confirmation)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(12)
+def pool_down(
+    pool_names: Optional[Union[str, List[str]]],
+    all: bool = False,  # pylint: disable=redefined-builtin
+    purge: bool = False,
+) -> server_common.RequestId:
+    """Delete a pool."""
+    return impl.down(pool_names, all, purge, pool=True)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(12)
+def pool_status(
+    pool_names: Optional[Union[str, List[str]]],) -> server_common.RequestId:
+    """Query a pool."""
+    return impl.status(pool_names, pool=True)
