@@ -1832,7 +1832,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if remote_api_version is None or remote_api_version < 12:
         show_pools = False
 
-
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
     if refresh:
