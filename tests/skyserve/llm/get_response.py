@@ -27,9 +27,7 @@ if __name__ == '__main__':
                              'messages': messages,
                              'temperature': 0,
                          },
-                         headers={
-                             'Authorization': f'Bearer {args.auth_token}'
-                         },
+                         headers={'Authorization': f'Bearer {args.auth_token}'},
                          timeout=30)
 
     if resp.status_code != 200:
