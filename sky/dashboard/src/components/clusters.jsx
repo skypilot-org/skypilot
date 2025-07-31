@@ -1294,7 +1294,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 
   return (
     <>
-      <div className="flex items-center gap-2 py-1 px-2">
+      <div className="flex items-center gap-4 py-2 px-2">
         <div className="flex flex-wrap items-content gap-2">
           {filters.map((filter, _index) => (
             <FilterItem

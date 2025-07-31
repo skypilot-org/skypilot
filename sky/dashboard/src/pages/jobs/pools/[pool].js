@@ -41,7 +41,8 @@ export default function PoolDetailPage() {
   const { pool: poolName } = router.query;
 
   const [poolData, setPoolData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Pagination state
@@ -61,10 +62,14 @@ export default function PoolDetailPage() {
   const [isPoolYamlExpanded, setIsPoolYamlExpanded] = useState(false);
   const [isPoolYamlCopied, setIsPoolYamlCopied] = useState(false);
 
-  const fetchPoolData = async () => {
+  const fetchPoolData = async (isRefresh = false) => {
     if (!poolName) return;
 
-    setLoading(true);
+    if (isRefresh) {
+      setLoading(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
 
     try {
@@ -83,7 +88,11 @@ export default function PoolDetailPage() {
       setError(`Failed to fetch pool data: ${err.message}`);
       setPoolData(null);
     } finally {
-      setLoading(false);
+      if (isRefresh) {
+        setLoading(false);
+      } else {
+        setInitialLoading(false);
+      }
     }
   };
 
@@ -225,7 +234,7 @@ export default function PoolDetailPage() {
     setCurrentPage(1);
   };
 
-  if (!router.isReady || loading) {
+  if (!router.isReady || initialLoading) {
     return (
       <>
         <Head>
@@ -252,7 +261,7 @@ export default function PoolDetailPage() {
             <h2 className="text-xl font-semibold mb-2">Error</h2>
             <p>{error || `Pool ${poolName} not found`}</p>
             <button
-              onClick={fetchPoolData}
+              onClick={() => fetchPoolData(true)}
               className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
             >
               Retry
@@ -294,7 +303,7 @@ export default function PoolDetailPage() {
               </div>
             )}
             <button
-              onClick={fetchPoolData}
+              onClick={() => fetchPoolData(true)}
               disabled={loading}
               className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
             >
