@@ -770,7 +770,7 @@ class Storage(object):
             # Storage does not exist in global_user_state, create new stores
             # Sky optimizer either adds a storage object instance or selects
             # from existing ones
-            input_stores = self.stores
+            input_stores = self.stores.copy()
             self.stores.clear()
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
