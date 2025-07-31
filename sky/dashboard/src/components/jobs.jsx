@@ -973,37 +973,17 @@ export function ManagedJobsTable({
             </TableHeader>
             <TableBody>
               {loading || isInitialLoad ? (
-                // Show skeleton rows to maintain column structure during loading
-                Array.from({ length: 3 }).map((_, index) => (
-                  <TableRow key={`loading-${index}`}>
-                    <TableCell>
-                      <div className="h-4 w-16 bg-gray-200 rounded animate-pulse"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <div className="h-5 w-12 bg-gray-200 rounded-full animate-pulse"></div>
-                        <div className="h-5 w-10 bg-gray-200 rounded-full animate-pulse"></div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <div className="h-5 w-16 bg-gray-200 rounded-full animate-pulse"></div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 w-6 bg-gray-200 rounded animate-pulse"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-5 w-12 bg-gray-200 rounded-full animate-pulse"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 w-14 bg-gray-200 rounded animate-pulse"></div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                <TableRow>
+                  <TableCell
+                    colSpan={12}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : paginatedData.length > 0 ? (
                 <>
                   {paginatedData.map((item) => (
