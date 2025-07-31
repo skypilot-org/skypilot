@@ -18,7 +18,11 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { formatDuration, REFRESH_INTERVAL } from '@/components/utils';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  getQueryPools,
+  extractHandleInfo,
+} from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
@@ -255,10 +259,18 @@ export function ManagedJobs() {
   const [nameFilter, setNameFilter] = useState('');
   const [workspaces, setWorkspaces] = useState([]);
   const [users, setUsers] = useState([]);
+  const [activeMainTab, setActiveMainTab] = useState('jobs');
 
-  // Handle URL query parameters for workspace and user filtering
+  // Handle URL query parameters for tab selection
   useEffect(() => {
     if (router.isReady) {
+      const tab = router.query.tab;
+      if (tab === 'pools') {
+        setActiveMainTab('pools');
+      } else {
+        setActiveMainTab('jobs');
+      }
+
       if (router.query.workspace) {
         const workspaceParam = Array.isArray(router.query.workspace)
           ? router.query.workspace[0]
@@ -280,6 +292,7 @@ export function ManagedJobs() {
     }
   }, [
     router.isReady,
+    router.query.tab,
     router.query.workspace,
     router.query.user,
     router.query.name,
@@ -420,6 +433,7 @@ export function ManagedJobs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getQueryPools, [{}]);
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
@@ -430,109 +444,137 @@ export function ManagedJobs() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 mb-1">
-        <div className="text-base">
-          <Link
-            href="/jobs"
-            className="text-sky-blue hover:underline leading-none"
+      {/* Main Tabs */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-base flex items-center">
+          <button
+            className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
+              activeMainTab === 'jobs'
+                ? 'text-sky-blue border-sky-500'
+                : 'text-gray-500 hover:text-gray-700 border-transparent'
+            }`}
+            onClick={() => {
+              setActiveMainTab('jobs');
+              router.push('/jobs', undefined, { shallow: true });
+            }}
           >
             Managed Jobs
-          </Link>
+          </button>
+          <button
+            className={`leading-none pb-2 px-2 border-b-2 ${
+              activeMainTab === 'pools'
+                ? 'text-sky-blue border-sky-500'
+                : 'text-gray-500 hover:text-gray-700 border-transparent'
+            }`}
+            onClick={() => {
+              setActiveMainTab('pools');
+              router.push('/jobs?tab=pools', undefined, { shallow: true });
+            }}
+          >
+            Pools
+          </button>
         </div>
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Filter by job name"
-            value={nameFilter}
-            onChange={(e) => handleNameFilterChange(e.target.value)}
-            className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-          />
-          {nameFilter && (
-            <button
-              onClick={() => handleNameFilterChange('')}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear filter"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
-        <Select
-          value={workspaceFilter}
-          onValueChange={handleWorkspaceFilterChange}
-        >
-          <SelectTrigger className="h-8 w-36 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
-            <SelectValue placeholder="Filter by workspace...">
-              {workspaceFilter === ALL_WORKSPACES_VALUE
-                ? 'All Workspaces'
-                : workspaceFilter}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_WORKSPACES_VALUE}>All Workspaces</SelectItem>
-            {workspaces.map((ws) => (
-              <SelectItem key={ws} value={ws}>
-                {ws}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={userFilter} onValueChange={handleUserFilterChange}>
-          <SelectTrigger className="h-8 w-32 sm:w-48 text-sm border-none focus:ring-0 focus:outline-none">
-            <SelectValue placeholder="Filter by user...">
-              {userFilter === ALL_USERS_VALUE
-                ? 'All Users'
-                : users.find((u) => u.userId === userFilter)?.display ||
-                  userFilter}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
-            {users.map((user) => (
-              <SelectItem key={user.userId} value={user.userId}>
-                {user.display}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+
         <div className="flex items-center gap-2 ml-auto">
-          {loading && (
-            <div className="flex items-center">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center disabled:opacity-50"
             title="Refresh"
           >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <RotateCwIcon
+              className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`}
+            />
             {!isMobile && <span>Refresh</span>}
           </button>
         </div>
       </div>
-      <ManagedJobsTable
-        refreshInterval={REFRESH_INTERVAL}
-        setLoading={setLoading}
-        refreshDataRef={refreshDataRef}
-        workspaceFilter={workspaceFilter}
-        userFilter={userFilter}
-        nameFilter={nameFilter}
-      />
+
+      {/* Filters and Content */}
+      {activeMainTab === 'jobs' && (
+        <>
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Filter by job name"
+                value={nameFilter}
+                onChange={(e) => handleNameFilterChange(e.target.value)}
+                className="h-8 w-40 sm:w-48 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+              />
+              {nameFilter && (
+                <button
+                  onClick={() => handleNameFilterChange('')}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  title="Clear filter"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <Select
+              value={workspaceFilter}
+              onValueChange={handleWorkspaceFilterChange}
+            >
+              <SelectTrigger className="w-40 sm:w-48 h-8 text-sm">
+                <SelectValue placeholder="All Workspaces" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_WORKSPACES_VALUE}>
+                  All Workspaces
+                </SelectItem>
+                {workspaces.map((workspace) => (
+                  <SelectItem key={workspace} value={workspace}>
+                    {workspace}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={userFilter} onValueChange={handleUserFilterChange}>
+              <SelectTrigger className="w-40 sm:w-48 h-8 text-sm">
+                <SelectValue placeholder="All Users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_USERS_VALUE}>All Users</SelectItem>
+                {users.map((user) => (
+                  <SelectItem key={user.userId} value={user.userId}>
+                    {user.display}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <ManagedJobsTable
+            refreshInterval={REFRESH_INTERVAL}
+            setLoading={setLoading}
+            refreshDataRef={refreshDataRef}
+            workspaceFilter={workspaceFilter}
+            userFilter={userFilter}
+            nameFilter={nameFilter}
+          />
+        </>
+      )}
+
+      {activeMainTab === 'pools' && (
+        <PoolsTable
+          refreshInterval={REFRESH_INTERVAL}
+          setLoading={setLoading}
+          refreshDataRef={refreshDataRef}
+        />
+      )}
+
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
         onClose={() =>
@@ -1031,23 +1073,50 @@ export function ManagedJobsTable({
                 >
                   Recoveries{getSortDirection('recoveries')}
                 </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('pool')}
+                >
+                  Worker Pool{getSortDirection('pool')}
+                </TableHead>
+
                 <TableHead>Details</TableHead>
                 <TableHead>Logs</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading || isInitialLoad ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={12}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    <div className="flex justify-center items-center">
-                      <CircularProgress size={20} className="mr-2" />
-                      <span>Loading...</span>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                // Show skeleton rows to maintain column structure during loading
+                Array.from({ length: 3 }).map((_, index) => (
+                  <TableRow key={`loading-${index}`}>
+                    <TableCell>
+                      <div className="h-4 w-16 bg-gray-200 rounded animate-pulse"></div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <div className="h-5 w-12 bg-gray-200 rounded-full animate-pulse"></div>
+                        <div className="h-5 w-10 bg-gray-200 rounded-full animate-pulse"></div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <div className="h-5 w-16 bg-gray-200 rounded-full animate-pulse"></div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 w-6 bg-gray-200 rounded animate-pulse"></div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-5 w-12 bg-gray-200 rounded-full animate-pulse"></div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 w-14 bg-gray-200 rounded animate-pulse"></div>
+                    </TableCell>
+                  </TableRow>
+                ))
               ) : paginatedData.length > 0 ? (
                 <>
                   {paginatedData.map((item) => (
@@ -1132,6 +1201,7 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
+                        <TableCell>{item.pool || '-'}</TableCell>
                         <TableCell>
                           {item.details ? (
                             <TruncatedDetails
@@ -1155,7 +1225,7 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={12}
+                          colSpan={13}
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1164,7 +1234,7 @@ export function ManagedJobsTable({
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-6">
+                  <TableCell colSpan={13} className="text-center py-6">
                     <div className="flex flex-col items-center space-y-4">
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
@@ -1794,5 +1864,325 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
         </button>
       )}
     </div>
+  );
+}
+
+function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
+  const [data, setData] = useState([]);
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: 'ascending',
+  });
+  const [loading, setLocalLoading] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const fetchData = React.useCallback(async () => {
+    setLocalLoading(true);
+    setLoading(true);
+    try {
+      const poolsResponse = await dashboardCache.get(getQueryPools, [{}]);
+      const { pools = [] } = poolsResponse || {};
+      setData(pools);
+      setIsInitialLoad(false);
+    } catch (err) {
+      console.error('Error fetching pools data:', err);
+      setData([]);
+      setIsInitialLoad(false);
+    } finally {
+      setLocalLoading(false);
+      setLoading(false);
+    }
+  }, [setLoading]);
+
+  // Expose fetchData to parent component
+  React.useEffect(() => {
+    if (refreshDataRef) {
+      refreshDataRef.current = fetchData;
+    }
+  }, [refreshDataRef, fetchData]);
+
+  useEffect(() => {
+    setData([]);
+    let isCurrent = true;
+
+    fetchData();
+
+    const interval = setInterval(() => {
+      if (isCurrent) {
+        fetchData();
+      }
+    }, refreshInterval);
+
+    return () => {
+      isCurrent = false;
+      clearInterval(interval);
+    };
+  }, [refreshInterval, fetchData]);
+
+  const requestSort = (key) => {
+    let direction = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirection = (key) => {
+    if (sortConfig.key === key) {
+      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+    }
+    return '';
+  };
+
+  // Sort the data
+  const sortedData = React.useMemo(() => {
+    if (!sortConfig.key) return data;
+
+    return [...data].sort((a, b) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'ascending' ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [data, sortConfig]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(sortedData.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedData = sortedData.slice(startIndex, endIndex);
+
+  // Page navigation handlers
+  const goToPreviousPage = () => {
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage((page) => Math.min(page + 1, totalPages));
+  };
+
+  const handlePageSizeChange = (e) => {
+    const newSize = parseInt(e.target.value, 10);
+    setPageSize(newSize);
+    setCurrentPage(1);
+  };
+
+  const getWorkersCount = (replicaInfo) => {
+    if (!replicaInfo || replicaInfo.length === 0) return '0';
+
+    const readyWorkers = replicaInfo.filter(
+      (worker) => worker.status === 'READY'
+    ).length;
+    return readyWorkers.toString();
+  };
+
+  const formatUptime = (uptime) => {
+    if (!uptime) return '-';
+
+    // uptime is a Unix timestamp of when the service became ready
+    // Convert to duration by subtracting from current time
+    const now = Date.now() / 1000; // Convert to seconds
+    const durationSeconds = Math.floor(now - uptime);
+
+    // Only show positive durations
+    if (durationSeconds <= 0) return '-';
+
+    return formatDuration(durationSeconds);
+  };
+
+  const JobStatusBadges = ({ jobCounts }) => {
+    if (!jobCounts || Object.keys(jobCounts).length === 0) {
+      return <span className="text-gray-500 text-sm">No active jobs</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1">
+        {Object.entries(jobCounts).map(([status, count]) => {
+          const style = getStatusStyle(status);
+          return (
+            <span
+              key={status}
+              className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
+            >
+              <span>{status}</span>
+              <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                {count}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const InfraBadges = ({ replicaInfo }) => {
+    if (!replicaInfo || replicaInfo.length === 0) {
+      return <span className="text-muted-foreground">-</span>;
+    }
+
+    // Aggregate infrastructure types from READY worker handles only
+    const infraCounts = {};
+    replicaInfo.forEach((worker) => {
+      if (worker.handle && worker.status === 'READY') {
+        const handleInfo = extractHandleInfo(worker.handle);
+        const cloud = handleInfo.cloud;
+        infraCounts[cloud] = (infraCounts[cloud] || 0) + 1;
+      }
+    });
+
+    if (Object.keys(infraCounts).length === 0) {
+      return <span className="text-muted-foreground">-</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1">
+        {Object.entries(infraCounts).map(([cloud, count]) => (
+          <span
+            key={cloud}
+            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+          >
+            {count} {cloud}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <Card>
+      <div className="overflow-x-auto rounded-lg">
+        <Table className="min-w-full table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('name')}
+              >
+                Pool Name{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-40"
+                onClick={() => requestSort('job_counts')}
+              >
+                Jobs{getSortDirection('job_counts')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-36"
+                onClick={() => requestSort('requested_resources_str')}
+              >
+                Infra Summary{getSortDirection('requested_resources_str')}
+              </TableHead>
+              <TableHead className="whitespace-nowrap w-20">Workers</TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-48"
+                onClick={() => requestSort('policy')}
+              >
+                Policy{getSortDirection('policy')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-24"
+                onClick={() => requestSort('status')}
+              >
+                Status{getSortDirection('status')}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading || isInitialLoad ? (
+              <TableRow>
+                <TableCell
+                  colSpan={6}
+                  className="text-center py-6 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={20} className="mr-2" />
+                    <span>Loading...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
+              paginatedData.map((pool) => (
+                <TableRow key={pool.name}>
+                  <TableCell>
+                    <Link
+                      href={`/jobs/pools/${pool.name}`}
+                      className="text-blue-600 font-medium hover:text-blue-800"
+                    >
+                      {pool.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                  </TableCell>
+                  <TableCell>
+                    <InfraBadges replicaInfo={pool.replica_info} />
+                  </TableCell>
+                  <TableCell>{getWorkersCount(pool.replica_info)}</TableCell>
+                  <TableCell className="truncate max-w-xs" title={pool.policy}>
+                    {pool.policy || '-'}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={pool.status} />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={6}
+                  className="text-center py-6 text-gray-500"
+                >
+                  No pools found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      {paginatedData.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              className="border border-gray-300 rounded px-2 py-1 text-sm"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">
+              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
+            </span>
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage === 1}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage === totalPages}
+              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

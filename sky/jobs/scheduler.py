@@ -42,6 +42,7 @@ import os
 import sys
 import time
 import typing
+from typing import Optional
 
 import filelock
 
@@ -96,7 +97,7 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
 def get_number_of_controllers() -> int:
     config = server_config.compute_server_config(deploy=True, quiet=True)
     free = common_utils.get_mem_size_gb() * 1024
-    
+
     used = 0.0
     used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
     used += (config.long_worker_config.garanteed_parallelism +
@@ -187,7 +188,7 @@ def maybe_start_controllers() -> None:
 
 
 def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
-               env_file_path: str, priority: int) -> None:
+               env_file_path: str, priority: int, pool: Optional[str]) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
@@ -199,7 +200,7 @@ def submit_job(job_id: int, dag_yaml_path: str, original_user_yaml_path: str,
     """
     state.scheduler_set_waiting(job_id, dag_yaml_path,
                                 original_user_yaml_path, env_file_path,
-                                common_utils.get_user_hash(), priority)
+                                common_utils.get_user_hash(), priority, pool)
     maybe_start_controllers()
 
 
@@ -307,6 +308,11 @@ if __name__ == '__main__':
     parser.add_argument('--env-file',
                         type=str,
                         help='The path to the controller env file.')
+    parser.add_argument('--pool',
+                        type=str,
+                        required=False,
+                        default=None,
+                        help='The pool to use for the controller job.')
     parser.add_argument(
         '--priority',
         type=int,
@@ -316,4 +322,4 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
-               args.priority)
+               args.priority, args.pool)

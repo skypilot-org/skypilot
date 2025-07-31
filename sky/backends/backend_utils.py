@@ -40,6 +40,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -2655,7 +2656,9 @@ def is_controller_accessible(
           failed to be connected.
     """
     if (managed_job_utils.is_consolidation_mode() and
-            controller == controller_utils.Controllers.JOBS_CONTROLLER):
+            controller == controller_utils.Controllers.JOBS_CONTROLLER
+       ) or (serve_utils.is_consolidation_mode() and
+             controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER):
         cn = 'local-controller-consolidation'
         return backends.LocalResourcesHandle(
             cluster_name=cn,

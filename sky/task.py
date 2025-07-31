@@ -738,7 +738,13 @@ class Task:
         service = config.pop('service', None)
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
-        task.set_service(service)
+            task.set_service(service)
+
+        pool = config.pop('pool', None)
+        if pool is not None:
+            pool['pool'] = True
+            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
+            task.set_service(pool)
 
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:

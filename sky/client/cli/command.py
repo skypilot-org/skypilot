@@ -1432,6 +1432,7 @@ def _handle_services_request(
         service_names: Optional[List[str]],
         show_all: bool,
         show_endpoint: bool,
+        pool: bool = False,
         is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
@@ -1447,6 +1448,7 @@ def _handle_services_request(
         is an error when querying the services. In this case, msg contains the
         error message. Otherwise, msg contains the formatted service table.
     """
+    noun = 'pool' if pool else 'service'
     num_services = None
     try:
         if not is_called_by_user:
@@ -1483,11 +1485,11 @@ def _handle_services_request(
             # print the original error.
             pass
         if not msg:
-            msg = ('Failed to fetch service statuses due to connection issues. '
+            msg = (f'Failed to fetch {noun} statuses due to connection issues. '
                    'Please try again later. Details: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
-        msg = ('Failed to fetch service statuses: '
+        msg = (f'Failed to fetch {noun} statuses: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
         if show_endpoint:
@@ -1502,14 +1504,16 @@ def _handle_services_request(
             endpoint = service_records[0]['endpoint']
             msg = '-' if endpoint is None else endpoint
         else:
-            msg = serve_lib.format_service_table(service_records, show_all)
+            msg = serve_lib.format_service_table(service_records, show_all,
+                                                 pool)
             service_not_found_msg = ''
             if service_names is not None:
                 for service_name in service_names:
                     if not any(service_name == record['name']
                                for record in service_records):
                         service_not_found_msg += (
-                            f'\nService {service_name!r} not found.')
+                            f'\n{noun.capitalize()} '
+                            f'{service_name!r} not found.')
             if service_not_found_msg:
                 msg += f'\n{service_not_found_msg}'
     return num_services, msg
@@ -1665,6 +1669,11 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
+@click.option('--show-pools/--no-show-pools',
+              default=True,
+              is_flag=True,
+              required=False,
+              help='Also show sky serve pools, if any.')
 @click.option(
     '--kubernetes',
     '--k8s',
@@ -1684,8 +1693,8 @@ def _show_enabled_infra(active_workspace: str, show_workspace: bool):
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, kubernetes: bool, clusters: List[str],
-           all_users: bool):
+           show_services: bool, show_pools: bool, kubernetes: bool,
+           clusters: List[str], all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1757,6 +1766,13 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
+    if show_services:
+        # Run the sky serve service query in parallel to speed up the
+        # status query.
+        service_status_request_id = serve_lib.status(service_names=None)
+    show_pools = show_pools and not any([clusters, ip, endpoints])
+    if show_pools:
+        pool_status_request_id = managed_jobs.query_pool(pool_names=None)
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -1919,7 +1935,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 job_info += '. '
             hints.append(
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
-                in_progress_hint.format(job_info=job_info))
+                in_progress_hint(False).format(job_info=job_info))
 
     if show_services:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -1942,8 +1958,35 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     msg = 'KeyboardInterrupt'
         click.echo(msg)
         if num_services is not None:
-            hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                         value.in_progress_hint)
+            hints.append(
+                controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
+                in_progress_hint(False))
+
+    if show_pools:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Pools{colorama.Style.RESET_ALL}')
+        num_pools = None
+        if managed_jobs_query_interrupted:
+            msg = 'KeyboardInterrupt'
+        else:
+            with rich_utils.client_status('[cyan]Checking pools[/]'):
+                try:
+                    num_pools, msg = _handle_services_request(
+                        pool_status_request_id,
+                        service_names=None,
+                        show_all=False,
+                        show_endpoint=False,
+                        pool=True,
+                        is_called_by_user=False)
+                except KeyboardInterrupt:
+                    sdk.api_cancel(pool_status_request_id, silent=True)
+                    num_pools = -1
+                    msg = 'KeyboardInterrupt'
+        click.echo(msg)
+        if num_pools is not None:
+            hints.append(
+                controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
+                in_progress_hint(True))
 
     if num_pending_autostop > 0 and not refresh:
         # Don't print this hint if there's no pending autostop or user has
@@ -4193,6 +4236,18 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
+@click.option('--pool',
+              '-p',
+              default=None,
+              type=str,
+              required=False,
+              help='Which pool to use for batch jobs submission.')
+@click.option('--batch-size',
+              '-b',
+              default=None,
+              type=int,
+              required=False,
+              help='Batch size for batch jobs submission.')
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -4226,6 +4281,8 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
+    pool: Optional[str],
+    batch_size: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -4245,6 +4302,11 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
+    if pool is None and batch_size is not None:
+        raise click.UsageError('Cannot specify --batch-size without --pool.')
+    if pool is not None and batch_size is None:
+        raise click.UsageError('Cannot specify --pool without --batch-size.')
+
     if cluster is not None:
         if name is not None and name != cluster:
             raise click.UsageError('Cannot specify both --name and --cluster. '
@@ -4295,22 +4357,38 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
+    if pool is not None:
+        click.secho(
+            f'Submitting to pool {colorama.Fore.CYAN}{pool!r}'
+            f'{colorama.Style.RESET_ALL} with batch size '
+            f'{colorama.Fore.CYAN}{batch_size}{colorama.Style.RESET_ALL}.')
+
     # Optimize info is only show if _need_confirmation.
     if not yes:
         click.secho(
             f'Managed job {dag.name!r} will be launched on (estimated):',
             fg='yellow')
 
-    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    request_id = managed_jobs.launch(dag,
+                                     name,
+                                     pool,
+                                     batch_size,
+                                     _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
                                         'sky.jobs.launch')
-    if not async_call and not detach_run:
-        job_id = job_id_handle[0]
-        returncode = managed_jobs.tail_logs(name=None,
-                                            job_id=job_id,
-                                            follow=True,
-                                            controller=False)
-        sys.exit(returncode)
+    if pool is None:
+        if not async_call and not detach_run:
+            job_id = job_id_handle[0]
+            returncode = managed_jobs.tail_logs(name=None,
+                                                job_id=job_id,
+                                                follow=True,
+                                                controller=False)
+            sys.exit(returncode)
+    else:
+        batch_ids = job_id_handle[0]
+        bids = ','.join(map(str, batch_ids))
+        click.secho(f'Batch submitted with IDs: {colorama.Fore.CYAN}{bids}'
+                    f'{colorama.Style.RESET_ALL}.')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4547,6 +4625,258 @@ def jobs_dashboard():
     sdk.dashboard(starting_page='jobs')
 
 
+@jobs.command('create-pool', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('pool_yaml',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--pool-name',
+              '-p',
+              default=None,
+              type=str,
+              help='A pool name. Unique for each pool. If not provided, '
+              'a unique name is autogenerated.')
+@_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
+                    flags.COMMON_OPTIONS)
+@flags.yes_option()
+@timeline.event
+@usage_lib.entrypoint
+def jobs_create_pool(
+    pool_yaml: Tuple[str, ...],
+    pool_name: Optional[str],
+    workdir: Optional[str],
+    infra: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    yes: bool,
+    async_call: bool,
+):
+    """Launch a cluster pool for managed jobs submission.
+
+    POOL_YAML must point to a valid YAML file.
+    """
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
+    if pool_name is None:
+        pool_name = serve_lib.generate_service_name(pool=True)
+
+    task = _generate_task_with_service(
+        service_name=pool_name,
+        service_yaml_args=pool_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        secret=secret,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        network_tier=network_tier,
+        ports=ports,
+        not_supported_cmd='sky jobs create-pool',
+    )
+    assert task.service is not None
+    if not task.service.pool:
+        raise click.UsageError('The YAML file needs a `pool` section.')
+    click.secho('Pool spec:', fg='cyan')
+    click.echo(task.service)
+    serve_lib.validate_service_task(task)
+
+    click.secho(
+        'Each pool worker will use the following resources (estimated):',
+        fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
+
+    request_id = managed_jobs.create_pool(task,
+                                          pool_name,
+                                          _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.create-pool')
+
+
+# TODO(MaoZiming): Update Doc.
+# TODO(MaoZiming): Expose mix replica traffic option to user.
+# Currently, we do not mix traffic from old and new replicas.
+@jobs.command('update-pool', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('pool_name', required=True, type=str)
+@click.argument('pool_yaml',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
+                    flags.COMMON_OPTIONS)
+@click.option('--mode',
+              default=serve_lib.DEFAULT_UPDATE_MODE.value,
+              type=click.Choice([m.value for m in serve_lib.UpdateMode],
+                                case_sensitive=False),
+              required=False,
+              help=('Update mode. If "rolling", SkyServe will update the '
+                    'service with rolling update. If "blue_green", SkyServe '
+                    'will update the service with blue-green update. '))
+@flags.yes_option()
+@timeline.event
+@usage_lib.entrypoint
+def jobs_update_pool(
+        pool_name: str, pool_yaml: Tuple[str, ...], workdir: Optional[str],
+        infra: Optional[str], cloud: Optional[str], region: Optional[str],
+        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
+        image_id: Optional[str], env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
+        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
+        cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
+        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
+        yes: bool, async_call: bool):
+    """Update a cluster pool."""
+    cloud, region, zone = _handle_infra_cloud_region_zone_options(
+        infra, cloud, region, zone)
+    task = _generate_task_with_service(
+        service_name=pool_name,
+        service_yaml_args=pool_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        secret=secret,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        network_tier=network_tier,
+        ports=ports,
+        not_supported_cmd='sky jobs update-pool',
+    )
+    assert task.service is not None
+    if not task.service.pool:
+        raise click.UsageError('The YAML file needs a `pool` section.')
+    click.secho('Pool spec:', fg='cyan')
+    click.echo(task.service)
+    serve_lib.validate_service_task(task)
+
+    click.secho('New pool worker will use the following resources (estimated):',
+                fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
+
+    request_id = managed_jobs.update_pool(task,
+                                          pool_name,
+                                          mode=serve_lib.UpdateMode(mode),
+                                          _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.update-pool')
+
+
+@jobs.command('query-pool', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
+@click.argument('pool_names', required=False, type=str, nargs=-1)
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def jobs_query_pool(verbose: bool, pool_names: List[str]):
+    """Show statuses of cluster pools.
+
+    Show detailed statuses of one or more pools. If POOL_NAME is not
+    provided, show all pools' status.
+    """
+    pool_names_to_query: Optional[List[str]] = pool_names
+    if not pool_names:
+        pool_names_to_query = None
+    # This won't pollute the output of --endpoint.
+    with rich_utils.client_status('[cyan]Checking pools[/]'):
+        pool_status_request_id = managed_jobs.query_pool(pool_names_to_query)
+        _, msg = _handle_services_request(pool_status_request_id,
+                                          service_names=pool_names_to_query,
+                                          show_all=verbose,
+                                          show_endpoint=False,
+                                          pool=True,
+                                          is_called_by_user=True)
+
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Pools{colorama.Style.RESET_ALL}')
+    click.echo(msg)
+
+
+@jobs.command('delete-pool', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('pool_names', required=False, type=str, nargs=-1)
+@flags.all_option('Delete all pools.')
+@click.option('--purge',
+              '-p',
+              default=False,
+              is_flag=True,
+              help='Tear down pools in failed status.')
+@flags.yes_option()
+@_add_click_options(flags.COMMON_OPTIONS)
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def jobs_delete_pool(
+    pool_names: List[str],
+    all: bool,
+    purge: bool,
+    yes: bool,
+    async_call: bool,
+) -> None:
+    """Delete pool(s).
+
+    POOL_NAMES is the name of the pool (or glob pattern) to delete. If
+    both POOL_NAMES and ``--all`` are supplied, the latter takes precedence.
+
+    Deleting a pool will delete all of its workers and associated resources.
+    """
+    if sum([bool(pool_names), all]) != 1:
+        argument_str = (f'POOL_NAMES={",".join(pool_names)}'
+                        if pool_names else '')
+        argument_str += ' --all' if all else ''
+        raise click.UsageError('Can only specify one of POOL_NAMES or --all. '
+                               f'Provided {argument_str!r}.')
+
+    if not yes:
+        quoted_pool_names = [f'{name!r}' for name in pool_names]
+        list_pool_str = ', '.join(quoted_pool_names)
+        pool_identity_str = f'pool(s) {list_pool_str}'
+        if all:
+            pool_identity_str = 'all pools'
+        click.confirm(f'Terminating {pool_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
+    request_id = managed_jobs.delete_pool(pool_names, all=all, purge=purge)
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.delete-pool')
+
+
 @cli.command(cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
@@ -4620,6 +4950,12 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
+
+    if task.service.pool:
+        if task.service.ports is not None or ports:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify ports in a cluster pool.')
+        return task
 
     # NOTE(yi): we only allow one service port now.
     service_port: Optional[int] = int(
@@ -4780,6 +5116,9 @@ def serve_up(
         ports=ports,
         not_supported_cmd='sky serve up',
     )
+    assert task.service is not None
+    if task.service.pool:
+        raise click.UsageError('The YAML file needs a `service` section.')
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
     serve_lib.validate_service_task(task)

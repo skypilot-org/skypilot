@@ -75,6 +75,7 @@ class ManagedJobEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
+        logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
         scheduler.maybe_start_controllers()
 

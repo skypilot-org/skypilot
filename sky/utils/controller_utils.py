@@ -5,7 +5,7 @@ import enum
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 import uuid
 
 import colorama
@@ -64,7 +64,7 @@ class _ControllerSpec:
     controller_type: str
     name: str
     cluster_name: str
-    in_progress_hint: str
+    in_progress_hint: Callable[[bool], str]
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
@@ -94,9 +94,9 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         cluster_name=common.JOB_CONTROLLER_NAME,
-        in_progress_hint=(
-            '* {job_info}To see all managed jobs: '
-            f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
+        in_progress_hint=lambda _:
+        ('* {job_info}To see all managed jobs: '
+         f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the jobs controller\'s jobs is not allowed.\nTo cancel '
             f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel '
@@ -126,8 +126,11 @@ class Controllers(enum.Enum):
         name='serve controller',
         cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
-            f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status -v{colorama.Style.RESET_ALL}'),
+            lambda pool:
+            (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
+             f'sky jobs query-pool -v{colorama.Style.RESET_ALL}') if pool else
+            (f'* To see detailed service status: {colorama.Style.BRIGHT}'
+             f'sky serve status -v{colorama.Style.RESET_ALL}')),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         _decline_down_when_failed_to_fetch_status_hint=(

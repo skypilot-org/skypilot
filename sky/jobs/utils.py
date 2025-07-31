@@ -35,6 +35,7 @@ from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -243,6 +244,7 @@ def ha_recovery_for_consolidation_mode():
 
 
 def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                   job_id: Optional[int],
                    job_logger: logging.Logger) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
@@ -256,10 +258,13 @@ def get_job_status(backend: 'backends.CloudVmRayBackend', cluster_name: str,
         job_logger.info(f'Cluster {cluster_name} not found.')
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+    job_ids = None if job_id is None else [job_id]
     for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
         try:
             job_logger.info('=== Checking the job status... ===')
-            statuses = backend.get_job_status(handle, stream_logs=False)
+            statuses = backend.get_job_status(handle,
+                                              job_ids=job_ids,
+                                              stream_logs=False)
             status = list(statuses.values())[0]
             if status is None:
                 job_logger.info('No job found.')
@@ -332,13 +337,22 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         error_msg = None
         tasks = managed_job_state.get_managed_jobs(job_id)
         for task in tasks:
-            task_name = task['job_name']
-            cluster_name = generate_managed_job_cluster_name(task_name, job_id)
+            pool = task.get('pool', None)
+            if pool is None:
+                task_name = task['job_name']
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id)
+            else:
+                cluster_name, _ = (
+                    managed_job_state.get_pool_submit_info(job_id))
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
                 try:
-                    terminate_cluster(cluster_name)
+                    if pool is None:
+                        terminate_cluster(cluster_name)
+                    else:
+                        serve_utils.release_cluster_name(pool, cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (
                         f'Failed to terminate cluster {cluster_name}: '
@@ -1318,6 +1332,9 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'WORKER_POOL',
+        'WORKER_CLUSTER',
+        'WORKER_JOB_ID',
     ]
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
@@ -1431,6 +1448,9 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                job_tasks[0].get('pool', '-'),
+                '-',
+                '-',
             ]
             if show_all:
                 details = job_tasks[current_task_id].get('details')
@@ -1471,6 +1491,9 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                task.get('pool', '-'),
+                task.get('current_cluster_name', '-'),
+                task.get('job_id_on_pm', '-'),
             ]
             if show_all:
                 # schedule_state is only set at the job level, so if we have
