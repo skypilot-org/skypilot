@@ -16,8 +16,6 @@ Machine learning examples:
 
 - [**`resnet_distributed_torch.yaml`**](./resnet_distributed_torch.yaml): Run Distributed PyTorch (DDP) training of ResNet50 on 2 nodes.
 
-- [**`verl/multinode.yaml`**](./verl/multinode.yaml): Multi-node distributed RLHF training with Verl (Volcano Engine Reinforcement Learning) framework using Ray.
-
 - [**`detectron2_app.yaml`**](./detectron2_app.yaml): Run Detectron2 on a V100 GPU.
 
 - TPU examples

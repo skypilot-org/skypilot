@@ -24,19 +24,41 @@
 name: verl-multinode-training
 
 resources:
-  accelerators: A100:1  # Can use A100:1, A100-80GB:1, or other high-memory GPUs
+  accelerators:
+    - A100:8
+    - A100-80GB:8
+    - H100:8  # H100 for faster training, can also use A100-80GB:1
   # cloud: lambda  # Optional: specify cloud provider
-  use_spot: false  # Set to true for cost savings (may be preempted)
+  use_spot: true
   ports:
     - 8280  # Ray dashboard port
 
 num_nodes: 2  # Number of nodes for distributed training
 
+# Environment variables
+envs:
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+  TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+  # Change this to your own checkpoint bucket
+  CHECKPOINT_BUCKET_NAME: sky-verl-checkpoints
+  # Optional: Add your W&B API key for experiment tracking
+  WANDB_API_KEY: null  # Pass with `--secret WANDB_API_KEY` in CLI
+  # Training configuration
+  MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
+  TOTAL_EPOCHS: 3
+  ACTOR_LR: 1e-6
+  CRITIC_LR: 1e-5
+
+# Mount cloud storage for checkpoints
+file_mounts:
+  /checkpoints:
+    name: ${CHECKPOINT_BUCKET_NAME}
+    mode: MOUNT
+    # Optionally, specify the store to enforce to use one of the stores below:
+    #   r2/azure/gcs/s3/cos
+    # store: s3
+
 setup: |
-  # Install uv for fast Python package management
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-  
   # Clone and setup Verl
   rm -rf verl
   git clone https://github.com/volcengine/verl.git
@@ -53,8 +75,10 @@ setup: |
 
 run: |
   # Set up distributed training environment
-  head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  head_ip=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  num_nodes=$(echo "$SKYPILOT_NODE_IPS" | wc -l)
+  echo "Head IP: $head_ip"
+  echo "Number of nodes: $num_nodes"
   
   cd verl
   source .venv/bin/activate
@@ -66,6 +90,7 @@ run: |
   env_vars:
     TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
     CUDA_DEVICE_MAX_CONNECTIONS: "1"
+    HF_HUB_ENABLE_HF_TRANSFER: "1"
   EOF
   
   # Ray cluster configuration
@@ -94,13 +119,15 @@ run: |
     if ! is_ray_alive "$head_ip"; then
       echo "Starting Ray head node..."
       ray start --head --node-ip-address="$head_ip" \
-                --port $HEAD_PORT --dashboard-port $DASH_PORT \
-                --dashboard-host=0.0.0.0 \
-                --dashboard-agent-listen-port=52366 \
-                --disable-usage-stats
+          --port $HEAD_PORT --dashboard-port $DASH_PORT \
+          --dashboard-host=0.0.0.0 \
+          --dashboard-agent-listen-port=52366 \
+          --disable-usage-stats \
+          --num-gpus=$SKYPILOT_NUM_GPUS_PER_NODE
       sleep 10
     else
       echo "Ray is already running at $head_ip:$HEAD_PORT, reusing existing instance"
+      ray status --address="$head_ip:$HEAD_PORT"
     fi
     
     # Submit the training job to Ray
@@ -112,11 +139,11 @@ run: |
       -- python3 -m verl.trainer.main_ppo \
       data.train_files=$HOME/data/gsm8k/train.parquet \
       data.val_files=$HOME/data/gsm8k/test.parquet \
-      data.train_batch_size=256 \
+      data.train_batch_size=128 \
       data.max_prompt_length=512 \
       data.max_response_length=256 \
-      actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
-      actor_rollout_ref.actor.optim.lr=1e-6 \
+      actor_rollout_ref.model.path=$MODEL_NAME \
+      actor_rollout_ref.actor.optim.lr=$ACTOR_LR \
       actor_rollout_ref.actor.ppo_mini_batch_size=64 \
       actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
       actor_rollout_ref.rollout.name=vllm \
@@ -124,8 +151,8 @@ run: |
       actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
       actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
       actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
-      critic.optim.lr=1e-5 \
-      critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+      critic.optim.lr=$CRITIC_LR \
+      critic.model.path=$MODEL_NAME \
       critic.ppo_micro_batch_size_per_gpu=4 \
       critic.ppo_mini_batch_size=64 \
       algorithm.kl_ctrl.kl_coef=0.001 \
@@ -137,15 +164,36 @@ run: |
       trainer.default_local_dir=/checkpoints \
       trainer.save_freq=10 \
       trainer.test_freq=10 \
-      trainer.total_epochs=15 \
-      trainer.logger=['console'] \
-      trainer.resume_mode=disable 2>&1 | tee verl_training.log
+      trainer.total_epochs=$TOTAL_EPOCHS \
+      trainer.logger=['console', 'wandb'] \
+      trainer.wandb_project='verl-rlhf' \
+      trainer.wandb_run_name='${SKYPILOT_CLUSTER_NAME}-${SKYPILOT_TASK_ID}' \
+      trainer.resume_mode=auto 2>&1 | tee verl_training.log
   else
     # Worker nodes: connect to Ray head
     echo "Setting up worker node..."
-    sleep 10  # Wait for head node to start
+    echo "Head IP: $head_ip"
+    echo "HEAD_PORT: $HEAD_PORT"
+    echo "SKYPILOT_NUM_GPUS_PER_NODE: $SKYPILOT_NUM_GPUS_PER_NODE"
+
+    # Get this worker's IP address
+    worker_ip=$(hostname -I | awk '{print $1}')
+    echo "Worker IP: $worker_ip"
+
+    echo "Checking if worker $worker_ip is already in Ray cluster at $head_ip:$HEAD_PORT"
     
-    # Check if this worker is already connected to Ray
-    echo "Connecting worker to Ray head at $head_ip:$HEAD_PORT"
-    ray start --address $head_ip:$HEAD_PORT --disable-usage-stats
+    if ray list nodes --address=$head_ip:$HEAD_PORT 2>/dev/null | grep -q "$worker_ip"; then
+      echo "Worker $worker_ip already connected to Ray cluster"
+      ray status --address=$head_ip:$HEAD_PORT
+    else
+      echo "Worker not connected, waiting for head node to start"
+      sleep 20
+      echo "Starting Ray worker"
+      ray start --address $head_ip:$HEAD_PORT --disable-usage-stats --num-gpus=$SKYPILOT_NUM_GPUS_PER_NODE
+      echo "Ray start exit code: $?"
+      
+      # Verify connection after starting
+      sleep 5
+      ray status --address=$head_ip:$HEAD_PORT
+    fi
   fi
