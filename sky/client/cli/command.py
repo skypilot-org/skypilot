@@ -62,6 +62,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import versions
 from sky.server.requests import requests
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1827,6 +1828,10 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version is None or remote_api_version < 12:
+        show_pools = False
+
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
