@@ -739,7 +739,7 @@ def test_runpod_http_server_with_custom_ports():
     test = smoke_tests_utils.Test(
         'runpod_http_server_with_custom_ports',
         [
-            # RunPod CPU instances have a maximum local disk size limit of 20GB.
+            # RunPod CPU instances have a maximum local disk size limit of 10x number of vCPUs.
             f'sky launch -y -d -c {name} --infra runpod --disk-size 20 examples/http_server_with_custom_ports/task.yaml',
             f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
             # Retry a few times to avoid flakiness in ports being open.
