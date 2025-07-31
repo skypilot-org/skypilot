@@ -10,7 +10,6 @@ import os
 import tempfile
 
 import pytest
-import yaml
 
 from sky import dag as dag_lib
 from sky import task as task_lib
@@ -27,38 +26,28 @@ class TestManagedJobSecrets:
         redacted secrets instead of actual secrets for execution.
         """
         # Create a DAG with secrets that a managed job would use
-        # Use YAML-based task creation to ensure proper _user_specified_yaml behavior        
-        task_config = {
-            'run': 'echo "Using secrets for job execution"',
-            'envs': {
+        dag = dag_lib.Dag()
+        dag.name = 'test-managed-job'
+
+        task = task_lib.Task(
+            run='echo "Using secrets for job execution"',
+            envs={
                 'PUBLIC_API_URL': 'https://api.example.com',
                 'DEBUG_MODE': 'true'
             },
-            'secrets': {
+            secrets={
                 'API_KEY': 'sk-1234567890abcdef',
                 'DATABASE_PASSWORD': 'super-secret-db-password',
                 'JWT_SECRET': 'jwt-signing-secret-key',
                 'OAUTH_TOKEN': 'oauth-token-for-api-access'
-            }
-        }
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', 
-                                         delete=False) as f:
-            yaml.dump(task_config, f)
-            f.flush()
-            task = task_lib.Task.from_yaml(f.name)
-        
-        os.unlink(f.name)
-        
-        dag = dag_lib.Dag()
-        dag.name = 'test-managed-job'
+            })
         dag.add(task)
 
         # Simulate what happens in jobs/server/core.py
 
         # 1. For display/logging (should be redacted for security)
-        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, use_user_specified_yaml=True)
+        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag,
+                                                            redact_secrets=True)
 
         # 2. For actual job execution (should have real secrets)
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
@@ -103,35 +92,21 @@ class TestManagedJobSecrets:
         This ensures the default behavior doesn't accidentally redact secrets
         that jobs need for execution.
         """
-
-        # Create task from user YAML to test user specified behavior
-        user_yaml_config = {
-            'run': 'echo "Job needs actual secrets"',
-            'envs': {
-                'PUBLIC_VAR': 'public-value'
-            },
-            'secrets': {
-                'CRITICAL_SECRET': 'job-execution-needs-this',
-                'API_TOKEN': 'real-token-value'
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            task = task_lib.Task.from_yaml(f.name)
-
-        os.unlink(f.name)
+        task = task_lib.Task(run='echo "Job needs actual secrets"',
+                             envs={'PUBLIC_VAR': 'public-value'},
+                             secrets={
+                                 'CRITICAL_SECRET': 'job-execution-needs-this',
+                                 'API_TOKEN': 'real-token-value'
+                             })
 
         # Default behavior should NOT redact (for execution)
         default_config = task.to_yaml_config()
 
-        # Explicit execution config (for execution)
-        execution_config = task.to_yaml_config()
+        # Explicit non-redaction (for execution)
+        execution_config = task.to_yaml_config(redact_secrets=False)
 
-        # User specified YAML (for display/logging)
-        display_config = task.to_yaml_config(use_user_specified_yaml=True)
+        # Explicit redaction (for display/logging)
+        display_config = task.to_yaml_config(redact_secrets=True)
 
         # Verify default behavior preserves secrets for job execution
         assert default_config['secrets'][
@@ -158,36 +133,26 @@ class TestManagedJobSecrets:
         This ensures dump_chain_dag_to_yaml_str() and dump_chain_dag_to_yaml()
         have correct default behavior for job execution vs display.
         """
-        # Create task from YAML to ensure proper _user_specified_yaml behavior        
-        task_config = {
-            'run': 'echo "Testing DAG secret handling"',
-            'secrets': {
-                'EXECUTION_SECRET': 'job-needs-this-value',
-                'SERVICE_KEY': 'service-authentication-key'
-            }
-        }
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(task_config, f)
-            f.flush()
-            task = task_lib.Task.from_yaml(f.name)
-        
-        os.unlink(f.name)
-        
         dag = dag_lib.Dag()
         dag.name = 'regression-test-dag'
+
+        task = task_lib.Task(run='echo "Testing DAG secret handling"',
+                             secrets={
+                                 'EXECUTION_SECRET': 'job-needs-this-value',
+                                 'SERVICE_KEY': 'service-authentication-key'
+                             })
         dag.add(task)
 
         # Default string dumping (for execution) - should preserve secrets
         default_yaml_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-        # Explicit execution string dumping (for execution)
-        execution_yaml_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        # Explicit non-redacted string dumping (for execution)
+        execution_yaml_str = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, redact_secrets=False)
 
-        # User specified string dumping (for display/logging)
+        # Explicit redacted string dumping (for display/logging)
         display_yaml_str = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, use_user_specified_yaml=True)
+            dag, redact_secrets=True)
 
         # File dumping (for execution) - should preserve secrets
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
@@ -228,37 +193,28 @@ class TestManagedJobSecrets:
         This simulates the exact pattern used in sky/jobs/server/core.py
         to ensure managed jobs get real secrets while display is secure.
         """
-        # Simulate a user's DAG with secrets created from YAML        
-        task_config = {
-            'run': 'python train.py --api-key=$API_KEY --db-pass=$DB_PASSWORD',
-            'envs': {
+        # Simulate a user's DAG with secrets
+        dag = dag_lib.Dag()
+        dag.name = 'user-job-with-secrets'
+
+        task = task_lib.Task(
+            run='python train.py --api-key=$API_KEY --db-pass=$DB_PASSWORD',
+            envs={
                 'MODEL_NAME': 'my-model',
                 'BATCH_SIZE': '32'
             },
-            'secrets': {
+            secrets={
                 'API_KEY': 'sk-prod-api-key-12345',
                 'DB_PASSWORD': 'prod-database-secret-password',
                 'WANDB_API_KEY': 'wandb-secret-key-67890'
-            }
-        }
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(task_config, f)
-            f.flush()
-            task = task_lib.Task.from_yaml(f.name)
-        
-        os.unlink(f.name)
-        
-        dag = dag_lib.Dag()
-        dag.name = 'user-job-with-secrets'
+            })
         dag.add(task)
 
         # Simulate what jobs/server/core.py does:
 
         # 1. Create user_dag_str for display/logging (redacted for security)
-        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, use_user_specified_yaml=True)
+        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag,
+                                                            redact_secrets=True)
 
         # 2. Create execution YAML for the actual job (real secrets)
         with tempfile.NamedTemporaryFile(prefix='managed-dag-',
@@ -331,50 +287,33 @@ class TestManagedJobSecrets:
         This prevents regression where some tasks in a chain might get 
         redacted secrets while others get real secrets.
         """
-        # Create tasks from YAML to ensure proper _user_specified_yaml behavior        
-        task1_config = {
-            'run': 'python preprocess.py',
-            'secrets': {
-                'DATA_API_KEY': 'data-api-secret-key',
-                'S3_SECRET': 's3-access-secret'
-            }
-        }
-        
-        task2_config = {
-            'run': 'python train.py',
-            'secrets': {
-                'MODEL_API_KEY': 'model-api-secret-key',
-                'WANDB_KEY': 'wandb-logging-secret'
-            }
-        }
-        
-        # Create first task from YAML
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(task1_config, f)
-            f.flush()
-            task1 = task_lib.Task.from_yaml(f.name)
-        os.unlink(f.name)
-        
-        # Create second task from YAML
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(task2_config, f)
-            f.flush()
-            task2 = task_lib.Task.from_yaml(f.name)
-        os.unlink(f.name)
-        
-        # Create chain
         dag = dag_lib.Dag()
         dag.name = 'multi-task-secrets-chain'
+
+        # First task with secrets
+        task1 = task_lib.Task(run='python preprocess.py',
+                              secrets={
+                                  'DATA_API_KEY': 'data-api-secret-key',
+                                  'S3_SECRET': 's3-access-secret'
+                              })
+
+        # Second task with different secrets
+        task2 = task_lib.Task(run='python train.py',
+                              secrets={
+                                  'MODEL_API_KEY': 'model-api-secret-key',
+                                  'WANDB_KEY': 'wandb-logging-secret'
+                              })
+
+        # Create chain
         dag.add(task1)
         dag.add(task2)
         dag.add_edge(task1, task2)
 
         # Test display vs execution separation
-        display_yaml = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, use_user_specified_yaml=True)
-        execution_yaml = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        display_yaml = dag_utils.dump_chain_dag_to_yaml_str(dag,
+                                                            redact_secrets=True)
+        execution_yaml = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, redact_secrets=False)
 
         # Display should redact all secrets
         assert '<redacted>' in display_yaml
@@ -407,34 +346,24 @@ class TestManagedJobSecrets:
         This prevents regression where environment variables might be 
         accidentally redacted or secrets might leak into logs.
         """
-        # Create task from user YAML to test user specified behavior
-        user_yaml_config = {
-            'run': 'echo "Job with mixed envs and secrets"',
-            'envs': {
+        task = task_lib.Task(
+            run='echo "Job with mixed envs and secrets"',
+            envs={
                 'PUBLIC_MODEL_URL': 'https://models.example.com/v1',
                 'LOG_LEVEL': 'INFO',
                 'BATCH_SIZE': '64'
             },
-            'secrets': {
+            secrets={
                 'PRIVATE_API_KEY': 'private-secret-api-key',
                 'DB_CONNECTION': 'postgresql://user:secret@host/db',
                 'REDIS_PASSWORD': 'redis-secret-password'
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            task = task_lib.Task.from_yaml(f.name)
-
-        os.unlink(f.name)
+            })
 
         # Test execution behavior (default)
         execution_config = task.to_yaml_config()
 
-        # Test display behavior (user specified YAML)
-        display_config = task.to_yaml_config(use_user_specified_yaml=True)
+        # Test display behavior (explicit redaction)
+        display_config = task.to_yaml_config(redact_secrets=True)
 
         # Execution config should have real secrets and envs
         assert execution_config['envs'][

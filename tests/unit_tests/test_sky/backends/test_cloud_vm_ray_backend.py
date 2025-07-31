@@ -3,40 +3,25 @@
 from sky import task
 
 
-class TestCloudVmRayBackendTaskUserSpecified:
-    """Tests for CloudVmRayBackend usage of user specified task configs."""
+class TestCloudVmRayBackendTaskRedaction:
+    """Tests for CloudVmRayBackend usage of redacted task configs."""
 
-    def test_cloud_vm_ray_backend_user_specified_usage_pattern(self):
+    def test_cloud_vm_ray_backend_redaction_usage_pattern(self):
         """Test the exact usage pattern from the CloudVmRayBackend code."""
-        import tempfile
-
-        import yaml
-
         # Create a task with sensitive secret variables and regular environment variables
-        user_yaml_config = {
-            'run': 'echo hello',
-            'envs': {
-                'DEBUG': 'true',
-                'PORT': '8080'
-            },
-            'secrets': {
-                'API_KEY': 'sk-very-secret-key-123',
-                'DATABASE_PASSWORD': 'super-secret-password',
-                'JWT_SECRET': 'jwt-signing-secret-456'
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
+        test_task = task.Task(run='echo hello',
+                              envs={
+                                  'DEBUG': 'true',
+                                  'PORT': '8080'
+                              },
+                              secrets={
+                                  'API_KEY': 'sk-very-secret-key-123',
+                                  'DATABASE_PASSWORD': 'super-secret-password',
+                                  'JWT_SECRET': 'jwt-signing-secret-456'
+                              })
 
         # Test the exact call pattern used in cloud_vm_ray_backend.py
-        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
+        task_config = test_task.to_yaml_config(redact_secrets=True)
 
         # Verify that environment variables are NOT redacted
         assert 'envs' in task_config
@@ -57,10 +42,13 @@ class TestCloudVmRayBackendTaskUserSpecified:
         test_task = task.Task(run='python train.py',
                               envs={'PYTHONPATH': '/app'})
 
-        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
+        task_config = test_task.to_yaml_config(redact_secrets=True)
 
-        # When no user YAML exists, should return empty dict
-        assert task_config == {}
+        # Environment variables should be preserved
+        assert task_config['envs']['PYTHONPATH'] == '/app'
+
+        # No secrets field should be present
+        assert 'secrets' not in task_config or not task_config.get('secrets')
 
     def test_backend_task_config_empty_secrets(self):
         """Test task config generation with empty secrets dict."""
@@ -68,105 +56,63 @@ class TestCloudVmRayBackendTaskUserSpecified:
                               envs={'PYTHONPATH': '/app'},
                               secrets={})
 
-        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
+        task_config = test_task.to_yaml_config(redact_secrets=True)
 
-        # When no user YAML exists, should return empty dict
-        assert task_config == {}
+        # Environment variables should be preserved
+        assert task_config['envs']['PYTHONPATH'] == '/app'
 
-    def test_backend_user_specified_yaml_with_mixed_secret_types(self):
-        """Test that user specified YAML properly redacts all secret types."""
-        import tempfile
+        # Empty secrets should not appear in config
+        assert 'secrets' not in task_config
 
-        import yaml
+    def test_backend_redaction_preserves_non_string_values(self):
+        """Test that non-string values in secrets are preserved during redaction."""
+        test_task = task.Task(run='echo hello',
+                              secrets={
+                                  'STRING_SECRET': 'actual-secret',
+                                  'NUMERIC_PORT': 5432,
+                                  'BOOLEAN_FLAG': True,
+                                  'NULL_VALUE': None
+                              })
 
-        user_yaml_config = {
-            'run': 'echo hello',
-            'secrets': {
-                'STRING_SECRET': 'actual-secret',
-                'NUMERIC_PORT': 5432,
-                'BOOLEAN_FLAG': True,
-                'NULL_VALUE': None
-            }
-        }
+        task_config = test_task.to_yaml_config(redact_secrets=True)
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
-
-        # All secret values should be redacted when using user specified YAML
+        # String values should be redacted
         assert task_config['secrets']['STRING_SECRET'] == '<redacted>'
-        assert task_config['secrets']['NUMERIC_PORT'] == '<redacted>'
-        assert task_config['secrets']['BOOLEAN_FLAG'] == '<redacted>'
-        assert task_config['secrets']['NULL_VALUE'] == '<redacted>'
 
-    def test_backend_supports_both_config_modes(self):
-        """Test that backend can use both user specified and default configs."""
-        import tempfile
+        # Non-string values should be preserved
+        assert task_config['secrets']['NUMERIC_PORT'] == 5432
+        assert task_config['secrets']['BOOLEAN_FLAG'] is True
+        assert task_config['secrets']['NULL_VALUE'] is None
 
-        import yaml
+    def test_backend_supports_both_redaction_modes(self):
+        """Test that backend can use both redacted and non-redacted configs."""
+        test_task = task.Task(run='echo hello',
+                              secrets={'API_KEY': 'secret-key-123'})
 
-        user_yaml_config = {
-            'run': 'echo hello',
-            'secrets': {
-                'API_KEY': 'secret-key-123'
-            }
-        }
+        # Test redacted mode (for logging/display)
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        assert redacted_config['secrets']['API_KEY'] == '<redacted>'
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        # Test user specified mode (for logging/display)
-        user_specified_config = test_task.to_yaml_config(
-            use_user_specified_yaml=True)
-        assert user_specified_config['secrets']['API_KEY'] == '<redacted>'
-
-        # Test default mode (for execution)
-        full_config = test_task.to_yaml_config()
+        # Test non-redacted mode (for execution)
+        full_config = test_task.to_yaml_config(redact_secrets=False)
         assert full_config['secrets']['API_KEY'] == 'secret-key-123'
 
     def test_backend_mixed_envs_and_secrets(self):
         """Test backend behavior with both envs and secrets containing sensitive data."""
-        import tempfile
-
-        import yaml
-
-        user_yaml_config = {
-            'run': 'echo hello',
-            'envs': {
+        test_task = task.Task(
+            run='echo hello',
+            envs={
                 'PUBLIC_API_URL': 'https://api.example.com',
                 'DEBUG_MODE': 'true',
                 'ENVIRONMENT': 'production'
             },
-            'secrets': {
+            secrets={
                 'PRIVATE_API_KEY': 'sk-secret-key-123',
                 'DATABASE_URL': 'postgresql://user:pass@host:5432/db',
                 'OAUTH_CLIENT_SECRET': 'oauth-secret-456'
-            }
-        }
+            })
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
+        task_config = test_task.to_yaml_config(redact_secrets=True)
 
         # All environment variables should remain visible
         assert task_config['envs'][
@@ -180,32 +126,17 @@ class TestCloudVmRayBackendTaskUserSpecified:
         assert task_config['secrets']['OAUTH_CLIENT_SECRET'] == '<redacted>'
 
     def test_backend_config_serialization_safety(self):
-        """Test that user specified configs are safe for serialization/logging."""
+        """Test that redacted configs are safe for serialization/logging."""
         import json
-        import tempfile
 
         import yaml
 
-        user_yaml_config = {
-            'run': 'echo hello',
-            'envs': {
-                'PUBLIC_VAR': 'public-value'
-            },
-            'secrets': {
-                'PRIVATE_KEY': 'very-sensitive-key-data'
-            }
-        }
+        test_task = task.Task(
+            run='echo hello',
+            envs={'PUBLIC_VAR': 'public-value'},
+            secrets={'PRIVATE_KEY': 'very-sensitive-key-data'})
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
 
         # Should be serializable to JSON
         json_str = json.dumps(redacted_config)
@@ -220,40 +151,25 @@ class TestCloudVmRayBackendTaskUserSpecified:
         # Public values should still be present
         assert 'public-value' in yaml_str
 
-    def test_user_specified_config_contains_no_sensitive_data(self):
-        """Test that user specified task config doesn't contain sensitive secret data."""
-        import tempfile
-
-        import yaml
-
+    def test_redacted_config_contains_no_sensitive_data(self):
+        """Test that redacted task config doesn't contain sensitive secret data."""
         # Create a task with sensitive secret variables and regular environment variables
-        user_yaml_config = {
-            'run': 'echo hello',
-            'envs': {
-                'DEBUG': 'true',
-                'PORT': 8080,
-                'PUBLIC_VAR': 'public-value'
-            },
-            'secrets': {
-                'API_KEY': 'secret-api-key-123',
-                'DATABASE_PASSWORD': 'super-secret-password',
-                'AWS_SECRET_ACCESS_KEY': 'aws-secret-key',
-                'STRIPE_SECRET_KEY': 'sk_live_sensitive_key',
-                'JWT_SECRET': 'jwt-signing-secret',
-            }
-        }
+        test_task = task.Task(run='echo hello',
+                              envs={
+                                  'DEBUG': 'true',
+                                  'PORT': 8080,
+                                  'PUBLIC_VAR': 'public-value'
+                              },
+                              secrets={
+                                  'API_KEY': 'secret-api-key-123',
+                                  'DATABASE_PASSWORD': 'super-secret-password',
+                                  'AWS_SECRET_ACCESS_KEY': 'aws-secret-key',
+                                  'STRIPE_SECRET_KEY': 'sk_live_sensitive_key',
+                                  'JWT_SECRET': 'jwt-signing-secret',
+                              })
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        # Get the user specified config as the backend would
-        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
+        # Get the redacted config as the backend would
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
 
         # Verify sensitive string values in secrets are redacted
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
@@ -279,132 +195,89 @@ class TestCloudVmRayBackendTaskUserSpecified:
         # But public values should still be present
         assert 'public-value' in config_str
 
-    def test_default_config_contains_actual_values(self):
-        """Test that default config contains actual secret values."""
-        import tempfile
-
-        import yaml
-
+    def test_non_redacted_config_contains_actual_values(self):
+        """Test that non-redacted config contains actual secret values."""
         # Create a task with environment variables and secrets
-        user_yaml_config = {
-            'run': 'echo hello',
-            'envs': {
-                'DEBUG': 'true',
-                'PORT': 8080
-            },
-            'secrets': {
-                'API_KEY': 'actual-api-key',
-                'JWT_SECRET': 'actual-jwt-secret'
-            }
-        }
+        test_task = task.Task(run='echo hello',
+                              envs={
+                                  'DEBUG': 'true',
+                                  'PORT': 8080
+                              },
+                              secrets={
+                                  'API_KEY': 'actual-api-key',
+                                  'JWT_SECRET': 'actual-jwt-secret'
+                              })
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        # Get the default config
-        default_config = test_task.to_yaml_config()
+        # Get the non-redacted config
+        non_redacted_config = test_task.to_yaml_config(redact_secrets=False)
 
         # Verify actual values are present in both envs and secrets
-        assert default_config['envs']['DEBUG'] == 'true'
-        assert default_config['envs']['PORT'] == 8080
-        assert default_config['secrets']['API_KEY'] == 'actual-api-key'
-        assert default_config['secrets']['JWT_SECRET'] == 'actual-jwt-secret'
+        assert non_redacted_config['envs']['DEBUG'] == 'true'
+        assert non_redacted_config['envs']['PORT'] == 8080
+        assert non_redacted_config['secrets']['API_KEY'] == 'actual-api-key'
+        assert non_redacted_config['secrets'][
+            'JWT_SECRET'] == 'actual-jwt-secret'
 
-        # Test user specified behavior (should redact secrets for display)
-        user_specified_config = test_task.to_yaml_config(
-            use_user_specified_yaml=True)
-        assert user_specified_config['envs']['DEBUG'] == 'true'
-        assert user_specified_config['envs']['PORT'] == 8080
-        assert user_specified_config['secrets']['API_KEY'] == '<redacted>'
-        assert user_specified_config['secrets']['JWT_SECRET'] == '<redacted>'
+        # Also test default behavior (should NOT redact secrets by default)
+        default_config = test_task.to_yaml_config()
+        assert default_config['envs'] == non_redacted_config[
+            'envs']  # envs same
+        assert default_config['secrets'][
+            'API_KEY'] == 'actual-api-key'  # secrets not redacted by default
 
-    def test_backend_user_specified_with_no_secrets(self):
+    def test_backend_redaction_with_no_secrets(self):
         """Test backend behavior when task has no secret variables."""
-        import tempfile
-
-        import yaml
-
         # Create a task with only environment variables, no secrets
-        user_yaml_config = {'run': 'echo hello', 'envs': {'DEBUG': 'true'}}
+        test_task = task.Task(run='echo hello', envs={'DEBUG': 'true'})
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
-        # Get user specified config
-        user_specified_config = test_task.to_yaml_config(
-            use_user_specified_yaml=True)
+        # Get redacted config
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
 
         # Should not have secrets key at all
-        assert 'secrets' not in user_specified_config
+        assert 'secrets' not in redacted_config
 
         # Should have envs key with actual values (not redacted)
-        assert 'envs' in user_specified_config
-        assert user_specified_config['envs']['DEBUG'] == 'true'
+        assert 'envs' in redacted_config
+        assert redacted_config['envs']['DEBUG'] == 'true'
 
         # Should still have other task properties
-        assert user_specified_config['run'] == 'echo hello'
+        assert redacted_config['run'] == 'echo hello'
 
-    def test_backend_user_specified_preserves_task_structure(self):
-        """Test that user specified config preserves all non-secret task configuration."""
-        import tempfile
-
-        import yaml
-
+    def test_backend_redaction_preserves_task_structure(self):
+        """Test that redaction preserves all non-secret task configuration."""
         from sky import resources
 
         # Create a comprehensive task
-        user_yaml_config = {
-            'run': 'python train.py',
-            'envs': {
-                'DEBUG': 'true',
-                'PORT': 8080
-            },
-            'secrets': {
-                'API_KEY': 'secret-value',
-                'DB_PASSWORD': 'secret-password'
-            },
-            'workdir': '/app',
-            'name': 'training-task'
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            yaml.dump(user_yaml_config, f)
-            f.flush()
-            test_task = task.Task.from_yaml(f.name)
-
-        import os
-        os.unlink(f.name)
-
+        test_task = task.Task(run='python train.py',
+                              envs={
+                                  'DEBUG': 'true',
+                                  'PORT': 8080
+                              },
+                              secrets={
+                                  'API_KEY': 'secret-value',
+                                  'DB_PASSWORD': 'secret-password'
+                              },
+                              workdir='/app',
+                              name='training-task')
         # Set resources using the proper method
         test_task.set_resources(resources.Resources(cpus=4, memory=8))
 
         # Get both configs
-        default_config = test_task.to_yaml_config()
-        user_specified_config = test_task.to_yaml_config(
-            use_user_specified_yaml=True)
+        original_config = test_task.to_yaml_config(redact_secrets=False)
+        redacted_config = test_task.to_yaml_config(redact_secrets=True)
 
-        # All non-secret fields should be preserved in user specified config
-        assert user_specified_config['envs']['DEBUG'] == 'true'
-        assert user_specified_config['envs']['PORT'] == 8080
-        assert user_specified_config['run'] == 'python train.py'
-        assert user_specified_config['workdir'] == '/app'
-        assert user_specified_config['name'] == 'training-task'
+        # All non-secret fields should be identical
+        for key in original_config:
+            if key != 'secrets':
+                assert original_config[key] == redacted_config[key]
+
+        # Envs should be identical (not redacted)
+        assert original_config['envs'] == redacted_config['envs']
+        assert redacted_config['envs']['DEBUG'] == 'true'
+        assert redacted_config['envs']['PORT'] == 8080
 
         # Secret handling should be different
-        assert default_config['secrets']['API_KEY'] == 'secret-value'
-        assert user_specified_config['secrets']['API_KEY'] == '<redacted>'
-        assert default_config['secrets']['DB_PASSWORD'] == 'secret-password'
-        assert user_specified_config['secrets']['DB_PASSWORD'] == '<redacted>'
+        assert original_config['secrets']['API_KEY'] == 'secret-value'
+        assert redacted_config['secrets']['API_KEY'] == '<redacted>'
+        assert original_config['secrets']['DB_PASSWORD'] == 'secret-password'
+        assert redacted_config['secrets']['DB_PASSWORD'] == '<redacted>'
