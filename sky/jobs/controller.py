@@ -39,6 +39,7 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
@@ -304,7 +305,7 @@ class JobsController:
             # Run the launch in a separate thread to avoid blocking the event
             # loop. The scheduler functions used internally already have their
             # own file locks.
-            remote_job_submitted_at = await managed_job_utils.to_thread(
+            remote_job_submitted_at = await context_utils.to_thread(
                 self._strategy_executor.launch)
 
             launch_time = time.time() - launch_start
@@ -385,7 +386,7 @@ class JobsController:
             job_status = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await managed_job_utils.to_thread(
+                    job_status = await context_utils.to_thread(
                         managed_job_utils.get_job_status, self._backend,
                         cluster_name, self._logger)
                 except exceptions.FetchClusterInfoError as fetch_e:
@@ -397,7 +398,7 @@ class JobsController:
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 self._logger.info(f'Task {task_id} succeeded!'
                                   'Getting end time and cleaning up')
-                success_end_time = await managed_job_utils.to_thread(
+                success_end_time = await context_utils.to_thread(
                     managed_job_utils.try_to_get_job_end_time, self._backend,
                     cluster_name)
                 # The job is done. Set the job to SUCCEEDED first before start
@@ -419,7 +420,7 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await managed_job_utils.to_thread(
+                        await context_utils.to_thread(
                             self._download_log_and_stream, task_id, handle)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
@@ -429,7 +430,7 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                await managed_job_utils.to_thread(
+                await context_utils.to_thread(
                     managed_job_utils.terminate_cluster, cluster_name)
 
                 task_total_time = time.time() - task_start_time
@@ -486,7 +487,7 @@ class JobsController:
                     # The user code has probably crashed, fail immediately.
                     self._logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await managed_job_utils.to_thread(
+                    end_time = await context_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name)
                     self._logger.info(
@@ -497,8 +498,8 @@ class JobsController:
                     # TODO(luca): this is a hack to avoid blocking the asyncio
                     # event loop. We should make _download_log_and_stream async
                     # however that will require a lot of changes to the code.
-                    await managed_job_utils.to_thread(
-                        self._download_log_and_stream, task_id, handle)
+                    await context_utils.to_thread(self._download_log_and_stream,
+                                                  task_id, handle)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -589,7 +590,7 @@ class JobsController:
                     self._logger.info(
                         'Cleaning up the preempted or failed cluster'
                         '...')
-                    await managed_job_utils.to_thread(
+                    await context_utils.to_thread(
                         managed_job_utils.terminate_cluster, cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
@@ -603,7 +604,7 @@ class JobsController:
                 callback_func=callback_func)
 
             recovery_start = time.time()
-            await managed_job_utils.to_thread(self._strategy_executor.recover)
+            await context_utils.to_thread(self._strategy_executor.recover)
             recovery_time = time.time() - recovery_start
 
             self._logger.info(
@@ -773,7 +774,7 @@ class Controller:
         dag, _ = _get_dag_and_name(dag_yaml)
         for task in dag.tasks:
             # most things in this function are blocking
-            await managed_job_utils.to_thread(task_cleanup, task, job_id)
+            await context_utils.to_thread(task_cleanup, task, job_id)
 
     async def run_job_loop(self,
                            job_id: int,

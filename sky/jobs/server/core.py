@@ -171,6 +171,9 @@ def launch(
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+
+    # We don't want the jobs controller to see the db if it is localhost
+    # postgres since it will fail to connect to the db.
     if not managed_job_utils.is_consolidation_mode():
         db_path = mutated_user_config.get('db', None)
         if db_path is not None:

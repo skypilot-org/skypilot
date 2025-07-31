@@ -42,6 +42,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -515,7 +516,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             f'For more details, run: sky jobs logs --controller {job_id}',
             override_terminal=True)
 
-        scheduler.job_done(job_id, idempotent=True)
+        scheduler.job_done(job_id)
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -597,7 +598,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 
         # In async context
         async def async_callback_func(status: str):
-            return await to_thread(callback_func, status)
+            return await context_utils.to_thread(callback_func, status)
 
         return async_callback_func
     except RuntimeError:

@@ -2015,15 +2015,16 @@ def api_stop() -> None:
     server_common.clear_local_api_server_database()
 
     try:
-        with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                  'r',
-                  encoding='utf-8') as f:
-            pids = f.read().split('\n')[:-1]
-            for pid in pids:
-                if subprocess_utils.is_process_alive(int(pid.strip())):
-                    subprocess_utils.kill_children_processes(
-                        parent_pids=[int(pid.strip())], force=True)
-        os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+        with filelock.FileLock(scheduler.JOB_CONTROLLER_PID_LOCK):
+            with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
+                      'r',
+                      encoding='utf-8') as f:
+                pids = f.read().split('\n')[:-1]
+                for pid in pids:
+                    if subprocess_utils.is_process_alive(int(pid.strip())):
+                        subprocess_utils.kill_children_processes(
+                            parent_pids=[int(pid.strip())], force=True)
+            os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
     except FileNotFoundError:
         # its fine we will create it
         pass

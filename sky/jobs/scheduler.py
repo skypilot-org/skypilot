@@ -96,7 +96,7 @@ MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 1024
 def get_number_of_controllers() -> int:
     config = server_config.compute_server_config(deploy=True, quiet=True)
     free = common_utils.get_mem_size_gb() * 1024
-    
+
     used = 0.0
     used += MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB
     used += (config.long_worker_config.garanteed_parallelism +
@@ -248,22 +248,19 @@ def scheduled_launch(job_id: int):
         state.scheduler_set_alive(job_id)
 
 
-def job_done(job_id: int, idempotent: bool = False) -> None:
+def job_done(job_id: int) -> None:
     """Transition a job to DONE.
-
-    If idempotent is True, this will not raise an error if the job is already
-    DONE.
 
     The job could be in any terminal ManagedJobStatus. However, once DONE, it
     should never transition back to another state.
 
     This is only called by utils.update_managed_jobs_statuses which is sync.
     """
-    if idempotent and (state.get_job_schedule_state(job_id)
-                       == state.ManagedJobScheduleState.DONE):
+    if (state.get_job_schedule_state(job_id) ==
+            state.ManagedJobScheduleState.DONE):
         return
 
-    state.scheduler_set_done(job_id, idempotent)
+    state.scheduler_set_done(job_id)
 
 
 def _set_alive_waiting(job_id: int) -> None:
@@ -274,22 +271,15 @@ def _set_alive_waiting(job_id: int) -> None:
 # === Async versions of functions called by controller.py ===
 
 
-async def job_done_async(job_id: int, idempotent: bool = False) -> None:
+async def job_done_async(job_id: int) -> None:
     """Async version of job_done. Transition a job to DONE.
-
-    If idempotent is True, this will not raise an error if the job is already
-    DONE.
 
     The job could be in any terminal ManagedJobStatus. However, once DONE, it
     should never transition back to another state.
 
     This is called by controller.py.
     """
-    if idempotent and (await state.get_job_schedule_state_async(job_id)
-                       == state.ManagedJobScheduleState.DONE):
-        return
-
-    await state.scheduler_set_done_async(job_id, idempotent)
+    await state.scheduler_set_done_async(job_id)
 
 
 if __name__ == '__main__':

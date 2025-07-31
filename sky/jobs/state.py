@@ -1511,11 +1511,11 @@ def scheduler_set_alive_waiting(job_id: int) -> None:
 
 
 @_init_db
-def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
+def scheduler_set_done(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        updated_count = session.query(job_info_table).filter(
+        session.query(job_info_table).filter(
             sqlalchemy.and_(
                 job_info_table.c.spot_job_id == job_id,
                 job_info_table.c.schedule_state !=
@@ -1525,8 +1525,6 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
                     ManagedJobScheduleState.DONE.value
             })
         session.commit()
-        if not idempotent:
-            assert updated_count == 1, (job_id, updated_count)
 
 
 @_init_db
@@ -2058,8 +2056,7 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
 
 
 @_init_db_async
-async def scheduler_set_done_async(job_id: int,
-                                   idempotent: bool = False) -> None:
+async def scheduler_set_done_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
@@ -2074,5 +2071,4 @@ async def scheduler_set_done_async(job_id: int,
                         ManagedJobScheduleState.DONE.value
                 }))
         await session.commit()
-        if not idempotent:
-            assert updated_count.rowcount == 1, (job_id, updated_count)
+        assert updated_count.rowcount == 1, (job_id, updated_count)
