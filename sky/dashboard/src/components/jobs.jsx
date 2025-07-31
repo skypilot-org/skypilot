@@ -329,6 +329,9 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidate(getUsers);
 
+    // Refresh parent component data (including poolsData for link matching)
+    fetchData();
+
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
       jobsRefreshRef.current();
@@ -417,6 +420,7 @@ export function ManagedJobs() {
         filters={filters}
         setOptionValues={setOptionValues}
         onRefresh={handleRefresh}
+        poolsData={poolsData}
       />
 
       {/* Pools table - always visible */}
@@ -438,6 +442,7 @@ export function ManagedJobsTable({
   filters,
   setOptionValues,
   onRefresh,
+  poolsData,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -1087,7 +1092,31 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
-                        <TableCell>{item.pool || '-'}</TableCell>
+                        <TableCell>
+                          {item.pool
+                            ? (() => {
+                                // Check if pool hash matches to determine if we should link
+                                const matchingPool = poolsData.find(
+                                  (pool) =>
+                                    pool.name === item.pool &&
+                                    pool.hash === item.pool_hash
+                                );
+
+                                if (matchingPool && item.pool_hash) {
+                                  return (
+                                    <Link
+                                      href={`/jobs/pools/${item.pool}`}
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      {item.pool}
+                                    </Link>
+                                  );
+                                }
+                                // Pool exists but no matching hash found - likely terminated
+                                return `${item.pool} (terminated)`;
+                              })()
+                            : '-'}
+                        </TableCell>
                         <TableCell>
                           {item.details ? (
                             <TruncatedDetails

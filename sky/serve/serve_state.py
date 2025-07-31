@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import typing
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 import colorama
 
@@ -71,6 +72,10 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # Whether the service is a cluster pool.
     db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
                                  'INTEGER DEFAULT 0')
+    # The service hash. Unique for each service, even if the service name is
+    # the same.
+    db_utils.add_column_to_table(cursor, conn, 'services', 'hash',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -287,11 +292,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
                 requested_resources_str, load_balancing_policy, tls_encrypted,
-                pool)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                pool, hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted), int(pool)))
+                 int(tls_encrypted), int(pool), str(uuid.uuid4())))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -368,7 +373,8 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted, pool) = row[:16]
+     _, active_versions, load_balancing_policy, tls_encrypted, pool,
+     svc_hash) = row[:17]
     record = {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -388,6 +394,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
         'pool': bool(pool),
+        'hash': svc_hash,
     }
     latest_spec = get_spec(name, current_version)
     if latest_spec is not None:
@@ -426,6 +433,18 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
             (service_name, service_name)).fetchall()
     for row in rows:
         return _get_service_from_row(row)
+    return None
+
+
+@init_db
+def get_service_hash(service_name: str) -> Optional[str]:
+    """Get the hash of a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute('SELECT hash FROM services WHERE name=(?)',
+                              (service_name,)).fetchall()
+    for row in rows:
+        return row[0]
     return None
 
 

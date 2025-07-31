@@ -130,6 +130,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
         pool: job.pool,
+        pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
       };
