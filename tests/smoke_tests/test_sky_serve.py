@@ -1037,7 +1037,7 @@ def test_skyserve_https(generic_cloud: str):
             'test-skyserve-https',
             [
                 f'sky serve up -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y tests/skyserve/https/service.yaml '
-                f'--env TLS_KEYFILE_ENV_VAR={keyfile} --env TLS_CERTFILE_ENV_VAR={certfile}',
+                f'--env TLS_KEYFILE_ENV_VAR={keyfile} --secret TLS_CERTFILE_ENV_VAR={certfile}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'output=$(curl $endpoint -k); echo $output; '
