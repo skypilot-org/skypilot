@@ -727,7 +727,13 @@ class Storage(object):
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
-            self.handle = handle
+            # Create a new handle with our specific mode instead of sharing
+            # the handle with other storage objects that have the same name
+            self.handle = self.StorageMetadata(storage_name=self.name,
+                                               source=self.source,
+                                               mode=self.mode)
+            # Copy the stores from the existing handle
+            self.handle.sky_stores = handle.sky_stores.copy()
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')

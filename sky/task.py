@@ -92,10 +92,18 @@ def _fill_in_env_vars(
     ...
 
 
+@typing.overload
 def _fill_in_env_vars(
-    yaml_field: Union[str, Dict[str, Any]],
+    yaml_field: List[str],
     task_envs: Dict[str, str],
-) -> Union[str, Dict[str, Any]]:
+) -> List[str]:
+    ...
+
+
+def _fill_in_env_vars(
+    yaml_field: Union[str, Dict[str, Any], List[str]],
+    task_envs: Dict[str, str],
+) -> Union[str, Dict[str, Any], List[str]]:
     """Detects env vars in yaml field and fills them with task_envs.
 
     Use cases of env vars in file_mounts:
@@ -1343,17 +1351,53 @@ class Task:
 
     @property
     def storage_mounts(self) -> Dict[str, storage_lib.Storage]:
-        storage_mounts = self._storage_mounts.copy()
-        for target, storage_obj in storage_mounts.items():
-            target = _fill_in_env_vars(target, self.envs_and_secrets)
-            storage_obj_dict = storage_obj.to_yaml_config()
-            storage_obj_dict = _fill_in_env_vars(storage_obj_dict,
-                                                 self.envs_and_secrets)
-            storage_mounts[target] = storage_lib.Storage.from_yaml_config(
-                storage_obj_dict)
-            # Restore the stores from the original storage object, so that
-            # constructed storage object will have the correct stores.
-            storage_mounts[target].stores = storage_obj.stores
+        storage_mounts = {}
+        for target, storage_obj in self._storage_mounts.items():
+            # Expand environment variables in the target path
+            expanded_target = _fill_in_env_vars(target, self.envs_and_secrets)
+
+            # Create a copy of the storage object to avoid modifying the
+            # original. Pass the store types to the constructor so they're
+            # properly initialized
+            store_types = (list(storage_obj.stores.keys()) 
+                          if storage_obj.stores else None)
+            storage_copy = storage_obj.__class__(
+                name=storage_obj.name,
+                source=storage_obj.source,
+                stores=store_types,
+                persistent=storage_obj.persistent,
+                mode=storage_obj.mode,
+                sync_on_reconstruction=storage_obj.sync_on_reconstruction,
+                # pylint: disable=protected-access
+                _is_sky_managed=storage_obj._is_sky_managed,
+                _bucket_sub_path=storage_obj._bucket_sub_path)
+
+            # Copy the stores from the original object (this preserves actual
+            # store objects)
+            storage_copy.stores = storage_obj.stores.copy()
+
+            # Copy the handle if it exists (only set after construct() is
+            # called)
+            if hasattr(storage_obj, 'handle'):
+                storage_copy.handle = storage_obj.handle
+
+            # Copy other attributes that might be set
+            if hasattr(storage_obj, '_constructed'):
+                # pylint: disable=protected-access
+                storage_copy._constructed = storage_obj._constructed
+            if hasattr(storage_obj, 'force_delete'):
+                storage_copy.force_delete = storage_obj.force_delete
+
+            # Expand environment variables in the storage object's name and
+            # source
+            if storage_copy.name is not None:
+                storage_copy.name = _fill_in_env_vars(storage_copy.name,
+                                                      self.envs_and_secrets)
+            if storage_copy.source is not None:
+                storage_copy.source = _fill_in_env_vars(storage_copy.source,
+                                                        self.envs_and_secrets)
+
+            storage_mounts[expanded_target] = storage_copy
         return storage_mounts
 
     def _get_preferred_store(
