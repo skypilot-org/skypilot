@@ -300,18 +300,20 @@ def launch(
         consolidation_mode_job_id: Optional[int] = None,
         job_rank: Optional[int] = None,
     ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+        rank_suffix = '' if job_rank is None else f'-{job_rank}'
         remote_original_user_yaml_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.original_user_yaml')
+            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.original_user_yaml')
         remote_user_yaml_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.yaml')
+            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.yaml')
         remote_user_config_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.config_yaml')
-        remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}-{job_rank}.env'
+            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.config_yaml')
+        remote_env_file_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.env')
         with tempfile.NamedTemporaryFile(
-                prefix=f'managed-dag-{dag.name}-{job_rank}-',
+                prefix=f'managed-dag-{dag.name}{rank_suffix}-',
                 mode='w',
         ) as f, tempfile.NamedTemporaryFile(
-                prefix=f'managed-user-dag-{dag.name}-{job_rank}-',
+                prefix=f'managed-user-dag-{dag.name}{rank_suffix}-',
                 mode='w',
         ) as original_user_yaml_path:
             original_user_yaml_path.write(user_dag_str_redacted)
