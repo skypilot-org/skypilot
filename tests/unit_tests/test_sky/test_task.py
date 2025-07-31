@@ -92,8 +92,8 @@ def test_to_yaml_config_without_envs():
     assert 'envs' not in yaml_config
     assert 'secrets' not in yaml_config
 
-    # Test with redact_secrets=True (should have no effect when no secrets)
-    yaml_config_redacted = task_obj.to_yaml_config(redact_secrets=True)
+    # Test with use_user_specified_yaml=True (should have no effect when no secrets)
+    yaml_config_redacted = task_obj.to_yaml_config(use_user_specified_yaml=True)
     assert 'envs' not in yaml_config_redacted
     assert 'secrets' not in yaml_config_redacted
     assert yaml_config == yaml_config_redacted
@@ -138,7 +138,7 @@ def test_to_yaml_config_with_secrets_redaction():
     task_obj = task.Task(run='echo hello', secrets=secrets)
 
     # Test with redaction enabled (default)
-    yaml_config = task_obj.to_yaml_config(redact_secrets=True)
+    yaml_config = task_obj.to_yaml_config(use_user_specified_yaml=True)
     assert 'secrets' in yaml_config
 
     # String values should be redacted
@@ -152,7 +152,8 @@ def test_to_yaml_config_with_secrets_redaction():
     assert yaml_config['secrets']['NONE_SECRET'] is None
 
     # Test with redaction disabled
-    yaml_config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    yaml_config_no_redact = task_obj.to_yaml_config(
+        use_user_specified_yaml=False)
     assert yaml_config_no_redact['secrets'] == secrets
 
 
@@ -167,8 +168,9 @@ def test_to_yaml_config_envs_and_secrets():
     task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
 
     # Get both configs
-    config_redact_secrets = task_obj.to_yaml_config(redact_secrets=True)
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    config_redact_secrets = task_obj.to_yaml_config(
+        use_user_specified_yaml=True)
+    config_no_redact = task_obj.to_yaml_config(use_user_specified_yaml=False)
 
     # Envs should always be preserved (not redacted)
     assert config_redact_secrets['envs'] == envs
@@ -176,11 +178,11 @@ def test_to_yaml_config_envs_and_secrets():
     assert config_redact_secrets['envs']['PUBLIC_VAR'] == 'public-value'
     assert config_redact_secrets['envs']['DEBUG'] == 'true'
 
-    # Secrets should be redacted when redact_secrets=True
+    # Secrets should be redacted when use_user_specified_yaml=True
     assert config_redact_secrets['secrets']['API_KEY'] == '<redacted>'
     assert config_redact_secrets['secrets']['DATABASE_PASSWORD'] == '<redacted>'
 
-    # Secrets should be preserved when redact_secrets=False
+    # Secrets should be preserved when use_user_specified_yaml=False
     assert config_no_redact['secrets'] == secrets
     assert config_no_redact['secrets']['API_KEY'] == 'secret-api-key-123'
     assert config_no_redact['secrets']['DATABASE_PASSWORD'] == 'secret-password'
@@ -191,8 +193,8 @@ def test_to_yaml_config_empty_secrets():
     task_obj = task.Task(run='echo hello', secrets={})
 
     # Empty secrets should not appear in config due to no_empty=True
-    config_redact = task_obj.to_yaml_config(redact_secrets=True)
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
+    config_redact = task_obj.to_yaml_config(use_user_specified_yaml=True)
+    config_no_redact = task_obj.to_yaml_config(use_user_specified_yaml=False)
 
     assert 'secrets' not in config_redact
     assert 'secrets' not in config_no_redact
@@ -209,8 +211,8 @@ def test_to_yaml_config_preserves_other_fields():
     # Set resources using the proper method
     task_obj.set_resources(resources.Resources(memory=4))
 
-    config_no_redact = task_obj.to_yaml_config(redact_secrets=False)
-    config_redacted = task_obj.to_yaml_config(redact_secrets=True)
+    config_no_redact = task_obj.to_yaml_config(use_user_specified_yaml=False)
+    config_redacted = task_obj.to_yaml_config(use_user_specified_yaml=True)
 
     # All non-secret fields should be identical
     for key in config_no_redact:
