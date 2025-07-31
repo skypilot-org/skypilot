@@ -28,7 +28,7 @@ sky logs verl
 ```
 
 <p align="center">
-  <img src="https://i.imgur.com/XXXXXXX.png" alt="Verl training logs showing reward optimization" width="90%"/>
+  <img src="https://imgur.com/vQoEIm6.png" alt="Verl training logs showing reward optimization" width="90%"/>
 </p>
 <p align="center"><i>Training logs showing PPO optimization progress with reward metrics</i></p>
 
