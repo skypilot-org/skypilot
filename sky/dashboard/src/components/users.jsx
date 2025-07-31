@@ -1316,7 +1316,7 @@ function UsersTable({
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
               {/* Show Actions column if basicAuthEnabled */}
-              {basicAuthEnabled && (
+              {(basicAuthEnabled || currentUserRole === 'admin') && (
                 <TableHead className="whitespace-nowrap w-1/7">
                   Actions
                 </TableHead>
@@ -1430,39 +1430,41 @@ function UsersTable({
                   )}
                 </TableCell>
                 {/* Actions cell logic */}
-                {basicAuthEnabled && (
+                {(basicAuthEnabled || currentUserRole === 'admin') && (
                   <TableCell className="relative">
                     <div className="flex items-center gap-2">
-                      {/* Reset password icon: admin can reset any, user can only reset self */}
-                      <button
-                        onClick={
-                          currentUserRole === 'admin' ||
-                          user.userId === currentUserId
-                            ? async () => {
-                                onResetPassword(user);
-                              }
-                            : undefined
-                        }
-                        className={
-                          currentUserRole === 'admin' ||
-                          user.userId === currentUserId
-                            ? 'text-blue-600 hover:text-blue-700 p-1'
-                            : 'text-gray-300 cursor-not-allowed p-1'
-                        }
-                        title={
-                          currentUserRole === 'admin' ||
-                          user.userId === currentUserId
-                            ? 'Reset Password'
-                            : 'You can only reset your own password'
-                        }
-                        disabled={
-                          currentUserRole !== 'admin' &&
-                          user.userId !== currentUserId
-                        }
-                      >
-                        <KeyRoundIcon className="h-4 w-4" />
-                      </button>
-                      {/* Only admin can see delete */}
+                      {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                      {basicAuthEnabled && (
+                        <button
+                          onClick={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? async () => {
+                                  onResetPassword(user);
+                                }
+                              : undefined
+                          }
+                          className={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? 'text-blue-600 hover:text-blue-700 p-1'
+                              : 'text-gray-300 cursor-not-allowed p-1'
+                          }
+                          title={
+                            currentUserRole === 'admin' ||
+                            user.userId === currentUserId
+                              ? 'Reset Password'
+                              : 'You can only reset your own password'
+                          }
+                          disabled={
+                            currentUserRole !== 'admin' &&
+                            user.userId !== currentUserId
+                          }
+                        >
+                          <KeyRoundIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                      {/* Delete button - only show for admin */}
                       {currentUserRole === 'admin' && (
                         <button
                           onClick={() => onDeleteUser(user)}

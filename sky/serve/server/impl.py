@@ -4,6 +4,7 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
+import filelock
 
 import sky
 from sky import backends
@@ -569,19 +570,20 @@ def apply(
     pool: bool = False,
 ) -> None:
     """Applies the config to the service or pool."""
-    try:
-        handle = backend_utils.is_controller_accessible(
-            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-            stopped_message='')
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-        service_record = _get_service_record(service_name, pool, handle,
-                                             backend)
-        if service_record is not None:
-            return update(task, service_name, mode, pool)
-    except exceptions.ClusterNotUpError:
-        pass
-    up(task, service_name, pool)
+    with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
+        try:
+            handle = backend_utils.is_controller_accessible(
+                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+                stopped_message='')
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            service_record = _get_service_record(service_name, pool, handle,
+                                                 backend)
+            if service_record is not None:
+                return update(task, service_name, mode, pool)
+        except exceptions.ClusterNotUpError:
+            pass
+        up(task, service_name, pool)
 
 
 def down(

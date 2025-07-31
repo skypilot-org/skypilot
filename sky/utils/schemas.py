@@ -1136,6 +1136,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.server import daemons
 
     resources_schema = {
         k: v
@@ -1479,6 +1480,27 @@ def get_config_schema():
         }
     }
 
+    daemon_config = {
+        'type': 'object',
+        'required': [],
+        'properties': {
+            'log_level': {
+                'type': 'string',
+                'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
+            },
+        }
+    }
+
+    daemon_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {}
+    }
+
+    for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
+        daemon_schema['properties'][daemon.id] = daemon_config
+
     api_server = {
         'type': 'object',
         'required': [],
@@ -1724,6 +1746,7 @@ def get_config_schema():
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
+            'daemons': daemon_schema,
             **cloud_configs,
         },
     }

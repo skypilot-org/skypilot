@@ -250,6 +250,13 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+def get_service_filelock_path(pool: str) -> str:
+    path = (pathlib.Path(constants.SKYSERVE_METADATA_DIR) / pool /
+            'pool.lock').expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
@@ -679,29 +686,43 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
     if not service_status['pool']:
         logger.error(f'Service {service_name!r} is not a cluster pool.')
         return None
+    with filelock.FileLock(get_service_filelock_path(service_name)):
 
-    logger.debug(f'Get next cluster name for pool {service_name!r}')
-    ready_replicas = [
-        info for info in serve_state.get_replica_infos(service_name)
-        if info.status == serve_state.ReplicaStatus.READY
-    ]
-    idle_replicas: List['replica_managers.ReplicaInfo'] = []
-    for replica_info in ready_replicas:
-        jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
-            service_name, replica_info.cluster_name)
-        if not jobs_on_replica:
-            idle_replicas.append(replica_info)
-    if not idle_replicas:
-        logger.info(f'No idle replicas found for pool {service_name!r}')
-        return None
+        logger.debug(f'Get next cluster name for pool {service_name!r}')
+        ready_replicas = [
+            info for info in serve_state.get_replica_infos(service_name)
+            if info.status == serve_state.ReplicaStatus.READY
+        ]
+        idle_replicas: List['replica_managers.ReplicaInfo'] = []
+        for replica_info in ready_replicas:
+            jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
+                service_name, replica_info.cluster_name)
+            # TODO(tian): Make it resources aware. Currently we allow and only
+            # allow one job per replica. In the following PR, we should:
+            #  i) When the replica is launched with `any_of` resources (
+            #     replicas can have different resources), we should check if
+            #     the resources that jobs require are available on the replica.
+            #     e.g., if a job requires A100:1 on a {L4:1, A100:1} pool, it
+            #     should only goes to replica with A100.
+            # ii) When a job only requires a subset of the resources on the
+            #     replica, each replica should be able to handle multiple jobs
+            #     at the same time. e.g., if a job requires A100:1 on a A100:8
+            #     pool, it should be able to run 4 jobs at the same time.
+            if not jobs_on_replica:
+                idle_replicas.append(replica_info)
+        if not idle_replicas:
+            logger.info(f'No idle replicas found for pool {service_name!r}')
+            return None
 
-    # Select the first idle replica.
-    # TODO(tian): "Load balancing" policy.
-    replica_info = idle_replicas[0]
-    logger.info(f'Selected replica {replica_info.replica_id} with cluster '
-                f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
-                f'{service_name!r}')
-    return replica_info.cluster_name
+        # Select the first idle replica.
+        # TODO(tian): "Load balancing" policy.
+        replica_info = idle_replicas[0]
+        logger.info(f'Selected replica {replica_info.replica_id} with cluster '
+                    f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
+                    f'{service_name!r}')
+        managed_job_state.set_current_cluster_name(job_id,
+                                                   replica_info.cluster_name)
+        return replica_info.cluster_name
 
 
 def _terminate_failed_services(

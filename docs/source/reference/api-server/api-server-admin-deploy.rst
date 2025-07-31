@@ -575,35 +575,18 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
 .. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
-    **Option 1: Set the DB connection URI via config**
+    **Option 1: Set the DB connection URI in helm values**
 
-    Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
-    To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+    Set :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` to ``postgresql://<username>:<password>@<host>:<port>/<database>`` in the helm values:
 
 
     .. code-block:: bash
 
-        # Create the config.yaml file
-        cat <<EOF > config.yaml
-        db: postgresql://<username>:<password>@<host>:<port>/<database>
-        EOF
-
-        # Install the API server with the config file
         # --reuse-values keeps the Helm chart values set in the previous step
         helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
-        --set-file apiService.config=config.yaml
-
-    You can also directly set this config value in the ``values.yaml`` file, e.g.:
-
-    .. code-block:: yaml
-
-        apiService:
-          config: |
-            db: postgresql://<username>:<password>@<host>:<port>/<database>
-
-    See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
+        --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
 
     **Option 2: Set the DB connection URI via Kubernetes secret**
 
@@ -636,11 +619,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
     .. note::
 
-        Once ``db`` is specified in the config, no other SkyPilot configuration
-        parameter can be specified in the helm chart.  This is because, with
-        the ``db`` setting, other configurations are now persistently saved in
-        the database instead. To set any other SkyPilot configuration, see
-        :ref:`sky-api-server-config`.
+        Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`.
 
 .. _sky-api-server-config:
 
@@ -997,7 +976,7 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
 
 .. note::
 
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller. For other ingress controllers, you can refer to :ref:`deploy-api-server-basic-auth` to setup authentication on the API server.
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller.
 
 
 .. _sky-api-server-cloud-deploy:
@@ -1070,6 +1049,5 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     API server metrics monitoring <examples/api-server-metrics-setup>
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
-    Advanced: Enable Basic Auth in the API Server <examples/api-server-basic-auth>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
     Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>

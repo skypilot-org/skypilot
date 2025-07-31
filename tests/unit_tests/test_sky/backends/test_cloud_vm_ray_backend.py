@@ -21,7 +21,7 @@ class TestCloudVmRayBackendTaskRedaction:
                               })
 
         # Test the exact call pattern used in cloud_vm_ray_backend.py
-        task_config = test_task.to_yaml_config(redact_secrets=True)
+        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # Verify that environment variables are NOT redacted
         assert 'envs' in task_config
@@ -42,7 +42,7 @@ class TestCloudVmRayBackendTaskRedaction:
         test_task = task.Task(run='python train.py',
                               envs={'PYTHONPATH': '/app'})
 
-        task_config = test_task.to_yaml_config(redact_secrets=True)
+        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # Environment variables should be preserved
         assert task_config['envs']['PYTHONPATH'] == '/app'
@@ -56,7 +56,7 @@ class TestCloudVmRayBackendTaskRedaction:
                               envs={'PYTHONPATH': '/app'},
                               secrets={})
 
-        task_config = test_task.to_yaml_config(redact_secrets=True)
+        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # Environment variables should be preserved
         assert task_config['envs']['PYTHONPATH'] == '/app'
@@ -64,8 +64,8 @@ class TestCloudVmRayBackendTaskRedaction:
         # Empty secrets should not appear in config
         assert 'secrets' not in task_config
 
-    def test_backend_redaction_preserves_non_string_values(self):
-        """Test that non-string values in secrets are preserved during redaction."""
+    def test_backend_redaction_redacts_all_values(self):
+        """Test that all secret values (including non-string) are redacted."""
         test_task = task.Task(run='echo hello',
                               secrets={
                                   'STRING_SECRET': 'actual-secret',
@@ -74,15 +74,15 @@ class TestCloudVmRayBackendTaskRedaction:
                                   'NULL_VALUE': None
                               })
 
-        task_config = test_task.to_yaml_config(redact_secrets=True)
+        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # String values should be redacted
         assert task_config['secrets']['STRING_SECRET'] == '<redacted>'
 
-        # Non-string values should be preserved
-        assert task_config['secrets']['NUMERIC_PORT'] == 5432
-        assert task_config['secrets']['BOOLEAN_FLAG'] is True
-        assert task_config['secrets']['NULL_VALUE'] is None
+        # All values should be redacted (including non-string values)
+        assert task_config['secrets']['NUMERIC_PORT'] == '<redacted>'
+        assert task_config['secrets']['BOOLEAN_FLAG'] == '<redacted>'
+        assert task_config['secrets']['NULL_VALUE'] == '<redacted>'
 
     def test_backend_supports_both_redaction_modes(self):
         """Test that backend can use both redacted and non-redacted configs."""
@@ -90,11 +90,11 @@ class TestCloudVmRayBackendTaskRedaction:
                               secrets={'API_KEY': 'secret-key-123'})
 
         # Test redacted mode (for logging/display)
-        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
 
         # Test non-redacted mode (for execution)
-        full_config = test_task.to_yaml_config(redact_secrets=False)
+        full_config = test_task.to_yaml_config(use_user_specified_yaml=False)
         assert full_config['secrets']['API_KEY'] == 'secret-key-123'
 
     def test_backend_mixed_envs_and_secrets(self):
@@ -112,7 +112,7 @@ class TestCloudVmRayBackendTaskRedaction:
                 'OAUTH_CLIENT_SECRET': 'oauth-secret-456'
             })
 
-        task_config = test_task.to_yaml_config(redact_secrets=True)
+        task_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # All environment variables should remain visible
         assert task_config['envs'][
@@ -136,7 +136,7 @@ class TestCloudVmRayBackendTaskRedaction:
             envs={'PUBLIC_VAR': 'public-value'},
             secrets={'PRIVATE_KEY': 'very-sensitive-key-data'})
 
-        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # Should be serializable to JSON
         json_str = json.dumps(redacted_config)
@@ -169,7 +169,7 @@ class TestCloudVmRayBackendTaskRedaction:
                               })
 
         # Get the redacted config as the backend would
-        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # Verify sensitive string values in secrets are redacted
         assert redacted_config['secrets']['API_KEY'] == '<redacted>'
@@ -209,7 +209,8 @@ class TestCloudVmRayBackendTaskRedaction:
                               })
 
         # Get the non-redacted config
-        non_redacted_config = test_task.to_yaml_config(redact_secrets=False)
+        non_redacted_config = test_task.to_yaml_config(
+            use_user_specified_yaml=False)
 
         # Verify actual values are present in both envs and secrets
         assert non_redacted_config['envs']['DEBUG'] == 'true'
@@ -231,7 +232,7 @@ class TestCloudVmRayBackendTaskRedaction:
         test_task = task.Task(run='echo hello', envs={'DEBUG': 'true'})
 
         # Get redacted config
-        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # Should not have secrets key at all
         assert 'secrets' not in redacted_config
@@ -263,8 +264,9 @@ class TestCloudVmRayBackendTaskRedaction:
         test_task.set_resources(resources.Resources(cpus=4, memory=8))
 
         # Get both configs
-        original_config = test_task.to_yaml_config(redact_secrets=False)
-        redacted_config = test_task.to_yaml_config(redact_secrets=True)
+        original_config = test_task.to_yaml_config(
+            use_user_specified_yaml=False)
+        redacted_config = test_task.to_yaml_config(use_user_specified_yaml=True)
 
         # All non-secret fields should be identical
         for key in original_config:

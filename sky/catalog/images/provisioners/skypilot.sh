@@ -83,3 +83,29 @@ sudo systemctl disable jupyter > /dev/null 2>&1 || true
 # Remove SkyPilot in OS image because when user sky launch we will install whatever version of SkyPilot user has on their local machine.
 $PYTHON_EXEC -m pip uninstall "skypilot-nightly" -y
 rm -rf ~/.sky
+
+# Clean up user home directories and sensitive files to prevent them from being baked into the image
+# This is critical for security and privacy - prevents user data from appearing in public images
+echo "Cleaning up user directories and sensitive files..."
+
+# Remove any non-system user home directories
+# Keep only standard system users (ubuntu for AWS, gcpuser for GCP, azureuser for Azure)
+sudo find /home -mindepth 1 -maxdepth 1 -type d ! -name "ubuntu" ! -name "gcpuser" ! -name "azureuser" -exec rm -rf {} \; 2>/dev/null || true
+
+# Clean up sensitive files and history from remaining user directories
+sudo rm -rf /root/.ssh/known_hosts 2>/dev/null || true
+sudo rm -rf /root/.bash_history 2>/dev/null || true
+sudo find /home -name ".bash_history" -delete 2>/dev/null || true
+sudo find /home -name ".ssh/known_hosts" -delete 2>/dev/null || true
+sudo find /home -name ".viminfo" -delete 2>/dev/null || true
+
+# Clear any temporary conda/pip caches that might contain user-specific info
+sudo find /home -name ".conda" -type d -exec rm -rf {} \; 2>/dev/null || true
+sudo find /home -name ".cache" -type d -exec rm -rf {} \; 2>/dev/null || true
+
+# Clear system logs that might contain sensitive information
+sudo truncate -s 0 /var/log/auth.log 2>/dev/null || true
+sudo truncate -s 0 /var/log/wtmp 2>/dev/null || true
+sudo truncate -s 0 /var/log/lastlog 2>/dev/null || true
+
+echo "User directory cleanup completed."
