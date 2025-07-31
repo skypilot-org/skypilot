@@ -2,6 +2,7 @@ import hashlib
 import logging
 import os
 import subprocess
+from typing import Optional
 
 IMAGE_NAME = 'sky-remote-test-image'
 CONTAINER_NAME_PREFIX = 'sky-remote-test'
@@ -44,8 +45,12 @@ def get_api_server_endpoint_inside_docker() -> str:
     return f'http://{host}:{get_host_port()}'
 
 
-def create_and_setup_new_container(target_container_name: str, host_port: int,
-                                   container_port: int, username: str) -> str:
+def create_and_setup_new_container(target_container_name: str,
+                                   host_port: int,
+                                   container_port: int,
+                                   username: str,
+                                   cpu_limit: Optional[str] = None,
+                                   memory_limit: Optional[str] = None) -> str:
     """Create a new Docker container and copy files/directories from current container.
 
     Args:
@@ -53,6 +58,8 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         host_port: Port on host machine to bind (default: 46581)
         container_port: Port in container to expose (default: 46580)
         username: Username in the container (default: buildkite)
+        cpu_limit: CPU limit for the container (e.g., "4")
+        memory_limit: Memory limit for the container (e.g., "8g")
 
     Returns:
         ID of the newly created container
@@ -78,16 +85,23 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
 
     if is_inside_docker():
         # Run the new container directly
-        run_cmd = (f'docker run -d '
-                   f'--name {target_container_name} '
-                   f'-p {host_port}:{container_port} '
-                   f'--add-host=host.docker.internal:host-gateway '
-                   f'-e USERNAME={username} '
-                   f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
-                   f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
-                   f'{IMAGE_NAME}')
+        run_cmd_parts = [
+            'docker', 'run', '-d', '--name', target_container_name, '-p',
+            f'{host_port}:{container_port}',
+            '--add-host=host.docker.internal:host-gateway', '-e',
+            f'USERNAME={username}', '-e', 'LAUNCHED_BY_DOCKER_CONTAINER=1',
+            '-e', 'SKYPILOT_DISABLE_USAGE_COLLECTION=1'
+        ]
 
-        subprocess.check_call(run_cmd, shell=True)
+        # Add resource limits if specified
+        if cpu_limit:
+            run_cmd_parts.extend(['--cpus', cpu_limit])
+        if memory_limit:
+            run_cmd_parts.extend(['--memory', memory_limit])
+
+        run_cmd_parts.append(IMAGE_NAME)
+
+        subprocess.check_call(run_cmd_parts)
 
         # Copy directories and files from current container to the new one
         for src_path, dst_path in src_dst_paths.items():
@@ -129,6 +143,12 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             '--name',
             target_container_name,
         ]
+
+        # Add resource limits if specified
+        if cpu_limit:
+            docker_cmd.extend(['--cpus', cpu_limit])
+        if memory_limit:
+            docker_cmd.extend(['--memory', memory_limit])
 
         docker_cmd.extend([
             *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',
