@@ -1567,12 +1567,14 @@ class Task:
         """
         if use_user_specified_yaml:
             if self._user_specified_yaml is None:
-                return {}
+                return self._to_yaml_config()
             config = yaml.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
                 config['secrets'] = {k: '<redacted>' for k in config['secrets']}
             return config
+        return self._to_yaml_config()
 
+    def _to_yaml_config(self) -> Dict[str, Any]:
         config = {}
 
         def add_if_not_none(key, value, no_empty: bool = False):
