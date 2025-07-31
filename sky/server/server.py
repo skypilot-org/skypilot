@@ -46,6 +46,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
@@ -482,7 +483,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
+    for event in daemons.INTERNAL_REQUEST_DAEMONS:
         try:
             executor.schedule_request(
                 request_id=event.id,
