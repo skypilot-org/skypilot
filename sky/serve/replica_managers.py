@@ -1372,7 +1372,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # are not empty.
         if new_config.get('file_mounts', None) != {}:
             return
-        for key in ['service', 'pool']:
+        for key in ['service', 'pool', '_user_specified_yaml']:
             new_config.pop(key, None)
         new_config_any_of = new_config.get('resources', {}).pop('any_of', [])
 
@@ -1385,7 +1385,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         self._service_name, info.version))
                 old_config = common_utils.read_yaml(
                     os.path.expanduser(old_service_task_yaml_path))
-                for key in ['service', 'pool']:
+                for key in ['service', 'pool', '_user_specified_yaml']:
                     old_config.pop(key, None)
                 # Bump replica version if all fields except for service are
                 # the same.
