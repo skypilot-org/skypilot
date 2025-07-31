@@ -972,7 +972,7 @@ export function ManagedJobsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading || isInitialLoad ? (
+              {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
                     colSpan={12}
@@ -1210,7 +1210,7 @@ export function ManagedJobsTable({
             </div>
           </div>
           <div>
-            {sortedData && sortedData.length > 0 && !loading
+            {sortedData && sortedData.length > 0
               ? `${startIndex + 1} – ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`
               : '0 – 0 of 0'}
           </div>
@@ -1923,7 +1923,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading || isInitialLoad ? (
+            {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
                   colSpan={5}
