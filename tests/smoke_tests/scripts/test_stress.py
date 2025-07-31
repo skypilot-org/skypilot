@@ -70,24 +70,36 @@ def main(cluster_name: str, long_concurrency: int, short_concurrency: int):
     print(f"Testing status queries for cluster: {cluster_name}")
     print(f"Long running requests: {long_concurrency}")
     print(f"Short running requests: {short_concurrency}")
+    print("\nProgress Format:")
+    print(
+        "Thread(finished/total): Long X/Y, Short X/Y | Server(submitted-finished/total): Long X-Y/Z, Short X-Y/Z"
+    )
+    print("Where: X=finished, Y=total, Z=total for that type")
+    print("=" * 80)
 
     # Thread pool for parallel execution
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        # Submit long running requests (FORCE refresh mode)
+        # Submit requests in mixed order (alternating long and short)
         long_futures = []
-        for i in range(long_concurrency):
-            future = executor.submit(query_status,
-                                     common.StatusRefreshMode.FORCE,
-                                     cluster_name)
-            long_futures.append(future)
-
-        # Submit short running requests (NONE refresh mode)
         short_futures = []
-        for i in range(short_concurrency):
-            future = executor.submit(query_status,
-                                     common.StatusRefreshMode.NONE,
-                                     cluster_name)
-            short_futures.append(future)
+
+        # Determine the maximum number of requests to submit
+        max_requests = max(long_concurrency, short_concurrency)
+
+        for i in range(max_requests):
+            # Submit long request if we haven't reached the limit
+            if i < long_concurrency:
+                future = executor.submit(query_status,
+                                         common.StatusRefreshMode.FORCE,
+                                         cluster_name)
+                long_futures.append(future)
+
+            # Submit short request if we haven't reached the limit
+            if i < short_concurrency:
+                future = executor.submit(query_status,
+                                         common.StatusRefreshMode.NONE,
+                                         cluster_name)
+                short_futures.append(future)
 
         # Monitor progress
         total_submitted = long_concurrency + short_concurrency
@@ -115,16 +127,36 @@ def main(cluster_name: str, long_concurrency: int, short_concurrency: int):
 
             # Display progress with statistics
             with stats_lock:
-                print(
-                    f"\rThread Progress: {total_finished}/{total_submitted} threads finished "
-                    f"(Long threads: {long_finished}/{long_concurrency}, "
-                    f"Short threads: {short_finished}/{short_concurrency}) | "
-                    f"Long requests submitted to server: {stats['long_server_submissions']}, "
-                    f"Long requests finished from server: {stats['long_verifications']} | "
-                    f"Short requests submitted to server: {stats['short_server_submissions']}, "
-                    f"Short requests finished from server: {stats['short_verifications']}",
-                    end='',
-                    flush=True)
+                long_submitted = stats['long_server_submissions']
+                long_finished_server = stats['long_verifications']
+                short_submitted = stats['short_server_submissions']
+                short_finished_server = stats['short_verifications']
+
+                # Format: Thread(Submit/total): Long X/Y, Short X/Y | Server(Submit-finished/total): Long X-Y/Z, Short X-Y/Z
+                thread_info = f"Thread({total_finished}/{total_submitted}): "
+                thread_parts = []
+                if long_concurrency > 0:
+                    thread_parts.append(
+                        f"Long {long_finished}/{long_concurrency}")
+                if short_concurrency > 0:
+                    thread_parts.append(
+                        f"Short {short_finished}/{short_concurrency}")
+                thread_info += ", ".join(thread_parts)
+
+                server_info = f"Server({long_submitted + short_submitted}-{long_finished_server + short_finished_server}/{total_submitted}): "
+                server_parts = []
+                if long_submitted > 0:
+                    server_parts.append(
+                        f"Long {long_submitted}-{long_finished_server}/{long_concurrency}"
+                    )
+                if short_submitted > 0:
+                    server_parts.append(
+                        f"Short {short_submitted}-{short_finished_server}/{short_concurrency}"
+                    )
+                server_info += ", ".join(server_parts)
+
+                progress_line = f"\r{thread_info} | {server_info}"
+                print(progress_line, end='', flush=True)
 
             time.sleep(3)  # Update every 500ms
 
