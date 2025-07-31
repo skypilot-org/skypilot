@@ -344,7 +344,7 @@ export function ManagedJobs() {
     sharedUpdateURLParams(router, filters);
   };
 
-  const updateFiltersByURLParams = () => {
+  const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
     propertyMap.set('status', 'Status');
@@ -355,14 +355,14 @@ export function ManagedJobs() {
 
     const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
     setFilters(urlFilters);
-  };
+  }, [router, setFilters]);
 
   // Handle URL query parameters for tab selection and filters
   useEffect(() => {
     if (router.isReady) {
       updateFiltersByURLParams();
     }
-  }, [router.isReady, router.query.tab]);
+  }, [router.isReady, router.query.tab, updateFiltersByURLParams]);
 
   const handleJobAction = async (jobId, action) => {
     try {
@@ -532,7 +532,7 @@ export function ManagedJobsTable({
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
     }
-  }, [setLoading]);
+  }, [setLoading, setOptionValues]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {

@@ -62,7 +62,7 @@ export default function PoolDetailPage() {
   const [isPoolYamlExpanded, setIsPoolYamlExpanded] = useState(false);
   const [isPoolYamlCopied, setIsPoolYamlCopied] = useState(false);
 
-  const fetchPoolData = async (isRefresh = false) => {
+  const fetchPoolData = React.useCallback(async (isRefresh = false) => {
     if (!poolName) return;
 
     if (isRefresh) {
@@ -94,11 +94,11 @@ export default function PoolDetailPage() {
         setInitialLoading(false);
       }
     }
-  };
+  }, [poolName, setLoading, setInitialLoading, setError, setPoolData]);
 
   useEffect(() => {
     fetchPoolData();
-  }, [poolName]);
+  }, [poolName, fetchPoolData]);
 
   // Sorting functions
   const requestSort = (key) => {
