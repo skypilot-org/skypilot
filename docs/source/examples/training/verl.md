@@ -2,14 +2,14 @@
 
 [Verl](https://github.com/volcengine/verl) is the most popular open-source reinforcement learning framework for LLMs, supporting PPO, DPO, and other algorithms.
 
-## Why SkyPilot + Verl?
+## Why SkyPilot + verl?
 
 SkyPilot makes RL training **easy and cost-effective**:
 - **Get GPUs instantly** across clouds and Kubernetes
 - **3x cheaper** with managed spot instances
 - **Zero setup** - handles distributed Ray clusters automatically
 
-## Quick Start
+## Quick start
 
 Launch a 2-node RLHF training job on the cheapest available GPUs:
 ```bash
@@ -21,7 +21,7 @@ Monitor training progress:
 sky logs verl
 ```
 
-## Advanced Features
+## Advanced features
 
 **💰 Use spot instances for 3x cost savings:**
 ```bash
@@ -42,7 +42,7 @@ sky exec verl llm/verl/multinode.yaml --env TOTAL_EPOCHS=10
 sky launch -c verl llm/verl/multinode.yaml --num-nodes 4
 ```
 
-## Learn More
+## Learn more
 
 - [Full example with config options](https://github.com/skypilot-org/skypilot/tree/master/llm/verl)
 - [Verl documentation](https://verl.readthedocs.io/)
