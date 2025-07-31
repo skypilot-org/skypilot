@@ -1,7 +1,7 @@
 # Verl: State-of-the-art RL Training for LLMs
 
 
-[Verl](https://github.com/volcengine/verl) is the most popular open-source reinforcement learning framework for LLMs, supporting PPO, DPO, and other algorithms.
+[Verl](https://github.com/volcengine/verl) is the most popular open-source reinforcement learning framework for LLMs, supporting PPO, GRPO, and other algorithms.
 
 ## Why SkyPilot + Verl?
 
@@ -19,6 +19,7 @@ sky launch -c verl llm/verl/multinode.yaml
 
 **With Weights & Biases tracking** (recommended for visualizing training curves):
 ```bash
+# SkyPilot will read WANDB_API_KEY from your local environment
 sky launch -c verl llm/verl/multinode.yaml --secret WANDB_API_KEY
 ```
 
