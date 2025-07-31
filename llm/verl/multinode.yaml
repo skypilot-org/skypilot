@@ -29,7 +29,7 @@ resources:
     - A100-80GB:8
     - H100:8  # H100 for faster training, can also use A100-80GB:1
   # cloud: lambda  # Optional: specify cloud provider
-  use_spot: true
+  use_spot: false  # Set to true to use spot instances with managed jobs
   ports:
     - 8280  # Ray dashboard port
 
@@ -165,10 +165,13 @@ run: |
       trainer.save_freq=10 \
       trainer.test_freq=10 \
       trainer.total_epochs=$TOTAL_EPOCHS \
-      trainer.logger=['console', 'wandb'] \
-      trainer.wandb_project='verl-rlhf' \
-      trainer.wandb_run_name='${SKYPILOT_CLUSTER_NAME}-${SKYPILOT_TASK_ID}' \
+      trainer.logger=['console'] \
       trainer.resume_mode=auto 2>&1 | tee verl_training.log
+      # To enable W&B logging:
+      # 1. Set WANDB_API_KEY in envs or pass via --secret WANDB_API_KEY
+      # 2. Change trainer.logger to: trainer.logger=['console', 'wandb']
+      # 3. Add: trainer.wandb_project='verl-rlhf'
+      # 4. Add: trainer.wandb_run_name='${SKYPILOT_CLUSTER_NAME}-${SKYPILOT_TASK_ID}'
   else
     # Worker nodes: connect to Ray head
     echo "Setting up worker node..."

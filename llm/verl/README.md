@@ -17,12 +17,6 @@ Launch a 2-node RLHF training job on the cheapest available GPUs:
 sky launch -c verl llm/verl/multinode.yaml
 ```
 
-**With Weights & Biases tracking** (recommended for visualizing training curves):
-```bash
-# SkyPilot will read WANDB_API_KEY from your local environment
-sky launch -c verl llm/verl/multinode.yaml --secret WANDB_API_KEY
-```
-
 Monitor training progress:
 ```bash
 sky logs verl
@@ -49,6 +43,19 @@ The example trains Qwen2.5-0.5B-Instruct on the GSM8K dataset using PPO:
 - **Multi-node distributed training** with automatic Ray cluster setup
 - **Checkpoint persistence** to cloud storage for fault tolerance
 - **Customizable models and datasets** via environment variables
+
+## Optional: Enable W&B for Training Visualization
+
+To track training curves and metrics in Weights & Biases:
+```bash
+# 1. Set your W&B API key locally
+export WANDB_API_KEY=your-api-key
+
+# 2. Launch with the secret flag
+sky launch -c verl llm/verl/multinode.yaml --secret WANDB_API_KEY
+
+# 3. Edit multinode.yaml to enable W&B logger (see comments in the file)
+```
 
 ## Advanced Usage
 
