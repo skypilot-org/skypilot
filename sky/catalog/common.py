@@ -51,7 +51,7 @@ class InstanceTypeInfo(NamedTuple):
     cloud: str
     instance_type: Optional[str]
     accelerator_name: str
-    accelerator_count: int
+    accelerator_count: float
     cpu_count: Optional[float]
     device_memory: Optional[float]
     memory: Optional[float]
@@ -631,6 +631,7 @@ def list_accelerators_impl(
         df = df[df['Region'].str.contains(region_filter,
                                           case=case_sensitive,
                                           regex=True)]
+    df['AcceleratorCount'] = df['AcceleratorCount'].astype(float)
     if quantity_filter is not None:
         df = df[df['AcceleratorCount'] == quantity_filter]
     grouped = df.groupby('AcceleratorName')
