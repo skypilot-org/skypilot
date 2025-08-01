@@ -1829,7 +1829,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
     remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is None or remote_api_version < 12:
+    if remote_api_version is not None and remote_api_version < 12:
         show_pools = False
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters

@@ -123,8 +123,13 @@ def managed_job_status_refresh_event():
 def sky_serve_status_refresh_event():
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
     from sky.serve import serve_utils
-    if not serve_utils.is_consolidation_mode():
+
+    # Pool consolidation mode is configured in the jobs config. But we should
+    # still do the status refresh for pool.
+    if not (serve_utils.is_consolidation_mode() or
+            managed_job_utils.is_consolidation_mode()):
         return
     # TODO(tian): Add HA recovery logic.
     from sky.skylet import events
