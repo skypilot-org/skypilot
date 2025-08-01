@@ -6,6 +6,7 @@ import base64
 import contextlib
 import datetime
 import hashlib
+import http
 import json
 import logging
 import multiprocessing
@@ -22,7 +23,6 @@ import uuid
 import zipfile
 
 import aiofiles
-import aiohttp
 import fastapi
 from fastapi.middleware import cors
 from passlib.hash import apr_md5_crypt
@@ -39,7 +39,6 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
@@ -53,6 +52,8 @@ from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
+from sky.server.auth import authn
+from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -120,41 +121,6 @@ def _basic_auth_401_response(content: str):
         status_code=401,
         headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
         content=content)
-
-
-# TODO(hailong): Remove this function and use request.state.auth_user instead.
-async def _override_user_info_in_request_body(request: fastapi.Request,
-                                              auth_user: Optional[models.User]):
-    if auth_user is None:
-        return
-
-    body = await request.body()
-    if body:
-        try:
-            original_json = await request.json()
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.error(f'Error parsing request JSON: {e}')
-        else:
-            logger.debug(f'Overriding user for {request.state.request_id}: '
-                         f'{auth_user.name}, {auth_user.id}')
-            if 'env_vars' in original_json:
-                if isinstance(original_json.get('env_vars'), dict):
-                    original_json['env_vars'][
-                        constants.USER_ID_ENV_VAR] = auth_user.id
-                    original_json['env_vars'][
-                        constants.USER_ENV_VAR] = auth_user.name
-                else:
-                    logger.warning(
-                        f'"env_vars" in request body is not a dictionary '
-                        f'for request {request.state.request_id}. '
-                        'Skipping user info injection into body.')
-            else:
-                original_json['env_vars'] = {}
-                original_json['env_vars'][
-                    constants.USER_ID_ENV_VAR] = auth_user.id
-                original_json['env_vars'][
-                    constants.USER_ENV_VAR] = auth_user.name
-            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
 
 
 def _try_set_basic_auth_user(request: fastapi.Request):
@@ -283,7 +249,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     apr_md5_crypt.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
-                await _override_user_info_in_request_body(request, user)
+                await authn.override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
@@ -402,7 +368,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             request.state.auth_user = auth_user
 
             # Override user info in request body for service account requests
-            await _override_user_info_in_request_body(request, auth_user)
+            await authn.override_user_info_in_request_body(request, auth_user)
 
             logger.debug(f'Authenticated service account: {user_id}')
 
@@ -416,136 +382,6 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 })
 
         return await call_next(request)
-
-
-class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to handle authentication by delegating to OAuth2 Proxy."""
-
-    def __init__(self, application: fastapi.FastAPI):
-        super().__init__(application)
-        self.enabled: bool = skypilot_config.get_nested(
-            ('auth', 'oauth2-proxy', 'enabled'), False)
-        self.proxy_base: str = ''
-        if self.enabled:
-            proxy_base = skypilot_config.get_nested(
-                ('auth', 'oauth2-proxy', 'base_url'), None)
-            if not proxy_base:
-                raise ValueError('OAuth2 Proxy is enabled but base_url is not '
-                                 'set')
-            self.proxy_base = proxy_base.rstrip('/')
-
-    async def dispatch(self, request: fastapi.Request, call_next):
-        if not self.enabled:
-            return await call_next(request)
-
-        # Forward /oauth2/* to oauth2-proxy, including /oauth2/start and
-        # /oauth2/callback.
-        if request.url.path.startswith('/oauth2'):
-            return await self.forward_to_oauth2_proxy(request)
-
-        return await self.authenticate(request, call_next)
-
-    async def forward_to_oauth2_proxy(self, request: fastapi.Request):
-        """Forward requests to oauth2-proxy service."""
-        logger.info(f'forwarding to oauth2-proxy: {request.url.path}')
-        target_url = f'{self.proxy_base}/{request.url.path}'
-        body = await request.body()
-        async with aiohttp.ClientSession() as session:
-            try:
-                forwarded_headers = dict(request.headers)
-                async with session.request(
-                        method=request.method,
-                        url=target_url,
-                        headers=forwarded_headers,
-                        data=body,
-                        cookies=request.cookies,
-                        params=request.query_params,
-                        allow_redirects=False,
-                ) as response:
-                    response_body = await response.read()
-                    return fastapi.responses.Response(
-                        content=response_body,
-                        status_code=response.status,
-                        headers=dict(response.headers),
-                    )
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f'Error forwarding to OAuth2 proxy: {e}')
-                return fastapi.responses.JSONResponse(
-                    status_code=502,
-                    content={'detail': 'oauth2-proxy service unavailable'})
-
-    async def authenticate(self, request: fastapi.Request, call_next):
-        if request.state.auth_user is not None:
-            # Already authenticated
-            return await call_next(request)
-
-        async with aiohttp.ClientSession() as session:
-            try:
-                return await self._authenticate(request, call_next, session)
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f'Error communicating with OAuth2 proxy: {e}')
-                # Fail open or closed based on your security requirements
-                return fastapi.responses.JSONResponse(
-                    status_code=503,
-                    content={'detail': 'oauth2-proxy service unavailable'})
-
-    async def _authenticate(self, request: fastapi.Request, call_next,
-                            session: aiohttp.ClientSession):
-        forwarded_headers = dict(request.headers)
-        auth_url = f'{self.proxy_base}/oauth2/auth'
-        forwarded_headers['X-Forwarded-Uri'] = str(request.url)
-        logger.info(f'forwarded headers: {forwarded_headers}')
-
-        async with session.request(
-                method=request.method,
-                url=auth_url,
-                headers=forwarded_headers,
-                cookies=request.cookies,
-                timeout=aiohttp.ClientTimeout(total=10),
-                allow_redirects=False,
-        ) as auth_response:
-
-            if auth_response.status == 202:
-                # User is authenticated, extract user info from headers
-                auth_user = self.get_auth_user(auth_response)
-                if not auth_user:
-                    return fastapi.responses.JSONResponse(
-                        status_code=500,
-                        content={
-                            'detail':
-                                'oauth2 proxy is enabled but did not'
-                                'return user info, check your oauth2-proxy'
-                                'setup.'
-                        })
-                request.state.auth_user = auth_user
-                await _override_user_info_in_request_body(request, auth_user)
-                return await call_next(request)
-            elif auth_response.status == 401:
-                # TODO(aylei): in unified authentication, the redirection
-                # or rejection should be done after all the authentication
-                # methods are performed.
-                # Not authenticated, redirect to sign-in
-                logger.info(f'base url: {request.base_url}')
-                signin_url = (f'{request.base_url}/oauth2/start?'
-                              f'rd={str(request.url)}')
-                logger.info(f'sigin url: {signin_url}')
-                return fastapi.responses.RedirectResponse(url=signin_url)
-            else:
-                logger.error(
-                    f'OAuth2 proxy returned status {auth_response.status}')
-                return fastapi.responses.JSONResponse(
-                    status_code=auth_response.status,
-                    content={'detail': 'oauth2-proxy error'})
-
-    def get_auth_user(
-            self, response: aiohttp.ClientResponse) -> Optional[models.User]:
-        """Extract user info from OAuth2 proxy response headers."""
-        email_header = response.headers.get('X-Auth-Request-Email')
-        if email_header:
-            user_hash = hashlib.md5(email_header.encode()).hexdigest(
-            )[:common_utils.USER_HASH_LENGTH]
-            return models.User(id=user_hash, name=email_header)
-        return None
 
 
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -577,7 +413,7 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        await _override_user_info_in_request_body(request, auth_user)
+        await authn.override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -758,7 +594,7 @@ app.add_middleware(
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
 # Authentication based on oauth2-proxy.
-app.add_middleware(OAuth2ProxyMiddleware)
+app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
 # BearerTokenMiddleware, since it should be skipped if either of those set the
 # auth user.
@@ -1708,7 +1544,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
-    logger.info(f'Health endpoint: request.state.auth_user = {user}')
+    logger.debug(f'Health endpoint: request.state.auth_user = {user}')
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
         # Kept for backward compatibility, clients before 0.11.0 will read this
@@ -1891,6 +1727,13 @@ async def serve_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/healthz')
+async def healthz(request: fastapi.Request) -> None:
+    """Health check endpoint for ochestration tools."""
+    del request
+    return fastapi.responses.Response(status_code=http.HTTPStatus.OK)
 
 
 # Redirect the root path to dashboard
