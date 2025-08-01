@@ -1713,6 +1713,28 @@ def get_config_schema():
         },
     }
 
+    auth_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'oauth2-proxy': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'enabled': {
+                        'type': 'boolean',
+                    },
+                    'base_url': {
+                        'type': 'string',
+                        'pattern': r'^https?://.*$',
+                    },
+                }
+            }
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(
@@ -1747,6 +1769,7 @@ def get_config_schema():
             'rbac': rbac_schema,
             'logs': logs_schema,
             'daemons': daemon_schema,
+            'auth': auth_schema,
             **cloud_configs,
         },
     }
