@@ -1544,7 +1544,7 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
     """
     user = request.state.auth_user
     user_dict = None
-    status = common.ApiServerStatus.HEALTHY
+    server_status = common.ApiServerStatus.HEALTHY
     if user is not None:
         user_dict = user.to_dict()
     elif getattr(request.state, 'anonymous_user', False):
@@ -1559,11 +1559,11 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
             'name': 'anonymous',
             'id': 'anonymous',
         }
-        status = common.ApiServerStatus.NEEDS_AUTH
+        server_status = common.ApiServerStatus.NEEDS_AUTH
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
     return {
-        'status': status,
+        'status': server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
