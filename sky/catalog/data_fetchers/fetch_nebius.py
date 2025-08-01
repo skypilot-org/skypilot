@@ -126,8 +126,9 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                         resources=compute().ResourcesSpec(
                             platform=platform_name,
                             preset=preset.name,
-                        )),
-                    preemptible=compute().PreemptibleSpec(priority=1),
+                        ),
+                        preemptible=compute().PreemptibleSpec(priority=1),
+                    ),
                 ))
             spot_price_request = billing().EstimateBatchRequest(
                 resource_specs=[spot_estimate_spec])
