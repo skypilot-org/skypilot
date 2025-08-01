@@ -256,6 +256,25 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class AnonymousAccessMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle anonymous access."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.state.auth_user:
+            return await call_next(request)
+        if os.environ.get(constants.ENV_VAR_ENABLE_ANONYMOUS_ACCESS,
+                          'false').lower() == 'true':
+            return await call_next(request)
+
+        # TODO(hailong): also check the source IP address
+        if request.url.path.startswith('/api/health'):
+            # Try to set the auth user from basic auth
+            return await call_next(request)
+
+        return fastapi.responses.JSONResponse(
+            status_code=401, content={'detail': 'Authentication failed'})
+
+
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
@@ -268,7 +287,6 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         auth_header = request.headers.get('authorization')
         if not auth_header:
             # No Bearer token, continue with next middleware
-            logger.debug('No Bearer token, continuing with next middleware')
             return await call_next(request)
 
         split_header = auth_header.split(' ', 1)
@@ -589,6 +607,7 @@ app.add_middleware(
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
+app.add_middleware(AnonymousAccessMiddleware)
 # Authentication based on oauth2-proxy.
 app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and

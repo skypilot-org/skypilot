@@ -79,6 +79,10 @@ spec:
         - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
+        {{- if .Values.apiService.enableAnonymousAccess }}
+        - name: ENABLE_ANONYMOUS_ACCESS
+          value: "true"
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
