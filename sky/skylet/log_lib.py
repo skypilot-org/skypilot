@@ -118,7 +118,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                     line2 = line
                     if line.endswith('\r'):
                         line2 = line + 'A\r'
-                    print('seungjin ' + streaming_prefix + line2,
+                    print(streaming_prefix + line2,
                           end='',
                           file=out_stream,
                           flush=True,
@@ -458,7 +458,6 @@ def tail_logs(job_id: Optional[int],
         tail: The number of lines to display from the end of the log file,
             if 0, print all lines.
     """
-    print('seungjin tail_logs')
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
         # which means no job has been submitted to this cluster. See
