@@ -8,29 +8,41 @@ import click
 import sky
 from sky.utils import common
 
+# Global storage for request IDs
+request_ids = {'long': [], 'short': []}
+request_ids_lock = threading.Lock()
+
 # Global statistics
 stats = {
-    'long_server_submissions': 0,
-    'long_verifications': 0,
-    'short_server_submissions': 0,
-    'short_verifications': 0
+    'long_submitted': 0,
+    'long_finished': 0,
+    'short_submitted': 0,
+    'short_finished': 0
 }
 stats_lock = threading.Lock()
 
 
-def query_status(refresh: common.StatusRefreshMode, cluster_name: str):
+def submit_request(refresh: common.StatusRefreshMode, cluster_name: str):
+    """Submit a request to server and return request ID."""
+    global stats
+
+    request_id = sky.status(refresh=refresh)
+
+    with stats_lock:
+        if refresh == common.StatusRefreshMode.FORCE:
+            stats['long_submitted'] += 1
+        else:
+            stats['short_submitted'] += 1
+
+    return request_id
+
+
+def query_request(request_id: str, cluster_name: str, request_type: str):
+    """Query a specific request ID and verify cluster name."""
     global stats
 
     # Capture output using stream_and_get's output_stream parameter
     captured_output = io.StringIO()
-
-    # Submit to server and track statistics
-    request_id = sky.status(refresh=refresh)
-    with stats_lock:
-        if refresh == common.StatusRefreshMode.FORCE:
-            stats['long_server_submissions'] += 1
-        else:
-            stats['short_server_submissions'] += 1
 
     # Stream and get results
     sky.stream_and_get(request_id, output_stream=captured_output)
@@ -41,10 +53,10 @@ def query_status(refresh: common.StatusRefreshMode, cluster_name: str):
 
     # Verify cluster name appears in the output and track statistics
     with stats_lock:
-        if refresh == common.StatusRefreshMode.FORCE:
-            stats['long_verifications'] += 1
+        if request_type == 'long':
+            stats['long_finished'] += 1
         else:
-            stats['short_verifications'] += 1
+            stats['short_finished'] += 1
 
     if cluster_name not in output:
         raise ValueError(
@@ -71,14 +83,15 @@ def main(cluster_name: str, long_concurrency: int, short_concurrency: int):
     print(f"Long running requests: {long_concurrency}")
     print(f"Short running requests: {short_concurrency}")
     print("\nProgress Format:")
-    print(
-        "Thread(finished/total): Long X/Y, Short X/Y | Server(submitted-finished/total): Long X-Y/Z, Short X-Y/Z"
-    )
-    print("Where: X=finished, Y=total, Z=total for that type")
+    print("Phase 1: Submit all requests to server")
+    print("Phase 2: Query all request IDs and verify results")
     print("=" * 80)
 
-    # Thread pool for parallel execution
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    # Phase 1: Submit all requests to server
+    print("\n=== Phase 1: Submitting all requests to server ===")
+
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=8) as submit_executor:
         # Submit requests in mixed order (alternating long and short)
         long_futures = []
         short_futures = []
@@ -89,106 +102,120 @@ def main(cluster_name: str, long_concurrency: int, short_concurrency: int):
         for i in range(max_requests):
             # Submit long request if we haven't reached the limit
             if i < long_concurrency:
-                future = executor.submit(query_status,
-                                         common.StatusRefreshMode.FORCE,
-                                         cluster_name)
+                future = submit_executor.submit(submit_request,
+                                                common.StatusRefreshMode.FORCE,
+                                                cluster_name)
                 long_futures.append(future)
 
             # Submit short request if we haven't reached the limit
             if i < short_concurrency:
-                future = executor.submit(query_status,
-                                         common.StatusRefreshMode.NONE,
-                                         cluster_name)
+                future = submit_executor.submit(submit_request,
+                                                common.StatusRefreshMode.NONE,
+                                                cluster_name)
                 short_futures.append(future)
 
+        # Collect all request IDs in mixed order
+        long_request_ids = []
+        short_request_ids = []
+
+        # Collect results in the same mixed order
+        long_index = 0
+        short_index = 0
+
+        for i in range(max_requests):
+            # Collect long result if we submitted one
+            if i < long_concurrency:
+                request_id = long_futures[long_index].result()
+                long_request_ids.append(request_id)
+                long_index += 1
+
+            # Collect short result if we submitted one
+            if i < short_concurrency:
+                request_id = short_futures[short_index].result()
+                short_request_ids.append(request_id)
+                short_index += 1
+
+    print(
+        f"✓ Submitted {long_concurrency + short_concurrency} requests to server"
+    )
+    print(f"  - Long requests: {len(long_request_ids)}")
+    print(f"  - Short requests: {len(short_request_ids)}")
+
+    # Phase 2: Query all request IDs
+    print("\n=== Phase 2: Querying all request results ===")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as query_executor:
+        # Submit queries in mixed order (alternating long and short)
+        long_query_futures = []
+        short_query_futures = []
+
+        # Determine the maximum number of queries to submit
+        max_queries = max(len(long_request_ids), len(short_request_ids))
+
+        for i in range(max_queries):
+            # Submit query for long request if we have one
+            if i < len(long_request_ids):
+                future = query_executor.submit(query_request,
+                                               long_request_ids[i],
+                                               cluster_name, 'long')
+                long_query_futures.append(future)
+
+            # Submit query for short request if we have one
+            if i < len(short_request_ids):
+                future = query_executor.submit(query_request,
+                                               short_request_ids[i],
+                                               cluster_name, 'short')
+                short_query_futures.append(future)
+
         # Monitor progress
-        total_submitted = long_concurrency + short_concurrency
+        total_requests = long_concurrency + short_concurrency
         long_finished = 0
         short_finished = 0
 
-        print(f"\nSubmitted {total_submitted} requests total:")
-        print(f"  - Long running: {long_concurrency}")
-        print(f"  - Short running: {short_concurrency}")
-
         while long_finished < long_concurrency or short_finished < short_concurrency:
-            # Check long running requests
-            for future in long_futures:
+            # Check long requests
+            for future in long_query_futures:
                 if future.done() and not future._done_callbacks:
                     long_finished += 1
-                    future._done_callbacks = True  # Mark as counted
+                    future._done_callbacks = True
 
-            # Check short running requests
-            for future in short_futures:
+            # Check short requests
+            for future in short_query_futures:
                 if future.done() and not future._done_callbacks:
                     short_finished += 1
-                    future._done_callbacks = True  # Mark as counted
+                    future._done_callbacks = True
 
             total_finished = long_finished + short_finished
 
-            # Display progress with statistics
+            # Display progress
             with stats_lock:
-                long_submitted = stats['long_server_submissions']
-                long_finished_server = stats['long_verifications']
-                short_submitted = stats['short_server_submissions']
-                short_finished_server = stats['short_verifications']
-
-                # Format: Thread(Submit/total): Long X/Y, Short X/Y | Server(Submit-finished/total): Long X-Y/Z, Short X-Y/Z
-                thread_info = f"Thread({total_finished}/{total_submitted}): "
-                thread_parts = []
-                if long_concurrency > 0:
-                    thread_parts.append(
-                        f"Long {long_finished}/{long_concurrency}")
-                if short_concurrency > 0:
-                    thread_parts.append(
-                        f"Short {short_finished}/{short_concurrency}")
-                thread_info += ", ".join(thread_parts)
-
-                server_info = f"Server({long_submitted + short_submitted}-{long_finished_server + short_finished_server}/{total_submitted}): "
-                server_parts = []
-                if long_submitted > 0:
-                    server_parts.append(
-                        f"Long {long_submitted}-{long_finished_server}/{long_concurrency}"
-                    )
-                if short_submitted > 0:
-                    server_parts.append(
-                        f"Short {short_submitted}-{short_finished_server}/{short_concurrency}"
-                    )
-                server_info += ", ".join(server_parts)
-
-                progress_line = f"\r{thread_info} | {server_info}"
+                progress_line = f"\rQuery Progress: {total_finished}/{total_requests} | " \
+                              f"Long: {long_finished}/{long_concurrency} | " \
+                              f"Short: {short_finished}/{short_concurrency} | " \
+                              f"Submitted: Long {stats['long_submitted']}, Short {stats['short_submitted']} | " \
+                              f"Finished: Long {stats['long_finished']}, Short {stats['short_finished']}"
                 print(progress_line, end='', flush=True)
 
-            time.sleep(3)  # Update every 500ms
+            time.sleep(1)
 
-        print(f"\n\n✓ All {total_submitted} requests completed!")
+        print(f"\n\n✓ All {total_requests} requests completed!")
 
         # Display final statistics
         print("\n" + "=" * 60)
         print("FINAL STATISTICS")
         print("=" * 60)
         with stats_lock:
-            print(f"Thread Summary:")
+            print(f"Server Submissions:")
+            print(f"  Long requests submitted: {stats['long_submitted']}")
+            print(f"  Short requests submitted: {stats['short_submitted']}")
             print(
-                f"  Long threads: {long_concurrency} submitted, {long_finished} finished"
+                f"  Total submitted: {stats['long_submitted'] + stats['short_submitted']}"
             )
+            print(f"\nQuery Results:")
+            print(f"  Long requests finished: {stats['long_finished']}")
+            print(f"  Short requests finished: {stats['short_finished']}")
             print(
-                f"  Short threads: {short_concurrency} submitted, {short_finished} finished"
-            )
-            print(
-                f"  Total threads: {total_submitted} submitted, {total_finished} finished"
-            )
-            print(f"\nServer Request Summary:")
-            print(
-                f"  Long requests submitted to server: {stats['long_server_submissions']}"
-            )
-            print(
-                f"  Long requests finished from server: {stats['long_verifications']}"
-            )
-            print(
-                f"  Short requests submitted to server: {stats['short_server_submissions']}"
-            )
-            print(
-                f"  Short requests finished from server: {stats['short_verifications']}"
+                f"  Total finished: {stats['long_finished'] + stats['short_finished']}"
             )
 
 
