@@ -1544,10 +1544,11 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
     """
     user = request.state.auth_user
     user_dict = None
+    status = common.ApiServerStatus.HEALTHY
     if user is not None:
         user_dict = user.to_dict()
     elif getattr(request.state, 'anonymous_user', False):
-        # /api/health had two different usage previously:
+        # /api/health had several different usage previously:
         # 1. For health check from CLI and external ochestration tools (k8s).
         # 2. For `sky api info` call to get the user info.
         # The first does not require authentication while the second does,
@@ -1558,10 +1559,11 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
             'name': 'anonymous',
             'id': 'anonymous',
         }
+        status = common.ApiServerStatus.NEEDS_AUTH
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
     return {
-        'status': common.ApiServerStatus.HEALTHY.value,
+        'status': status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
         # field to check compatibility and hint the user to upgrade the CLI.
         # TODO(aylei): remove this field after 0.13.0
