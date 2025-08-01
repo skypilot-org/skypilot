@@ -7,7 +7,6 @@ import '@/app/globals.css';
 import { useEffect } from 'react';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
-import '@/lib/prismYamlConfig'; // Apply enhanced YAML highlighting globally
 
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
