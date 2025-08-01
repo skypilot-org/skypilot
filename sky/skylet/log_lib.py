@@ -87,7 +87,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                       if args.line_processor is None else args.line_processor)
 
     out = []
-    with open(args.log_path, 'a', encoding='utf-8') as fout:
+    with open(args.log_path, 'ab') as fout:
         with line_processor:
             while True:
                 ctx = _get_context()
@@ -115,12 +115,16 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                     end_streaming_flag = True
                 if (args.stream_logs and start_streaming_flag and
                         not end_streaming_flag):
-                    print(streaming_prefix + line,
+                    line2 = line
+                    if line.endswith('\r'):
+                        line2 = line + 'A\r'
+                    print('seungjin ' + streaming_prefix + line2,
                           end='',
                           file=out_stream,
-                          flush=True)
+                          flush=True,
+                          )
                 if args.log_path != '/dev/null':
-                    fout.write(line)
+                    fout.write(line.encode('utf-8'))
                     fout.flush()
                 line_processor.process_line(line)
                 out.append(line)
@@ -203,7 +207,7 @@ def run_with_log(
     # server.
     stdin = kwargs.pop('stdin', subprocess.DEVNULL)
     if log_cmd:
-        with open(log_path, 'a', encoding='utf-8') as f:
+        with open(log_path, 'ab') as f:
             print(f'Running command: {cmd}', file=f)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
@@ -454,6 +458,7 @@ def tail_logs(job_id: Optional[int],
         tail: The number of lines to display from the end of the log file,
             if 0, print all lines.
     """
+    print('seungjin tail_logs')
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
         # which means no job has been submitted to this cluster. See
@@ -524,7 +529,9 @@ def tail_logs(job_id: Optional[int],
                                          job_id=job_id,
                                          start_streaming=start_streaming,
                                          start_streaming_at=start_stream_at):
-                print(line, end='', flush=True)
+                # print(f'repr(line): {repr(line)}')
+                if len(line) > 10:
+                    print(line, end='', flush=True)
     else:
         try:
             start_streaming = False

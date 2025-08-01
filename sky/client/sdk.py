@@ -100,6 +100,8 @@ def stream_response(request_id: Optional[str],
         line_count = 0
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
+                # if line.endswith('\rA\n'):
+                #     line = line[:-3] + '\r'
                 line_count += 1
                 if retry_context is None:
                     print(line, flush=True, end='', file=output_stream)
