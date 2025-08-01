@@ -106,3 +106,43 @@ async def download_logs(
         if jobs_download_logs_body.refresh else api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
+
+
+@router.post('/pool_apply')
+async def pool_apply(request: fastapi.Request,
+                     jobs_pool_apply_body: payloads.JobsPoolApplyBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_apply',
+        request_body=jobs_pool_apply_body,
+        func=core.pool_apply,
+        schedule_type=api_requests.ScheduleType.LONG,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
+@router.post('/pool_down')
+async def pool_down(request: fastapi.Request,
+                    jobs_pool_down_body: payloads.JobsPoolDownBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_down',
+        request_body=jobs_pool_down_body,
+        func=core.pool_down,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
+@router.post('/pool_status')
+async def pool_status(
+        request: fastapi.Request,
+        jobs_pool_status_body: payloads.JobsPoolStatusBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.pool_status',
+        request_body=jobs_pool_status_body,
+        func=core.pool_status,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )

@@ -739,7 +739,8 @@ def test_runpod_http_server_with_custom_ports():
     test = smoke_tests_utils.Test(
         'runpod_http_server_with_custom_ports',
         [
-            f'sky launch -y -d -c {name} --infra runpod examples/http_server_with_custom_ports/task.yaml',
+            # RunPod CPU instances have a maximum local disk size limit of 10x number of vCPUs.
+            f'sky launch -y -d -c {name} --infra runpod --disk-size 20 examples/http_server_with_custom_ports/task.yaml',
             f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
             # Retry a few times to avoid flakiness in ports being open.
             f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi',
@@ -1739,17 +1740,21 @@ def test_gcp_disk_tier(instance_types: List[str]):
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-central1'
-        instance_type_options = ['']
+        instance_type_options = [f'--instance-type {instance_type}']
         if disk_tier == resources_utils.DiskTier.BEST:
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             # If using default instance type, it will only enable the high disk tier.
+            # Test both scenarios: n2-standard-2 maps to HIGH, n2-standard-64 maps to ULTRA
             disk_types = [
-                GCP._get_disk_type(instance_type,
+                GCP._get_disk_type(instance_type_low,
                                    resources_utils.DiskTier.HIGH),
                 GCP._get_disk_type(instance_type,
                                    resources_utils.DiskTier.ULTRA),
             ]
-            instance_type_options = ['', f'--instance-type {instance_type}']
+            instance_type_options = [
+                f'--instance-type {instance_type_low}',
+                f'--instance-type {instance_type}'
+            ]
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
             test = smoke_tests_utils.Test(

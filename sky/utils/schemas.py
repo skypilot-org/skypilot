@@ -611,7 +611,6 @@ def get_service_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['readiness_probe'],
         'additionalProperties': False,
         'properties': {
             'readiness_probe': {
@@ -646,6 +645,9 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'pool': {
+                'type': 'boolean',
             },
             'replica_policy': {
                 'type': 'object',
@@ -692,6 +694,9 @@ def get_service_schema():
                 'type': 'integer',
             },
             'replicas': {
+                'type': 'integer',
+            },
+            'workers': {
                 'type': 'integer',
             },
             'load_balancing_policy': {
@@ -829,6 +834,9 @@ def get_task_schema():
             },
             # service config is validated separately using SERVICE_SCHEMA
             'service': {
+                'type': 'object',
+            },
+            'pool': {
                 'type': 'object',
             },
             'setup': {
@@ -1134,6 +1142,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.server import daemons
 
     resources_schema = {
         k: v
@@ -1143,21 +1152,7 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema(add_consolidation_mode: bool = False):
-        controller_properties = {
-            'resources': resources_schema,
-            'high_availability': {
-                'type': 'boolean',
-                'default': False,
-            },
-            'autostop': _AUTOSTOP_SCHEMA,
-        }
-        if add_consolidation_mode:
-            controller_properties['consolidation_mode'] = {
-                'type': 'boolean',
-                'default': False,
-            }
-
+    def _get_controller_schema():
         return {
             'type': 'object',
             'required': [],
@@ -1167,7 +1162,18 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'additionalProperties': False,
-                    'properties': controller_properties,
+                    'properties': {
+                        'resources': resources_schema,
+                        'high_availability': {
+                            'type': 'boolean',
+                            'default': False,
+                        },
+                        'autostop': _AUTOSTOP_SCHEMA,
+                        'consolidation_mode': {
+                            'type': 'boolean',
+                            'default': False,
+                        }
+                    },
                 },
                 'bucket': {
                     'type': 'string',
@@ -1480,6 +1486,27 @@ def get_config_schema():
         }
     }
 
+    daemon_config = {
+        'type': 'object',
+        'required': [],
+        'properties': {
+            'log_level': {
+                'type': 'string',
+                'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
+            },
+        }
+    }
+
+    daemon_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {}
+    }
+
+    for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
+        daemon_schema['properties'][daemon.id] = daemon_config
+
     api_server = {
         'type': 'object',
         'required': [],
@@ -1713,8 +1740,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(add_consolidation_mode=True),
-            'serve': _get_controller_schema(add_consolidation_mode=False),
+            'jobs': _get_controller_schema(),
+            'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
@@ -1725,6 +1752,7 @@ def get_config_schema():
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
+            'daemons': daemon_schema,
             **cloud_configs,
         },
     }
