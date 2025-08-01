@@ -1,5 +1,6 @@
 """REST API client of SkyPilot API server"""
 
+import asyncio
 import contextlib
 import contextvars
 import functools
@@ -21,9 +22,11 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
+    import aiohttp
     import requests
 
 else:
+    aiohttp = adaptors_common.LazyImport('aiohttp')
     requests = adaptors_common.LazyImport('requests')
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -204,3 +207,115 @@ def request_without_retry(method, url, **kwargs) -> 'requests.Response':
     if remote_version is not None:
         versions.set_remote_version(remote_version)
     return response
+
+
+# Async versions of the above functions
+
+
+async def request_async(session: 'aiohttp.ClientSession',
+                        method: str,
+                        url: str,
+                        **kwargs) -> 'aiohttp.ClientResponse':
+    """Send an async request to the API server, retry on server temporarily
+    unavailable."""
+    max_retries = 3
+    initial_backoff = 1.0
+    max_backoff_factor = 5
+    
+    backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
+    last_exception = None
+
+    for retry_count in range(max_retries):
+        try:
+            return await request_without_retry_async(session, method, url, **kwargs)
+        except exceptions.RequestInterruptedError:
+            logger.debug('Request interrupted. Retry immediately.')
+            continue
+        except Exception as e:
+            last_exception = e
+            if retry_count >= max_retries - 1:
+                # Retries exhausted
+                raise
+
+            # Check if this is a transient error (similar to sync version logic)
+            is_transient = _is_transient_error_async(e)
+            if not is_transient:
+                # Permanent error, no need to retry
+                raise
+
+            logger.debug(f'Retry async request due to {e}, '
+                         f'attempt {retry_count + 1}/{max_retries}')
+            await asyncio.sleep(backoff.current_backoff())
+
+    # This should never be reached, but just in case
+    raise last_exception
+
+
+async def request_without_retry_async(
+        session: 'aiohttp.ClientSession',
+        method: str,
+        url: str,
+        **kwargs) -> 'aiohttp.ClientResponse':
+    """Send an async request to the API server without retry."""
+    # Add API version headers for compatibility (like sync version does)
+    if 'headers' not in kwargs:
+        kwargs['headers'] = {}
+    kwargs['headers'][constants.API_VERSION_HEADER] = str(constants.API_VERSION)
+    kwargs['headers'][constants.VERSION_HEADER] = (
+        versions.get_local_readable_version())
+
+    try:
+        response = await session.request(method, url, **kwargs)
+
+        # Handle server unavailability (503 status) - same as sync version
+        if response.status == 503:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ServerTemporarilyUnavailableError(
+                    'SkyPilot API server is temporarily unavailable. '
+                    'Please try again later.')
+
+        # Set remote API version and version from headers - same as sync version
+        remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
+        remote_version = response.headers.get(constants.VERSION_HEADER)
+        if remote_api_version is not None:
+            versions.set_remote_api_version(int(remote_api_version))
+        if remote_version is not None:
+            versions.set_remote_version(remote_version)
+
+        return response
+
+    except aiohttp.ClientError as e:
+        # Convert aiohttp errors to appropriate SkyPilot exceptions
+        if isinstance(e, aiohttp.ClientConnectorError):
+            raise exceptions.RequestInterruptedError(
+                f'Connection failed: {e}') from e
+        elif isinstance(e, aiohttp.ClientTimeout):
+            raise exceptions.RequestInterruptedError(
+                f'Request timeout: {e}') from e
+        else:
+            raise
+
+
+def _is_transient_error_async(e: Exception) -> bool:
+    """Check if an exception from async request is transient and should be retried.
+    
+    Mirrors the logic from the sync version's is_transient_error().
+    """
+    if isinstance(e, aiohttp.ClientError):
+        # For response errors, check status code if available
+        if isinstance(e, aiohttp.ClientResponseError):
+            # Only server error is considered as transient (same as sync version)
+            return e.status >= 500
+        # Consider connection errors and timeouts as transient
+        if isinstance(e, (aiohttp.ClientConnectorError, aiohttp.ClientTimeout)):
+            return True
+    
+    # Consider server temporarily unavailable as transient
+    if isinstance(e, exceptions.ServerTemporarilyUnavailableError):
+        return True
+        
+    # It is hard to enumerate all other errors that are transient, e.g.
+    # broken pipe, connection refused, etc. Instead, it is safer to assume
+    # all other errors might be transient since we only retry for 3 times
+    # by default. (Same comment as in sync version)
+    return True
