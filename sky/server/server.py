@@ -505,7 +505,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 allow_redirects=False,
         ) as auth_response:
 
-            if auth_response.status == 200:
+            if auth_response.status == 202:
                 # User is authenticated, extract user info from headers
                 auth_user = self.get_auth_user(auth_response)
                 if not auth_user:
