@@ -97,10 +97,23 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                 if not line:
                     break
                 # start_streaming_at logic in processor.process_line(line)
+                
+                # Debug: Log line endings for progress bar debugging
+                line_repr = repr(line)
+                
+                print(f"replace_crlf: {args.replace_crlf}")
+                slash_r = '\r'
+                slash_r_n = '\r\n'
+                print(f"line.endswith('slash r'): {line.endswith(slash_r)}")
+                print(f"line.endswith('slash r slash n'): {line.endswith(slash_r_n)}")
+                print(f"line: {line_repr}")
+
+
                 if args.replace_crlf and line.endswith('\r\n'):
-                    # Replace CRLF with LF to avoid ray logging to the same
+                    # For regular lines, replace CRLF with LF to avoid ray logging to the same
                     # line due to separating lines with '\n'.
                     line = line[:-2] + '\n'
+                
                 if (args.skip_lines is not None and
                         any(skip in line for skip in args.skip_lines)):
                     continue
@@ -116,7 +129,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                 if (args.stream_logs and start_streaming_flag and
                         not end_streaming_flag):
                     print(streaming_prefix + line,
-                          end='',
+                          end='' if line.endswith('\r') else '\n',
                           file=out_stream,
                           flush=True)
                 if args.log_path != '/dev/null':
@@ -515,7 +528,7 @@ def tail_logs(job_id: Optional[int],
                     if start_stream_at in line:
                         start_streaming = True
                     if start_streaming:
-                        print(line, end='')
+                        print(line, end='' if line.endswith('\r') else '\n')
                 # Flush the last n lines
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
@@ -524,7 +537,7 @@ def tail_logs(job_id: Optional[int],
                                          job_id=job_id,
                                          start_streaming=start_streaming,
                                          start_streaming_at=start_stream_at):
-                print(line, end='', flush=True)
+                print(line, end='' if line.endswith('\r') else '\n', flush=True)
     else:
         try:
             start_streaming = False
@@ -542,7 +555,7 @@ def tail_logs(job_id: Optional[int],
                     if start_stream_at in line:
                         start_streaming = True
                     if start_streaming:
-                        print(line, end='', flush=True)
+                        print(line, end='' if line.endswith('\r') else '\n', flush=True)
                 status_str = status.value if status is not None else 'None'
                 # Only show "Job finished" for actually terminal states
                 if status is not None and status.is_terminal():
