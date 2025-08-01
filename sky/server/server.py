@@ -481,7 +481,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         async with aiohttp.ClientSession() as session:
             try:
-                await self._authenticate(request, call_next, session)
+                return await self._authenticate(request, call_next, session)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error communicating with OAuth2 proxy: {e}')
                 # Fail open or closed based on your security requirements
