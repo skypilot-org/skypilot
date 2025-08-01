@@ -77,7 +77,7 @@ jobs:
         run: |
           echo "Reading current API version from the current checkout..."
           # Extract current API version from the current checked-out state
-          CURRENT_SKY_API_VERSION=$(grep "^API_VERSION = " sky/server/constants.py | sed "s/API_VERSION = '\\(.*\\)'/\\1/")
+          CURRENT_SKY_API_VERSION=$(grep "^API_VERSION = " sky/server/constants.py | awk '{print $3}')
           echo "Current API version (from checkout): ${CURRENT_SKY_API_VERSION}"
           echo "current_sky_api_version=${CURRENT_SKY_API_VERSION}" >> $GITHUB_OUTPUT
 
