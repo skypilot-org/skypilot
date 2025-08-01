@@ -173,7 +173,7 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  
+
   // Initialize showHistory from URL parameter immediately
   const getInitialShowHistory = () => {
     if (typeof window !== 'undefined' && router.isReady) {
@@ -182,7 +182,7 @@ export function Clusters() {
     }
     return false;
   };
-  
+
   const [showHistory, setShowHistory] = useState(getInitialShowHistory);
   const [shouldAnimate, setShouldAnimate] = useState(true); // Track if toggle should animate
   const isMobile = useMobile();
@@ -200,11 +200,11 @@ export function Clusters() {
   useEffect(() => {
     if (router.isReady) {
       updateFiltersByURLParams();
-      
+
       // Sync showHistory state with URL if it has changed
       const historyParam = router.query.history;
       const expectedState = historyParam === 'true';
-      
+
       if (showHistory !== expectedState) {
         setShouldAnimate(false); // Disable animation for programmatic changes
         setShowHistory(expectedState);
