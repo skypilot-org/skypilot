@@ -93,9 +93,15 @@ export function YamlHighlighter({ children, className = '' }) {
 
         let node;
         while ((node = walker.nextNode())) {
-          if (node.textContent && node.textContent.includes('#YAML_BLANK_LINE_MARKER#')) {
+          if (
+            node.textContent &&
+            node.textContent.includes('#YAML_BLANK_LINE_MARKER#')
+          ) {
             // Replace the marker with empty string to hide it
-            node.textContent = node.textContent.replace(/#YAML_BLANK_LINE_MARKER#/g, '');
+            node.textContent = node.textContent.replace(
+              /#YAML_BLANK_LINE_MARKER#/g,
+              ''
+            );
           }
         }
       }, 0);
@@ -125,7 +131,8 @@ export function YamlHighlighter({ children, className = '' }) {
           padding: 0,
           background: 'transparent',
           fontSize: '0.875rem',
-          fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
+          fontFamily:
+            'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
         }}
         wrapLines={true}
         wrapLongLines={true}
