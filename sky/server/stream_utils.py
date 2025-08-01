@@ -155,9 +155,14 @@ async def _tail_log_file(f: aiofiles.threadpool.binary.AsyncBufferedReader,
                 if request_task.status > requests_lib.RequestStatus.RUNNING:
                     if (request_task.status ==
                             requests_lib.RequestStatus.CANCELLED):
-                        buffer.append(
-                            f'{request_task.name!r} request {request_id}'
-                            ' cancelled\n')
+                        if request_task.should_retry:
+                            buffer.append(
+                                message_utils.encode_payload(
+                                    rich_utils.Control.RETRY.encode('')))
+                        else:
+                            buffer.append(
+                                f'{request_task.name!r} request {request_id}'
+                                ' cancelled\n')
                     break
             if not follow:
                 break

@@ -71,10 +71,10 @@ export async function getCloudInfrastructure(clusters, jobs) {
       (c) => c.enabled
     ).length;
 
-    // Convert to array, filter to only enabled clouds, and sort
+    // Convert to array, filter to only enabled clouds, and sort by name
     const result = Object.values(cloudsData)
       .filter((cloud) => cloud.enabled)
-      .sort((a, b) => b.clusters - a.clusters || b.jobs - a.jobs);
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       clouds: result,
@@ -437,6 +437,7 @@ async function getKubernetesGPUs(clustersAndJobsData) {
             gpu_name: acceleratorType,
             gpu_total: totalAccelerators,
             gpu_free: freeAccelerators,
+            ip_address: nodeData['ip_address'] || null,
             context: context,
           };
 

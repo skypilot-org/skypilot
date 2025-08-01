@@ -1,4 +1,4 @@
-name: Dashboard Linting and Formatting
+name: Dashboard Testing and Formatting
 
 on:
   # Trigger the workflow on push or pull request,

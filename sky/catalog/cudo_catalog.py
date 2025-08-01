@@ -10,7 +10,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_PULL_FREQUENCY_HOURS = 1
+_PULL_FREQUENCY_HOURS = 7
 _df = common.read_catalog(cudo_mt.VMS_CSV,
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
@@ -51,7 +51,9 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+                              disk_tier: Optional[str] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     del disk_tier
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
@@ -62,7 +64,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     if memory is None:
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
-                                                      memory_gb_or_ratio)
+                                                      memory_gb_or_ratio,
+                                                      region, zone)
 
 
 def get_accelerators_from_instance_type(

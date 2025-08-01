@@ -1,6 +1,7 @@
 apiVersion: v2
 name: skypilot
 description: A Helm chart for deploying SkyPilot API server on Kubernetes
+icon: "https://raw.githubusercontent.com/skypilot-org/skypilot/master/charts/skypilot/skypilot.svg"
 type: application
 version: 0.0.0
 appVersion: "0.0"
@@ -9,3 +10,11 @@ dependencies:
     version: 4.11.3
     repository: https://kubernetes.github.io/ingress-nginx
     condition: ingress-nginx.enabled
+  - name: prometheus
+    version: 27.20.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled
+  - name: grafana
+    version: 9.2.2
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled

@@ -140,13 +140,17 @@ def apply(
                                                 at_client_side)
         try:
             mutated_user_request = policy.apply(user_request)
+        # Avoid duplicate exception wrapping.
+        except exceptions.UserRequestRejectedByPolicy as e:
+            with ux_utils.print_exception_no_traceback():
+                raise e
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(
                     f'{colorama.Fore.RED}User request rejected by policy '
                     f'{policy!r}{colorama.Fore.RESET}: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
-                ) from e
+                ) from None
         if mutated_config is None:
             mutated_config = mutated_user_request.skypilot_config
         else:

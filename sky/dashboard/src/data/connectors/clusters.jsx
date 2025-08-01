@@ -106,6 +106,71 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
+export async function getClusterHistory() {
+  try {
+    const history = await apiClient.fetch('/cost_report', {
+      days: 30,
+    });
+
+    console.log('Raw cluster history data:', history); // Debug log
+
+    const historyData = history.map((cluster) => {
+      // Get cloud name from resources if available
+      let cloud = 'Unknown';
+      if (cluster.cloud) {
+        cloud = cluster.cloud;
+      } else if (cluster.resources && cluster.resources.cloud) {
+        cloud = cluster.resources.cloud;
+      }
+
+      // Get user name - need to look up from user_hash if needed
+      let user_name = cluster.user_name || '-';
+
+      // Extract resource info
+
+      return {
+        status: cluster.status
+          ? clusterStatusMap[cluster.status]
+          : 'TERMINATED',
+        cluster: cluster.name,
+        user: user_name,
+        user_hash: cluster.user_hash,
+        cloud: cloud,
+        region: '',
+        infra: cloud,
+        full_infra: cloud,
+        resources_str: cluster.resources_str,
+        resources_str_full: cluster.resources_str_full,
+        time: cluster.launched_at ? new Date(cluster.launched_at * 1000) : null,
+        num_nodes: cluster.num_nodes || 1,
+        duration: cluster.duration,
+        total_cost: cluster.total_cost,
+        workspace: cluster.workspace || 'default',
+        autostop: -1,
+        to_down: false,
+        cluster_hash: cluster.cluster_hash,
+        usage_intervals: cluster.usage_intervals,
+        command: cluster.last_creation_command || '',
+        task_yaml: cluster.last_creation_yaml || '{}',
+        events: [
+          {
+            time: cluster.launched_at
+              ? new Date(cluster.launched_at * 1000)
+              : new Date(),
+            event: 'Cluster created.',
+          },
+        ],
+      };
+    });
+
+    console.log('Processed cluster history data:', historyData); // Debug log
+    return historyData;
+  } catch (error) {
+    console.error('Error fetching cluster history:', error);
+    return [];
+  }
+}
+
 export async function streamClusterJobLogs({
   clusterName,
   jobId,
@@ -157,6 +222,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         status: job.status,
         job: job.job_name,
         user: job.username,
+        user_hash: job.user_hash,
         gpus: job.accelerators || {},
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
@@ -168,6 +234,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
         infra: '',
         logs: '',
         workspace: workspace || 'default',
+        git_commit: job.metadata?.git_commit || '-',
       };
     });
     return jobData;

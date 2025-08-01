@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
@@ -24,10 +24,10 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -62,10 +62,8 @@ class JobInfoLoc(enum.IntEnum):
     END_AT = 7
     RESOURCES = 8
     PID = 9
-
-
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+    LOG_PATH = 10
+    METADATA = 11
 
 
 def create_table(cursor, conn):
@@ -105,7 +103,9 @@ def create_table(cursor, conn):
         start_at FLOAT DEFAULT -1,
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
-        pid INTEGER DEFAULT -1)""")
+        pid INTEGER DEFAULT -1,
+        log_dir TEXT DEFAULT NULL,
+        metadata TEXT DEFAULT '{}')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -118,6 +118,14 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
+                                 'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'jobs',
+                                 'metadata',
+                                 'TEXT DEFAULT \'{}\'',
+                                 value_to_replace_existing_entries='{}')
     conn.commit()
 
 
@@ -136,7 +144,9 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+                db_path = os.path.expanduser('~/.sky/jobs.db')
+                os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
+                _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
 
     return wrapper
@@ -336,23 +346,60 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> Tuple[int, str]:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
+         run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
     for row in rows:
         job_id = row[0]
     assert job_id is not None
-    return job_id
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, f'{job_id}-{job_name}')
+    set_log_dir_no_lock(job_id, log_dir)
+    return job_id, log_dir
+
+
+@init_db
+def set_log_dir_no_lock(job_id: int, log_dir: str) -> None:
+    """Set the log directory for the job.
+
+    We persist the log directory for the job to allow changing the log directory
+    generation logic over versions.
+
+    Args:
+        job_id: The ID of the job.
+        log_dir: The log directory for the job.
+    """
+    assert _DB is not None
+    _DB.cursor.execute('UPDATE jobs SET log_dir=(?) WHERE job_id=(?)',
+                       (log_dir, job_id))
+    _DB.conn.commit()
+
+
+@init_db
+def get_log_dir_for_job(job_id: int) -> Optional[str]:
+    """Get the log directory for the job.
+
+    Args:
+        job_id: The ID of the job.
+    """
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT log_dir FROM jobs WHERE job_id=(?)',
+                              (job_id,))
+    for row in rows:
+        return row[0]
+    return None
 
 
 @init_db
@@ -533,6 +580,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
+            'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
     return records
 
@@ -760,6 +808,14 @@ def fail_all_jobs_in_progress() -> None:
 
 
 def update_status() -> None:
+    # This signal file suggests that the controller is recovering from a
+    # failure. See sky/jobs/utils.py::update_managed_jobs_statuses for more
+    # details. When recovering, we should not update the job status to failed
+    # driver as they will be recovered later.
+    if os.path.exists(
+            os.path.expanduser(
+                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
+        return
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     nonterminal_jobs = _get_jobs(user_hash=None,
@@ -795,7 +851,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
     """
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
+        'STATUS', 'LOG', 'GIT COMMIT'
     ])
     for job in jobs:
         job_table.add_row([
@@ -810,6 +866,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
             job['resources'],
             job['status'].colored_str(),
             job['log_path'],
+            job.get('metadata', {}).get('git_commit', '-'),
         ])
     return job_table
 
@@ -972,8 +1029,8 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
 
 
 @init_db
-def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
-    """Returns the relative paths to the log files for job with globbing."""
+def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
+    """Returns the relative paths to the log files for jobs with globbing."""
     assert _DB is not None
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
     _DB.cursor.execute(
@@ -981,12 +1038,16 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _DB.cursor.fetchall()
-    run_timestamps = {}
+    job_to_dir = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
-        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-        run_timestamps[str(job_id)] = run_timestamp
-    return message_utils.encode_payload(run_timestamps)
+        if row[JobInfoLoc.LOG_PATH.value]:
+            job_to_dir[str(job_id)] = row[JobInfoLoc.LOG_PATH.value]
+        else:
+            run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+            job_to_dir[str(job_id)] = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                                   run_timestamp)
+    return message_utils.encode_payload(job_to_dir)
 
 
 class JobLibCodeGen:
@@ -1007,7 +1068,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+                resources_str: str, metadata: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1018,12 +1079,25 @@ class JobLibCodeGen:
             '\nif int(constants.SKYLET_VERSION) < 9: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
-            '\njob_id = job_lib.add_job('
+            '\nresult = None',
+            '\nif int(constants.SKYLET_VERSION) < 15: '
+            '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
-            'print("Job ID: " + str(job_id), flush=True)',
+            '\nelse: '
+            '\n result = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r})',
+            ('\nif isinstance(result, tuple):'
+             '\n  print("Job ID: " + str(result[0]), flush=True)'
+             '\n  print("Log Dir: " + str(result[1]), flush=True)'
+             '\nelse:'
+             '\n  print("Job ID: " + str(result), flush=True)'),
         ]
         return cls._build(code)
 
@@ -1092,9 +1166,17 @@ class JobLibCodeGen:
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
-            'run_timestamp = job_lib.get_run_timestamp(job_id)',
-            f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
-            f'tail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
+            # For backward compatibility, use the legacy generation rule for
+            # jobs submitted before 0.11.0.
+            ('log_dir = None\n'
+             'if hasattr(job_lib, "get_log_dir_for_job"):\n'
+             '  log_dir = job_lib.get_log_dir_for_job(job_id)\n'
+             'if log_dir is None:\n'
+             '  run_timestamp = job_lib.get_run_timestamp(job_id)\n'
+             f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
+            ),
+            # Add a newline to leave the if indent block above.
+            f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
@@ -1103,6 +1185,10 @@ class JobLibCodeGen:
             # and older did not have JobExitCode, so we use 0 for those versions
             # TODO: Remove this special handling after 0.10.0.
             'exit_code = exceptions.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
+            # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
+            # exit with success (0) since fetching current logs is a successful operation.
+            # This prevents shell wrappers from printing "command terminated with exit code 101".
+            f'exit_code = 0 if not {follow} and exit_code == 101 else exit_code',
             'sys.exit(exit_code)',
         ]
         return cls._build(code)
@@ -1134,12 +1220,14 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_run_timestamp_with_globbing(cls,
-                                        job_ids: Optional[List[str]]) -> str:
+    def get_log_dirs_for_jobs(cls, job_ids: Optional[List[str]]) -> str:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.run_timestamp_with_globbing_payload(job_ids)',
+            # TODO(aylei): backward compatibility, remove after 0.12.0.
+            'log_dirs = job_lib.get_log_dir_for_jobs(job_ids) if '
+            'hasattr(job_lib, "get_log_dir_for_jobs") else '
+            'job_lib.run_timestamp_with_globbing_payload(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

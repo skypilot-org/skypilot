@@ -7,6 +7,15 @@ import { CACHE_CONFIG } from './config';
 // Default value configured in config.js but can be overridden per function or globally
 const DEFAULT_CACHE_TTL = CACHE_CONFIG.DEFAULT_TTL;
 
+// Simple string hash function (djb2)
+function simpleHash(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) + hash + str.charCodeAt(i);
+  }
+  return hash >>> 0;
+}
+
 class DashboardCache {
   constructor() {
     this.cache = new Map();
@@ -207,9 +216,13 @@ class DashboardCache {
    * @private
    */
   _generateKey(fetchFunction, args) {
-    const functionName = fetchFunction.name || 'anonymous';
+    // The `fetchFunction.name` would be like `a`, `s`, `n`, etc. after exporting,
+    // which is very likely to be conflict between different functions.
+    // So we use the function string to generate the hash.
+    const functionString = fetchFunction.toString();
+    const functionHash = simpleHash(functionString);
     const argsHash = args.length > 0 ? JSON.stringify(args) : '';
-    return `${functionName}_${argsHash}`;
+    return `${functionHash}_${argsHash}`;
   }
 }
 

@@ -4,7 +4,10 @@ import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useClusterDetails } from '@/data/connectors/clusters';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import {
+  CustomTooltip as Tooltip,
+  formatFullTimestamp,
+} from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
@@ -12,6 +15,8 @@ import { StatusBadge } from '@/components/elements/StatusBadge';
 import { LogFilter, formatLogs } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
+import { UserDisplay } from '@/components/elements/UserDisplay';
+import { CheckIcon, CopyIcon } from 'lucide-react';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -78,6 +83,7 @@ export function JobDetailPage() {
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logs, setLogs] = useState([]);
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -172,6 +178,7 @@ export function JobDetailPage() {
         infra: clusterData.infra,
         cluster: clusterData.cluster,
         user: clusterData.user,
+        user_hash: clusterData.user_hash,
       };
     }
   }
@@ -234,7 +241,22 @@ export function JobDetailPage() {
                       <div className="text-gray-600 font-medium text-base">
                         User
                       </div>
-                      <div className="text-base mt-1">{jobData.user}</div>
+                      <div className="text-base mt-1">
+                        <UserDisplay
+                          username={jobData.user}
+                          userHash={jobData.user_hash}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Submitted
+                      </div>
+                      <div className="text-base mt-1">
+                        {jobData.submitted_at
+                          ? formatFullTimestamp(jobData.submitted_at)
+                          : 'N/A'}
+                      </div>
                     </div>
                     {jobData.resources && (
                       <div>
@@ -261,6 +283,41 @@ export function JobDetailPage() {
                         </div>
                       </div>
                     )}
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Git Commit
+                      </div>
+                      <div className="text-base mt-1 flex items-center">
+                        {jobData.git_commit && jobData.git_commit !== '-' ? (
+                          <span className="flex items-center mr-2">
+                            {jobData.git_commit}
+                            <Tooltip
+                              content={isCopied ? 'Copied!' : 'Copy commit'}
+                              className="text-muted-foreground"
+                            >
+                              <button
+                                onClick={async () => {
+                                  await navigator.clipboard.writeText(
+                                    jobData.git_commit
+                                  );
+                                  setIsCopied(true);
+                                  setTimeout(() => setIsCopied(false), 2000);
+                                }}
+                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                              >
+                                {isCopied ? (
+                                  <CheckIcon className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <CopyIcon className="w-4 h-4" />
+                                )}
+                              </button>
+                            </Tooltip>
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -296,8 +353,7 @@ export function JobDetailPage() {
                   {isPending ? (
                     <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
                       <span>
-                        Waiting for the job to start, please refresh after a
-                        while
+                        Waiting for the job to start; refresh in a few moments.
                       </span>
                     </div>
                   ) : isLoadingLogs ? (

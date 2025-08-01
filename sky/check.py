@@ -11,10 +11,12 @@ import colorama
 from sky import clouds as sky_clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -22,6 +24,30 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+
+logger = sky_logging.init_logger(__name__)
+
+
+def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
+    # Use allowed_clouds from config if it exists, otherwise check all
+    # clouds. Also validate names with get_cloud_tuple.
+    config_allowed_cloud_names = skypilot_config.get_nested(
+        ('allowed_clouds',),
+        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME])
+    # filter out the clouds that are disabled in the workspace config
+    workspace_disabled_clouds = []
+    for cloud in config_allowed_cloud_names:
+        cloud_config = skypilot_config.get_workspace_cloud(cloud.lower(),
+                                                           workspace=workspace)
+        cloud_disabled = cloud_config.get('disabled', False)
+        if cloud_disabled:
+            workspace_disabled_clouds.append(cloud.lower())
+
+    config_allowed_cloud_names = [
+        c for c in config_allowed_cloud_names
+        if c.lower() not in workspace_disabled_clouds
+    ]
+    return config_allowed_cloud_names
 
 
 def check_capabilities(
@@ -132,6 +158,8 @@ def check_capabilities(
             c for c in config_allowed_cloud_names
             if c not in workspace_disabled_clouds
         ]
+        global_user_state.set_allowed_clouds(
+            [c for c in config_allowed_cloud_names], current_workspace_name)
 
         # Use disallowed_cloud_names for logging the clouds that will be
         # disabled because they are not included in allowed_clouds in
@@ -341,11 +369,22 @@ def get_cached_enabled_clouds_or_refresh(
             raise_if_no_cloud_access is set to True.
     """
     active_workspace = skypilot_config.get_active_workspace()
+    allowed_clouds_changed = False
+    cached_allowed_clouds = global_user_state.get_allowed_clouds(
+        active_workspace)
+    skypilot_config_allowed_clouds = _get_workspace_allowed_clouds(
+        active_workspace)
+    if sorted(cached_allowed_clouds) != sorted(skypilot_config_allowed_clouds):
+        allowed_clouds_changed = True
+
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
         capability, active_workspace)
-    if not cached_enabled_clouds:
+    if not cached_enabled_clouds or allowed_clouds_changed:
         try:
             check_capability(capability, quiet=True, workspace=active_workspace)
+            if allowed_clouds_changed:
+                global_user_state.set_allowed_clouds(
+                    skypilot_config_allowed_clouds, active_workspace)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
@@ -382,7 +421,8 @@ def get_cloud_credential_file_mounts(
         cloud_file_mounts = cloud.get_credential_file_mounts()
         for remote_path, local_path in cloud_file_mounts.items():
             if os.path.exists(os.path.expanduser(local_path)):
-                file_mounts[remote_path] = local_path
+                file_mounts[remote_path] = os.path.realpath(
+                    os.path.expanduser(local_path))
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.
@@ -522,7 +562,7 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
             # TODO: This is a hack to remove the 'ssh-' prefix from the
             # context name. Once we have a separate kubeconfig for SSH,
             # this will not be required.
-            cleaned_context = context.lstrip('ssh-')
+            cleaned_context = common_utils.removeprefix(context, 'ssh-')
         else:
             cleaned_context = context
         symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(filtered_contexts) -
@@ -579,8 +619,11 @@ def _format_enabled_cloud(cloud_name: str,
             return _green_color(cloud_and_capabilities)
 
         # Check if allowed_contexts is explicitly set in config
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
+        allowed_contexts = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=None,
+            keys=('allowed_contexts',),
+            default_value=None)
 
         # Format the context info with consistent styling
         if allowed_contexts is not None:

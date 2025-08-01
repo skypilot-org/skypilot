@@ -1,34 +1,23 @@
 """The database for services information."""
 import collections
 import enum
+import functools
 import json
 import pathlib
 import pickle
 import sqlite3
+import threading
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
 from sky.serve import constants
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
     from sky.serve import service_spec
-
-
-def _get_db_path() -> str:
-    """Workaround to collapse multi-step Path ops for type checker.
-    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
-    """
-    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
-    path = path.expanduser().absolute()
-    path.parents[0].mkdir(parents=True, exist_ok=True)
-    return str(path)
-
-
-_DB_PATH: str = _get_db_path()
 
 
 def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
@@ -79,10 +68,43 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     # Whether the service's load balancer is encrypted with TLS.
     db_utils.add_column_to_table(cursor, conn, 'services', 'tls_encrypted',
                                  'INTEGER DEFAULT 0')
+    # Whether the service is a cluster pool.
+    db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
+                                 'INTEGER DEFAULT 0')
     conn.commit()
 
 
-db_utils.SQLiteConn(_DB_PATH, create_table)
+def _get_db_path() -> str:
+    """Workaround to collapse multi-step Path ops for type checker.
+    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
+    """
+    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_PATH = None
+_db_init_lock = threading.Lock()
+
+
+def init_db(func):
+    """Initialize the database."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global _DB_PATH
+        if _DB_PATH is not None:
+            return func(*args, **kwargs)
+        with _db_init_lock:
+            if _DB_PATH is None:
+                _DB_PATH = _get_db_path()
+                db_utils.SQLiteConn(_DB_PATH, create_table)
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -247,26 +269,29 @@ _SERVICE_STATUS_TO_COLOR = {
 }
 
 
+@init_db
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus, tls_encrypted: bool) -> bool:
+                status: ServiceStatus, tls_encrypted: bool, pool: bool) -> bool:
     """Add a service in the database.
 
     Returns:
         True if the service is added successfully, False if the service already
         exists.
     """
+    assert _DB_PATH is not None
     try:
         with db_utils.safe_cursor(_DB_PATH) as cursor:
             cursor.execute(
                 """\
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
-                requested_resources_str, load_balancing_policy, tls_encrypted)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                requested_resources_str, load_balancing_policy, tls_encrypted,
+                pool)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
                  requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted)))
+                 int(tls_encrypted), int(pool)))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -275,15 +300,19 @@ def add_service(name: str, controller_job_id: int, policy: str,
     return True
 
 
+@init_db
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute("""\
             DELETE FROM services WHERE name=(?)""", (service_name,))
 
 
+@init_db
 def set_service_uptime(service_name: str, uptime: int) -> None:
     """Sets the uptime of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -291,11 +320,13 @@ def set_service_uptime(service_name: str, uptime: int) -> None:
             uptime=(?) WHERE name=(?)""", (uptime, service_name))
 
 
+@init_db
 def set_service_status_and_active_versions(
         service_name: str,
         status: ServiceStatus,
         active_versions: Optional[List[int]] = None) -> None:
     """Sets the service status."""
+    assert _DB_PATH is not None
     vars_to_set = 'status=(?)'
     values: Tuple[str, ...] = (status.value, service_name)
     if active_versions is not None:
@@ -308,9 +339,11 @@ def set_service_status_and_active_versions(
             {vars_to_set} WHERE name=(?)""", values)
 
 
+@init_db
 def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -319,9 +352,11 @@ def set_service_controller_port(service_name: str,
             (controller_port, service_name))
 
 
+@init_db
 def set_service_load_balancer_port(service_name: str,
                                    load_balancer_port: int) -> None:
     """Sets the load balancer port of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -333,8 +368,8 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
-    return {
+     _, active_versions, load_balancing_policy, tls_encrypted, pool) = row[:16]
+    record = {
         'name': name,
         'controller_job_id': controller_job_id,
         'controller_port': controller_port,
@@ -352,11 +387,19 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'requested_resources_str': requested_resources_str,
         'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
+        'pool': bool(pool),
     }
+    latest_spec = get_spec(name, current_version)
+    if latest_spec is not None:
+        record['policy'] = latest_spec.autoscaling_policy_str()
+        record['load_balancing_policy'] = latest_spec.load_balancing_policy
+    return record
 
 
+@init_db
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute('SELECT v.max_version, s.* FROM services s '
                               'JOIN ('
@@ -369,8 +412,10 @@ def get_services() -> List[Dict[str, Any]]:
     return records
 
 
+@init_db
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             'SELECT v.max_version, s.* FROM services s '
@@ -384,8 +429,10 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+@init_db
 def get_service_versions(service_name: str) -> List[int]:
     """Gets all versions of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -394,6 +441,7 @@ def get_service_versions(service_name: str) -> List[int]:
     return [row[0] for row in rows]
 
 
+@init_db
 def get_glob_service_names(
         service_names: Optional[List[str]] = None) -> List[str]:
     """Get service names matching the glob patterns.
@@ -405,6 +453,7 @@ def get_glob_service_names(
     Returns:
         A list of non-duplicated service names.
     """
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         if service_names is None:
             rows = cursor.execute('SELECT name FROM services').fetchall()
@@ -419,9 +468,11 @@ def get_glob_service_names(
 
 
 # === Replica functions ===
+@init_db
 def add_or_update_replica(service_name: str, replica_id: int,
                           replica_info: 'replica_managers.ReplicaInfo') -> None:
     """Adds a replica to the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -431,8 +482,10 @@ def add_or_update_replica(service_name: str, replica_id: int,
             (service_name, replica_id, pickle.dumps(replica_info)))
 
 
+@init_db
 def remove_replica(service_name: str, replica_id: int) -> None:
     """Removes a replica from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -441,10 +494,12 @@ def remove_replica(service_name: str, replica_id: int) -> None:
             AND replica_id=(?)""", (service_name, replica_id))
 
 
+@init_db
 def get_replica_info_from_id(
         service_name: str,
         replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -456,9 +511,11 @@ def get_replica_info_from_id(
     return None
 
 
+@init_db
 def get_replica_infos(
         service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -467,8 +524,10 @@ def get_replica_infos(
     return [pickle.loads(row[0]) for row in rows]
 
 
+@init_db
 def total_number_provisioning_replicas() -> int:
     """Returns the total number of provisioning replicas."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute('SELECT replica_info FROM replicas').fetchall()
     provisioning_count = 0
@@ -488,9 +547,10 @@ def get_replicas_at_status(
 
 
 # === Version functions ===
+@init_db
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""
-
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -507,8 +567,10 @@ def add_version(service_name: str) -> int:
     return inserted_version
 
 
+@init_db
 def add_or_update_version(service_name: str, version: int,
                           spec: 'service_spec.SkyServiceSpec') -> None:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -517,8 +579,10 @@ def add_or_update_version(service_name: str, version: int,
         VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
 
 
+@init_db
 def remove_service_versions(service_name: str) -> None:
     """Removes a replica from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -526,9 +590,11 @@ def remove_service_versions(service_name: str) -> None:
             WHERE service_name=(?)""", (service_name,))
 
 
+@init_db
 def get_spec(service_name: str,
              version: int) -> Optional['service_spec.SkyServiceSpec']:
     """Gets spec from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -540,8 +606,10 @@ def get_spec(service_name: str,
     return None
 
 
+@init_db
 def delete_version(service_name: str, version: int) -> None:
     """Deletes a version from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -550,8 +618,10 @@ def delete_version(service_name: str, version: int) -> None:
             AND version=(?)""", (service_name, version))
 
 
+@init_db
 def delete_all_versions(service_name: str) -> None:
     """Deletes all versions from the database."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -559,7 +629,9 @@ def delete_all_versions(service_name: str) -> None:
             WHERE service_name=(?)""", (service_name,))
 
 
+@init_db
 def get_latest_version(service_name: str) -> Optional[int]:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
@@ -570,8 +642,10 @@ def get_latest_version(service_name: str) -> Optional[int]:
     return rows[0][0]
 
 
+@init_db
 def get_service_controller_port(service_name: str) -> int:
     """Gets the controller port of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute('SELECT controller_port FROM services WHERE name = ?',
                        (service_name,))
@@ -581,8 +655,10 @@ def get_service_controller_port(service_name: str) -> int:
         return row[0]
 
 
+@init_db
 def get_service_load_balancer_port(service_name: str) -> int:
     """Gets the load balancer port of a service."""
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute('SELECT load_balancer_port FROM services WHERE name = ?',
                        (service_name,))

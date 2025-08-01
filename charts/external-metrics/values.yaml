@@ -1,0 +1,21 @@
+# Set configuration for Prometheus helm chart
+prometheus:
+  enabled: true
+  # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
+  # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
+  # it is recommended to install and manage prometheus separately.
+  # SkyPilot API server will be automatically discovered by the prometheus if it runs with the default kubernetes discovery configuration.
+  server:
+    persistentVolume:
+      enabled: true
+      size: 10Gi
+  kube-state-metrics:
+    enabled: true
+    metricLabelsAllowlist:
+      - pods=[skypilot-cluster]
+  prometheus-node-exporter:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  alertmanager:
+    enabled: false

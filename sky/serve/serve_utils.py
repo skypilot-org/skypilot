@@ -11,9 +11,10 @@ import shlex
 import shutil
 import threading
 import time
+import traceback
 import typing
-from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar, Union)
+from typing import (Any, Callable, DefaultDict, Deque, Dict, Generic, Iterator,
+                    List, Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -22,7 +23,10 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_placer
@@ -46,6 +50,8 @@ if typing.TYPE_CHECKING:
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
+
+logger = sky_logging.init_logger(__name__)
 
 
 @annotations.lru_cache(scope='request')
@@ -244,7 +250,22 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
-def validate_service_task(task: 'sky.Task') -> None:
+def get_service_filelock_path(pool: str) -> str:
+    path = (pathlib.Path(constants.SKYSERVE_METADATA_DIR) / pool /
+            'pool.lock').expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    consolidation_mode = skypilot_config.get_nested(
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
+    # _check_consolidation_mode_consistency(consolidation_mode)
+    return consolidation_mode
+
+
+def validate_service_task(task: 'sky.Task', pool: bool) -> None:
     """Validate the task for Sky Serve.
 
     Args:
@@ -267,17 +288,25 @@ def validate_service_task(task: 'sky.Task') -> None:
                 'use `dynamic_ondemand_fallback` or set '
                 'base_ondemand_fallback_replicas.')
 
+    field_name = 'service' if not pool else 'pool'
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
+            raise RuntimeError(f'{field_name.capitalize()} section not found.')
+
+    if pool != task.service.pool:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{field_name.capitalize()} section in the YAML '
+                             f'file does not match the pool argument. '
+                             f'To fix, add a valid `{field_name}` field.')
 
     policy_description = ('on-demand'
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.job_recovery is not None:
+            sys_name = 'SkyServe' if not pool else 'Cluster Pool'
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('job_recovery is disabled for SkyServe. '
-                                 'SkyServe will replenish preempted spot '
+                raise ValueError(f'job_recovery is disabled for {sys_name}. '
+                                 f'{sys_name} will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
@@ -300,7 +329,7 @@ def validate_service_task(task: 'sky.Task') -> None:
                 raise ValueError(
                     '`spot_placer` is only supported for spot resources. '
                     'Please explicitly specify `use_spot: true` in resources.')
-        if task.service.ports is None:
+        if not pool and task.service.ports is None:
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
             if len(requested_ports) != 1:
@@ -320,10 +349,16 @@ def validate_service_task(task: 'sky.Task') -> None:
                         f'Got multiple ports: {service_port} and '
                         f'{replica_ingress_port} in different resources. '
                         'Please specify the same port instead.')
+        if pool:
+            if (task.service.ports is not None or
+                    requested_resources.ports is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify ports in a cluster pool.')
 
 
-def generate_service_name():
-    return f'sky-service-{uuid.uuid4().hex[:4]}'
+def generate_service_name(pool: bool = False):
+    noun = 'pool' if pool else 'service'
+    return f'sky-{noun}-{uuid.uuid4().hex[:4]}'
 
 
 def generate_remote_service_dir_name(service_name: str) -> str:
@@ -426,6 +461,9 @@ def set_service_status_and_active_versions_from_replica(
 
 
 def update_service_status() -> None:
+    if is_consolidation_mode():
+        # TODO(tian): PID-based tracking.
+        return
     services = serve_state.get_services()
     for record in services:
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
@@ -440,11 +478,14 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service_encoded(service_name: str, version: int, mode: str) -> str:
-    service_status = _get_service_status(service_name)
+def update_service_encoded(service_name: str, version: int, mode: str,
+                           pool: bool) -> str:
+    noun = 'pool' if pool else 'service'
+    capnoun = noun.capitalize()
+    service_status = _get_service_status(service_name, pool=pool)
     if service_status is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist.')
+            raise ValueError(f'{capnoun} {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
@@ -455,27 +496,30 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         })
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
+            # This only happens for services since pool is added after the
+            # update feature is introduced.
             raise ValueError(
                 'The service is up-ed in an old version and does not '
                 'support update. Please `sky serve down` '
                 'it first and relaunch the service. ')
     elif resp.status_code == 400:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Client error during service update: {resp.text}')
+            raise ValueError(f'Client error during {noun} update: {resp.text}')
     elif resp.status_code == 500:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Server error during service update: {resp.text}')
+                f'Server error during {noun} update: {resp.text}')
     elif resp.status_code != 200:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to update service: {resp.text}')
+            raise ValueError(f'Failed to update {noun}: {resp.text}')
 
     service_msg = resp.json()['message']
     return message_utils.encode_payload(service_msg)
 
 
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
-    service_status = _get_service_status(service_name)
+    # TODO(tian): Currently pool does not support terminating replica.
+    service_status = _get_service_status(service_name, pool=False)
     if service_status is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist.')
@@ -506,6 +550,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
 
 def _get_service_status(
         service_name: str,
+        pool: bool,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
@@ -520,27 +565,63 @@ def _get_service_status(
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         return None
+    if record['pool'] != pool:
+        return None
+
+    record['pool_yaml'] = ''
+    if record['pool']:
+        latest_yaml_path = generate_task_yaml_file_name(service_name,
+                                                        record['version'])
+        original_config = common_utils.read_yaml(latest_yaml_path)
+        original_config.pop('run', None)
+        svc: Dict[str, Any] = original_config.pop('service')
+        if svc is not None:
+            svc.pop('pool', None)
+            original_config['pool'] = svc
+        record['pool_yaml'] = common_utils.dump_yaml_str(original_config)
+
+    record['target_num_replicas'] = 0
+    try:
+        controller_port = record['controller_port']
+        resp = requests.get(
+            _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+            '/autoscaler/info')
+        record['target_num_replicas'] = resp.json()['target_num_replicas']
+    except requests.exceptions.RequestException:
+        record['target_num_replicas'] = None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to get autoscaler info for {service_name}: '
+                     f'{common_utils.format_exception(e)}\n'
+                     f'Traceback: {traceback.format_exc()}')
+
     if with_replica_info:
         record['replica_info'] = [
-            info.to_info_dict(with_handle=True)
+            info.to_info_dict(with_handle=True, with_url=not pool)
             for info in serve_state.get_replica_infos(service_name)
         ]
+        if pool:
+            for replica_info in record['replica_info']:
+                job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
+                    service_name, replica_info['name'])
+                replica_info['used_by'] = job_ids[0] if job_ids else None
     return record
 
 
-def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
+def get_service_status_encoded(service_names: Optional[List[str]],
+                               pool: bool) -> str:
     service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        service_status = _get_service_status(service_name)
+        service_status = _get_service_status(service_name, pool=pool)
         if service_status is None:
             continue
         service_statuses.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
+    service_statuses = sorted(service_statuses, key=lambda x: x['name'])
     # We have to use payload_type here to avoid the issue of
     # message_utils.decode_payload() not being able to correctly decode the
     # message with <sky-payload> tags.
@@ -577,6 +658,71 @@ def add_version_encoded(service_name: str) -> str:
 
 def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
+
+
+def num_replicas(service_name: str) -> int:
+    logger.info(f'Get number of replicas for pool {service_name!r}')
+    return len(serve_state.get_replica_infos(service_name))
+
+
+def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
+    """Get the next available cluster name from idle replicas.
+
+    Args:
+        service_name: The name of the service.
+        job_id: Optional job ID to associate with the acquired cluster.
+                If None, a placeholder will be used.
+
+    Returns:
+        The cluster name if an idle replica is found, None otherwise.
+    """
+    # Check if service exists
+    service_status = _get_service_status(service_name,
+                                         pool=True,
+                                         with_replica_info=False)
+    if service_status is None:
+        logger.error(f'Service {service_name!r} does not exist.')
+        return None
+    if not service_status['pool']:
+        logger.error(f'Service {service_name!r} is not a cluster pool.')
+        return None
+    with filelock.FileLock(get_service_filelock_path(service_name)):
+
+        logger.debug(f'Get next cluster name for pool {service_name!r}')
+        ready_replicas = [
+            info for info in serve_state.get_replica_infos(service_name)
+            if info.status == serve_state.ReplicaStatus.READY
+        ]
+        idle_replicas: List['replica_managers.ReplicaInfo'] = []
+        for replica_info in ready_replicas:
+            jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
+                service_name, replica_info.cluster_name)
+            # TODO(tian): Make it resources aware. Currently we allow and only
+            # allow one job per replica. In the following PR, we should:
+            #  i) When the replica is launched with `any_of` resources (
+            #     replicas can have different resources), we should check if
+            #     the resources that jobs require are available on the replica.
+            #     e.g., if a job requires A100:1 on a {L4:1, A100:1} pool, it
+            #     should only goes to replica with A100.
+            # ii) When a job only requires a subset of the resources on the
+            #     replica, each replica should be able to handle multiple jobs
+            #     at the same time. e.g., if a job requires A100:1 on a A100:8
+            #     pool, it should be able to run 4 jobs at the same time.
+            if not jobs_on_replica:
+                idle_replicas.append(replica_info)
+        if not idle_replicas:
+            logger.info(f'No idle replicas found for pool {service_name!r}')
+            return None
+
+        # Select the first idle replica.
+        # TODO(tian): "Load balancing" policy.
+        replica_info = idle_replicas[0]
+        logger.info(f'Selected replica {replica_info.replica_id} with cluster '
+                    f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
+                    f'{service_name!r}')
+        managed_job_state.set_current_cluster_name(job_id,
+                                                   replica_info.cluster_name)
+        return replica_info.cluster_name
 
 
 def _terminate_failed_services(
@@ -618,17 +764,38 @@ def _terminate_failed_services(
             f'controller: {remaining_identity}{colorama.Style.RESET_ALL}')
 
 
-def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
+def terminate_services(service_names: Optional[List[str]], purge: bool,
+                       pool: bool) -> str:
+    noun = 'pool' if pool else 'service'
+    capnoun = noun.capitalize()
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names: List[str] = []
     messages: List[str] = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
+                                             pool=pool,
                                              with_replica_info=False)
+        if service_status is None:
+            continue
         if (service_status is not None and service_status['status']
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
             continue
+        if pool:
+            nonterminal_job_ids = (
+                managed_job_state.get_nonterminal_job_ids_by_pool(service_name))
+            if nonterminal_job_ids:
+                nonterminal_job_ids_str = ','.join(
+                    str(job_id) for job_id in nonterminal_job_ids)
+                num_nonterminal_jobs = len(nonterminal_job_ids)
+                messages.append(
+                    f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} has '
+                    f'{num_nonterminal_jobs} nonterminal jobs: '
+                    f'{nonterminal_job_ids_str}. To terminate the {noun}, '
+                    f'please run `sky jobs cancel --pool {service_name}` to '
+                    'cancel all jobs in the pool first.'
+                    f'{colorama.Style.RESET_ALL}')
+                continue
         # If the `services` and `version_specs` table are not aligned, it might
         # result in a None service status. In this case, the controller process
         # is not functioning as well and we should also use the
@@ -636,10 +803,11 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
         # This is a safeguard for a rare case, that is accidentally abort
         # between `serve_state.add_service` and
         # `serve_state.add_or_update_version` in service.py.
-        if (service_status is None or service_status['status']
+        purge_cmd = (f'sky jobs pool down {service_name} --purge'
+                     if pool else f'sky serve down {service_name} --purge')
+        if (service_status['status']
                 in serve_state.ServiceStatus.failed_statuses()):
-            failed_status = (service_status['status']
-                             if service_status is not None else None)
+            failed_status = service_status['status']
             if purge:
                 message = _terminate_failed_services(service_name,
                                                      failed_status)
@@ -647,11 +815,10 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     messages.append(message)
             else:
                 messages.append(
-                    f'{colorama.Fore.YELLOW}Service {service_name!r} is in '
+                    f'{colorama.Fore.YELLOW}{capnoun} {service_name!r} is in '
                     f'failed status ({failed_status}). Skipping '
                     'its termination as it could lead to a resource leak. '
-                    f'(Use `sky serve down {service_name} --purge` to '
-                    'forcefully terminate the service.)'
+                    f'(Use `{purge_cmd}` to forcefully terminate the {noun}.)'
                     f'{colorama.Style.RESET_ALL}')
                 # Don't add to terminated_service_names since it's not
                 # actually terminated.
@@ -668,12 +835,12 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
     if not terminated_service_names:
-        messages.append('No service to terminate.')
+        messages.append(f'No {noun} to terminate.')
     else:
-        identity_str = f'Service {terminated_service_names[0]} is'
+        identity_str = f'{capnoun} {terminated_service_names[0]} is'
         if len(terminated_service_names) > 1:
             terminated_service_names_str = ', '.join(terminated_service_names)
-            identity_str = f'Services {terminated_service_names_str} are'
+            identity_str = f'{capnoun}s {terminated_service_names_str} are'
         messages.append(f'{identity_str} scheduled to be terminated.')
     return '\n'.join(messages)
 
@@ -694,32 +861,35 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     start_time = time.time()
     setup_completed = False
     while True:
-        job_status = job_lib.get_status(job_id)
-        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
-            # Wait for the controller process to finish setting up. It can be
-            # slow if a lot cloud dependencies are being installed.
-            if (time.time() - start_time >
-                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Failed to start the controller '
-                        f'process for the service {service_name!r} '
-                        f'within '
-                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
-                    )
-            # No need to check the service status as the controller process
-            # is still setting up.
-            time.sleep(1)
-            continue
+        # TODO(tian): PID-based tracking.
+        if not is_consolidation_mode():
+            job_status = job_lib.get_status(job_id)
+            if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+                # Wait for the controller process to finish setting up. It
+                # can be slow if a lot cloud dependencies are being installed.
+                if (time.time() - start_time >
+                        constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            f'Failed to start the controller process for '
+                            f'the service {service_name!r} within '
+                            f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
+                            f' seconds.')
+                # No need to check the service status as the controller process
+                # is still setting up.
+                time.sleep(1)
+                continue
 
-        if not setup_completed:
-            setup_completed = True
-            # Reset the start time to wait for the service to be registered.
-            start_time = time.time()
+            if not setup_completed:
+                setup_completed = True
+                # Reset the start time to wait for the service to be registered.
+                start_time = time.time()
 
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
-            if job_id != record['controller_job_id']:
+            # TODO(tian): PID-based tracking.
+            if (not is_consolidation_mode() and
+                    job_id != record['controller_job_id']):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'The service {service_name!r} is already running. '
@@ -782,6 +952,54 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
+def _process_line(line: str,
+                  cluster_name: str,
+                  stop_on_eof: bool = False) -> Iterator[str]:
+    # The line might be directing users to view logs, like
+    # `✓ Cluster launched: new-http.  View logs at: *.log`
+    # We should tail the detailed logs for user.
+    def cluster_is_up() -> bool:
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        if cluster_record is None:
+            return False
+        return cluster_record['status'] == status_lib.ClusterStatus.UP
+
+    provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
+    log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
+
+    if provision_log_prompt is not None:
+        nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
+
+        try:
+            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
+                # We still exit if more than 10 seconds without new content
+                # to avoid any internal bug that causes the launch to fail
+                # while cluster status remains INIT.
+                yield from log_utils.follow_logs(f,
+                                                 should_stop=cluster_is_up,
+                                                 stop_on_eof=stop_on_eof,
+                                                 idle_timeout_seconds=10)
+        except FileNotFoundError:
+            yield line
+
+            yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
+                   f'Try to expand log file {nested_log_path} but not '
+                   f'found. Skipping...{colorama.Style.RESET_ALL}')
+            pass
+        return
+
+    if log_prompt is not None:
+        # Now we skip other logs (file sync logs) since we lack
+        # utility to determine when these log files are finished
+        # writing.
+        # TODO(tian): We should not skip these logs since there are
+        # small chance that error will happen in file sync. Need to
+        # find a better way to do this.
+        return
+
+    yield line
+
+
 def _follow_logs_with_provision_expanding(
     file: TextIO,
     cluster_name: str,
@@ -804,51 +1022,8 @@ def _follow_logs_with_provision_expanding(
         Log lines, including expanded content from referenced provision logs.
     """
 
-    def cluster_is_up() -> bool:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return False
-        return cluster_record['status'] == status_lib.ClusterStatus.UP
-
     def process_line(line: str) -> Iterator[str]:
-        # The line might be directing users to view logs, like
-        # `✓ Cluster launched: new-http.  View logs at: *.log`
-        # We should tail the detailed logs for user.
-        provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-        log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
-
-        if provision_log_prompt is not None:
-            nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
-
-            try:
-                with open(nested_log_path, 'r', newline='',
-                          encoding='utf-8') as f:
-                    # We still exit if more than 10 seconds without new content
-                    # to avoid any internal bug that causes the launch to fail
-                    # while cluster status remains INIT.
-                    yield from log_utils.follow_logs(f,
-                                                     should_stop=cluster_is_up,
-                                                     stop_on_eof=stop_on_eof,
-                                                     idle_timeout_seconds=10)
-            except FileNotFoundError:
-                yield line
-
-                yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
-                       f'Try to expand log file {nested_log_path} but not '
-                       f'found. Skipping...{colorama.Style.RESET_ALL}')
-                pass
-            return
-
-        if log_prompt is not None:
-            # Now we skip other logs (file sync logs) since we lack
-            # utility to determine when these log files are finished
-            # writing.
-            # TODO(tian): We should not skip these logs since there are
-            # small chance that error will happen in file sync. Need to
-            # find a better way to do this.
-            return
-
-        yield line
+        yield from _process_line(line, cluster_name, stop_on_eof=stop_on_eof)
 
     return log_utils.follow_logs(file,
                                  should_stop=should_stop,
@@ -857,18 +1032,51 @@ def _follow_logs_with_provision_expanding(
                                  idle_timeout_seconds=idle_timeout_seconds)
 
 
-def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+def _capped_follow_logs_with_provision_expanding(
+    log_list: List[str],
+    cluster_name: str,
+    *,
+    line_cap: int = 100,
+) -> Iterator[str]:
+    """Follows logs and expands any provision.log references found.
+
+    Args:
+        log_list: List of Log Lines to read from.
+        cluster_name: Name of the cluster being launched.
+        line_cap: Number of last lines to return
+
+    Yields:
+        Log lines, including expanded content from referenced provision logs.
+    """
+    all_lines: Deque[str] = collections.deque(maxlen=line_cap)
+
+    for line in log_list:
+        for processed in _process_line(line=line,
+                                       cluster_name=cluster_name,
+                                       stop_on_eof=False):
+            all_lines.append(processed)
+
+    yield from all_lines
+
+
+def stream_replica_logs(service_name: str, replica_id: int, follow: bool,
+                        tail: Optional[int]) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
-        with open(log_file_name, 'r', encoding='utf-8') as f:
-            print(f.read(), flush=True)
+        if tail is not None:
+            lines = common_utils.read_last_n_lines(log_file_name, tail)
+            for line in lines:
+                if not line.endswith('\n'):
+                    line += '\n'
+                print(line, end='', flush=True)
+        else:
+            with open(log_file_name, 'r', encoding='utf-8') as f:
+                print(f.read(), flush=True)
         return ''
 
     launch_log_file_name = generate_replica_launch_log_file_name(
@@ -891,24 +1099,48 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
-    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_logs_with_provision_expanding(
-                f,
-                replica_cluster_name,
-                should_stop=replica_provisioned,
-                stop_on_eof=not follow,
-        ):
-            print(line, end='', flush=True)
+
+    # Handle launch logs based on number parameter
+    final_lines_to_print = []
+    if tail is not None:
+        static_lines = common_utils.read_last_n_lines(launch_log_file_name,
+                                                      tail)
+        lines = list(
+            _capped_follow_logs_with_provision_expanding(
+                log_list=static_lines,
+                cluster_name=replica_cluster_name,
+                line_cap=tail,
+            ))
+        final_lines_to_print += lines
+    else:
+        with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
+            for line in _follow_logs_with_provision_expanding(
+                    f,
+                    replica_cluster_name,
+                    should_stop=replica_provisioned,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
 
     if (not follow and
             _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
         # Early exit if not following the logs.
+        if tail is not None:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                print(line, end='', flush=True)
         return ''
 
     backend = backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
+        if tail is not None:
+            for line in final_lines_to_print:
+                if not line.endswith('\n'):
+                    line += '\n'
+                print(line, end='', flush=True)
         return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
@@ -917,15 +1149,37 @@ def stream_replica_logs(service_name: str, replica_id: int,
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     # Always tail the latest logs, which represent user setup & run.
-    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
-    if returncode != 0:
-        return (f'{colorama.Fore.RED}Failed to stream logs for replica '
-                f'{replica_id}.{colorama.Style.RESET_ALL}')
+    if tail is None:
+        returncode = backend.tail_logs(handle, job_id=None, follow=follow)
+        if returncode != 0:
+            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                    f'{replica_id}.{colorama.Style.RESET_ALL}')
+    elif not follow and tail > 0:
+        final = backend.tail_logs(handle,
+                                  job_id=None,
+                                  follow=follow,
+                                  tail=tail,
+                                  stream_logs=False,
+                                  require_outputs=True,
+                                  process_stream=True)
+        if isinstance(final, int) or (final[0] != 0 and final[0] != 101):
+            if tail is not None:
+                for line in final_lines_to_print:
+                    if not line.endswith('\n'):
+                        line += '\n'
+                    print(line, end='', flush=True)
+            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                    f'{replica_id}.{colorama.Style.RESET_ALL}')
+        final_lines_to_print += final[1].splitlines()
+        for line in final_lines_to_print[-tail:]:
+            if not line.endswith('\n'):
+                line += '\n'
+            print(line, end='', flush=True)
     return ''
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool) -> str:
+                              follow: bool, tail: Optional[int]) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
@@ -940,14 +1194,24 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
 
-    with open(os.path.expanduser(log_file), 'r', newline='',
-              encoding='utf-8') as f:
-        for line in log_utils.follow_logs(
-                f,
-                should_stop=_service_is_terminal,
-                stop_on_eof=not follow,
-        ):
+    if tail is not None:
+        lines = common_utils.read_last_n_lines(os.path.expanduser(log_file),
+                                               tail)
+        for line in lines:
+            if not line.endswith('\n'):
+                line += '\n'
             print(line, end='', flush=True)
+    else:
+        with open(os.path.expanduser(log_file),
+                  'r',
+                  newline='',
+                  encoding='utf-8') as f:
+            for line in log_utils.follow_logs(
+                    f,
+                    should_stop=_service_is_terminal,
+                    stop_on_eof=not follow,
+            ):
+                print(line, end='', flush=True)
     return ''
 
 
@@ -965,18 +1229,25 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def format_service_table(service_records: List[Dict[str, Any]],
-                         show_all: bool) -> str:
+def format_service_table(service_records: List[Dict[str, Any]], show_all: bool,
+                         pool: bool) -> str:
+    noun = 'pool' if pool else 'service'
     if not service_records:
-        return 'No existing services.'
+        return f'No existing {noun}s.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS',
+        'REPLICAS' if not pool else 'WORKERS'
     ]
+    if not pool:
+        service_columns.append('ENDPOINT')
     if show_all:
         service_columns.extend([
             'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
         ])
+        if pool:
+            # Remove the load balancing policy column for pools.
+            service_columns.pop(-2)
     service_table = log_utils.create_table(service_columns)
 
     replica_infos: List[Dict[str, Any]] = []
@@ -1007,35 +1278,44 @@ def format_service_table(service_records: List[Dict[str, Any]],
             uptime,
             status_str,
             replicas,
-            endpoint,
         ]
+        if not pool:
+            service_values.append(endpoint)
         if show_all:
             service_values.extend(
                 [policy, load_balancing_policy, requested_resources_str])
+            if pool:
+                service_values.pop(-2)
         service_table.add_row(service_values)
 
-    replica_table = _format_replica_table(replica_infos, show_all)
+    replica_table = _format_replica_table(replica_infos, show_all, pool)
+    replica_noun = 'Pool Workers' if pool else 'Service Replicas'
     return (f'{service_table}\n'
             f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
+            f'{replica_noun}{colorama.Style.RESET_ALL}\n'
             f'{replica_table}')
 
 
-def _format_replica_table(replica_records: List[Dict[str, Any]],
-                          show_all: bool) -> str:
+def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
+                          pool: bool) -> str:
+    noun = 'worker' if pool else 'replica'
     if not replica_records:
-        return 'No existing replicas.'
+        return f'No existing {noun}s.'
 
     replica_columns = [
-        'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'INFRA',
-        'RESOURCES', 'STATUS'
+        'POOL_NAME' if pool else 'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT',
+        'LAUNCHED', 'INFRA', 'RESOURCES', 'STATUS'
     ]
+    if pool:
+        replica_columns.append('USED_BY')
+        # Remove the endpoint column for pool workers.
+        replica_columns.pop(3)
     replica_table = log_utils.create_table(replica_columns)
 
     truncate_hint = ''
     if not show_all:
         if len(replica_records) > _REPLICA_TRUNC_NUM:
-            truncate_hint = '\n... (use --all to show all replicas)'
+            truncate_hint = f'\n... (use --all to show all {noun}s)'
         replica_records = replica_records[:_REPLICA_TRUNC_NUM]
 
     for record in replica_records:
@@ -1049,6 +1329,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         resources_str = '-'
         replica_status = record['status']
         status_str = replica_status.colored_str()
+        used_by = record.get('used_by', None)
+        used_by_str = str(used_by) if used_by is not None else '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
@@ -1067,6 +1349,9 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             resources_str,
             status_str,
         ]
+        if pool:
+            replica_values.append(used_by_str)
+            replica_values.pop(3)
         replica_table.add_row(replica_values)
 
     return f'{replica_table}{truncate_hint}'
@@ -1091,13 +1376,16 @@ class ServeCodeGen:
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
         'from sky.serve import constants',
+        'serve_version = constants.SERVE_VERSION',
     ]
 
     @classmethod
-    def get_service_status(cls, service_names: Optional[List[str]]) -> str:
+    def get_service_status(cls, service_names: Optional[List[str]],
+                           pool: bool) -> str:
         code = [
-            f'msg = serve_utils.get_service_status_encoded({service_names!r})',
-            'print(msg, end="", flush=True)'
+            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
+            f'msg = serve_utils.get_service_status_encoded({service_names!r}, '
+            '**kwargs)', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
@@ -1110,11 +1398,12 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def terminate_services(cls, service_names: Optional[List[str]],
-                           purge: bool) -> str:
+    def terminate_services(cls, service_names: Optional[List[str]], purge: bool,
+                           pool: bool) -> str:
         code = [
+            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
             f'msg = serve_utils.terminate_services({service_names!r}, '
-            f'purge={purge})', 'print(msg, end="", flush=True)'
+            f'purge={purge}, **kwargs)', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
@@ -1140,20 +1429,33 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            follow: bool, tail: Optional[int]) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, follow={follow}, tail={tail})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
     def stream_serve_process_logs(cls, service_name: str,
-                                  stream_controller: bool, follow: bool) -> str:
+                                  stream_controller: bool, follow: bool,
+                                  tail: Optional[int]) -> str:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
+            f'{stream_controller}, follow={follow}, tail={tail})',
+            'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def update_service(cls, service_name: str, version: int, mode: str,
+                       pool: bool) -> str:
+        code = [
+            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
+            f'msg = serve_utils.update_service_encoded({service_name!r}, '
+            f'{version}, mode={mode!r}, **kwargs)',
+            'print(msg, end="", flush=True)',
         ]
         return cls._build(code)
 
@@ -1167,12 +1469,3 @@ class ServeCodeGen:
                 f'"{common_utils.get_user_hash()}"; '
                 f'{skylet_constants.SKY_PYTHON_CMD} '
                 f'-u -c {shlex.quote(generated_code)}')
-
-    @classmethod
-    def update_service(cls, service_name: str, version: int, mode: str) -> str:
-        code = [
-            f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, mode={mode!r})',
-            'print(msg, end="", flush=True)',
-        ]
-        return cls._build(code)

@@ -47,7 +47,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 6
+MANAGED_JOBS_VERSION = 7
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes
@@ -70,5 +70,3 @@ DASHBOARD_SETUP_CMD = (
     f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
     '>> ~/.sky/job-dashboard.log 2>&1 &); '
     'fi')
-
-DEFAULT_PRIORITY = 500

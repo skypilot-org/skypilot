@@ -16,18 +16,22 @@ import colorama
 import pytest
 import requests
 from smoke_tests.docker import docker_utils
-import yaml
 
 import sky
 from sky import serve
 from sky import skypilot_config
+from sky.client import sdk
 from sky.clouds import AWS
+from sky.clouds import gcp
 from sky.clouds import GCP
+from sky.jobs import utils as managed_job_utils
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -87,6 +91,27 @@ JOB_WAIT_NOT_RUNNING = (
     'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
     'sleep 10; s=$(sky jobs queue);'
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
+
+ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
+    'GOOGLE_APPLICATION_CREDENTIALS='
+    f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+    'gcloud auth activate-service-account '
+    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+    '2> /dev/null || true; '
+    'gsutil')
+
+ENDPOINT = 'http://127.0.0.1:46580/api/health'
+
+# Fix the flakyness of the test, server may not ready when we run the command after restart.
+WAIT_FOR_API = (
+    'for i in $(seq 1 30); do '
+    f'if curl -s {ENDPOINT} > /dev/null; then '
+    'echo "API is up and running"; break; fi; '
+    'echo "Waiting for API to be ready... ($i/30)"; '
+    '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
+    'sleep 1; done')
+
+SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
 
 # Cluster functions
 _ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
@@ -423,9 +448,11 @@ def override_sky_config(
         os.environ.update(env_before_override)
 
 
-def run_one_test(test: Test) -> None:
+def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
-    subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
+    if check_sky_status:
+        test.commands.insert(0, 'sky status')
+
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:
         write = test.echo
@@ -644,7 +671,8 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
 
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
-                             envs: Set[str] = None) -> str:
+                             envs: Set[str] = None,
+                             timeout: int = 180) -> str:
     """Run the cloud command on the remote cluster for cloud commands."""
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
     if sky.server.common.is_api_server_local() and not is_remote_server_test():
@@ -654,7 +682,7 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
         wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
             cluster_name=cluster_name,
             cluster_status=[sky.ClusterStatus.UP],
-            timeout=180,
+            timeout=timeout,
         )
         envs_str = ''
         if envs is not None:
@@ -774,7 +802,65 @@ def get_response_from_request_id(request_id: str) -> Any:
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
-            requests_lib.RequestPayload(**response.json()))
+            payloads.RequestPayload(**response.json()))
         return request_task.get_return_value()
     raise RuntimeError(f'Failed to get request {request_id}: '
                        f'{response.status_code} {response.text}')
+
+
+def with_config(cmd: str, config_path: str) -> str:
+    return (f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={config_path}; '
+            f'{cmd}')
+
+
+def _get_controller_pod_name(controller_name: str) -> str:
+    return (
+        'kubectl get pods -l app -o custom-columns=NAME:.metadata.name,'
+        'APP:.metadata.labels.app --no-headers | '
+        f'awk \'$2 ~ /sky-{controller_name}-controller/ {{print $1; exit}}\'')
+
+
+def kill_and_wait_controller(controller_name: str) -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    assert controller_name in ['serve', 'jobs'
+                              ], (f'Invalid controller name: {controller_name}')
+    return (
+        f'initial_controller_pod=$({_get_controller_pod_name(controller_name)}); '
+        f'echo "Killing {controller_name} controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        f'until new_controller_pod=$({_get_controller_pod_name(controller_name)}) && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && '
+        'kubectl get pod $new_controller_pod | grep "1/1"; do '
+        f'  echo "Waiting for new {controller_name} controller pod..."; sleep 5; '
+        'done; '
+        f'echo "New {controller_name} controller pod ready: $new_controller_pod"'
+    )
+
+
+def server_side_is_consolidation_mode() -> bool:
+    """Returns whether the consolidation mode is enabled on the server side.
+
+    This is required because when --postgres and --jobs-consolidation specified
+    at the same time, the server side will have config for consolidation mode,
+    but the client side will only have a config to specify the db url for
+    postgres. Here we manually retrieve the config from the server side to
+    check if the consolidation mode is enabled.
+    """
+    if is_remote_server_test():
+        # The buildkite pre_command setup does not affect the remote server
+        # config. So --postgres and --jobs-consolidation will not be enabled
+        # even if they are specified.
+        # (TODO: zeping) support this in the future.
+        return False
+    response = requests.get(f'{get_api_server_url()}/workspaces/config')
+    request_id = server_common.get_request_id(response)
+    config = config_utils.Config.from_dict(sdk.get(request_id))
+    config = skypilot_config.overlay_skypilot_config(
+        original_config=config, override_configs=skypilot_config.to_dict())
+    with skypilot_config.replace_skypilot_config(config):
+        return managed_job_utils.is_consolidation_mode()
+
+
+def is_in_buildkite_env() -> bool:
+    """Check if the test is running in the Buildkite environment."""
+    return env_options.Options.RUNNING_IN_BUILDKITE.get()

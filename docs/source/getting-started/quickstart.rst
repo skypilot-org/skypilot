@@ -132,6 +132,8 @@ This may show multiple clusters, if you have created several:
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
+.. _dashboard:
+
 Access the dashboard
 ====================
 
@@ -239,10 +241,11 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
 .. code-block:: console
 
   $ for i in $(seq 100) # launch 100 jobs
-      do sky jobs launch --use-spot --detach-run --yes -n hello-$i hello_sky.yaml
+      do sky jobs launch --use-spot --detach-run --async --yes -n hello-$i hello_sky.yaml
     done
   ...
-  $ sky jobs dashboard # check the jobs status
+  $ sky dashboard # check the jobs status in Jobs tab
+
 
 .. image:: ../images/managed-jobs-dashboard.png
   :width: 800

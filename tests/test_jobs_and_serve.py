@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+import traceback
 
 import click
 from click import testing as cli_testing
@@ -9,12 +10,12 @@ import yaml
 
 import sky
 from sky import backends
-from sky import cli
 from sky import exceptions
 from sky import global_user_state
+from sky.client.cli import command
 from sky.utils import common
 from sky.utils import controller_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 
 def test_job_nonexist_strategy():
@@ -46,7 +47,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
-    global_user_state.create_table()
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 def _generate_tmp_yaml(tmp_path, filename: str) -> str:
@@ -158,7 +159,7 @@ class TestWithEmptyDBSetup:
 
     def test_cancel_jobs(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.jobs_cancel, ['-a', '-y'])
+        result = cli_runner.invoke(command.jobs_cancel, ['-a', '-y'])
         assert result.exit_code == 1
 
         assert isinstance(result.exception, exceptions.ClusterNotUpError)
@@ -168,7 +169,7 @@ class TestWithEmptyDBSetup:
 
     def test_logs_jobs(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.jobs_logs, ['1'])
+        result = cli_runner.invoke(command.jobs_logs, ['1'])
         assert result.exit_code == 1
         assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
             result.exception), (result.exception, result.output,
@@ -176,7 +177,7 @@ class TestWithEmptyDBSetup:
 
     def test_queue_jobs(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.jobs_queue)
+        result = cli_runner.invoke(command.jobs_queue)
         assert result.exit_code == 0
         assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
@@ -184,7 +185,7 @@ class TestWithEmptyDBSetup:
     @pytest.mark.timeout(60)
     def test_down_serve(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.serve_down, ['-a', '-y'])
+        result = cli_runner.invoke(command.serve_down, ['-a', '-y'])
         assert result.exit_code == 1
 
         assert isinstance(result.exception, exceptions.ClusterNotUpError)
@@ -195,14 +196,14 @@ class TestWithEmptyDBSetup:
 
     def test_logs_serve(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.serve_logs, ['test', '--controller'])
+        result = cli_runner.invoke(command.serve_logs, ['test', '--controller'])
         assert controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
             result.exception), (result.exception, result.output,
                                 result.exc_info)
 
     def test_status_serve(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.serve_status)
+        result = cli_runner.invoke(command.serve_status)
         assert result.exit_code == 0
         assert controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
@@ -219,38 +220,39 @@ class TestJobsOperations:
 
     def test_stop_jobs_controller(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.stop, [common.JOB_CONTROLLER_NAME])
+        result = cli_runner.invoke(command.stop, [common.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert (f'Stopping controller(s) \'{common.JOB_CONTROLLER_NAME}\' is '
                 'currently not supported' in result.output)
 
-        result = cli_runner.invoke(cli.stop, ['sky-jobs-con*'])
+        result = cli_runner.invoke(command.stop, ['sky-jobs-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.stop, ['-a'], input='n\n')
+        result = cli_runner.invoke(command.stop, ['-a'], input='n\n')
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
     def test_autostop_jobs_controller(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.autostop, [common.JOB_CONTROLLER_NAME])
+        result = cli_runner.invoke(command.autostop,
+                                   [common.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert ('Scheduling autostop on controller(s) '
                 f'\'{common.JOB_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
-        result = cli_runner.invoke(cli.autostop, ['sky-jobs-con*'])
+        result = cli_runner.invoke(command.autostop, ['sky-jobs-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.autostop, ['-a'], input='n\n')
+        result = cli_runner.invoke(command.autostop, ['-a'], input='n\n')
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
     def test_cancel_on_jobs_controller(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.cancel,
+        result = cli_runner.invoke(command.cancel,
                                    [common.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the jobs controller\'s jobs is not allowed.' in str(
@@ -259,7 +261,7 @@ class TestJobsOperations:
     def test_down_jobs_controller_no_job(self, mock_job_table_no_job,
                                          mock_client_requests):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.down, [common.JOB_CONTROLLER_NAME],
+        result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -268,25 +270,26 @@ class TestJobsOperations:
 
     def test_down_jobs_controller_one_job(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.down, [common.JOB_CONTROLLER_NAME],
+        result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
-        assert isinstance(result.exception, exceptions.NotSupportedError)
+        assert isinstance(result.exception, exceptions.NotSupportedError), (
+            f'{traceback.format_tb(result.exception.__traceback__)}')
 
-        result = cli_runner.invoke(cli.down, ['sky-jobs-con*'])
+        result = cli_runner.invoke(command.down, ['sky-jobs-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.down, ['sky-jobs-con*', '-p'])
+        result = cli_runner.invoke(command.down, ['sky-jobs-con*', '-p'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.down, ['-a'], input='n\n')
+        result = cli_runner.invoke(command.down, ['-a'], input='n\n')
         assert isinstance(result.exception, SystemExit), result.exception
         assert 'Aborted' in result.output
 
-        result = cli_runner.invoke(cli.down, ['-ap'], input='n\n')
+        result = cli_runner.invoke(command.down, ['-ap'], input='n\n')
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
@@ -301,23 +304,24 @@ class TestServeOperations:
 
     def test_stop_serve_controller(self,):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.stop, [common.SKY_SERVE_CONTROLLER_NAME])
+        result = cli_runner.invoke(command.stop,
+                                   [common.SKY_SERVE_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert (
             f'Stopping controller(s) \'{common.SKY_SERVE_CONTROLLER_NAME}\' is '
             'currently not supported' in result.output)
 
-        result = cli_runner.invoke(cli.stop, ['sky-serve-con*'])
+        result = cli_runner.invoke(command.stop, ['sky-serve-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.stop, ['-a'], input='n\n')
+        result = cli_runner.invoke(command.stop, ['-a'], input='n\n')
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
     def test_autostop_serve_controller(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.autostop,
+        result = cli_runner.invoke(command.autostop,
                                    [common.SKY_SERVE_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert (
@@ -325,17 +329,17 @@ class TestServeOperations:
             f'\'{common.SKY_SERVE_CONTROLLER_NAME}\' is currently not supported'
             in result.output)
 
-        result = cli_runner.invoke(cli.autostop, ['sky-serve-con*'])
+        result = cli_runner.invoke(command.autostop, ['sky-serve-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.autostop, ['-a'], input='n\n')
+        result = cli_runner.invoke(command.autostop, ['-a'], input='n\n')
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
     def test_cancel_on_serve_controller(self):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.cancel,
+        result = cli_runner.invoke(command.cancel,
                                    [common.SKY_SERVE_CONTROLLER_NAME, '-a'])
         assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the sky serve controller\'s jobs is not allowed.' in str(
@@ -345,30 +349,32 @@ class TestServeOperations:
                                                mock_services_one_service):
         cli_runner = cli_testing.CliRunner()
 
-        result = cli_runner.invoke(cli.down, [common.SKY_SERVE_CONTROLLER_NAME],
+        result = cli_runner.invoke(command.down,
+                                   [common.SKY_SERVE_CONTROLLER_NAME],
                                    input='n')
         assert isinstance(result.exception, exceptions.NotSupportedError)
 
-        result = cli_runner.invoke(cli.down, ['sky-serve-con*'])
+        result = cli_runner.invoke(command.down, ['sky-serve-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.down, ['sky-serve-con*', '-p'])
+        result = cli_runner.invoke(command.down, ['sky-serve-con*', '-p'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.down, ['-a'], input='n\n')
+        result = cli_runner.invoke(command.down, ['-a'], input='n\n')
         assert isinstance(result.exception, SystemExit), result.exception
         assert 'Aborted' in result.output
 
-        result = cli_runner.invoke(cli.down, ['-ap'], input='n\n')
+        result = cli_runner.invoke(command.down, ['-ap'], input='n\n')
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
     def test_down_serve_controller_no_service(self, mock_controller_accessible,
                                               mock_services_no_service):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.down, [common.SKY_SERVE_CONTROLLER_NAME],
+        result = cli_runner.invoke(command.down,
+                                   [common.SKY_SERVE_CONTROLLER_NAME],
                                    input='n')
         assert 'Terminate sky serve controller:' in result.output, (
             result.exception, result.output, result.exc_info)

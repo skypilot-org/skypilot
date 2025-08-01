@@ -31,7 +31,7 @@ cd skypilot/llm/vicuna-llama-2
 Paste the access token into [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml):
 ```yaml
 envs:
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 ```
 
 ## Train your own Vicuna on Llama-2
@@ -81,7 +81,7 @@ Start training with a single command
   ```bash
   sky launch --down -c vicuna train.yaml \
     --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
-    --env WANDB_API_KEY=<your-wandb-api-key>
+    --secret WANDB_API_KEY=<your-wandb-api-key>
   ```
 
 This will launch the training job on the cheapest cloud that has 8x A100-80GB spot GPUs available.
@@ -114,7 +114,7 @@ sky launch --no-use-spot ...
   ```bash
   sky launch -c vicuna train.yaml \
     --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
-    --env WANDB_API_KEY=<your-wandb-api-key> \
+    --secret WANDB_API_KEY=<your-wandb-api-key> \
     --env MODEL_SIZE=13
   ```
 
@@ -127,7 +127,7 @@ To use SkyPilot Managed Spot Jobs, you can simply replace `sky launch` with `sky
 ```bash
 sky jobs launch -n vicuna train.yaml \
   --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
-  --env WANDB_API_KEY=<your-wandb-api-key>
+  --secret WANDB_API_KEY=<your-wandb-api-key>
 ```
 
 

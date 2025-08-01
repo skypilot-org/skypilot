@@ -59,6 +59,11 @@ function shortenTimeString(timeString) {
     return 'now';
   }
 
+  // Handle "less than a minute ago" case
+  if (timeString.toLowerCase() === 'less than a minute ago') {
+    return 'Less than 1m ago';
+  }
+
   // Handle "about X unit(s) ago" e.g. "about 1 hour ago" -> "1h ago"
   const aboutMatch = timeString.match(/^about\s+(\d+)\s+(\w+)\s+ago$/i);
   if (aboutMatch) {
@@ -133,7 +138,7 @@ export function formatDateTime(date) {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
     hour12: false, // Use 24-hour format
@@ -200,6 +205,8 @@ export function formatDuration(durationInSeconds) {
   durationInSeconds = Math.floor(durationInSeconds);
 
   const units = [
+    { value: 31536000, label: 'y' }, // years (365 days)
+    { value: 2592000, label: 'mo' }, // months (30 days)
     { value: 86400, label: 'd' }, // days
     { value: 3600, label: 'h' }, // hours
     { value: 60, label: 'm' }, // minutes
@@ -423,4 +430,68 @@ export function LogFilter({ logs, controller = false }) {
       />
     </div>
   );
+}
+
+// New component for timestamps with dotted underlines and local timezone tooltips
+export function TimestampWithTooltip({ date }) {
+  if (!date) {
+    return 'N/A';
+  }
+
+  const now = new Date();
+  const differenceInDays = (now - date) / (1000 * 3600 * 24);
+
+  // Format the full timestamp in '2025-06-13, 03:53:33 PM PDT' format
+  const dateStr =
+    date.getFullYear() +
+    '-' +
+    String(date.getMonth() + 1).padStart(2, '0') +
+    '-' +
+    String(date.getDate()).padStart(2, '0');
+  const timeStr = date.toLocaleString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  });
+  const fullLocalTimestamp = dateStr + ' ' + timeStr;
+
+  let displayText;
+  // Always show relative time with shortened format
+  const originalTimeString = formatDistance(date, now, { addSuffix: true });
+  displayText = shortenTimeString(originalTimeString);
+
+  return (
+    <CustomTooltip
+      content={fullLocalTimestamp}
+      className="text-sm text-muted-foreground"
+    >
+      <span className="border-b border-dotted border-gray-400 cursor-help">
+        {displayText}
+      </span>
+    </CustomTooltip>
+  );
+}
+
+// Helper function to format timestamp in full format without underline (for detail pages)
+export function formatFullTimestamp(date) {
+  if (!date) {
+    return 'N/A';
+  }
+
+  const dateStr =
+    date.getFullYear() +
+    '-' +
+    String(date.getMonth() + 1).padStart(2, '0') +
+    '-' +
+    String(date.getDate()).padStart(2, '0');
+  const timeStr = date.toLocaleString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  });
+  return dateStr + ' ' + timeStr;
 }

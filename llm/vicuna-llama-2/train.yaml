@@ -1,7 +1,7 @@
 envs:
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
   ARTIFACT_BUCKET_NAME: # TODO: Fill with your unique bucket name, or use --env to pass.
-  WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
+  WANDB_API_KEY: null # Pass with `--secret WANDB_API_KEY` in CLI
   MODEL_SIZE: 7
   USE_XFORMERS: 1
 

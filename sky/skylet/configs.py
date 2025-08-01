@@ -2,17 +2,16 @@
 import functools
 import os
 import pathlib
+import threading
 from typing import Callable, Optional, Union
 
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
-_DB_PATH = os.path.expanduser('~/.sky/skylet_config.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
-
-_table_created = False
+_DB_PATH = None
+_db_init_lock = threading.Lock()
 
 
-def ensure_table(func: Callable):
+def init_db(func: Callable):
     """Ensure the table exists before calling the function.
 
     Since this module will be imported whenever `sky` is imported (due to
@@ -24,25 +23,32 @@ def ensure_table(func: Callable):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global _table_created
-        if not _table_created:
-            with db_utils.safe_cursor(
-                    _DB_PATH) as c:  # Call it 'c' to avoid pylint complaining.
-                # Use WAL mode to avoid locking problem in #1507.
-                # Reference: https://stackoverflow.com/a/39265148
-                c.execute('PRAGMA journal_mode=WAL')
-                c.execute("""\
-                    CREATE TABLE IF NOT EXISTS config (
-                        key TEXT PRIMARY KEY,
-                        value TEXT)""")
-        _table_created = True
+        global _DB_PATH
+        if _DB_PATH is not None:
+            return func(*args, **kwargs)
+
+        with _db_init_lock:
+            if _DB_PATH is None:
+                _DB_PATH = os.path.expanduser('~/.sky/skylet_config.db')
+                os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+                with db_utils.safe_cursor(
+                        _DB_PATH
+                ) as c:  # Call it 'c' to avoid pylint complaining.
+                    # Use WAL mode to avoid locking problem in #1507.
+                    # Reference: https://stackoverflow.com/a/39265148
+                    c.execute('PRAGMA journal_mode=WAL')
+                    c.execute("""\
+                        CREATE TABLE IF NOT EXISTS config (
+                            key TEXT PRIMARY KEY,
+                            value TEXT)""")
         return func(*args, **kwargs)
 
     return wrapper
 
 
-@ensure_table
+@init_db
 def get_config(key: str) -> Optional[bytes]:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute('SELECT value FROM config WHERE key = ?', (key,))
         for (value,) in rows:
@@ -50,8 +56,9 @@ def get_config(key: str) -> Optional[bytes]:
         return None
 
 
-@ensure_table
+@init_db
 def set_config(key: str, value: Union[bytes, str]) -> None:
+    assert _DB_PATH is not None
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\

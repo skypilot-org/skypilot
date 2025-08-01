@@ -28,7 +28,7 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
     os.environ[
         skypilot_config.
         ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config.yaml'
-    skypilot_config._reload_config()
+    skypilot_config.reload_config()
 
     cloud = clouds.AWS()
 
@@ -120,3 +120,48 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
             "config template incorrect")
     assert (mock_fill_template.call_args[0][1].items() >=
             expected_subset.items(), "config fill values incorrect")
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
+            return_value={'fake-acc': 2})
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.backends.backend_utils._get_yaml_path_from_cluster_name',
+            return_value='/tmp/fake/path')
+@mock.patch('sky.utils.common_utils.fill_template')
+def test_write_cluster_config_w_post_provision_runcmd(mock_fill_template,
+                                                      *mocks):
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config_runcmd.yaml'
+    skypilot_config.reload_config()
+
+    cloud = clouds.AWS()
+    region = clouds.Region(name='fake-region')
+    zones = [clouds.Zone(name='fake-zone')]
+    resource = Resources(cloud=cloud, instance_type='fake-type: 3')
+    cluster_config_template = 'aws-ray.yml.j2'
+
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=2,
+        cluster_config_template=cluster_config_template,
+        cluster_name="display",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=region,
+        zones=zones,
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+
+    expected_runcmd = [
+        'echo "hello world!"',
+        ['ls', '-l', '/'],
+    ]
+    mock_fill_template.assert_called_once()
+    assert mock_fill_template.call_args[0][
+        0] == cluster_config_template, "config template incorrect"
+    assert mock_fill_template.call_args[0][1][
+        'runcmd'] == expected_runcmd, "runcmd not passed correctly"

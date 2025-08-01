@@ -45,7 +45,7 @@ class TestWorkspaceManagement(unittest.TestCase):
     @mock.patch('sky.skypilot_config.get_user_config_path')
     @mock.patch('sky.skypilot_config.to_dict')
     @mock.patch('sky.utils.common_utils.dump_yaml')
-    @mock.patch('sky.skypilot_config._reload_config')
+    @mock.patch('sky.skypilot_config.reload_config')
     def test_internal_update_workspaces_config(self, mock_reload_config,
                                                mock_dump_yaml, mock_to_dict,
                                                mock_get_path):
@@ -79,7 +79,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertEqual(result, new_workspaces)
 
     @mock.patch('sky.workspaces.core.get_workspaces')
-    @mock.patch('sky.workspaces.core._check_workspace_has_no_active_resources')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
     @mock.patch('sky.utils.schemas.get_config_schema')
     @mock.patch('sky.utils.common_utils.validate_schema')
     @mock.patch('sky.check.check')
@@ -189,7 +190,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertIn("already exists", str(cm.exception))
 
     @mock.patch('sky.workspaces.core.get_workspaces')
-    @mock.patch('sky.workspaces.core._check_workspace_has_no_active_resources')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
     @mock.patch('sky.workspaces.core._update_workspaces_config')
     def test_delete_workspace(self, mock_update_workspaces_config,
                               mock_check_resources, mock_get_workspaces):

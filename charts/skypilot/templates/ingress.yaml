@@ -2,6 +2,7 @@
 {{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
 {{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
 {{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
+{{- $enableBasicAuthInAPIServer := include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" -}}
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -10,16 +11,34 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     {{- if not $useNewIngressClass }}
-    kubernetes.io/ingress.class: nginx
+    kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName }}
+    {{- end }}
+    {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+    # Enable session affinity and retry on 502 for RollingUpdate strategy
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "SKYPILOT_ROUTEID"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
+    nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
+    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
     {{- end }}
     {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
-    # OAuth2 Proxy authentication
+    # OAuth2 Proxy authentication for browser-based access
+    # Bearer token requests bypass OAuth2 proxy and go directly to the application
     nginx.ingress.kubernetes.io/auth-signin: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/start?rd=$escaped_request_uri
     nginx.ingress.kubernetes.io/auth-url: {{ if index .Values.ingress "oauth2-proxy" "use-https" | default false }}https{{ else }}http{{ end }}://$host/oauth2/auth
-    nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email
-    {{- else }}
+    nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-Email, X-Skypilot-Auth
+    # Skip OAuth2 authentication for requests with Authorization header (Bearer tokens)
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      if ($http_authorization ~ "^Bearer sky_.+") {
+        # Set x_skypilot_auth_mode variable to make sure the request is validated on the API server side.
+        set $x_skypilot_auth_mode "token";
+        return 200;
+      }
+    {{- else if and (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"
     nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" .Release.Name) }}
     {{- end }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
@@ -29,22 +48,18 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     skypilot.co/ingress-path: {{ .Values.ingress.path }}
     {{- end }}
-    nginx.ingress.kubernetes.io/server-snippets: |
-      location / {
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_http_version 1.1;
-        proxy_set_header X-Forwarded-Host $http_host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header Host $host;
-        proxy_set_header Connection "upgrade";
-        proxy_cache_bypass $http_upgrade;
-      }
-
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      {{- if index .Values.ingress "oauth2-proxy" "enabled" }}
+      # Set X-Skypilot-Auth-Mode header to the value from the auth request.
+      proxy_set_header X-Skypilot-Auth-Mode $x_skypilot_auth_mode;
+      {{- end }}
+    {{- if .Values.ingress.annotations }}
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- end }}
 
 spec:
   {{- if $useNewIngressClass }}
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
   rules:
   - host: {{ .Values.ingress.host }}

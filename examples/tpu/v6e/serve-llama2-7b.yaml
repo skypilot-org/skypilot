@@ -2,12 +2,13 @@ resources:
   accelerators: tpu-v6e-8 # Fill in the accelerator type you want to use
 
 envs:
-  HF_TOKEN: # fill in your huggingface token
   HF_REPO_ID: meta-llama/Llama-2-7b
   model_name: llama-2
   input_ckpt_dir: /home/gcpuser/sky_workdir/ckpt/llama2-7b/original
   output_ckpt_dir: /home/gcpuser/sky_workdir/ckpt/llama2-7b/converted
   tokenizer_path: /home/gcpuser/sky_workdir/ckpt/llama2-7b/original/tokenizer.model
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 setup: |
   pip3 install huggingface_hub

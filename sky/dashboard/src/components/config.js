@@ -11,6 +11,7 @@ import { SaveIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { VersionDisplay } from '@/components/elements/version-display';
 import { apiClient } from '@/data/connectors/client';
+import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 
 export function Config() {
   const router = useRouter();
@@ -19,10 +20,21 @@ export function Config() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const successTimeoutRef = useRef(null);
 
   useEffect(() => {
     loadConfig();
+
+    // Check Grafana availability
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
   }, []);
 
   // Cleanup timeout on unmount
@@ -141,7 +153,7 @@ export function Config() {
     <>
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
-          <span className="text-sky-blue">SkyPilot Configuration</span>
+          <span className="text-sky-blue">SkyPilot API Server</span>
         </div>
 
         <div className="flex items-center">
@@ -155,6 +167,35 @@ export function Config() {
               </div>
             )}
           </div>
+          {isGrafanaAvailable && (
+            <button
+              onClick={() => {
+                const grafanaUrl = getGrafanaUrl();
+                const host = window.location.hostname;
+                window.open(
+                  `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${host}`,
+                  '_blank'
+                );
+              }}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
+            >
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                />
+              </svg>
+              View API Server Metrics
+            </button>
+          )}
           <VersionDisplay />
         </div>
       </div>
@@ -262,7 +303,7 @@ export function Config() {
             <Button
               onClick={handleSave}
               disabled={loading || saving}
-              className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white"
+              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
             >
               {saving ? (
                 <>

@@ -7,6 +7,7 @@ import threading
 import typing
 from typing import Callable, Iterator, Optional, Tuple, Union
 
+from sky import exceptions
 from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
 from sky.utils import context
@@ -58,6 +59,7 @@ class Control(enum.Enum):
     EXIT = 'rich_exit'
     UPDATE = 'rich_update'
     HEARTBEAT = 'heartbeat'
+    RETRY = 'retry'
 
     def encode(self, msg: str) -> str:
         return f'<{self.value}>{msg}</{self.value}>'
@@ -365,6 +367,9 @@ def decode_rich_status(
                     yield line
                     continue
 
+                if control == Control.RETRY:
+                    raise exceptions.RequestInterruptedError(
+                        'Streaming interrupted. Please retry.')
                 # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():
                     yield None

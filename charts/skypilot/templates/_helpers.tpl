@@ -70,3 +70,29 @@ metadata:
     helm.sh/resource-policy: keep
 {{ end -}}
 {{- end -}}
+
+{{/* Whether to enable basic auth */}}
+{{- define "skypilot.enableBasicAuthInAPIServer" -}}
+{{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.apiService.enableUserManagement -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/* Get initial basic auth secret name */}}
+{{- define "skypilot.initialBasicAuthSecretName" -}}
+{{- if .Values.apiService.initialBasicAuthSecret -}}
+{{ .Values.apiService.initialBasicAuthSecret }}
+{{- else if .Values.apiService.initialBasicAuthCredentials -}}
+{{ printf "%s-initial-basic-auth" .Release.Name }}
+{{- else -}}
+{{- /* Return empty string */ -}}
+{{ "" }}
+{{- end -}}
+{{- end -}}
+
+{{/* API server start arguments */}}
+{{- define "skypilot.apiArgs" -}}
+--deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
+{{- end -}}

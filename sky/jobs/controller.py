@@ -14,6 +14,13 @@ from typing import Optional, Tuple
 
 import filelock
 
+# This import ensures backward compatibility. Controller processes may not have
+# imported this module initially, but will attempt to import it during job
+# termination on the fly. If a job was launched with an old SkyPilot runtime
+# and a new job is launched with a newer runtime, the old job's termination
+# will try to import code from a different SkyPilot runtime, causing exceptions.
+# pylint: disable=unused-import
+from sky import core
 from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -23,6 +30,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -53,12 +61,13 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
-    def __init__(self, job_id: int, dag_yaml: str) -> None:
+    def __init__(self, job_id: int, dag_yaml: str, pool: Optional[str]) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        self._pool = pool
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -92,8 +101,10 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-        self, task_id: Optional[int],
-        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
+        self,
+        task_id: Optional[int],
+        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle],
+        job_id_on_pool_cluster: Optional[int],
     ) -> None:
         """Downloads and streams the logs of the current job with given task ID.
 
@@ -106,15 +117,26 @@ class JobsController:
                         'Skipping downloading and streaming the logs.')
             return
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                            'managed_jobs')
-        log_file = controller_utils.download_and_stream_latest_job_log(
-            self._backend, handle, managed_job_logs_dir)
+                                            'managed_jobs',
+                                            f'job-id-{self._job_id}')
+        log_file = controller_utils.download_and_stream_job_log(
+            self._backend,
+            handle,
+            managed_job_logs_dir,
+            job_ids=[str(job_id_on_pool_cluster)]
+            if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can be
             # accessed even after the job is finished
             managed_job_state.set_local_log_file(self._job_id, task_id,
                                                  log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
+    def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
+        if cluster_name is None:
+            return
+        if self._pool is None:
+            managed_job_utils.terminate_cluster(cluster_name)
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -152,6 +174,20 @@ class JobsController:
         Other exceptions may be raised depending on the backend.
         """
 
+        latest_task_id, last_task_prev_status = (
+            managed_job_state.get_latest_task_id_status(self._job_id))
+        is_resume = False
+        if (latest_task_id is not None and last_task_prev_status !=
+                managed_job_state.ManagedJobStatus.PENDING):
+            assert latest_task_id >= task_id, (latest_task_id, task_id)
+            if latest_task_id > task_id:
+                logger.info(f'Task {task_id} ({task.name}) has already '
+                            'been executed. Skipping...')
+                return True
+            if latest_task_id == task_id:
+                # Start recovery.
+                is_resume = True
+
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
         if task.run is None:
@@ -171,42 +207,83 @@ class JobsController:
             return True
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
-        submitted_at = time.time()
-        if task_id == 0:
-            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
-                self._backend.run_timestamp)
         assert task.name is not None, task
+        # Set the cluster name to None if the job is submitted
+        # to a pool. This will be updated when we later calls the `launch`
+        # or `recover` function from the strategy executor.
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
+            task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id)
-        managed_job_state.set_starting(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            submitted_at,
-            resources_str=backend_utils.get_task_resources_str(
-                task, is_managed_job=True),
-            specs={
-                'max_restarts_on_errors':
-                    self._strategy_executor.max_restarts_on_errors
-            },
-            callback_func=callback_func)
-        logger.info(
-            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
-            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+            cluster_name, self._backend, task, self._job_id, task_id,
+            self._pool)
+        if not is_resume:
+            submitted_at = time.time()
+            if task_id == 0:
+                submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                    self._backend.run_timestamp)
+            managed_job_state.set_starting(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str=backend_utils.get_task_resources_str(
+                    task, is_managed_job=True),
+                specs={
+                    'max_restarts_on_errors':
+                        self._strategy_executor.max_restarts_on_errors
+                },
+                callback_func=callback_func)
+            logger.info(f'Submitted managed job {self._job_id} '
+                        f'(task: {task_id}, name: {task.name!r}); '
+                        f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
         logger.info('Started monitoring.')
 
-        remote_job_submitted_at = self._strategy_executor.launch()
-        assert remote_job_submitted_at is not None, remote_job_submitted_at
+        # Only do the initial cluster launch if not resuming from a controller
+        # failure. Otherwise, we will transit to recovering immediately.
+        remote_job_submitted_at = time.time()
+        if not is_resume:
+            remote_job_submitted_at = self._strategy_executor.launch()
+            assert remote_job_submitted_at is not None, remote_job_submitted_at
+        if self._pool is None:
+            job_id_on_pool_cluster = None
+        else:
+            # Update the cluster name when using cluster pool.
+            cluster_name, job_id_on_pool_cluster = (
+                managed_job_state.get_pool_submit_info(self._job_id))
+        assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
-        managed_job_state.set_started(job_id=self._job_id,
-                                      task_id=task_id,
-                                      start_time=remote_job_submitted_at,
-                                      callback_func=callback_func)
+        if not is_resume:
+            managed_job_state.set_started(job_id=self._job_id,
+                                          task_id=task_id,
+                                          start_time=remote_job_submitted_at,
+                                          callback_func=callback_func)
 
         while True:
+            # NOTE: if we are resuming from a controller failure, we only keep
+            # monitoring if the job is in RUNNING state. For all other cases,
+            # we will directly transit to recovering since we have no idea what
+            # the cluster status is.
+            force_transit_to_recovering = False
+            if is_resume:
+                prev_status = managed_job_state.get_job_status_with_task_id(
+                    job_id=self._job_id, task_id=task_id)
+                if prev_status is not None:
+                    if prev_status.is_terminal():
+                        return (prev_status ==
+                                managed_job_state.ManagedJobStatus.SUCCEEDED)
+                    if (prev_status ==
+                            managed_job_state.ManagedJobStatus.CANCELLING):
+                        # If the controller is down when cancelling the job,
+                        # we re-raise the error to run the `_cleanup` function
+                        # again to clean up any remaining resources.
+                        raise exceptions.ManagedJobUserCancelledError(
+                            'Recovering cancel signal.')
+                if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+                    force_transit_to_recovering = True
+                # This resume logic should only be triggered once.
+                is_resume = False
+
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
@@ -221,12 +298,25 @@ class JobsController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = managed_job_utils.get_job_status(
-                self._backend, cluster_name)
+            # NOTE: If fetching the job status fails or we force to transit to
+            # recovering, we will set the job status to None, which will force
+            # enter the recovering logic.
+            job_status = None
+            if not force_transit_to_recovering:
+                try:
+                    job_status = managed_job_utils.get_job_status(
+                        self._backend,
+                        cluster_name,
+                        job_id=job_id_on_pool_cluster)
+                except exceptions.FetchClusterInfoError as fetch_e:
+                    logger.info(
+                        'Failed to fetch the job status. Start recovery.\n'
+                        f'Exception: {common_utils.format_exception(fetch_e)}\n'
+                        f'Traceback: {traceback.format_exc()}')
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 success_end_time = managed_job_utils.try_to_get_job_end_time(
-                    self._backend, cluster_name)
+                    self._backend, cluster_name, job_id_on_pool_cluster)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
@@ -237,6 +327,8 @@ class JobsController:
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
                 try:
+                    logger.info(f'Downloading logs on cluster {cluster_name} '
+                                f'and job id {job_id_on_pool_cluster}.')
                     clusters = backend_utils.get_clusters(
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
@@ -245,7 +337,8 @@ class JobsController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        self._download_log_and_stream(task_id, handle)
+                        self._download_log_and_stream(task_id, handle,
+                                                      job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -254,7 +347,7 @@ class JobsController:
                         exc_info=True)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                managed_job_utils.terminate_cluster(cluster_name=cluster_name)
+                self._cleanup_cluster(cluster_name)
                 return True
 
             # For single-node jobs, non-terminated job_status indicates a
@@ -302,13 +395,14 @@ class JobsController:
                       job_status == job_lib.JobStatus.FAILED_DRIVER):
                     # The user code has probably crashed, fail immediately.
                     end_time = managed_job_utils.try_to_get_job_end_time(
-                        self._backend, cluster_name)
+                        self._backend, cluster_name, job_id_on_pool_cluster)
                     logger.info(
                         f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(task_id, handle)
+                    self._download_log_and_stream(task_id, handle,
+                                                  job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -379,20 +473,36 @@ class JobsController:
             if handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
-                if resources.need_cleanup_after_preemption_or_failure():
+                # If we are forcing to transit to recovering, we need to clean
+                # up the cluster as it is possible that we already submitted the
+                # job to the worker cluster, but state is not updated yet. In
+                # this case, it is possible that we will double-submit the job
+                # to the worker cluster. So we always clean up the cluster here.
+                # TODO(tian,cooperc): We can check if there is a running job on
+                # the worker cluster, and if so, we can skip the cleanup.
+                # Challenge: race condition when the worker cluster thought it
+                # does not have a running job yet but later the job is launched.
+                if (resources.need_cleanup_after_preemption_or_failure() or
+                        force_transit_to_recovering):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    managed_job_utils.terminate_cluster(cluster_name)
+                    self._cleanup_cluster(cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
-            managed_job_state.set_recovering(job_id=self._job_id,
-                                             task_id=task_id,
-                                             callback_func=callback_func)
+            managed_job_state.set_recovering(
+                job_id=self._job_id,
+                task_id=task_id,
+                force_transit_to_recovering=force_transit_to_recovering,
+                callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
+            if self._pool is not None:
+                cluster_name, job_id_on_pool_cluster = (
+                    managed_job_state.get_pool_submit_info(self._job_id))
+                assert cluster_name is not None
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
@@ -467,11 +577,11 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-def _run_controller(job_id: int, dag_yaml: str):
+def _run_controller(job_id: int, dag_yaml: str, pool: Optional[str]):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    jobs_controller = JobsController(job_id, dag_yaml)
+    jobs_controller = JobsController(job_id, dag_yaml, pool)
     jobs_controller.run()
 
 
@@ -503,7 +613,7 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
-def _cleanup(job_id: int, dag_yaml: str):
+def _cleanup(job_id: int, dag_yaml: str, pool: Optional[str]):
     """Clean up the cluster(s) and storages.
 
     (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -514,12 +624,25 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
+    # Cleanup the HA recovery script first as it is possible that some error
+    # was raised when we construct the task object (e.g.,
+    # sky.exceptions.ResourcesUnavailableError).
+    managed_job_state.remove_ha_recovery_script(job_id)
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, job_id)
-        managed_job_utils.terminate_cluster(cluster_name)
+        if pool is None:
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task.name, job_id)
+            managed_job_utils.terminate_cluster(cluster_name)
+        else:
+            cluster_name, job_id_on_pool_cluster = (
+                managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is not None:
+                if job_id_on_pool_cluster is not None:
+                    core.cancel(cluster_name=cluster_name,
+                                job_ids=[job_id_on_pool_cluster],
+                                _try_cancel_if_cluster_is_init=True)
 
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -536,7 +659,11 @@ def _cleanup(job_id: int, dag_yaml: str):
         # mounts.
         for file_mount in (task.file_mounts or {}).values():
             try:
-                if not data_utils.is_cloud_store_url(file_mount):
+                # For consolidation mode, there is no two-hop file mounts
+                # and the file path here represents the real user data.
+                # We skip the cleanup for consolidation mode.
+                if (not data_utils.is_cloud_store_url(file_mount) and
+                        not managed_job_utils.is_consolidation_mode()):
                     path = os.path.expanduser(file_mount)
                     if os.path.isdir(path):
                         shutil.rmtree(path)
@@ -547,7 +674,7 @@ def _cleanup(job_id: int, dag_yaml: str):
                     f'Failed to clean up file mount {file_mount}: {e}')
 
 
-def start(job_id, dag_yaml):
+def start(job_id, dag_yaml, pool):
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -561,7 +688,8 @@ def start(job_id, dag_yaml):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml))
+                                                     args=(job_id, dag_yaml,
+                                                           pool))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
@@ -597,7 +725,7 @@ def start(job_id, dag_yaml):
         # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster job_state.
-        _cleanup(job_id, dag_yaml=dag_yaml)
+        _cleanup(job_id, dag_yaml=dag_yaml, pool=pool)
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
@@ -635,8 +763,13 @@ if __name__ == '__main__':
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
+    parser.add_argument('--pool',
+                        required=False,
+                        default=None,
+                        type=str,
+                        help='The pool to use for the controller job.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml)
+    start(args.job_id, args.dag_yaml, args.pool)

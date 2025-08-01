@@ -39,12 +39,14 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
+    :ref:`network_tier <yaml-spec-resources-network-tier>`: best
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
     :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
+    :ref:`autostop <yaml-spec-resources-autostop>`: 10m
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -62,6 +64,13 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_BUCKET: skypilot-temp-gcs-test
     MY_LOCAL_PATH: tmp-workdir
     MODEL_SIZE: 13b
+
+  :ref:`secrets <yaml-spec-secrets>`:
+    MY_HF_TOKEN: my-secret-value
+    WANDB_API_KEY: my-secret-value-2
+
+  :ref:`volumes <yaml-spec-new-volumes>`:
+    /mnt/data: volume-name
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
@@ -125,13 +134,40 @@ Task name (optional), used for display purposes.
 ``workdir``
 ~~~~~~~~~~~
 
-Working directory (optional), synced to ``~/sky_workdir`` on the remote cluster each time launch or exec is run with the yaml file.
+``workdir`` can be a local working directory or a git repository (optional). It is synced or cloned to ``~/sky_workdir`` on the remote cluster each time ``sky launch`` or ``sky exec`` is run with the YAML file.
 
-Commands in ``setup`` and ``run`` will be executed under it.
+**Local Directory**:
+
+If ``workdir`` is a local path, the entire directory is synced to the remote cluster. To exclude files from syncing, see :ref:`exclude-uploading-files`.
 
 If a relative path is used, it's evaluated relative to the location from which ``sky`` is called.
 
-To exclude files from syncing, see https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
+**Git Repository**:
+
+If ``workdir`` is a git repository, the ``url`` field is required and can be in one of the following formats:
+
+* HTTPS: ``https://github.com/skypilot-org/skypilot.git``
+* SSH: ``ssh://git@github.com/skypilot-org/skypilot.git``
+* SCP: ``git@github.com:skypilot-org/skypilot.git``
+
+The ``ref`` field specifies the git reference to checkout, which can be:
+
+* A branch name (e.g., ``main``, ``develop``)
+* A tag name (e.g., ``v1.0.0``)
+* A commit hash (e.g., ``abc123def456``)
+
+**Authentication for Private Repositories**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
+
+Commands in ``setup`` and ``run`` will be executed under ``~/sky_workdir``.
 
 .. code-block:: yaml
 
@@ -143,6 +179,13 @@ OR
 
   workdir: ../my-project  # Relative path
 
+OR
+
+.. code-block:: yaml
+
+  workdir:
+    url: https://github.com/skypilot-org/skypilot.git
+    ref: main
 
 .. _yaml-spec-num-nodes:
 
@@ -217,6 +260,62 @@ You can also specify a specific region, zone, or Kubernetes context.
   resources:
     infra: k8s/my-h100-cluster-context
 
+
+.. _yaml-spec-resources-autostop:
+
+``resources.autostop``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Autostop configuration (optional).
+
+Controls whether and when to automatically stop or tear down the cluster after it becomes idle. See :ref:`auto-stop` for more details.
+
+Format:
+
+- ``true``: Use default idle minutes (5)
+- ``false``: Disable autostop
+- ``<num>``: Stop after this many idle minutes
+- ``<num><unit>``: Stop after this much time
+- Object with configuration:
+  - ``idle_minutes``: Number of idle minutes before stopping
+  - ``down``: If true, tear down the cluster instead of stopping it
+
+``<unit>`` can be one of:
+- ``m``: minutes (default if not specified)
+- ``h``: hours
+- ``d``: days
+- ``w``: weeks
+
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    autostop: true  # Stop after default idle minutes (5)
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop: 10  # Stop after 10 minutes
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop: 10h  # Stop after 10 hours
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      down: true  # Use autodown instead of autostop
 
 
 .. _yaml-spec-resources-accelerators:
@@ -343,12 +442,20 @@ OR
 ``resources.memory``
 ~~~~~~~~~~~~~~~~~~~~
 
-Memory in GiB per node (optional).
+Memory specification per node (optional).
 
 Format:
 
--  ``<num>``: exactly ``<num>`` GiB
--  ``<num>+``: at least ``<num>`` GiB
+-  ``<num>``: exactly ``<num>`` GB
+-  ``<num>+``: at least ``<num>`` GB
+-  ``<num><unit>``: memory with unit (e.g., ``1024MB``, ``64GB``)
+
+Units supported (case-insensitive):
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes) (default if not specified)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
@@ -362,7 +469,7 @@ OR
 .. code-block:: yaml
 
   resources:
-    memory: 64
+    memory: 64GB
 
 .. _yaml-spec-resources-instance-type:
 
@@ -399,14 +506,34 @@ If unspecified, defaults to ``false`` (on-demand instances).
 ``resources.disk_size``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Disk size in GB to allocate for OS (mounted at ``/``).
+Integer disk size in GB to allocate for OS (mounted at ``/``) OR specify units.
 
 Increase this if you have a large working directory or tasks that write out large outputs.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+.. warning::
+
+   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
   resources:
     disk_size: 256
+  
+OR
+
+.. code-block:: yaml
+
+  resources:
+    disk_size: 256GB
+
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -439,6 +566,27 @@ OR
 
   resources:
     disk_tier: best
+
+
+.. _yaml-spec-resources-network-tier:
+
+``resources.network_tier``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Network tier to use (optional).
+
+Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
+
+If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
+
+- ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes
+- ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
+
+.. code-block:: yaml
+
+  resources:
+    network_tier: best
 
 
 .. _yaml-spec-resources-ports:
@@ -741,26 +889,6 @@ These values can be accessed in the ``file_mounts``, ``setup``, and ``run`` sect
 
 Values set here can be overridden by a CLI flag: ``sky launch/exec --env ENV=val`` (if ``ENV`` is present).
 
-For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
-
-If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
-
-.. code-block:: yaml
-
-  envs:
-    SKYPILOT_DOCKER_USERNAME: <username>
-    SKYPILOT_DOCKER_PASSWORD: <password>
-    SKYPILOT_DOCKER_SERVER: <registry server>
-
-SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
-
-You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
-
-.. code-block:: yaml
-
-  sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
-
-For more information about docker support in SkyPilot, please refer to the ``image_id`` section above.
 
 Example of using envs:
 
@@ -770,6 +898,65 @@ Example of using envs:
     MY_BUCKET: skypilot-data
     MODEL_SIZE: 13b
     MY_LOCAL_PATH: tmp-workdir
+
+.. dropdown:: Docker login authentication with environment variables
+
+  For costumized non-root docker image in RunPod, you need to set ``SKYPILOT_RUNPOD_DOCKER_USERNAME`` to specify the login username for the docker image. See :ref:`docker-containers-as-runtime-environments` for more.
+
+  If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
+
+  .. code-block:: yaml
+
+    envs:
+      SKYPILOT_DOCKER_USERNAME: <username>
+      SKYPILOT_DOCKER_PASSWORD: <password>
+      SKYPILOT_DOCKER_SERVER: <registry server>
+
+  SkyPilot will execute ``docker login --username <username> --password <password> <registry server>`` before pulling the docker image. For ``docker login``, see https://docs.docker.com/engine/reference/commandline/login/
+
+  You could also specify any of them through the CLI flag if you don't want to store them in your yaml file or if you want to generate them for constantly changing password. For example:
+
+  .. code-block:: yaml
+
+    sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+
+  For more information about docker support in SkyPilot, please refer to :ref:`Using private docker registries <docker-containers-private-registries>`.
+
+  You can also use :ref:`secrets <yaml-spec-secrets>` to set the authentication above.
+
+.. _yaml-spec-secrets:
+
+``secrets``
+~~~~~~~~~~~
+
+Secrets (optional).
+
+Secrets are similar to :ref:`envs <yaml-spec-envs>` above but can only be used in the ``setup`` and ``run``, and will be redacted in the entrypoint/YAML in the dashboard.
+
+Values set here can be overridden by a CLI flag: ``sky launch/exec --secret SECRET=val`` (if ``SECRET`` is present).
+
+Example:
+
+.. code-block:: yaml
+
+  secrets:
+    HF_TOKEN: my-huggingface-token
+    WANDB_API_KEY: my-wandb-api-key
+
+.. _yaml-spec-new-volumes:
+
+``volumes``
+~~~~~~~~~~~
+
+SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+
+Example:
+
+.. code-block:: yaml
+
+  volumes:
+    /mnt/data: volume-name
+
 
 .. _yaml-spec-file-mounts:
 
@@ -1277,35 +1464,3 @@ Port to run your service on each replica.
 
   resources:
     ports: 8080
-
-Managed jobs
-============
-
-When creating a managed job, you can add an optional ``job`` section to your SkyPilot YAML for additional configuration.
-
-Syntax
-
-.. parsed-literal::
-
-  job:
-    :ref:`priority <yaml-spec-job-priority>`: 200
-
-
-Fields
-----------
-
-.. _yaml-spec-job-priority:
-
-``job.priority``
-~~~~~~~~~~~~~~~~
-
-Priority of the job, between 0 and 1000 (default: 500).
-
-Set the queuing priority of the job. A higher value means that the job is higher
-priority. High priority jobs are scheduled sooner and will block lower priority
-jobs from starting until the high priority jobs have started.
-
-.. code-block:: yaml
-
-  job:
-    priority: 200

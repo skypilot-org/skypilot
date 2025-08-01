@@ -17,7 +17,8 @@ service:
 
 envs:
   MODEL_NAME: google/gemma-7b-it
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+secrets:
+  HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 resources: 
   accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}

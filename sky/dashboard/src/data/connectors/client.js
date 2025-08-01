@@ -3,18 +3,21 @@
 import { ENDPOINT } from './constants';
 
 export const apiClient = {
-  fetch: async (path, body) => {
-    const headers = {
-      'Content-Type': 'application/json',
-    };
+  fetch: async (path, body, method = 'POST') => {
+    const headers =
+      method === 'POST'
+        ? {
+            'Content-Type': 'application/json',
+          }
+        : {};
 
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
 
     const response = await fetch(fullUrl, {
-      method: 'POST',
+      method,
       headers,
-      body: JSON.stringify(body),
+      body: method === 'POST' ? JSON.stringify(body) : undefined,
     });
 
     // Handle X-Request-ID for API requests

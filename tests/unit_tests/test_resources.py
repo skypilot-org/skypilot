@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from sky import check
 from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
@@ -103,6 +104,10 @@ def test_no_cloud_labels_resources():
     global_user_state.set_enabled_clouds(['aws', 'gcp'],
                                          sky_cloud.CloudCapability.COMPUTE,
                                          constants.SKYPILOT_DEFAULT_WORKSPACE)
+    global_user_state.set_allowed_clouds(
+        check._get_workspace_allowed_clouds(
+            constants.SKYPILOT_DEFAULT_WORKSPACE),
+        constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -118,6 +123,10 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
     global_user_state.set_enabled_clouds(['aws'],
                                          sky_cloud.CloudCapability.COMPUTE,
                                          constants.SKYPILOT_DEFAULT_WORKSPACE)
+    global_user_state.set_allowed_clouds(
+        check._get_workspace_allowed_clouds(
+            constants.SKYPILOT_DEFAULT_WORKSPACE),
+        constants.SKYPILOT_DEFAULT_WORKSPACE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS
@@ -763,3 +772,367 @@ def test_autostop_config():
     assert r.autostop_config.enabled is False  # should remain disabled
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 55
+
+
+def test_disk_size_conversion():
+    """Test disk size conversion to GB."""
+    # Test integer input
+    r = Resources(disk_size=100)
+    assert r.disk_size == 100
+
+    # Test string input with different units
+    r = Resources(disk_size='100GB')
+    assert r.disk_size == 100
+
+    r = Resources(disk_size='1024MB')
+    assert r.disk_size == 1
+
+    r = Resources(disk_size='1TB')
+    assert r.disk_size == 1024
+
+    with pytest.raises(ValueError):
+        Resources(disk_size='1024KB')
+
+    with pytest.raises(ValueError):
+        Resources(disk_size='1024B')
+
+    r = Resources(disk_size='1PB')
+    assert r.disk_size == 1024 * 1024
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(disk_size='invalid')
+
+
+def test_memory_conversion():
+    """Test memory conversion to GB."""
+    # Test integer input
+    r = Resources(memory=8)
+    assert r.memory == '8'
+
+    # Test string input with different units
+    r = Resources(memory='8GB')
+    assert r.memory == '8.0'
+
+    r = Resources(memory='8192MB')
+    assert r.memory == '8.0'
+
+    r = Resources(memory='1TB+')
+    assert r.memory == '1024.0+'
+
+    r = Resources(memory='1PB')
+    assert r.memory == '1048576.0'
+
+    # Test with plus suffix
+    r = Resources(memory='8GB+')
+    assert r.memory == '8.0+'
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(memory='invalid')
+
+
+def test_autostop_time_format():
+    """Test autostop time format parsing."""
+    # Test minutes format
+    r = Resources(autostop='5m')
+    assert r.autostop_config.idle_minutes == 5
+
+    # Test hours format
+    r = Resources(autostop='2h')
+    assert r.autostop_config.idle_minutes == 120
+
+    # Test days format
+    r = Resources(autostop='1d')
+    assert r.autostop_config.idle_minutes == 1440
+
+    r = Resources(autostop=30)
+    assert r.autostop_config.idle_minutes == 30
+
+    # Test numeric format
+    r = Resources(autostop='60')
+    assert r.autostop_config.idle_minutes == 60
+
+    # Test invalid format
+    with pytest.raises(ValueError):
+        Resources(autostop='invalid')
+
+
+def test_priority_basic():
+    """Test basic priority field functionality."""
+    # Test with no priority specified (defaults to None)
+    r = Resources()
+    assert r.priority is None
+
+    # Test with valid priority values
+    r = Resources(priority=constants.MIN_PRIORITY)
+    assert r.priority == constants.MIN_PRIORITY
+
+    r = Resources(priority=constants.DEFAULT_PRIORITY)
+    assert r.priority == constants.DEFAULT_PRIORITY
+
+    r = Resources(priority=constants.MAX_PRIORITY)
+    assert r.priority == constants.MAX_PRIORITY
+
+    # Test with None explicitly
+    r = Resources(priority=None)
+    assert r.priority is None
+
+
+def test_priority_validation():
+    """Test priority field validation with invalid values."""
+    # Test invalid priority - below range
+    error_message = f'Priority must be between {constants.MIN_PRIORITY} and {constants.MAX_PRIORITY}'
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=constants.MIN_PRIORITY - 1)
+
+    # Test invalid priority - above range
+    with pytest.raises(ValueError, match=error_message):
+        Resources(priority=constants.MAX_PRIORITY + 1)
+
+
+def test_priority_yaml_serialization():
+    """Test priority YAML serialization and deserialization."""
+    # Test priority serialization
+    r = Resources(priority=750)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['priority'] == 750
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.priority == 750
+
+    # Test None priority (should not appear in yaml)
+    r = Resources(priority=None)
+    yaml_config = r.to_yaml_config()
+    assert 'priority' not in yaml_config
+
+    # Test priority with other fields
+    r = Resources(cpus=4, memory='8', priority=200)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['priority'] == 200
+    assert yaml_config['cpus'] == '4'
+    assert yaml_config['memory'] == '8'
+
+    loaded_resources = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_resources.priority == 200
+    assert loaded_resources.cpus == '4'
+    assert loaded_resources.memory == '8'
+
+
+def test_priority_copy():
+    """Test priority preservation in copy operations."""
+    r = Resources(priority=300, cpus=4)
+    r_copy = r.copy()
+    assert r_copy.priority == 300
+
+    # Test overriding priority in copy
+    r_override = r.copy(priority=600)
+    assert r_override.priority == 600
+    assert r_override.cpus == '4'  # Other properties preserved
+
+    # Test copying with None priority
+    r_none = Resources(priority=None, cpus=2)
+    r_copy = r_none.copy()
+    assert r_copy.priority is None
+
+    # Test overriding None priority in copy
+    r_override = r_none.copy(priority=100)
+    assert r_override.priority == 100
+    assert r_override.cpus == '2'
+
+
+def test_priority_with_any_of():
+    """Test priority field works with any_of configuration."""
+    config = {
+        'priority': constants.DEFAULT_PRIORITY,  # Base priority
+        'any_of': [
+            {
+                'cpus': 8,
+                'memory': 16
+            },
+            {
+                'cpus': 4,
+                'memory': 32,
+                'priority': 800  # Override priority
+            },
+        ]
+    }
+    resources_set = Resources.from_yaml_config(config)
+
+    assert isinstance(resources_set, set)
+    assert len(resources_set) == 2
+
+    resources_list = list(resources_set)
+
+    # Find resources by properties
+    r_cpus8 = next((r for r in resources_list if r.cpus == '8'), None)
+    r_cpus4 = next((r for r in resources_list if r.cpus == '4'), None)
+
+    assert r_cpus8 is not None
+    assert r_cpus8.priority == constants.DEFAULT_PRIORITY  # Base priority
+
+    assert r_cpus4 is not None
+    assert r_cpus4.priority == 800  # Override priority
+
+
+def test_priority_with_ordered():
+    """Test priority field works with ordered configuration."""
+    config = {
+        'priority': 300,  # Base priority
+        'ordered': [
+            {
+                'infra': 'gcp',
+                'accelerators': 'A100:8'
+            },
+            {
+                'infra': 'aws',
+                'accelerators': 'V100:8',
+                'priority': 700  # Override priority
+            },
+        ]
+    }
+    resources_list = Resources.from_yaml_config(config)
+
+    assert isinstance(resources_list, list)
+    assert len(resources_list) == 2
+
+    # Ordered resources should preserve order
+    assert resources_list[0].infra.cloud.lower() == 'gcp'
+    assert resources_list[0].priority == 300  # Base priority
+
+    assert resources_list[1].infra.cloud.lower() == 'aws'
+    assert resources_list[1].priority == 700  # Override priority
+
+
+@pytest.mark.parametrize(['resources_kwargs', 'expected_yaml_config'], [
+    ({
+        'infra': 'aws/us-east-1',
+        'accelerators': 'A10',
+        'priority': 400
+    }, {
+        'infra': 'aws/us-east-1',
+        'accelerators': {
+            'A10': 1
+        },
+        'priority': 400,
+        'disk_size': 256,
+    }),
+    ({
+        'cpus': 4,
+        'memory': '8+',
+        'priority': 0
+    }, {
+        'cpus': '4',
+        'memory': '8+',
+        'priority': 0,
+        'disk_size': 256,
+    }),
+    ({
+        'cpus': 2,
+        'priority': 1000
+    }, {
+        'cpus': '2',
+        'priority': 1000,
+        'disk_size': 256,
+    }),
+])
+def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):
+    """Test priority field in to_yaml_config and from_yaml_config."""
+    r = Resources(**resources_kwargs)
+    yaml_config = r.to_yaml_config()
+    assert yaml_config == expected_yaml_config
+
+    loaded_r = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded_r.priority == r.priority
+    assert loaded_r.cpus == r.cpus
+    if 'accelerators' in expected_yaml_config:
+        assert loaded_r.accelerators == r.accelerators
+
+
+@pytest.mark.parametrize(
+    'r_kwargs, blocked_kwargs, expected',
+    [
+        # All fields match
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, True),
+        # use_spot mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': False
+        }, False),
+        # cloud mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+        }, {
+            'cloud': clouds.GCP(),
+            'instance_type': 'g2-standard-4',
+            'region': 'us-east4',
+            'zone': 'us-east4-c',
+            'accelerators': {
+                'L4': 1
+            },
+        }, False),
+        # instance_type mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.8xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, False),
+    ])
+def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
+    """Test should_be_blocked_by method."""
+    r = Resources(**r_kwargs)
+    blocked = Resources(**blocked_kwargs)
+    assert r.should_be_blocked_by(blocked) == expected

@@ -60,20 +60,20 @@ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 
 # Deploy SkyPilot API server
 echo "Deploying SkyPilot API server..."
+
+# Set version-specific flag
 if [ "$HELM_VERSION" = "latest" ]; then
-    helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME --devel \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --set ingress.authCredentials=$AUTH_STRING
+    extra_flag="--devel"
 else
     # Convert PEP440 version to SemVer if needed (e.g., 1.0.0.dev20250609 -> 1.0.0-dev.20250609)
     SEMVER_VERSION=$(echo "$HELM_VERSION" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
-    helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --version "$SEMVER_VERSION" \
-        --set ingress.authCredentials=$AUTH_STRING
+    extra_flag="--version $SEMVER_VERSION"
 fi
+
+helm upgrade --install $RELEASE_NAME skypilot/$PACKAGE_NAME $extra_flag \
+    --namespace $NAMESPACE \
+    --create-namespace \
+    --set ingress.authCredentials=$AUTH_STRING
 
 # Wait for pods to be ready
 echo "Waiting for pods to be ready..."
@@ -128,10 +128,21 @@ if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     exit 1
 fi
 
-# Extract version from response and verify it matches
+# Extract version from response and verify it matches (only if not using 'latest')
 RETURNED_VERSION=$(echo $HEALTH_RESPONSE | jq -r '.version')
-if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
-    echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+
+# Verify that we got a valid version string
+if [ -z "$RETURNED_VERSION" ] || [ ${#RETURNED_VERSION} -le 1 ]; then
+    echo "Error: Invalid version returned from API. Got: '$RETURNED_VERSION'"
     exit 1
 fi
-echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
+
+if [ "$HELM_VERSION" != "latest" ]; then
+    if [ "$RETURNED_VERSION" != "$HELM_VERSION" ]; then
+        echo "Error: Version mismatch! Expected: $HELM_VERSION, Got: $RETURNED_VERSION"
+        exit 1
+    fi
+    echo "Version verification successful! Expected version $HELM_VERSION matches returned version $RETURNED_VERSION"
+else
+    echo "Using latest version. Skipping version verification. Deployed version: $RETURNED_VERSION"
+fi

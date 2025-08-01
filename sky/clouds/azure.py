@@ -24,6 +24,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -93,6 +94,9 @@ class Azure(clouds.Cloud):
             clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
                 f'High availability controllers are not supported on {cls._REPR}.'
             ),
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
+            ),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -150,15 +154,18 @@ class Azure(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='azure')
 
     @classmethod
@@ -313,13 +320,15 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -377,8 +386,11 @@ class Azure(clouds.Cloud):
             }
 
         # Determine resource group for deploying the instance.
-        resource_group_name = skypilot_config.get_nested(
-            ('azure', 'resource_group_vm'), None)
+        resource_group_name = skypilot_config.get_effective_region_config(
+            cloud='azure',
+            region=region_name,
+            keys=('resource_group_vm',),
+            default_value=None)
         use_external_resource_group = resource_group_name is not None
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
@@ -490,7 +502,9 @@ class Azure(clouds.Cloud):
             default_instance_type = Azure.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:

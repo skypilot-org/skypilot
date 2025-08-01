@@ -32,6 +32,7 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -171,6 +172,11 @@ class AWS(clouds.Cloud):
             clouds.CloudImplementationFeatures.
             HIGH_AVAILABILITY_CONTROLLERS] = (
                 f'High availability controllers are not supported on {cls._REPR}.'
+            )
+
+        unsupported_features[
+            clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK] = (
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
             )
 
         return unsupported_features
@@ -398,15 +404,18 @@ class AWS(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
@@ -428,13 +437,15 @@ class AWS(clouds.Cloud):
                                                         clouds='aws')
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            num_nodes: int,
-            dryrun: bool = False) -> Dict[str, Any]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name: resources_utils.ClusterName,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
+        dryrun: bool = False,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    ) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
@@ -455,10 +466,16 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       resources.instance_type)
 
-        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
-                                                    False)
-        user_security_group_config = skypilot_config.get_nested(
-            ('aws', 'security_group_name'), None)
+        disk_encrypted = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('disk_encrypted',),
+            default_value=False)
+        user_security_group_config = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('security_group_name',),
+            default_value=None)
         user_security_group = None
         if isinstance(user_security_group_config, str):
             user_security_group = user_security_group_config
@@ -540,7 +557,9 @@ class AWS(clouds.Cloud):
             default_instance_type = AWS.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -725,7 +744,7 @@ class AWS(clouds.Cloud):
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+                              stderr=subprocess.DEVNULL)
         if proc.returncode != 0:
             return None
         return proc.stdout
