@@ -624,6 +624,7 @@ class Rclone:
         IBM = 'IBM'
         R2 = 'R2'
         AZURE = 'AZURE'
+        NEBIUS = 'NEBIUS'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -640,7 +641,8 @@ class Rclone:
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
-                Rclone.RcloneStores.AZURE: 'sky-azure'
+                Rclone.RcloneStores.AZURE: 'sky-azure',
+                Rclone.RcloneStores.NEBIUS: 'sky-nebius'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -727,6 +729,24 @@ class Rclone:
                     type = azureblob
                     account = {storage_account_name}
                     key = {storage_account_key}
+                    """)
+            elif self is Rclone.RcloneStores.NEBIUS:
+                nebius_session = nebius.session()
+                nebius_credentials = nebius.get_nebius_credentials(
+                    nebius_session)
+                # Get endpoint URL from the client
+                client = nebius.client('s3')
+                endpoint_url = client.meta.endpoint_url
+                access_key_id = nebius_credentials.access_key
+                secret_access_key = nebius_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    acl = private
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
