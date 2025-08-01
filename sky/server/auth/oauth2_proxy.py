@@ -35,8 +35,8 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     def __init__(self, application: fastapi.FastAPI):
         super().__init__(application)
-        self.enabled: bool = (os.getenv(OAUTH2_PROXY_ENABLED_ENV_VAR, 'false')
-                              == 'true')
+        self.enabled: bool = (os.getenv(OAUTH2_PROXY_ENABLED_ENV_VAR,
+                                        'false') == 'true')
         self.proxy_base: str = ''
         if self.enabled:
             proxy_base = os.getenv(OAUTH2_PROXY_BASE_URL_ENV_VAR)
@@ -133,6 +133,14 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     request, auth_user)
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
+                # For /api/health, we should allow unauthenticated requests to
+                # not break healthz check.
+                # TODO(aylei): remove this to an aggregated login middleware
+                # in favor of the unified authentication.
+                if request.url.path.startswith('/api/health'):
+                    request.state.anonymous_user = True
+                    return await call_next(request)
+
                 # TODO(aylei): in unified authentication, the redirection
                 # or rejection should be done after all the authentication
                 # methods are performed.

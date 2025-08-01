@@ -37,6 +37,7 @@ from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
 from sky.server import rest
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -1927,7 +1928,15 @@ def api_info() -> Dict[str, Any]:
         Note that user may be None if we are not using an auth proxy.
 
     """
-    response = server_common.make_authenticated_request('GET', '/api/health')
+    if versions.get_remote_api_version() < 13:
+        # TODO(aylei): remove this after min_compatible_api_version >= 13.
+        # /api/health does not require authentication, thus running
+        # `sky api info` upon an legacy server would not trigger the login
+        # process.
+        response = server_common.make_authenticated_request(
+            'GET', '/api/health')
+    else:
+        response = server_common.make_authenticated_request('GET', '/api/info')
     response.raise_for_status()
     return response.json()
 

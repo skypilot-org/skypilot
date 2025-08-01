@@ -6,7 +6,6 @@ import base64
 import contextlib
 import datetime
 import hashlib
-import http
 import json
 import logging
 import multiprocessing
@@ -1544,6 +1543,22 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
+    user_dict = None
+    if user is not None:
+        user_dict = user.to_dict()
+    elif getattr(request.state, 'anonymous_user', False):
+        # /api/health had two different usage previously:
+        # 1. For health check from CLI and external ochestration tools (k8s).
+        # 2. For `sky api info` call to get the user info.
+        # The first does not require authentication while the second does,
+        # thus we introduce an new API /api/info to serve the second usage.
+        # However, for backward compatibility, we need to return a dummy user
+        # info to CLI that runs in API version < 13 in this API.
+        user_dict = {
+            'name': 'anonymous',
+            'id': 'anonymous',
+        }
+
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
     return {
         'status': common.ApiServerStatus.HEALTHY.value,
@@ -1554,9 +1569,23 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
+        'user': user_dict,
         'basic_auth_enabled': os.environ.get(
             constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
+    }
+
+
+@app.get('/api/info')
+async def api_info(request: fastapi.Request) -> Dict[str, Any]:
+    """Gets the info of the API server."""
+    user = request.state.auth_user
+    return {
+        'status': common.ApiServerStatus.HEALTHY.value,
+        'api_version': str(server_constants.API_VERSION),
+        'version': sky.__version__,
+        'version_on_disk': common.get_skypilot_version_on_disk(),
+        'commit': sky.__commit__,
+        'user': user.to_dict() if user is not None else None,
     }
 
 
@@ -1727,13 +1756,6 @@ async def serve_dashboard(full_path: str):
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
-
-
-@app.get('/healthz')
-async def healthz(request: fastapi.Request) -> None:
-    """Health check endpoint for ochestration tools."""
-    del request
-    return fastapi.responses.Response(status_code=http.HTTPStatus.OK)
 
 
 # Redirect the root path to dashboard

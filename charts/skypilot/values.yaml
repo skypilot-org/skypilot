@@ -25,10 +25,8 @@ apiService:
   # If enabled, the basic auth configuration `ingress.authCredentials`
   # and `ingress.authSecret` in the ingress will be ignored.
   enableUserManagement: false
-  # Enable service account tokens for automated API access
-  # If enabled, users can create bearer tokens to bypass SSO authentication
-  # for automated systems. This works independently of enableUserManagement.
-  # JWT secrets are automatically stored in the database for persistence across restarts.
+  # Deprecated: use `apiService.auth.serviceAccount.enabled` instead.
+  # @schema type: [boolean]
   enableServiceAccounts: true
   # Initial basic auth credentials for the API server
   # The user in the credentials will be used to create a new admin user in the API server,
@@ -144,6 +142,32 @@ apiService:
 
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
+
+# Authentication configuration for the API server
+# @schema type: [object, null]
+auth:
+  # OAuth2 Proxy based authentication for the API server
+  # @schema type: [object, null]
+  oauth2Proxy:
+    # Enable/disable OAuth2 Proxy based authentication
+    # @schema type: [boolean]
+    enabled: false
+    # Base URL of the OAuth2 Proxy:
+    # - If you are using a self-hosted OAuth2 Proxy, set this to the base URL of the OAuth2 Proxy.
+    # - If you want this chart to provision an OAuth2 Proxy, leave this unset and enable the OAuth2 Proxy deployment via `ingress.oauth2-proxy` config.
+    # Therefore, a non-empty base-url is mutually exclusive with `ingress.oauth2-proxy.enabled`.
+    # @schema type: [string, null]
+    baseUrl: null
+  # Service account token based authentication for the API server
+  # @schema type: [object, null]
+  serviceAccount:
+    # Enable service account tokens for automated API access
+    # If enabled, users can create bearer tokens to bypass SSO authentication
+    # for automated systems. This works independently of enableUserManagement.
+    # JWT secrets are automatically stored in the database for persistence across restarts.
+    # Default to `.apiService.enableServiceAccounts` (true) for backward compatibility, setting this will override the default value.
+    # @schema type: [boolean, null]
+    enabled: null
 
 storage:
   # Enable/disable persistent storage
