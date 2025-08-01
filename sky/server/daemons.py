@@ -56,21 +56,21 @@ class InternalRequestDaemon:
 
         level = self.refresh_log_level()
         while True:
-            with ux_utils.enable_traceback(), \
-                sky_logging.set_sky_logging_levels(level):
-                sky_logging.reload_logger()
-                try:
+            try:
+                with ux_utils.enable_traceback(), \
+                    sky_logging.set_sky_logging_levels(level):
+                    sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
-                except Exception:  # pylint: disable=broad-except
-                    # It is OK to fail to run the event, as the event is not
-                    # critical, but we should log the error.
-                    logger.exception(
-                        f'Error running {self.name} event. '
-                        f'Restarting in '
-                        f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
-                        'seconds...')
-                    time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
+            except Exception:  # pylint: disable=broad-except
+                # It is OK to fail to run the event, as the event is not
+                # critical, but we should log the error.
+                logger.exception(
+                    f'Error running {self.name} event. '
+                    f'Restarting in '
+                    f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
+                    'seconds...')
+                time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
 
 
 def refresh_cluster_status_event():
