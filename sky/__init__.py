@@ -119,7 +119,6 @@ from sky.data import StoreType
 from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.resources import Resources
-from sky.skylet.autostop_lib import AutostopWaitFor
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
 from sky.utils.common import OptimizeTarget

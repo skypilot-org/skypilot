@@ -957,12 +957,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
-@click.option('--wait-for',
-              type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
-              default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
-              required=False,
-              help=autostop_lib.AutostopWaitFor.cli_help_message(
-                  pair='idle-minutes-to-autostop'))
+@flags.wait_for_option('idle-minutes-to-autostop')
 @click.option(
     '--down',
     default=False,
@@ -2445,12 +2440,7 @@ def stop(
               required=False,
               help=('Set the idle minutes before autostopping the cluster. '
                     'See the doc above for detailed semantics.'))
-@click.option(
-    '--wait-for',
-    type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
-    default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
-    required=False,
-    help=autostop_lib.AutostopWaitFor.cli_help_message(pair='idle-minutes'))
+@flags.wait_for_option('idle-minutes')
 @click.option(
     '--cancel',
     default=False,
@@ -2566,12 +2556,7 @@ def autostop(
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
-@click.option('--wait-for',
-              type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
-              default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
-              required=False,
-              help=autostop_lib.AutostopWaitFor.cli_help_message(
-                  pair='idle-minutes-to-autostop'))
+@flags.wait_for_option('idle-minutes-to-autostop')
 @click.option(
     '--down',
     default=False,
