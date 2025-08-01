@@ -30,6 +30,9 @@ apiService:
   # for automated systems. This works independently of enableUserManagement.
   # JWT secrets are automatically stored in the database for persistence across restarts.
   enableServiceAccounts: true
+  # Enable anonymous access to the API server
+  # If enabled, the API server will allow anonymous access to the API.
+  enableAnonymousAccess: false
   # Initial basic auth credentials for the API server
   # The user in the credentials will be used to create a new admin user in the API server,
   # and the password can be updated by the user in the Dashboard.
