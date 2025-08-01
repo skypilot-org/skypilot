@@ -27,6 +27,8 @@ import filelock
 from typing_extensions import ParamSpec
 
 from sky import exceptions
+from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -37,6 +39,9 @@ from sky.server import rest
 from sky.server import versions
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.users import rbac
+from sky.users import token_service as token_lib
+from sky.users.permission import permission_service
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -48,7 +53,6 @@ if typing.TYPE_CHECKING:
     import requests
 
     from sky import dag as dag_lib
-    from sky import models
 else:
     aiohttp = adaptors_common.LazyImport('aiohttp')
     pydantic = adaptors_common.LazyImport('pydantic')
@@ -509,6 +513,63 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     return RequestId[T](request_id)
 
 
+def _initialize_jwt_secret():
+    sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                                'false').lower()
+    if sa_enabled != 'true':
+        return
+
+    # Check if file exists and is not empty
+    token_path = os.path.expanduser(constants.SKYPILOT_SYSTEM_SA_TOKEN_PATH)
+    if os.path.exists(token_path) and os.path.getsize(token_path) > 0:
+        logger.info(
+            f'Initial token already exists at {token_path}, skipping generation'
+        )
+        return
+
+    token_service = token_lib.TokenService()
+    tokens = global_user_state.get_service_account_tokens_by_sa_user_id(
+        constants.SKYPILOT_SYSTEM_SA_ID)
+    if len(tokens) > 0:
+        logger.info(f'Initial token has been generated for '
+                    f'{constants.SKYPILOT_SYSTEM_SA_ID}, skipping generation')
+        return
+
+    logger.info(f'Creating initial token for {constants.SKYPILOT_SYSTEM_SA_ID}')
+    initial_token = token_service.create_token(
+        creator_user_id=constants.SKYPILOT_SYSTEM_USER_ID,
+        service_account_user_id=constants.SKYPILOT_SYSTEM_SA_ID,
+        token_name=constants.SKYPILOT_SYSTEM_SA_ID,
+        expires_in_days=constants.SKYPILOT_SYSTEM_SA_TOKEN_DURATION_DAYS)
+    global_user_state.add_service_account_token(
+        token_id=initial_token['token_id'],
+        token_name=constants.SKYPILOT_SYSTEM_SA_ID,
+        token_hash=initial_token['token_hash'],
+        creator_user_hash=constants.SKYPILOT_SYSTEM_USER_ID,
+        service_account_user_id=constants.SKYPILOT_SYSTEM_SA_ID,
+        expires_at=initial_token['expires_at'])
+
+    service_account_user = models.User(id=constants.SKYPILOT_SYSTEM_SA_ID,
+                                       name=constants.SKYPILOT_SYSTEM_SA_ID)
+    global_user_state.add_or_update_user(service_account_user,
+                                         allow_duplicate_name=False)
+    permission_service.update_role(constants.SKYPILOT_SYSTEM_SA_ID,
+                                   rbac.RoleName.ADMIN.value)
+
+    # Create the directory if it doesn't exist
+    os.makedirs(os.path.dirname(token_path), exist_ok=True)
+    with open(token_path, 'w', encoding='utf-8') as f:
+        f.write(initial_token['token'])
+    logger.info(f'Initial token saved to {token_path}')
+    return
+
+
+# This function is used to do some initialization before the API server
+# workers start e.g. generate the initial system service account token.
+def _initialize_before_workers_start():
+    _initialize_jwt_secret()
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -539,6 +600,8 @@ def _start_api_server(deploy: bool = False,
                 f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is '
                 'recommended to support higher load with better performance.'
                 f'{colorama.Style.RESET_ALL}')
+
+        _initialize_before_workers_start()
 
         args = [sys.executable, *API_SERVER_CMD.split()]
         if deploy:

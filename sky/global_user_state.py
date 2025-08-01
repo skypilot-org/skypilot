@@ -1698,6 +1698,26 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @_init_db
+def get_service_account_tokens_by_sa_user_id(
+        service_account_user_id: str) -> List[Dict[str, Any]]:
+    """Get all service account tokens for a service account."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(service_account_token_table).filter_by(
+            service_account_user_id=service_account_user_id).all()
+    return [{
+        'token_id': row.token_id,
+        'token_name': row.token_name,
+        'token_hash': row.token_hash,
+        'created_at': row.created_at,
+        'last_used_at': row.last_used_at,
+        'expires_at': row.expires_at,
+        'creator_user_hash': row.creator_user_hash,
+        'service_account_user_id': row.service_account_user_id,
+    } for row in rows]
+
+
+@_init_db
 def update_service_account_token_last_used(token_id: str) -> None:
     """Update the last_used_at timestamp for a service account token."""
     assert _SQLALCHEMY_ENGINE is not None
