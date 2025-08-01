@@ -7,6 +7,7 @@ import click
 import dotenv
 
 from sky import skypilot_config
+from sky.skylet import autostop_lib
 from sky.utils import resources_utils
 
 
@@ -338,5 +339,19 @@ def all_users_option(helptext: Optional[str] = None):
                             default=False,
                             required=False,
                             help=helptext)(func)
+
+    return return_option_decorator
+
+
+def wait_for_option(pair: str):
+    """A decorator for the --wait-for option."""
+
+    def return_option_decorator(func):
+        return click.option(
+            '--wait-for',
+            type=click.Choice(autostop_lib.AutostopWaitFor.supported_modes()),
+            default=autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR.value,
+            required=False,
+            help=autostop_lib.AutostopWaitFor.cli_help_message(pair=pair))(func)
 
     return return_option_decorator

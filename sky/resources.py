@@ -20,6 +20,7 @@ from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.nebius import constants as nebius_constants
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
@@ -69,6 +70,8 @@ class AutostopConfig:
     # flags.
     idle_minutes: int = 0
     down: bool = False
+    wait_for: autostop_lib.AutostopWaitFor = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR)
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -76,6 +79,7 @@ class AutostopConfig:
         return {
             'idle_minutes': self.idle_minutes,
             'down': self.down,
+            'wait_for': self.wait_for.value,
         }
 
     @classmethod
@@ -104,6 +108,9 @@ class AutostopConfig:
                 autostop_config.idle_minutes = config['idle_minutes']
             if 'down' in config:
                 autostop_config.down = config['down']
+            if 'wait_for' in config:
+                autostop_config.wait_for = (
+                    autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
             return autostop_config
 
         return None
@@ -958,15 +965,18 @@ class Resources:
             valid_volumes.append(volume)
         self._volumes = valid_volumes
 
-    def override_autostop_config(self,
-                                 down: bool = False,
-                                 idle_minutes: Optional[int] = None) -> None:
+    def override_autostop_config(
+            self,
+            down: bool = False,
+            idle_minutes: Optional[int] = None,
+            wait_for: Optional[autostop_lib.AutostopWaitFor] = None) -> None:
         """Override autostop config to the resource.
 
         Args:
             down: If true, override the autostop config to use autodown.
             idle_minutes: If not None, override the idle minutes to autostop or
                 autodown.
+            wait_for: If not None, override the wait mode.
         """
         if not down and idle_minutes is None:
             return
@@ -976,6 +986,8 @@ class Resources:
             self._autostop_config.down = down
         if idle_minutes is not None:
             self._autostop_config.idle_minutes = idle_minutes
+        if wait_for is not None:
+            self._autostop_config.wait_for = wait_for
 
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""

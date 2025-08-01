@@ -4650,6 +4650,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def set_autostop(self,
                      handle: CloudVmRayResourceHandle,
                      idle_minutes_to_autostop: Optional[int],
+                     wait_for: autostop_lib.AutostopWaitFor,
                      down: bool = False,
                      stream_logs: bool = True) -> None:
         # The core.autostop() function should have already checked that the
@@ -4697,7 +4698,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
             code = autostop_lib.AutostopCodeGen.set_autostop(
-                idle_minutes_to_autostop, self.NAME, down)
+                idle_minutes_to_autostop, self.NAME, wait_for, down)
             returncode, _, stderr = self.run_on_head(handle,
                                                      code,
                                                      require_outputs=True,

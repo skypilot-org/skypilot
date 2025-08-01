@@ -11,6 +11,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import resources_utils
 
@@ -686,6 +687,7 @@ def test_autostop_config():
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 0  # default value
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS_AND_SSH  # default value
 
     # Override with idle_minutes when no existing autostop config
     r = Resources()
@@ -696,29 +698,39 @@ def test_autostop_config():
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False  # default value
     assert r.autostop_config.idle_minutes == 10
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS_AND_SSH  # default value
 
     # Override with both down and idle_minutes when no existing config
     r = Resources()
     assert r.autostop_config is None
 
-    r.override_autostop_config(down=True, idle_minutes=15)
+    r.override_autostop_config(down=True,
+                               idle_minutes=15,
+                               wait_for=autostop_lib.AutostopWaitFor.JOBS)
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 15
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS
 
     # Override when there's an existing autostop config
-    r = Resources(autostop={'idle_minutes': 20, 'down': False})
+    r = Resources(autostop={
+        'idle_minutes': 20,
+        'down': False,
+        'wait_for': 'none'
+    })
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False
     assert r.autostop_config.idle_minutes == 20
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE
 
     # Override only down flag
     r.override_autostop_config(down=True)
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 20  # unchanged
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE  # unchanged
 
     # Override existing config with new idle_minutes
     r = Resources(autostop={'idle_minutes': 25, 'down': True})
@@ -730,12 +742,19 @@ def test_autostop_config():
     assert r.autostop_config.down is True  # unchanged
     assert r.autostop_config.idle_minutes == 30
 
-    # Override existing config with both parameters
-    r = Resources(autostop={'idle_minutes': 35, 'down': False})
-    r.override_autostop_config(down=True, idle_minutes=40)
+    # Override existing config with all parameters
+    r = Resources(autostop={
+        'idle_minutes': 35,
+        'down': False,
+        'wait_for': 'jobs'
+    })
+    r.override_autostop_config(down=True,
+                               idle_minutes=40,
+                               wait_for=autostop_lib.AutostopWaitFor.NONE)
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 40
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE
 
     # Call override with default parameters (should do nothing)
     r = Resources()
@@ -745,33 +764,45 @@ def test_autostop_config():
     assert r.autostop_config is None  # should remain None
 
     # Call override with default parameters on existing config
-    r = Resources(autostop={'idle_minutes': 45, 'down': True})
+    r = Resources(autostop={
+        'idle_minutes': 45,
+        'down': True,
+        'wait_for': 'none'
+    })
     original_config = r.autostop_config
 
     r.override_autostop_config()  # should do nothing
     assert r.autostop_config is original_config  # same object
     assert r.autostop_config.idle_minutes == 45  # unchanged
     assert r.autostop_config.down is True  # unchanged
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE  # unchanged
 
     # Override with down=False (should still create config if none exists)
     r = Resources()
     assert r.autostop_config is None
 
-    r.override_autostop_config(down=False, idle_minutes=50)
+    r.override_autostop_config(
+        down=False,
+        idle_minutes=50,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH)
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False
     assert r.autostop_config.idle_minutes == 50
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS_AND_SSH
 
     # Test with disabled autostop config
     r = Resources(autostop=False)
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is False
 
-    r.override_autostop_config(down=True, idle_minutes=55)
+    r.override_autostop_config(down=True,
+                               idle_minutes=55,
+                               wait_for=autostop_lib.AutostopWaitFor.NONE)
     assert r.autostop_config.enabled is False  # should remain disabled
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 55
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE
 
 
 def test_disk_size_conversion():

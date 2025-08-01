@@ -34,6 +34,7 @@ from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -383,6 +384,8 @@ def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional['backends.Backend'] = None,
@@ -432,6 +435,15 @@ def launch(
             ``sky.autostop(idle_minutes=<minutes>)``. If set, the autostop
             config specified in the task' resources will be overridden by
             this parameter.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes_to_autostop``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -500,7 +512,9 @@ def launch(
     for task in dag.tasks:
         for resource in task.resources:
             resource.override_autostop_config(
-                down=down, idle_minutes=idle_minutes_to_autostop)
+                down=down,
+                idle_minutes=idle_minutes_to_autostop,
+                wait_for=wait_for)
             if resource.autostop_config is not None:
                 # For backward-compatbility, get the final autostop config for
                 # admin policy.
@@ -833,6 +847,8 @@ def download_logs(cluster_name: str,
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -859,6 +875,15 @@ def start(
             flag is equivalent to running ``sky.launch()`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
             cluster will not be autostopped.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes_to_autostop``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified
@@ -890,6 +915,7 @@ def start(
     body = payloads.StartBody(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=wait_for,
         retry_until_up=retry_until_up,
         down=down,
         force=force,
@@ -990,9 +1016,11 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-    cluster_name: str,
-    idle_minutes: int,
-    down: bool = False  # pylint: disable=redefined-outer-name
+        cluster_name: str,
+        idle_minutes: int,
+        wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
+        down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> server_common.RequestId:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1023,6 +1051,15 @@ def autostop(
         idle_minutes: the number of minutes of idleness (no pending/running
             jobs) after which the cluster will be stopped automatically. Setting
             to a negative number cancels any autostop/autodown setting.
+        wait_for: determines the condition for resetting the idleness timer.
+            This option works in conjunction with ``idle_minutes``.
+            Choices:
+
+            1. "jobs_and_ssh" (default) - Wait for all jobs to complete
+               AND all SSH sessions to disconnect.
+            2. "jobs" - Wait for all jobs to complete.
+            3. "none" - Stop immediately after idle time expires,
+               regardless of running jobs or SSH connections.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
 
@@ -1045,6 +1082,7 @@ def autostop(
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
+        wait_for=wait_for,
         down=down,
     )
     response = server_common.make_authenticated_request(

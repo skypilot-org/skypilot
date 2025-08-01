@@ -38,6 +38,7 @@ from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -2238,7 +2239,11 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                     success = True
                     reset_local_autostop = True
                     try:
-                        backend.set_autostop(handle, -1, stream_logs=False)
+                        backend.set_autostop(
+                            handle,
+                            -1,
+                            autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                            stream_logs=False)
                     except exceptions.CommandError as e:
                         success = False
                         if e.returncode == 255:
