@@ -72,8 +72,6 @@ jobs:
             echo "previous_minor_release_branch=" >> $GITHUB_OUTPUT
           fi
 
-
-
       # Determine release version based on trigger type
       - name: Determine release version
         id: determine_version
@@ -83,14 +81,15 @@ jobs:
             RELEASE_VERSION="${{ github.event.inputs.release_version }}"
             echo "Using manually specified version: ${RELEASE_VERSION}"
           else
-            # Scheduled trigger or manual trigger without version - extract version from latest release and increment minor
+            # Scheduled trigger or manual trigger without version - extract version from latest release and increment patch
             LATEST_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
             # Split version into parts
             MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
             MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
-            # Always increment minor version
-            NEW_MINOR=$((MINOR + 1))
-            RELEASE_VERSION="${MAJOR}.${NEW_MINOR}.0"
+            PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
+            # Always increment patch version
+            NEW_PATCH=$((PATCH + 1))
+            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
             echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
           fi
           echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
@@ -109,17 +108,18 @@ jobs:
           # Parse latest PyPI version
           PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
           PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
+          PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
 
-          # Calculate expected next minor version
-          NEXT_MINOR_VERSION="${PYPI_MAJOR}.$((PYPI_MINOR + 1)).0"
+          # Calculate expected next patch version
+          NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
 
-          echo "Expected next minor version: ${NEXT_MINOR_VERSION}"
+          echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
 
-          # Check if the determined release version is the expected next minor version
-          if [ "${RELEASE_VERSION}" = "${NEXT_MINOR_VERSION}" ]; then
-            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is the expected next minor version."
+          # Check if the determined release version is the expected next patch version
+          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ]; then
+            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is the expected next patch version."
           else
-            echo "Error: Determined release version ${RELEASE_VERSION} must be the next minor version (${NEXT_MINOR_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
+            echo "Error: Determined release version ${RELEASE_VERSION} must be the next patch version (${NEXT_PATCH_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
             exit 1
           fi
 
