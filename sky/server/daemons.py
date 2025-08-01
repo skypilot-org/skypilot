@@ -23,16 +23,11 @@ class InternalRequestDaemon:
     event_fn: Callable[[], None]
     default_log_level: str = 'INFO'
 
-    def run_event(self):
-        """Run the event."""
+    def refresh_log_level(self) -> int:
         # pylint: disable=import-outside-toplevel
         import logging
 
-        # Disable logging for periodic refresh to avoid the usage message being
-        # sent multiple times.
-        os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
-
-        while True:
+        try:
             # Refresh config within the while loop.
             # Since this is a long running daemon,
             # reload_config_for_new_request()
@@ -42,17 +37,30 @@ class InternalRequestDaemon:
             # in case the log level changes after the API server is started.
             level_str = skypilot_config.get_nested(
                 ('daemons', self.id, 'log_level'), self.default_log_level)
-            try:
-                level = getattr(logging, level_str.upper())
-            except AttributeError:
-                # Bad level should be rejected by
-                # schema validation, just in case.
-                logger.warning(f'Invalid log level: {level_str}, using DEBUG')
-                level = logging.DEBUG
+            return getattr(logging, level_str.upper())
+        except AttributeError:
+            # Bad level should be rejected by
+            # schema validation, just in case.
+            logger.warning(f'Invalid log level: {level_str}, using DEBUG')
+            return logging.DEBUG
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Error refreshing log level for {self.id}: {e}')
+            return logging.DEBUG
+
+    def run_event(self):
+        """Run the event."""
+
+        # Disable logging for periodic refresh to avoid the usage message being
+        # sent multiple times.
+        os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
+
+        level = self.refresh_log_level()
+        while True:
             with ux_utils.enable_traceback(), \
                 sky_logging.set_sky_logging_levels(level):
                 sky_logging.reload_logger()
                 try:
+                    level = self.refresh_log_level()
                     self.event_fn()
                 except Exception:  # pylint: disable=broad-except
                     # It is OK to fail to run the event, as the event is not
