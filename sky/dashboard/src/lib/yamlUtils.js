@@ -1,5 +1,18 @@
 import yaml from 'js-yaml';
 
+// Common YAML dump configuration
+const YAML_DUMP_OPTIONS = {
+  lineWidth: -1, // Disable line wrapping
+  quotingType: "'", // Use single quotes for strings that need quoting
+  forceQuotes: false, // Only quote when necessary
+  noRefs: true, // Disable YAML references
+  sortKeys: false, // Preserve original key order
+  condenseFlow: false, // Don't condense flow style
+  indent: 2, // Use 2 spaces for indentation
+  // Let js-yaml automatically choose the best style for multi-line strings
+  // This avoids syntax highlighting issues with blank lines in literal blocks
+};
+
 /**
  * Formats YAML string for better display
  * @param {string} yamlString - The YAML string to format
@@ -13,17 +26,7 @@ export const formatYaml = (yamlString) => {
     const parsed = yaml.load(yamlString);
 
     // Re-serialize with better handling for multi-line strings
-    const formatted = yaml.dump(parsed, {
-      lineWidth: -1, // Disable line wrapping
-      quotingType: "'", // Use single quotes for strings that need quoting
-      forceQuotes: false, // Only quote when necessary
-      noRefs: true, // Disable YAML references
-      sortKeys: false, // Preserve original key order
-      condenseFlow: false, // Don't condense flow style
-      indent: 2, // Use 2 spaces for indentation
-      // Let js-yaml automatically choose the best style for multi-line strings
-      // This avoids syntax highlighting issues with blank lines in literal blocks
-    });
+    const formatted = yaml.dump(parsed, YAML_DUMP_OPTIONS);
 
     // Add blank lines between top-level sections for better readability
     const lines = formatted.split('\n');
@@ -81,17 +84,7 @@ export const formatSingleYamlDocument = (doc, index) => {
     const parsed = yaml.load(doc);
 
     // Re-serialize with better handling for multi-line strings
-    const formatted = yaml.dump(parsed, {
-      lineWidth: -1, // Disable line wrapping
-      quotingType: "'", // Use single quotes for strings that need quoting
-      forceQuotes: false, // Only quote when necessary
-      noRefs: true, // Disable YAML references
-      sortKeys: false, // Preserve original key order
-      condenseFlow: false, // Don't condense flow style
-      indent: 2, // Use 2 spaces for indentation
-      // Let js-yaml automatically choose the best style for multi-line strings
-      // This avoids syntax highlighting issues with blank lines in literal blocks
-    });
+    const formatted = yaml.dump(parsed, YAML_DUMP_OPTIONS);
 
     // Add blank lines between top-level sections for better readability
     const lines = formatted.split('\n');

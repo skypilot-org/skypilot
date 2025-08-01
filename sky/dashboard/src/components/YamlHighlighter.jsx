@@ -126,7 +126,6 @@ export function YamlHighlighter({ children, className = '' }) {
           background: 'transparent',
           fontSize: '0.875rem',
           fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
-          whiteSpace: 'pre',
         }}
         wrapLines={true}
         wrapLongLines={true}
