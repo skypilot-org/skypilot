@@ -10,7 +10,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 
 @registry.CLOUD_REGISTRY.register
@@ -29,8 +29,6 @@ class Vast(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is currently not supported in '
              f'{_REPR}.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            ('Opening ports is currently not supported on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Vast.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
@@ -49,6 +47,7 @@ class Vast(clouds.Cloud):
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -265,7 +264,8 @@ class Vast(clouds.Cloud):
                     'error \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     '        $ pip install vastai\n'
-                    '        $ echo [key] > ~/.vast_api_key\n'
+                    '        $ mkdir -p ~/.config/vastai\n'
+                    '        $ echo [key] > ~/.config/vastai/vast_api_key\n'
                     '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
                 )
 

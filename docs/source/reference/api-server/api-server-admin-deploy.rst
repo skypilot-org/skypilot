@@ -66,7 +66,7 @@ Install the SkyPilot Helm chart with the following command:
 
     For more details on the available configuration options, refer to :ref:`SkyPilot API Server Helm Chart Values <helm-values-spec>`.
 
-The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`.
+The above command will install a SkyPilot API server and ingress-nginx controller in the given namespace, which by default conflicts with other installations. To deploy multiple API servers, refer to :ref:`Reusing ingress-nginx controller for API server <sky-api-server-helm-multiple-deploy>`. To use a different ingress controller, refer to :ref:`sky-api-server-custom-ingress`
 
 .. tip::
 
@@ -124,6 +124,7 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. code-block:: bash
 
             $ helm upgrade --namespace $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --reuse-values \
               --set ingress-nginx.controller.service.type=NodePort \
               --set ingress-nginx.controller.service.nodePorts.http=30050 \
               --set ingress-nginx.controller.service.nodePorts.https=30051
@@ -440,6 +441,43 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
 
+    .. tab-item:: Vast
+        :sync: vast-creds-tab
+
+        SkyPilot API server uses an **API key** to authenticate with Vast. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console and get your **API key**.
+
+        Once the key is obtained, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic vast-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable Vast credentials by setting ``vastCredentials.enabled=true``
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set vastCredentials.enabled=true
+
+        .. dropdown:: Use existing Vast credentials
+
+            You can also set the following values to use a secret that already contains your Vast credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set vastCredentials.enabled=true \
+                    --set vastCredentials.vastSecretName=your_secret_name
+
+
     .. tab-item:: SSH Node Pools
         :sync: ssh-node-pools-tab
 
@@ -480,6 +518,30 @@ Following tabs describe how to configure credentials for different clouds on the
 
            SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
 
+    .. tab-item:: Cloudflare R2
+        :sync: r2-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`Cloudflare R2 installation <cloudflare-r2-installation>` to authenticate with Cloudflare R2.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic r2-credentials \
+              --namespace $NAMESPACE \
+              --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
+              --from-file=accountid=$HOME/.cloudflare/accountid
+        
+        When installing or upgrading the Helm chart, enable Cloudflare R2 credentials by setting :ref:`r2Credentials.enabled <helm-values-r2credentials-enabled>` and :ref:`r2Credentials.r2SecretName <helm-values-r2credentials-r2secretname>`:
+        
+        .. code-block:: bash
+        
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set r2Credentials.enabled=true \
+              --set r2Credentials.r2SecretName=r2-credentials
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
@@ -513,35 +575,18 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
 .. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
 
-    **Option 1: Set the DB connection URI via config**
+    **Option 1: Set the DB connection URI in helm values**
 
-    Set ``db: postgresql://<username>:<password>@<host>:<port>/<database>`` in the API server's ``config.yaml`` file.
-    To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+    Set :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` to ``postgresql://<username>:<password>@<host>:<port>/<database>`` in the helm values:
 
 
     .. code-block:: bash
 
-        # Create the config.yaml file
-        cat <<EOF > config.yaml
-        db: postgresql://<username>:<password>@<host>:<port>/<database>
-        EOF
-
-        # Install the API server with the config file
         # --reuse-values keeps the Helm chart values set in the previous step
         helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
-        --set-file apiService.config=config.yaml
-
-    You can also directly set this config value in the ``values.yaml`` file, e.g.:
-
-    .. code-block:: yaml
-
-        apiService:
-          config: |
-            db: postgresql://<username>:<password>@<host>:<port>/<database>
-
-    See :ref:`here <config-yaml-db>` for more details on the ``db`` setting.
+        --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
 
     **Option 2: Set the DB connection URI via Kubernetes secret**
 
@@ -574,11 +619,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
     .. note::
 
-        Once ``db`` is specified in the config, no other SkyPilot configuration
-        parameter can be specified in the helm chart.  This is because, with
-        the ``db`` setting, other configurations are now persistently saved in
-        the database instead. To set any other SkyPilot configuration, see
-        :ref:`sky-api-server-config`.
+        Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`.
 
 .. _sky-api-server-config:
 
@@ -694,9 +735,9 @@ To uninstall the API server, run:
 
 .. code-block:: bash
 
-    helm uninstall $RELEASE_NAME --namespace $NAMESPACE
+    helm uninstall $RELEASE_NAME --namespace $NAMESPACE --wait
 
-This will delete the API server and all associated resources.
+This will delete the API server and all associated resources. ``--wait`` ensures that all the resources of SkyPilot API server are deleted before the command returns.
 
 
 Other notes
@@ -917,6 +958,26 @@ The same approach also applies when you have a ingress-nginx controller deployed
 
 It is a good practice to specify a unique :ref:`ingress.path <helm-values-ingress-path>` too in this case, to avoid conflicts with other backends hosted on the same ingress controller.
 
+.. _sky-api-server-custom-ingress:
+
+Use custom ingress controller
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, the SkyPilot helm chart will deploy a new ingress-nginx controller when installing the API server. However, you can use a custom ingress controller by disabling the creation of nginx ingress controller and setting :ref:`ingress.ingressClassName <helm-values-ingress-ingressclassname>` to the ingress class name of your controller. In addition, most of the ingress controllers support customizing behavior by setting annotations on the ingress resource. You can set :ref:`ingress.annotations <helm-values-ingress-annotations>` in the helm values to pass annotations to the ingress resource. Here is an example of using a custom ingress controller:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --reuse-values \
+        --set ingress-nginx.enabled=false \
+        --set ingress.ingressClassName=custom-ingress-class \
+        --set ingress.annotations.custom-ingress-annotation=custom-ingress-annotation-value
+
+.. note::
+
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` and :ref:`OAuth2 <helm-values-ingress-oauth2-proxy>` are only supported when using ingress-nginx controller.
+
 
 .. _sky-api-server-cloud-deploy:
 
@@ -989,3 +1050,4 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
     Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
+    Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>

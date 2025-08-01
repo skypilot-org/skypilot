@@ -16,7 +16,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 _INDENT_PREFIX = '    '
 
@@ -234,11 +234,8 @@ class Nebius(clouds.Cloud):
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',
-            region=None,
-            keys=(
-                region.name,
-                'filesystems',
-            ),
+            region=region.name,
+            keys=('filesystems',),
             default_value=[])
         resources_vars_fs = []
         for i, fs in enumerate(config_fs):
@@ -361,7 +358,7 @@ class Nebius(clouds.Cloud):
             f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
             f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
-        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long

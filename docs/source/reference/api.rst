@@ -140,6 +140,28 @@ Managed jobs SDK
   :noindex:
 
 
+Volumes SDK
+------------
+
+``sky.volumes.ls``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.volumes.ls
+  :noindex:
+
+``sky.volumes.apply``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.volumes.apply
+  :noindex:
+
+``sky.volumes.delete``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.volumes.delete
+  :noindex:
+
+
 Serving SDK
 -----------------
 

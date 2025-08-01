@@ -414,7 +414,7 @@ async def get_service_account_tokens(
 
 def _generate_service_account_user_id() -> str:
     """Generate a unique user ID for a service account."""
-    random_suffix = secrets.token_hex(16)  # 16 character hex string
+    random_suffix = secrets.token_hex(8)  # 16 character hex string
     service_account_id = (f'sa-{random_suffix}')
     return service_account_id
 

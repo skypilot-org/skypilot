@@ -1,5 +1,7 @@
 envs:
   TLS_KEYFILE_ENV_VAR:
+
+secrets:
   TLS_CERTFILE_ENV_VAR:
 
 service:

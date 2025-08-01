@@ -19,6 +19,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.nebius import constants as nebius_constants
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
@@ -32,7 +33,7 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -797,8 +798,13 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
+                # TODO(syang): GCP TPU names are supported on both GCP and
+                # kubernetes (GKE), but this logic automatically assumes
+                # GCP TPUs can only be used on GCP.
+                # Fix the logic such that GCP TPU names can failover between
+                # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc):
+                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -813,7 +819,8 @@ class Resources:
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
-                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                        not kubernetes_utils.is_tpu_on_gke(acc,
+                                                           normalize=False)):
                     if 'runtime_version' not in accelerator_args:
 
                         def _get_default_runtime_version() -> str:
@@ -1254,15 +1261,19 @@ class Resources:
             ValueError: if the attribute is invalid.
         """
 
-        if (self._network_tier == resources_utils.NetworkTier.BEST and
-                isinstance(self._cloud, clouds.GCP)):
-            # Handle GPU Direct TCPX requirement for docker images
-            if self._image_id is None:
-                # No custom image specified - use the default GPU Direct image
-                self._image_id = {
-                    self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
-                }
-            else:
+        if self._network_tier == resources_utils.NetworkTier.BEST:
+            if isinstance(self._cloud, clouds.GCP):
+                # Handle GPU Direct TCPX requirement for docker images
+                if self._image_id is None:
+                    self._image_id = {
+                        self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
+                    }
+            elif isinstance(self._cloud, clouds.Nebius):
+                if self._image_id is None:
+                    self._image_id = {
+                        self._region: nebius_constants.INFINIBAND_IMAGE_ID
+                    }
+            elif self._image_id:
                 # Custom image specified - validate it's a docker image
                 # Check if any of the specified images are not docker images
                 non_docker_images = []
@@ -1274,14 +1285,13 @@ class Resources:
                 if non_docker_images:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'When using network_tier=BEST on GCP, image_id '
+                            f'When using network_tier=BEST, image_id '
                             f'must be a docker image. '
                             f'Found non-docker images: '
                             f'{", ".join(non_docker_images)}. '
                             f'Please either: (1) use a docker image '
                             f'(prefix with "docker:"), or '
-                            f'(2) leave image_id empty to use the default '
-                            f'GPU Direct TCPX image.')
+                            f'(2) leave image_id empty to use the default')
 
         if self._image_id is None:
             return

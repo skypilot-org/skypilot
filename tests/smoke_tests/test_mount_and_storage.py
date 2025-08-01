@@ -57,8 +57,8 @@ def test_file_mounts(generic_cloud: str):
     extra_flags = ''
     if generic_cloud in 'kubernetes':
         # Kubernetes does not support multi-node
-        # NOTE: This test will fail if you have a Kubernetes cluster running on
-        #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
+        # NOTE: S3 mounting now works on all architectures including ARM64
+        #  (uses rclone fallback for ARM64, goofys for x86_64).
         extra_flags = '--num-nodes 1'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
@@ -118,13 +118,15 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         (f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
-         f'--env MY_BUCKET={storage_name}'),
+         f'--env MY_BUCKET={storage_name} '
+         f'--secret SECRETE_BUCKET_NAME={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
         (f'sky launch -y -c {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name} '
-         '--env MY_LOCAL_PATH=tmpfile'),
+         '--env MY_LOCAL_PATH=tmpfile '
+         f'--secret SECRETE_BUCKET_NAME={storage_name}'),
         f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(
@@ -196,6 +198,42 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
         f'sky storage delete -y {storage_name}')
     return test_commands, clean_command
+
+
+@pytest.mark.aws
+@pytest.mark.skip(reason='Skip due to AWS AMI selection issue')
+def test_aws_storage_mounts_arm64():
+    """Test S3 storage mounting on ARM64 architecture using rclone."""
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'aws'
+    storage_name = f'sky-test-arm64-{int(time.time())}'
+    ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        # Reuse the existing storage mounts command generator
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, False, False)
+
+        # Modify the sky launch command to force ARM64 instance
+        for i, cmd in enumerate(test_commands):
+            if cmd.startswith('sky launch') and '--infra aws' in cmd:
+                # Insert ARM64 instance type before the YAML file path
+                test_commands[i] = cmd.replace(
+                    'sky launch', 'sky launch --instance-type m6g.large')
+                break
+
+        # Add ARM64-specific verification
+        test_commands.append(
+            f'sky exec {name} -- "echo \\"ARM64 architecture: $(uname -m)\\" && cat /mount_private_mount/hello.txt"'
+        )
+
+        test = smoke_tests_utils.Test(
+            'aws_storage_mounts_arm64',
+            test_commands,
+            clean_command,
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
@@ -282,8 +320,8 @@ def test_azure_storage_mounts_with_stop():
 @pytest.mark.kubernetes
 def test_kubernetes_storage_mounts():
     # Tests bucket mounting on k8s, assuming S3 is configured.
-    # This test will fail if run on non x86_64 architecture, since goofys is
-    # built for x86_64 only.
+    # S3 mounting now works on all architectures including ARM64
+    # (uses rclone fallback for ARM64, goofys for x86_64).
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
 

@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import os
 from typing import List, Tuple
 
 from packaging import version
@@ -381,7 +382,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
 # we skip the following keys because they are meant to be client-side configs.
 SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('api_server',),
                                                        ('allowed_clouds',),
-                                                       ('workspaces',), ('db',)]
+                                                       ('workspaces',), ('db',),
+                                                       ('daemons',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -491,3 +493,6 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
+
+# The directory for file locks.
+SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')

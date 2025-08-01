@@ -203,17 +203,33 @@ class DagRequestBody(RequestBody):
         return kwargs
 
 
-class ValidateBody(DagRequestBody):
-    """The request body for the validate endpoint."""
-    dag: str
+class DagRequestBodyWithRequestOptions(DagRequestBody):
+    """Request body base class for endpoints with a dag and request options."""
     request_options: Optional[admin_policy.RequestOptions]
 
+    def get_request_options(self) -> Optional[admin_policy.RequestOptions]:
+        """Get the request options."""
+        if self.request_options is None:
+            return None
+        if isinstance(self.request_options, dict):
+            return admin_policy.RequestOptions(**self.request_options)
+        return self.request_options
 
-class OptimizeBody(DagRequestBody):
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        kwargs['request_options'] = self.get_request_options()
+        return kwargs
+
+
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+
+
+class OptimizeBody(DagRequestBodyWithRequestOptions):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: Optional[admin_policy.RequestOptions]
 
 
 class LaunchBody(RequestBody):
@@ -462,6 +478,8 @@ class JobsLaunchBody(RequestBody):
     """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
+    pool: Optional[str] = None
+    num_jobs: Optional[int] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -484,6 +502,7 @@ class JobsCancelBody(RequestBody):
     job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
+    pool: Optional[str] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -653,6 +672,36 @@ class JobsDownloadLogsBody(RequestBody):
     refresh: bool = False
     controller: bool = False
     local_dir: str = constants.SKY_LOGS_DIRECTORY
+
+
+class JobsPoolApplyBody(RequestBody):
+    """The request body for the jobs pool apply endpoint."""
+    task: str
+    pool_name: str
+    mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a pool.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class JobsPoolDownBody(RequestBody):
+    """The request body for the jobs pool down endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+    all: bool = False
+    purge: bool = False
+
+
+class JobsPoolStatusBody(RequestBody):
+    """The request body for the jobs pool status endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
 
 
 class UploadZipFileResponse(pydantic.BaseModel):
