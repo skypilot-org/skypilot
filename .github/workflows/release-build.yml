@@ -123,8 +123,6 @@ jobs:
             exit 1
           fi
 
-
-
       - name: Create release branch
         id: create_release_branch
         run: |
