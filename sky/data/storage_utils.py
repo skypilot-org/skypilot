@@ -5,6 +5,7 @@ import pathlib
 import shlex
 import stat
 import subprocess
+import tarfile
 from typing import Any, Dict, List, Optional, Set, TextIO, Union
 import warnings
 import zipfile
@@ -322,3 +323,78 @@ def zip_files_and_folders(items: List[str],
                             zipf.write(file_path)
                 if log_file is not None:
                     log_file.write(f'Zipped {item}\n')
+
+
+def tar_gz_files_and_folders(items: List[str],
+                             output_file: Union[str, pathlib.Path],
+                             log_file: Optional[TextIO] = None,
+                             excluded_files: Optional[Set[str]] = None):
+    """Create a .tar.gz archive from a list of dirs and files."""
+    output_file = os.path.abspath(os.path.expanduser(output_file))
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore',
+                                category=UserWarning,
+                                message='Duplicate name:')
+        with tarfile.open(output_file,
+                          'w:gz',
+                          dereference=False,
+                          format=tarfile.PAX_FORMAT) as tarf:
+            for item in items:
+                item = os.path.expanduser(item)
+                if not os.path.exists(item):
+                    raise ValueError(f'{item} does not exist.')
+
+                arcname = os.path.basename(item)
+
+                if os.path.isfile(item):
+                    try:
+                        tarf.add(item, arcname=arcname)
+                    except (FileNotFoundError, PermissionError, OSError,
+                            tarfile.TarError) as e:
+                        logger.warning(f'Failed to add {item} to tar.gz: {e}')
+                        continue
+                elif os.path.isdir(item):
+                    if excluded_files is None:
+                        excluded_files = set([
+                            os.path.join(item, f.rstrip('/'))
+                            for f in get_excluded_files(item)
+                        ])
+                    for root, dirs, files in os.walk(item, followlinks=False):
+                        dirs[:] = [
+                            d for d in dirs
+                            if os.path.join(root, d) not in excluded_files
+                        ]
+
+                        # Add dirs (to preserve empty dirs & symlinks)
+                        for dir_name in dirs:
+                            dir_path = os.path.join(root, dir_name)
+                            try:
+                                tarf.add(dir_path,
+                                         arcname=os.path.relpath(
+                                             dir_path, os.path.dirname(item)))
+                            except (FileNotFoundError, PermissionError, OSError,
+                                    tarfile.TarError) as e:
+                                logger.warning(
+                                    f'Failed to add {dir_path} to tar.gz: {e}')
+                                continue
+
+                        # Add files
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            if file_path in excluded_files:
+                                continue
+                            if stat.S_ISSOCK(os.stat(file_path).st_mode):
+                                continue
+                            try:
+                                tarf.add(file_path,
+                                         arcname=os.path.relpath(
+                                             file_path, os.path.dirname(item)))
+                            except (FileNotFoundError, PermissionError, OSError,
+                                    tarfile.TarError) as e:
+                                logger.warning(
+                                    f'Failed to add {file_path} to tar.gz: {e}')
+                                continue
+
+                if log_file is not None:
+                    log_file.write(f'Tarred {item}\n')
