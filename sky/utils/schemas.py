@@ -819,47 +819,62 @@ def get_task_schema():
                 }],
             },
             'event_callback': {
-                'anyOf': [
-                    {
-                        'type': 'string',
-                    },
-                    {
-                        'type': 'array',
-                        'items': {
-                            'type': 'object',
-                            'properties': {
-                                'slack': {
-                                    'type': 'object',
-                                    'properties': {
-                                        'webhook_url': {'type': 'string'},
-                                        'channel': {'type': 'string'},
-                                        'username': {'type': 'string'},
-                                        'message': {'type': 'string'},
-                                        'notify_on': {
-                                            'type': 'array',
-                                            'items': {'type': 'string'}
-                                        }
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'slack': {
+                                'type': 'object',
+                                'properties': {
+                                    'webhook_url': {
+                                        'type': 'string'
                                     },
-                                    'required': ['webhook_url']
+                                    'channel': {
+                                        'type': 'string'
+                                    },
+                                    'username': {
+                                        'type': 'string'
+                                    },
+                                    'message': {
+                                        'type': 'string'
+                                    },
+                                    'notify_on': {
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'string'
+                                        }
+                                    }
                                 },
-                                'discord': {
-                                    'type': 'object',
-                                    'properties': {
-                                        'webhook_url': {'type': 'string'},
-                                        'username': {'type': 'string'},
-                                        'message': {'type': 'string'},
-                                        'notify_on': {
-                                            'type': 'array',
-                                            'items': {'type': 'string'}
-                                        }
-                                    },
-                                    'required': ['webhook_url']
-                                }
+                                'required': ['webhook_url']
                             },
-                            'additionalProperties': False
-                        }
+                            'discord': {
+                                'type': 'object',
+                                'properties': {
+                                    'webhook_url': {
+                                        'type': 'string'
+                                    },
+                                    'username': {
+                                        'type': 'string'
+                                    },
+                                    'message': {
+                                        'type': 'string'
+                                    },
+                                    'notify_on': {
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'string'
+                                        }
+                                    }
+                                },
+                                'required': ['webhook_url']
+                            }
+                        },
+                        'additionalProperties': False
                     }
-                ]
+                }]
             },
             'num_nodes': {
                 'type': 'integer',

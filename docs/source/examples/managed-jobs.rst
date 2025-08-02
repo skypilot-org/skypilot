@@ -606,8 +606,8 @@ To tear down the current controller, so that new resource config is picked up, u
 The next time you use :code:`sky jobs launch`, a new controller will be created with the updated resources.
 
 
-Event callbacks and Slack notifications
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Event callbacks and notifications
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Get Slack notifications when your managed jobs start, succeed, or fail.
 
