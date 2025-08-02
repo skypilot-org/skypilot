@@ -7,7 +7,8 @@ import {
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
-import { apiClient } from './client';
+import { apiClient, getContentTypeAuthHeaders } from './client';
+import AuthManager from '@/lib/auth';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 10000;
@@ -348,15 +349,19 @@ export async function streamManagedJobLogs({
         tail: DEFAULT_TAIL_LINES,
       };
 
+      const headers = getContentTypeAuthHeaders();
       const response = await fetch(`${fullEndpoint}/jobs/logs`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(requestBody),
         // Only use the signal if it's provided
         ...(signal ? { signal } : {}),
       });
+
+      if (response.status === 401) {
+        AuthManager.logout();
+        return response;
+      }
 
       // Stream the logs
       const reader = response.body.getReader();
@@ -448,23 +453,33 @@ export async function handleJobAction(action, jobId, cluster) {
 
   try {
     try {
+      const headers = getContentTypeAuthHeaders();
       const response = await fetch(`${fullEndpoint}/${apiPath}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(requestBody),
       });
 
+      if (response.status === 401) {
+        AuthManager.logout();
+        return response;
+      }
+
       const id = response.headers.get('X-Skypilot-Request-ID');
       const finalResponse = await fetch(
-        `${fullEndpoint}/api/get?request_id=${id}`
+        `${fullEndpoint}/api/get?request_id=${id}`,
+        { headers }
       );
 
       // Check the status code of the final response
       if (finalResponse.status === 200) {
         showToast(`Job ${jobId} ${logMiddle} successfully.`, 'success');
       } else {
+        if (finalResponse.status === 401) {
+          AuthManager.logout();
+          return finalResponse;
+        }
+
         if (finalResponse.status === 500) {
           try {
             const data = await finalResponse.json();

@@ -1,17 +1,23 @@
 import { ENDPOINT } from '@/data/connectors/constants';
 import { showToast } from '@/data/connectors/toast';
+import AuthManager from '@/lib/auth';
+import { getAuthHeaders, getContentTypeAuthHeaders } from './client';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 1000;
 
 export async function getSSHNodePools() {
   try {
+    const headers = getContentTypeAuthHeaders();
     const response = await fetch(`${ENDPOINT}/ssh_node_pools`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -26,13 +32,17 @@ export async function getSSHNodePools() {
 
 export async function updateSSHNodePools(poolsConfig) {
   try {
+    const headers = getContentTypeAuthHeaders();
     const response = await fetch(`${ENDPOINT}/ssh_node_pools`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(poolsConfig),
     });
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -47,12 +57,16 @@ export async function updateSSHNodePools(poolsConfig) {
 
 export async function deleteSSHNodePool(poolName) {
   try {
+    const headers = getContentTypeAuthHeaders();
     const response = await fetch(`${ENDPOINT}/ssh_node_pools/${poolName}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -71,10 +85,18 @@ export async function uploadSSHKey(keyName, keyFile) {
     formData.append('key_name', keyName);
     formData.append('key_file', keyFile);
 
+    const headers = getAuthHeaders();
+
     const response = await fetch(`${ENDPOINT}/ssh_node_pools/keys`, {
       method: 'POST',
+      headers,
       body: formData,
     });
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -89,12 +111,16 @@ export async function uploadSSHKey(keyName, keyFile) {
 
 export async function listSSHKeys() {
   try {
+    const headers = getContentTypeAuthHeaders();
     const response = await fetch(`${ENDPOINT}/ssh_node_pools/keys`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -109,15 +135,25 @@ export async function listSSHKeys() {
 
 export async function deploySSHNodePool(poolName) {
   try {
+    const token = AuthManager.getToken();
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const response = await fetch(
       `${ENDPOINT}/ssh_node_pools/${poolName}/deploy`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       }
     );
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -132,15 +168,19 @@ export async function deploySSHNodePool(poolName) {
 
 export async function sshDownNodePool(poolName) {
   try {
+    const headers = getContentTypeAuthHeaders();
     const response = await fetch(
       `${ENDPOINT}/ssh_node_pools/${poolName}/down`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       }
     );
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -155,15 +195,19 @@ export async function sshDownNodePool(poolName) {
 
 export async function getSSHNodePoolStatus(poolName) {
   try {
+    const headers = getContentTypeAuthHeaders();
     const response = await fetch(
       `${ENDPOINT}/ssh_node_pools/${poolName}/status`,
       {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       }
     );
+
+    if (response.status === 401) {
+      AuthManager.logout();
+      return response;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -208,17 +252,21 @@ export async function streamSSHDeploymentLogs({ requestId, signal, onNewLog }) {
   // Create the fetch promise
   const fetchPromise = (async () => {
     try {
+      const headers = getContentTypeAuthHeaders();
       const response = await fetch(
         `${ENDPOINT}/api/stream?request_id=${requestId}&format=plain&tail=${DEFAULT_TAIL_LINES}&follow=true`,
         {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers,
           // Only use the signal if it's provided
           ...(signal ? { signal } : {}),
         }
       );
+
+      if (response.status === 401) {
+        AuthManager.logout();
+        return response;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -316,17 +364,21 @@ export async function streamSSHOperationLogs({
   // Create the fetch promise
   const fetchPromise = (async () => {
     try {
+      const headers = getContentTypeAuthHeaders();
       const response = await fetch(
         `${ENDPOINT}/api/stream?request_id=${requestId}&format=plain&tail=${DEFAULT_TAIL_LINES}&follow=true`,
         {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers,
           // Only use the signal if it's provided
           ...(signal ? { signal } : {}),
         }
       );
+
+      if (response.status === 401) {
+        AuthManager.logout();
+        return response;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
