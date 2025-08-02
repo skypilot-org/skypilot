@@ -2970,9 +2970,10 @@ def get_kubernetes_node_info(
                         pod.status.phase in ['Running', 'Pending']):
                     # Skip low priority test pods that should not count against real GPU availability
                     if should_exclude_pod_from_gpu_allocation(pod):
-                        logger.debug(f'Excluding low priority pod '
-                                   f'{pod.metadata.name} from GPU allocation '
-                                   f'calculations on node {node.metadata.name}')
+                        logger.debug(
+                            f'Excluding low priority pod '
+                            f'{pod.metadata.name} from GPU allocation '
+                            f'calculations on node {node.metadata.name}')
                         continue
                     # Iterate over all the containers in the pod and sum the
                     # GPU requests
@@ -3573,22 +3574,23 @@ def delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
             else:
                 raise
 
+
 def should_exclude_pod_from_gpu_allocation(pod) -> bool:
     """Check if a pod should be excluded from GPU count calculations.
-    
-    Some cloud providers run low priority test/verification pods that request 
-    GPUs but should not count against real GPU availability since they are 
+
+    Some cloud providers run low priority test/verification pods that request
+    GPUs but should not count against real GPU availability since they are
     designed to be evicted when higher priority workloads need resources.
-    
+
     Args:
         pod: Kubernetes pod object
-        
+
     Returns:
         bool: True if the pod should be excluded from GPU count calculations.
     """
     # CoreWeave HPC verification pods - identified by namespace
-    if (hasattr(pod.metadata, 'namespace') and 
-        pod.metadata.namespace == 'cw-hpc-verification'):
+    if (hasattr(pod.metadata, 'namespace') and
+            pod.metadata.namespace == 'cw-hpc-verification'):
         return True
-    
+
     return False
