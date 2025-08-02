@@ -266,7 +266,8 @@ class AnonymousAccessMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                           'false').lower() == 'true':
             return await call_next(request)
 
-        # TODO(hailong): also check the source IP address
+        # TODO(hailong): Need to remove this when the new API for health check
+        # is ready.
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             return await call_next(request)
