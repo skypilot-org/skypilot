@@ -33,7 +33,7 @@ class TestServiceAccountTokens:
     def test_config_integration(self):
         """Test service account integration with configuration."""
         # Environment variable should take precedence
-        token = service_account_auth._get_service_account_token()
+        token = service_account_auth.get_service_account_token()
         assert token == 'sky_test_token'
 
         # Headers should be properly formatted
@@ -64,7 +64,7 @@ class TestServiceAccountTokens:
     def test_authentication_flow(self):
         """Test the complete authentication flow."""
         # Get token
-        token = service_account_auth._get_service_account_token()
+        token = service_account_auth.get_service_account_token()
         assert token == 'sky_test_token'
 
         # Generate headers
