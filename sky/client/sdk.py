@@ -1101,7 +1101,6 @@ def autostop(
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
-        wait_for = None
 
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
