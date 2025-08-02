@@ -35,6 +35,9 @@
                         "null"
                     ]
                 },
+                "enableAnonymousAccess": {
+                    "type": "boolean"
+                },
                 "enableServiceAccounts": {
                     "type": "boolean"
                 },
