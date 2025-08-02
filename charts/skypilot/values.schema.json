@@ -126,6 +126,45 @@
                 }
             }
         },
+        "auth": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "properties": {
+                "oauth2Proxy": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "baseUrl": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "serviceAccount": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "enabled": {
+                            "type": [
+                                "boolean",
+                                "null"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "awsCredentials": {
             "type": "object",
             "properties": {

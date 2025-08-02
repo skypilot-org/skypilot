@@ -1,0 +1,227 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: oauth2_proxy_test
+templates:
+  - templates/api-deployment.yaml
+  - templates/ingress.yaml
+  - templates/NOTES.txt
+tests:
+  - it: should pass validation when oauth2Proxy auth is enabled with external baseUrl
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.oauth2Proxy.enabled: true
+      auth.oauth2Proxy.baseUrl: "https://external-oauth2-proxy.example.com"
+      ingress.oauth2-proxy.enabled: false
+      ingress.enabled: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Deployment
+
+  - it: should pass validation when oauth2Proxy auth is enabled with ingress oauth2-proxy
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.oauth2Proxy.enabled: true
+      auth.oauth2Proxy.baseUrl: null
+      ingress.oauth2-proxy.enabled: true
+      ingress.enabled: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Deployment
+
+  - it: should pass validation when oauth2Proxy auth is disabled
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.oauth2Proxy.enabled: false
+      ingress.oauth2-proxy.enabled: true
+      ingress.enabled: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Deployment
+
+  # API Deployment OAuth2 Environment Variables Tests
+  - it: should set OAuth2 proxy environment variables when enabled with external baseUrl
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.oauth2Proxy.enabled: true
+      auth.oauth2Proxy.baseUrl: "https://external-oauth2-proxy.example.com"
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+            value: "https://external-oauth2-proxy.example.com"
+
+  - it: should set OAuth2 proxy environment variables when enabled with ingress oauth2-proxy
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.oauth2Proxy.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+            value: "http://RELEASE-NAME-oauth2-proxy:4180"
+
+  - it: should not set OAuth2 proxy environment variables when disabled
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.oauth2Proxy.enabled: false
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+
+  # Service Account Authentication Tests
+  - it: should enable service accounts when auth.serviceAccount.enabled is true
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.serviceAccount.enabled: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+            value: "true"
+
+  - it: should disable service accounts when auth.serviceAccount.enabled is false
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.serviceAccount.enabled: false
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  - it: should fallback to apiService.enableServiceAccounts when auth.serviceAccount.enabled is null
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.serviceAccount.enabled: null
+      apiService.enableServiceAccounts: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+            value: "true"
+
+  - it: should override apiService.enableServiceAccounts when auth.serviceAccount.enabled is set
+    templates:
+      - templates/api-deployment.yaml
+    set:
+      auth.serviceAccount.enabled: false
+      apiService.enableServiceAccounts: true
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENABLE_SERVICE_ACCOUNTS
+
+  # Ingress OAuth2 Integration Tests
+  - it: should disable ingress oauth2-proxy when API server oauth2 auth is enabled
+    templates:
+      - templates/ingress.yaml
+    set:
+      ingress.enabled: true
+      auth.oauth2Proxy.enabled: true
+      auth.oauth2Proxy.baseUrl: "https://external-oauth2-proxy.example.com"
+      ingress.oauth2-proxy.enabled: false
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]
+
+  - it: should enable ingress oauth2-proxy when API server oauth2 auth is disabled
+    templates:
+      - templates/ingress.yaml
+    set:
+      ingress.enabled: true
+      auth.oauth2Proxy.enabled: false
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.use-https: false
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "http://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "http://$host/oauth2/auth"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+
+  - it: should enable ingress oauth2-proxy when auth.oauth2Proxy is not configured
+    templates:
+      - templates/ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.use-https: false
+      apiService.metrics.enabled: false
+      apiService.skipResourceCheck: true
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "http://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "http://$host/oauth2/auth"

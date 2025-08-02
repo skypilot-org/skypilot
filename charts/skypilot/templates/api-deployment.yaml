@@ -75,7 +75,7 @@ spec:
               name: {{ include "skypilot.initialBasicAuthSecretName" . }}
               key: auth
         {{- end }}
-        {{- if .Values.apiService.enableServiceAccounts }}
+        {{- if include "skypilot.serviceAccountAuthEnabled" . | trim | eq "true" }}
         - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
@@ -119,6 +119,12 @@ spec:
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
+        {{- end }}
+        {{- if .Values.auth.oauth2Proxy.enabled }}
+        - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
+          value: "true"
+        - name: SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL
+          value: {{ include "skypilot.oauth2ProxyURL" . }}
         {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]

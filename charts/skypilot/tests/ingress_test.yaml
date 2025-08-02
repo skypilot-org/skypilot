@@ -55,6 +55,56 @@ tests:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
           value: "https://$host/oauth2/auth"
 
+  # Test OAuth2 proxy integration with API server authentication
+  - it: should disable ingress OAuth2 proxy when API server OAuth2 auth is enabled
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      auth.oauth2Proxy.enabled: true
+      auth.oauth2Proxy.baseUrl: "https://external-oauth2-proxy.example.com"
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]
+
+  - it: should enable ingress OAuth2 proxy when API server OAuth2 auth is disabled
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.use-https: false
+      auth.oauth2Proxy.enabled: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "http://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "http://$host/oauth2/auth"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+
+  - it: should enable ingress OAuth2 proxy when auth.oauth2Proxy is not configured
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.use-https: false
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
+          value: "http://$host/oauth2/start?rd=$escaped_request_uri"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-url"]
+          value: "http://$host/oauth2/auth"
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
+          value: "X-Auth-Request-Email, X-Skypilot-Auth"
+
   # Test basic auth annotations
   - it: should add basic auth annotations when authSecret is provided and user management disabled
     set:
