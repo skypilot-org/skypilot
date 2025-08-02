@@ -46,6 +46,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics
 from sky.server import state
 from sky.server import stream_utils
@@ -245,7 +246,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        if request.url.path.startswith('/api/'):
+        if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
             return await call_next(request)
@@ -482,7 +483,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event in requests_lib.INTERNAL_REQUEST_DAEMONS:
+    for event in daemons.INTERNAL_REQUEST_DAEMONS:
         try:
             executor.schedule_request(
                 request_id=event.id,
@@ -882,10 +883,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
     # TODO(SKY-1271): We need to double check security of uploading zip file.
     client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1764,6 +1770,9 @@ if __name__ == '__main__':
 
     from sky.server import uvicorn as skyuvicorn
 
+    # Initialize global user state db
+    global_user_state.initialize_and_get_db()
+    # Initialize request db
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()

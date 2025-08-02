@@ -25,7 +25,7 @@ Choose the right recipe for your needs:
 
 This approach uses [torchtune](https://github.com/pytorch/torchtune) to do full supervised fine-tuning with CPU offloading to reduce GPU memory requirements. Requires 32 or more H200s.
 
-**SkyPilot YAML**: [`llama-4-maverick-sft.yaml`](llama-4-maverick-sft.yaml)
+**SkyPilot YAML**: [`llama-4-maverick-sft.yaml`](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-4-finetuning/llama-4-maverick-sft.yaml)
 
 Run the following on your local machine:
 

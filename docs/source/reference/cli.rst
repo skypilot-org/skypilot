@@ -124,6 +124,25 @@ Storage CLI
    :nested: full
 
 
+Volumes CLI
+------------
+
+.. _sky-volumes-ls:
+.. click:: sky.client.cli.command:volumes_ls
+   :prog: sky volumes ls
+   :nested: full
+
+.. _sky-volumes-apply:
+.. click:: sky.client.cli.command:volumes_apply
+   :prog: sky volumes apply
+   :nested: full
+
+.. _sky-volumes-delete:
+.. click:: sky.client.cli.command:volumes_delete
+   :prog: sky volumes delete
+   :nested: full
+
+
 .. _sky-api-cli:
 
 API request CLI
