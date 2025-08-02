@@ -2968,7 +2968,7 @@ def get_kubernetes_node_info(
                 # Get all the pods running on the node
                 if (pod.spec.node_name == node.metadata.name and
                         pod.status.phase in ['Running', 'Pending']):
-                    # Skip low priority test pods that should not count against real GPU availability
+                    # Skip pods that should not count against GPU count
                     if should_exclude_pod_from_gpu_allocation(pod):
                         logger.debug(
                             f'Excluding low priority pod '
