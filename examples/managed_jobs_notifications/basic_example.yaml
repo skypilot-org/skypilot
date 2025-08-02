@@ -1,0 +1,22 @@
+name: my-training-job
+
+envs:
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+
+run: |
+  echo "Training model..."
+  
+  # Simulate training work
+  for i in {1..10}; do
+    echo "Epoch $i/10 - Training..."
+    sleep 3
+  done
+  
+  echo "Training completed!"
+
+event_callback:
+  - slack:
+      webhook_url: ${SLACK_WEBHOOK_URL}
+
+resources:
+  cpus: 2

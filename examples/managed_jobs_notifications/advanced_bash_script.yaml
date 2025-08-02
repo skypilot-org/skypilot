@@ -1,0 +1,38 @@
+name: multiple-notifications-example
+
+# Example using multiple built-in notifications
+
+envs:
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+
+run: |
+  echo "Starting job with multiple notifications..."
+  
+  # Simulate some work that might fail
+  if [ "$((RANDOM % 3))" -eq 0 ]; then
+    echo "Simulating failure..."
+    exit 1
+  fi
+  
+  for i in {1..5}; do
+    echo "Processing step $i/5"
+    sleep 3
+  done
+  
+  echo "Job completed successfully!"
+
+# Multiple notification handlers - send to both Slack and Discord
+event_callback:
+  - slack:
+      webhook_url: ${SLACK_WEBHOOK_URL}  # Required
+      username: "SkyPilot Bot"           # Optional: custom bot name  
+      channel: "#alerts"                 # Optional: channel override
+      notify_on: ["FAILED", "SUCCEEDED"] # Optional: only critical statuses
+  - discord:
+      webhook_url: ${DISCORD_WEBHOOK_URL} # Required
+      username: "SkyPilot"                # Optional: custom bot name
+      notify_on: ["RUNNING", "FAILED", "SUCCEEDED"] # Optional: more verbose notifications
+
+resources:
+  cpus: 2

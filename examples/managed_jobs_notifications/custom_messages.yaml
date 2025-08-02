@@ -1,0 +1,33 @@
+name: customized-notifications
+
+# Example showing all customization options
+
+envs:
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+
+run: |
+  echo "Starting ML training with customized notifications..."
+  
+  # Simulate training work
+  for i in {1..8}; do
+    echo "Training epoch $i/8..."
+    sleep 4
+  done
+  
+  echo "Training completed!"
+
+# Customization options
+event_callback:
+  - slack:
+      webhook_url: ${SLACK_WEBHOOK_URL}
+      username: "ML Bot"                    # Custom bot name
+      channel: "#ml-jobs"                   # Specific channel  
+      notify_on: ["FAILED", "SUCCEEDED"]    # Filter statuses
+      message: "{EMOJI} {TASK_NAME} is {JOB_STATUS}"  # Custom message
+  - discord:
+      webhook_url: ${DISCORD_WEBHOOK_URL}
+      message: "🤖 {TASK_NAME} → {JOB_STATUS} {EMOJI}"
+
+resources:
+  cpus: 2
