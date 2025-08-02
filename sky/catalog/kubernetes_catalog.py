@@ -255,6 +255,12 @@ def _list_accelerators(
                     # Get all the pods running on the node
                     if (pod.spec.node_name == node.metadata.name and
                             pod.status.phase in ['Running', 'Pending']):
+                        # Skip low priority test pods that should not count against real GPU availability
+                        if kubernetes_utils.should_exclude_pod_from_gpu_allocation(pod):
+                            logger.debug(f'Excluding pod '
+                                       f'{pod.metadata.name} from GPU count '
+                                       f'calculations on node {node.metadata.name}')
+                            continue
                         # Iterate over all the containers in the pod and sum
                         # the GPU requests
                         for container in pod.spec.containers:
