@@ -262,8 +262,8 @@ class AnonymousAccessMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.state.auth_user:
             return await call_next(request)
-        if os.environ.get(constants.ENV_VAR_ENABLE_ANONYMOUS_ACCESS,
-                          'false').lower() == 'true':
+        if os.environ.get(constants.ENV_VAR_DISABLE_ANONYMOUS_ACCESS,
+                          'false').lower() == 'false':
             return await call_next(request)
 
         # TODO(hailong): Need to remove this when the new API for health check

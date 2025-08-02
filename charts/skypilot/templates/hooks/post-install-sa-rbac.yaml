@@ -53,4 +53,3 @@ roleRef:
   name: {{ .Release.Name }}-sa-extractor
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
-
