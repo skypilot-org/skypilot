@@ -12,8 +12,6 @@ service_spec:
       {%- for key, value in annotations.items() %}
       {{ key }}: {{ value|tojson }}
       {%- endfor %}
-      {# Note: It's ok to add cloud-specific annotations here since they will be ignored by other clouds #}
-      service.beta.kubernetes.io/coreweave-load-balancer-type: public
   spec:
     type: LoadBalancer
     selector:
