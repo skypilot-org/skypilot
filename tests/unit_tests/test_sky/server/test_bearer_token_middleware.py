@@ -6,6 +6,7 @@ import unittest.mock as mock
 import fastapi
 import pytest
 
+from sky.server import authn
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
 
@@ -136,7 +137,7 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
-                mock.patch('sky.server.auth.authn.override_user_info_in_request_body') as mock_override_user_info:
+                mock.patch('sky.server.authn.override_user_info_in_request_body') as mock_override_user_info:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
