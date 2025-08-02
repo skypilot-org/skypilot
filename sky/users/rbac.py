@@ -12,31 +12,56 @@ logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
 # Cannot access workspace CUD operations
-_DEFAULT_USER_BLOCKLIST = [{
-    'path': '/workspaces/config',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/update',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/create',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/delete',
-    'method': 'POST'
-}, {
-    'path': '/users/delete',
-    'method': 'POST'
-}, {
-    'path': '/users/create',
-    'method': 'POST'
-}, {
-    'path': '/users/import',
-    'method': 'POST'
-}, {
-    'path': '/users/export',
-    'method': 'GET'
-}]
+_DEFAULT_USER_BLOCKLIST = [
+    {
+        'path': '/workspaces/config',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/update',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/create',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/delete',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/delete',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/create',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/import',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/export',
+        'method': 'GET'
+    },
+    {
+        'path': '/users/service-account-tokens',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/service-account-tokens/delete',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/service-account-tokens/update-role',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/service-account-tokens/rotate',
+        'method': 'POST'
+    },
+]
 
 
 # Define roles
