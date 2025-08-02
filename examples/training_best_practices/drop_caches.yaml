@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: drop-caches
+spec:
+  hostPID: true                  # required to access host /proc
+  containers:
+    - name: dropper
+      image: ubuntu:latest
+      securityContext:
+        privileged: true         # needed to write to kernel parameter
+      volumeMounts:
+        - name: host-proc
+          mountPath: /host_proc
+          readOnly: false
+      command:
+        - sh
+        - -c
+        - |
+          sync && echo 3 > /host_proc/sys/vm/drop_caches
+          echo "Host caches dropped"
+  restartPolicy: Never
+  volumes:
+    - name: host-proc
+      hostPath:
+        path: /proc
+        type: Directory

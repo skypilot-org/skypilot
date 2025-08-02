@@ -1,0 +1,55 @@
+envs:
+  S3_BUCKET: nebius://henry-test  # S3 bucket for checkpoints
+  S3_BUCKET2: nebius://henry-test-et  # S3 bucket for checkpoints
+  HF_TOKEN:  # Add your HuggingFace token if needed
+
+resources:
+  # cloud: aws
+  # region: us-west-2  # Ensure compute is in same region as S3 bucket
+  cpus: 32+
+  memory: 256+
+  # accelerators: H100:8
+  network_tier: best
+  disk_tier: best
+  disk_size: 2000
+  accelerators: H100:8
+
+num_nodes: 1
+
+# Configure buckets for dataset and checkpoints with both S3 and local NVMe
+file_mounts:
+  /checkpoints_s3:
+    source: ${S3_BUCKET}
+    mode: MOUNT
+  /checkpoints_s3_mount_cached:
+    source: ${S3_BUCKET2}
+    mode: MOUNT_CACHED
+  /e2e: ./e2e
+
+volumes:
+  # Mount the Nebius shared filesystem to /mnt/data across all nodes
+  /mnt/data: nebius-pvc
+
+setup: |
+  conda install cuda -c nvidia
+  uv venv ~/training --seed --python 3.10; source ~/training/bin/activate
+  uv pip install torch torchvision torchaudio
+  uv pip install accelerate trl deepspeed liger-kernel
+  sudo apt install -y vmtouch vim
+
+  # Other tools
+  sudo apt install -y htop sysstat iproute2 net-tools infiniband-diags
+  uv pip install nvitop
+
+  mkdir /tmp/checkpoint
+
+run: |
+  source ~/training/bin/activate
+  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py
+  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --dirs /tmp/checkpoint /mnt/data/checkpoint /checkpoints_s3 /checkpoints_s3_mount_cached
+  python /e2e/download.py --num_proc -1 --dirs /tmp/checkpoint /mnt/data /checkpoints_s3 /checkpoints_s3_mount_cached
+  # accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /tmp/checkpoint /mnt/data/checkpoint /checkpoints_s3 /checkpoints_s3_mount_cached
+  accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /tmp/checkpoint
+  accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /mnt/data/
+  accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /checkpoints_s3
+  accelerate launch --config_file /e2e/deepspeed_zero3.yaml /e2e/train.py --num_proc -1 --dirs /checkpoints_s3_mount_cached

@@ -1,0 +1,248 @@
+# SkyPilot Storage benchmarks using fio.
+#
+# Uses FIO to run benchmarks on both S3 mount and NVMe storage to compare performance.
+# We use Azure's recommended parameters for fio to measure storage performance.
+# See https://docs.microsoft.com/en-us/azure/virtual-machines/disks-benchmarks
+#
+# Note that random writes are not supported by SkyPilot Storage, and thus
+# not benchmarked.
+#
+# Usage:
+#   S3_BUCKET=your-bucket sky launch -y -c bench disk_microbenchmark.yaml
+#   sky down bench
+#   SkyPilot Storage delete <storage_name>
+
+name: storage-benchmark
+
+envs:
+  S3_BUCKET: nebius://henry-test  # S3 bucket for benchmarks
+  BENCH_PATH_S3: /skystorage-mount/bench
+  BENCH_PATH_NVME: /tmp/nvme-bench/bench
+  BENCH_PATH_NEBIUS: /mnt/data/fio
+  
+  # Disable VM cache dropping if it fails in containerized environments
+  DISABLE_CACHE_DROP: "false"
+
+resources:
+  # cloud: aws
+  # region: us-west-2  # Ensure compute is in same region as S3 bucket
+  cpus: 32+
+  memory: 64+
+  network_tier: best
+  disk_tier: best
+  disk_size: 1000
+
+num_nodes: 1
+
+# Configure S3 mount for benchmarking
+file_mounts:
+  /skystorage-mount:
+    source: ${S3_BUCKET}
+    mode: MOUNT
+
+volumes:
+  # Mount the Nebius shared filesystem to /mnt/data across all nodes
+  /mnt/data: nebius-pvc
+
+setup: |
+  # Test VM cache dropping capability for fair benchmarking
+  echo "Testing VM cache dropping capability..."
+  if sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'; then
+    echo "✅ VM cache dropping capability confirmed"
+  else
+    echo "⚠️ VM cache dropping not available - common in containerized environments"
+    echo "💡 This is due to read-only /proc/sys filesystem for security"
+    echo "💡 Benchmarks will use vmtouch for cache eviction instead"
+  fi
+
+  # Check if fio is installed
+  if ! command -v fio &> /dev/null
+  then
+      echo "fio not found. Installing fio..."
+      sudo apt update
+      sudo apt install -y fio htop vim sysstat vmtouch
+  else
+      echo "fio exists"
+      # Install vmtouch for cache eviction
+      sudo apt update
+      sudo apt install -y vmtouch
+  fi
+  
+  # Create NVMe benchmark directory
+  mkdir -p ${BENCH_PATH_NVME}
+  
+  # Create S3 benchmark directory  
+  mkdir -p ${BENCH_PATH_S3}
+  
+  # Create Nebius benchmark directory
+  mkdir -p ${BENCH_PATH_NEBIUS}
+  
+  echo "✅ Setup complete"
+  echo "S3 mount path: ${BENCH_PATH_S3}"
+  echo "NVMe bench path: ${BENCH_PATH_NVME}"
+  echo "Nebius bench path: ${BENCH_PATH_NEBIUS}"
+
+run: |
+  purge_io () { 
+    local bench_path="$1"
+    if [ "$DISABLE_CACHE_DROP" = "true" ]; then
+      echo "Cache dropping disabled"
+    else
+      echo "Purging I/O caches using vmtouch..."
+      sync
+      # Try traditional cache drop first (works on bare metal)
+      if sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null; then
+        echo "✅ Used system cache drop"
+      else
+        # Use vmtouch to evict files from page cache (works in containers)
+        echo "Using vmtouch for cache eviction..."
+        if [ -d "$bench_path" ]; then
+          vmtouch -e "$bench_path" 2>/dev/null || echo "vmtouch eviction completed"
+        fi
+        echo "✅ Used vmtouch cache eviction"
+      fi
+    fi
+  }
+  
+  run_fio_benchmark() {
+    local storage_type="$1"
+    local bench_path="$2"
+    local prefix="$3"
+    
+    # Create results directory in /tmp with storage type
+    local results_dir="/tmp/benchmark_results_${prefix}"
+    mkdir -p "$results_dir"
+    
+    echo "=== Running FIO benchmarks on $storage_type storage ==="
+    echo "Benchmark path: $bench_path"
+    echo "Results path: $results_dir"
+    
+    # Sequential Read Benchmark
+    purge_io "$bench_path"
+    echo "Running sequential read benchmark on $storage_type..."
+    fio --name=64kseqreads --rw=read --direct=1 --ioengine=io_uring --bs=1M --numjobs=4 --max-jobs=10 --iodepth=128 --size=10G --group_reporting --directory=${bench_path}/ > ${results_dir}/perf_read_${prefix}.txt
+    # Clean up test files
+    rm -f ${bench_path}/64kseqreads.*
+    
+    # Sequential Write Benchmark  
+    purge_io "$bench_path"
+    echo "Running sequential write benchmark on $storage_type..."
+    fio --name=64kseqwrites --rw=write --direct=1 --ioengine=io_uring --bs=1M --numjobs=4 --max-jobs=10 --iodepth=128 --size=10G --group_reporting --directory=${bench_path}/ > ${results_dir}/perf_write_${prefix}.txt
+    # Clean up test files
+    rm -f ${bench_path}/64kseqwrites.*
+    
+    # Small Files Read Benchmark
+    echo "Running small files read benchmark on $storage_type..."
+    purge_io "$bench_path"
+    fio --name=1mbfilesread --rw=read --direct=1 --ioengine=io_uring --bs=1M --iodepth=128 --size=1M --filesize=1M --numjobs=100  --max-jobs=10 --group_reporting --directory=${bench_path}/ > ${results_dir}/perf_read_small_${prefix}.txt
+    # Clean up test files
+    rm -f ${bench_path}/1mbfilesread.*
+    
+    # Small Files Write Benchmark
+    echo "Running small files write benchmark on $storage_type..."
+    purge_io "$bench_path"
+    fio --name=1mbfileswrite --rw=write --direct=1 --ioengine=io_uring --bs=1M --iodepth=128 --size=1M --filesize=1M --numjobs=100 --max-jobs=10 --group_reporting --directory=${bench_path}/ > ${results_dir}/perf_write_small_${prefix}.txt
+    # Clean up test files
+    rm -f ${bench_path}/1mbfileswrite.*
+    
+    echo "✅ $storage_type benchmarks complete"
+  }
+  
+  display_results() {
+    local storage_type="$1"
+    local bench_path="$2" 
+    local prefix="$3"
+    
+    # Use results directory in /tmp
+    local results_dir="/tmp/benchmark_results_${prefix}"
+    
+    echo ""
+    echo "=== $storage_type Storage Results ==="
+    echo "All results are reported as (bandwidth MB/s, IOPS)"
+    echo "Results directory: $results_dir"
+    
+    echo ""
+    echo "##### Sequential Read Results #####"
+    if [ -f "${results_dir}/perf_read_${prefix}.txt" ]; then
+      # Extract bandwidth and IOPS from fio output
+      BW=$(grep "read:" "${results_dir}/perf_read_${prefix}.txt" | grep -o "BW=[^,]*" | grep -o "[0-9.]*MB/s" | head -1 | sed 's/MB\/s//')
+      IOPS=$(grep "read:" "${results_dir}/perf_read_${prefix}.txt" | grep -o "IOPS=[^,]*" | grep -o "[0-9.]*" | head -1)
+      echo -e "\t${BW:-0} MB/s\t${IOPS:-0} IOPS"
+    else
+      echo -e "\tBenchmark file not found"
+    fi
+    
+    echo ""
+    echo "##### Sequential Write Results #####"
+    if [ -f "${results_dir}/perf_write_${prefix}.txt" ]; then
+      # Extract bandwidth and IOPS from fio output
+      BW=$(grep "write:" "${results_dir}/perf_write_${prefix}.txt" | grep -o "BW=[^,]*" | grep -o "[0-9.]*MB/s" | head -1 | sed 's/MB\/s//')
+      IOPS=$(grep "write:" "${results_dir}/perf_write_${prefix}.txt" | grep -o "IOPS=[^,]*" | grep -o "[0-9.]*" | head -1)
+      echo -e "\t${BW:-0} MB/s\t${IOPS:-0} IOPS"
+    else
+      echo -e "\tBenchmark file not found"
+    fi
+    
+    echo ""
+    echo "##### Small Files Read Results #####"
+    if [ -f "${results_dir}/perf_read_small_${prefix}.txt" ]; then
+      # Extract bandwidth and IOPS from fio output
+      BW=$(grep "read:" "${results_dir}/perf_read_small_${prefix}.txt" | grep -o "BW=[^,]*" | grep -o "[0-9.]*MB/s" | head -1 | sed 's/MB\/s//')
+      IOPS=$(grep "read:" "${results_dir}/perf_read_small_${prefix}.txt" | grep -o "IOPS=[^,]*" | grep -o "[0-9.]*" | head -1)
+      echo -e "\t${BW:-0} MB/s\t${IOPS:-0} IOPS"
+    else
+      echo -e "\tBenchmark file not found"
+    fi
+    
+    echo ""
+    echo "##### Small Files Write Results #####"
+    if [ -f "${results_dir}/perf_write_small_${prefix}.txt" ]; then
+      # Extract bandwidth and IOPS from fio output
+      BW=$(grep "write:" "${results_dir}/perf_write_small_${prefix}.txt" | grep -o "BW=[^,]*" | grep -o "[0-9.]*MB/s" | head -1 | sed 's/MB\/s//')
+      IOPS=$(grep "write:" "${results_dir}/perf_write_small_${prefix}.txt" | grep -o "IOPS=[^,]*" | grep -o "[0-9.]*" | head -1)
+      echo -e "\t${BW:-0} MB/s\t${IOPS:-0} IOPS"
+    else
+      echo -e "\tBenchmark file not found"
+    fi
+  }
+  
+  # Run benchmarks on both storage types
+  echo "=== Starting Triple Storage Benchmark ==="
+  echo "Testing S3 mount, NVMe storage, and Nebius shared filesystem performance"
+  
+  # Benchmark S3 Mount Storage
+  run_fio_benchmark "S3 Mount" "${BENCH_PATH_S3}" "s3"
+  
+  # Benchmark NVMe Storage  
+  run_fio_benchmark "NVMe" "${BENCH_PATH_NVME}" "nvme"
+  
+  # Benchmark Nebius Shared Filesystem
+  run_fio_benchmark "Nebius" "${BENCH_PATH_NEBIUS}" "nebius"
+  
+  # Display comparative results
+  echo ""
+  echo "========================================================================================="
+  echo "=== COMPARATIVE STORAGE BENCHMARK RESULTS ==="
+  echo "========================================================================================="
+  
+  display_results "S3 Mount" "${BENCH_PATH_S3}" "s3"
+  display_results "NVMe" "${BENCH_PATH_NVME}" "nvme"
+  display_results "Nebius" "${BENCH_PATH_NEBIUS}" "nebius"
+  
+  echo ""
+  echo "=== Benchmark Summary ==="
+  echo "S3 Mount Path: ${BENCH_PATH_S3}"
+  echo "NVMe Path: ${BENCH_PATH_NVME}"
+  echo "Nebius Path: ${BENCH_PATH_NEBIUS}"
+  echo "✅ All benchmarks complete"
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            capabilities:
+              add:
+              - IPC_LOCK
+              - SYS_ADMIN
