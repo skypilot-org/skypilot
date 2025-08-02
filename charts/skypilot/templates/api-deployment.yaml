@@ -79,8 +79,8 @@ spec:
         - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
-        {{- if .Values.apiService.enableAnonymousAccess }}
-        - name: ENABLE_ANONYMOUS_ACCESS
+        {{- if .Values.apiService.disableAnonymousAccess }}
+        - name: DISABLE_ANONYMOUS_ACCESS
           value: "true"
         {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
