@@ -310,7 +310,7 @@ def _execute_dag(
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
-        wait_for = autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (

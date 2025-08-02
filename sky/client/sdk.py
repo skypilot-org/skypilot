@@ -32,6 +32,7 @@ from sky.client import common as client_common
 from sky.client import oauth as oauth_lib
 from sky.server import common as server_common
 from sky.server import rest
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
@@ -384,8 +385,7 @@ def launch(
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
-    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional['backends.Backend'] = None,
@@ -507,14 +507,27 @@ def launch(
             raise NotImplementedError('clone_disk_from is not implemented yet. '
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
+
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
     for task in dag.tasks:
         for resource in task.resources:
-            resource.override_autostop_config(
-                down=down,
-                idle_minutes=idle_minutes_to_autostop,
-                wait_for=wait_for)
+            if remote_api_version is None or remote_api_version < 13:
+                # An older server would not recognize the wait_for field
+                # in the schema, so we need to omit it.
+                resource.override_autostop_config(
+                    down=down, idle_minutes=idle_minutes_to_autostop)
+            else:
+                resource.override_autostop_config(
+                    down=down,
+                    idle_minutes=idle_minutes_to_autostop,
+                    wait_for=wait_for)
             if resource.autostop_config is not None:
                 # For backward-compatbility, get the final autostop config for
                 # admin policy.
@@ -847,8 +860,7 @@ def download_logs(cluster_name: str,
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
-    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -912,6 +924,12 @@ def start(
         sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
             restart was launched by a different user.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     body = payloads.StartBody(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -1018,8 +1036,7 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
 def autostop(
         cluster_name: str,
         idle_minutes: int,
-        wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> server_common.RequestId:
     """Schedules an autostop/autodown for a cluster.
@@ -1079,6 +1096,13 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    remote_api_version = versions.get_remote_api_version()
+    if wait_for is not None and (remote_api_version is None or
+                                 remote_api_version < 13):
+        logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+        wait_for = None
+
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
