@@ -687,7 +687,7 @@ def test_autostop_config():
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 0  # default value
-    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS_AND_SSH  # default value
+    assert r.autostop_config.wait_for == None  # default value
 
     # Override with idle_minutes when no existing autostop config
     r = Resources()
@@ -698,7 +698,7 @@ def test_autostop_config():
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False  # default value
     assert r.autostop_config.idle_minutes == 10
-    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS_AND_SSH  # default value
+    assert r.autostop_config.wait_for == None  # default value
 
     # Override with both down and idle_minutes when no existing config
     r = Resources()
