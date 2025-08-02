@@ -1199,7 +1199,7 @@ def launch(
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
-        if wait_for else None,
+        if wait_for is not None else None,
         down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
@@ -2646,7 +2646,7 @@ def autostop(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes,
         wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
-        if wait_for else None,
+        if wait_for is not None else None,
         async_call=async_call)
 
 
@@ -2870,7 +2870,7 @@ def start(
         lambda name: sdk.start(name,
                                idle_minutes_to_autostop,
                                autostop_lib.AutostopWaitFor.from_str(wait_for)
-                               if wait_for else None,
+                               if wait_for is not None else None,
                                retry_until_up,
                                down=down,
                                force=force), to_start)
