@@ -74,6 +74,13 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
+  
+  :ref:`auth <helm-values-auth>`:
+    :ref:`oauth2Proxy <helm-values-auth-oauth2Proxy>`:
+      :ref:`enabled <helm-values-auth-oauth2Proxy-enabled>`: false
+      :ref:`baseUrl <helm-values-auth-oauth2Proxy-baseUrl>`: null
+    :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
+      :ref:`enabled <helm-values-auth-serviceAccount-enabled>`: null
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -674,6 +681,96 @@ Default: ``null``
       - name: my-volume
         mountPath: /my-path
         subPath: my-file
+
+
+.. _helm-values-auth:
+
+``auth``
+~~~~~~~~
+
+Authentication configuration for the API server.
+
+.. _helm-values-auth-oauth2Proxy:
+
+``auth.oauth2Proxy``
+^^^^^^^^^^^^^^^^^^^^
+
+OAuth2 Proxy based authentication configuration for the API server.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  auth:
+    oauth2Proxy:
+      enabled: false
+      baseUrl: null
+
+.. _helm-values-auth-oauth2Proxy-enabled:
+
+``auth.oauth2Proxy.enabled``
+''''''''''''''''''''''''''''
+
+Enable/disable OAuth2 Proxy based authentication.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  auth:
+    oauth2Proxy:
+      enabled: true
+
+.. _helm-values-auth-oauth2Proxy-baseUrl:
+
+``auth.oauth2Proxy.baseUrl``
+''''''''''''''''''''''''''''
+
+Base URL of the OAuth2 Proxy. This setting is used when you have a self-hosted OAuth2 Proxy instance.
+
+- If you are using a self-hosted OAuth2 Proxy, set this to the base URL of the OAuth2 Proxy.
+- If you want this chart to provision an OAuth2 Proxy, leave this unset (``null``) and enable the OAuth2 Proxy deployment via :ref:`ingress.oauth2-proxy <helm-values-ingress-oauth2-proxy>` config.
+
+A non-empty ``baseUrl`` is mutually exclusive with :ref:`ingress.oauth2-proxy.enabled=true <helm-values-ingress-oauth2-proxy-enabled>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth2Proxy:
+      baseUrl: "https://oauth.mycompany.com"
+
+.. _helm-values-auth-serviceAccount:
+
+``auth.serviceAccount``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Service account token based authentication configuration for the API server.
+
+.. code-block:: yaml
+
+  auth:
+    serviceAccount:
+      enabled: null
+
+.. _helm-values-auth-serviceAccount-enabled:
+
+``auth.serviceAccount.enabled``
+'''''''''''''''''''''''''''''''
+
+Enable service account tokens for automated API access. If enabled, users can create bearer tokens to bypass SSO authentication for automated systems.
+
+JWT secrets are automatically stored in the database for persistence across restarts. This setting defaults to the value of :ref:`.apiService.enableServiceAccounts <helm-values-apiService-enableServiceAccounts>` (which is ``true`` by default) for backward compatibility. Setting this field will override the default value.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    serviceAccount:
+      enabled: true
+
 
 .. _helm-values-storage:
 

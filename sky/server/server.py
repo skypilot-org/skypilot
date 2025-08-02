@@ -1543,23 +1543,38 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         - commit: str; The commit hash of SkyPilot used for API server.
     """
     user = request.state.auth_user
-    user_dict = None
     server_status = common.ApiServerStatus.HEALTHY
-    if user is not None:
-        user_dict = user.to_dict()
-    elif getattr(request.state, 'anonymous_user', False):
-        # /api/health had several different usage previously:
-        # 1. For health check from CLI and external ochestration tools (k8s).
-        # 2. For `sky api info` call to get the user info.
-        # The first does not require authentication while the second does,
-        # thus we introduce an new API /api/info to serve the second usage.
-        # However, for backward compatibility, we need to return a dummy user
-        # info to CLI that runs in API version < 13 in this API.
-        user_dict = {
-            'name': 'anonymous',
-            'id': 'anonymous',
-        }
+    if getattr(request.state, 'anonymous_user', False):
+        # API server authentication is enabled, but the request is not
+        # authenticated. We still have to serve the request because the
+        # /api/health endpoint has two different usage:
+        # 1. For health check from `api start` and external ochestration
+        #    tools (k8s), which does not require authentication and user info.
+        # 2. Return server info to client and hint client to login if required.
+        # Separating these two usage to different APIs will break backward
+        # compatibility for existing ochestration solutions (e.g. helm chart).
+        # So we serve these two usages in a backward compatible manner below.
+        client_version = versions.get_remote_api_version()
+        # - For Client with API version >= 13, we return 200 response with
+        #   status=NEEDS_AUTH, new client will handle the login process.
+        # - For health check from `sky api start`, the client code always uses
+        #   the same API version with the server, thus there is no compatibility
+        #   issue.
         server_status = common.ApiServerStatus.NEEDS_AUTH
+        if client_version is None:
+            # - For health check from ochestration tools (e.g. k8s), we also
+            #   return 200 with status=NEEDS_AUTH, which passes HTTP probe
+            #   check.
+            # - There is no harm when an malicious client calls /api/health
+            #   without authentication since no sensitive information is
+            #   returned.
+            return {'status': common.ApiServerStatus.HEALTHY}
+        # TODO(aylei): remove this after min_compatible_api_version >= 13.
+        if client_version < 13:
+            # For Client with API version < 13, the NEEDS_AUTH status is not
+            # honored. Return 401 to trigger the login process.
+            raise fastapi.HTTPException(status_code=401,
+                                        detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
     return {
@@ -1571,23 +1586,9 @@ async def health(request: fastapi.Request) -> Dict[str, Any]:
         'version': sky.__version__,
         'version_on_disk': common.get_skypilot_version_on_disk(),
         'commit': sky.__commit__,
-        'user': user_dict,
+        'user': user.to_dict() if user is not None else None,
         'basic_auth_enabled': os.environ.get(
             constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false').lower() == 'true',
-    }
-
-
-@app.get('/api/info')
-async def api_info(request: fastapi.Request) -> Dict[str, Any]:
-    """Gets the info of the API server."""
-    user = request.state.auth_user
-    return {
-        'status': common.ApiServerStatus.HEALTHY.value,
-        'api_version': str(server_constants.API_VERSION),
-        'version': sky.__version__,
-        'version_on_disk': common.get_skypilot_version_on_disk(),
-        'commit': sky.__commit__,
-        'user': user.to_dict() if user is not None else None,
     }
 
 

@@ -322,7 +322,6 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         # The response is 200, so we can parse the response.
         try:
             result = response.json()
-            # TODO(aylei): backward compatbility
             server_status = result.get('status')
             api_version = result.get('api_version')
             version = result.get('version')
