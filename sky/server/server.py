@@ -289,51 +289,54 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class AnonymousAccessMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to handle anonymous access."""
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        if request.state.auth_user:
+            return await call_next(request)
+        if os.environ.get(constants.ENV_VAR_DISABLE_ANONYMOUS_ACCESS,
+                          'false').lower() == 'false':
+            return await call_next(request)
+
+        # TODO(hailong): Need to remove this when the new API for health check
+        # is ready.
+        if request.url.path.startswith('/api/health'):
+            # Try to set the auth user from basic auth
+            return await call_next(request)
+
+        return fastapi.responses.JSONResponse(
+            status_code=401, content={'detail': 'Authentication failed'})
+
+
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
         """Make sure correct bearer token auth is present.
 
-        1. If the request has the X-Skypilot-Auth-Mode: token header, it must
-           have a valid bearer token.
-        2. For backwards compatibility, if the request has a Bearer token
-           beginning with "sky_" (even if X-Skypilot-Auth-Mode is not present),
-           it must be a valid token.
-        3. If X-Skypilot-Auth-Mode is not set to "token", and there is no Bearer
-           token beginning with "sky_", allow the request to continue.
-
-        In conjunction with an auth proxy, the idea is to make the auth proxy
-        bypass requests with bearer tokens, instead setting the
-        X-Skypilot-Auth-Mode header. The auth proxy should either validate the
-        auth or set the header X-Skypilot-Auth-Mode: token.
+        1. If no valid bearer token is present, continue with next middleware.
+        2. For valid bearer token, verify the token and set the auth user.
         """
-        has_skypilot_auth_header = (
-            request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')
-        has_bearer_token_starting_with_sky = (
-            auth_header and auth_header.lower().startswith('bearer ') and
-            auth_header.split(' ', 1)[1].startswith('sky_'))
-
-        if (not has_skypilot_auth_header and
-                not has_bearer_token_starting_with_sky):
-            # This is case #3 above. We do not need to validate the request.
-            # No Bearer token, continue with normal processing (OAuth2 cookies,
-            # etc.)
+        if not auth_header:
+            # No Bearer token, continue with next middleware
             return await call_next(request)
-        # After this point, all requests must be validated.
 
-        if auth_header is None:
-            return fastapi.responses.JSONResponse(
-                status_code=401, content={'detail': 'Authentication required'})
-
-        # Extract token
         split_header = auth_header.split(' ', 1)
-        if split_header[0].lower() != 'bearer':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Invalid authentication method'})
-        sa_token = split_header[1]
+        if len(split_header) < 2:
+            logger.warning(f'Invalid authorization header: {auth_header}')
+            return await call_next(request)
+
+        header_type = split_header[0].strip().lower()
+        if header_type != 'bearer':
+            logger.warning(f'Invalid authorization header: {auth_header}')
+            return await call_next(request)
+
+        sa_token = split_header[1].strip()
+        if not sa_token.startswith('sky_'):
+            logger.warning(f'Invalid authorization header: {auth_header}')
+            return await call_next(request)
 
         # Handle SkyPilot service account tokens
         return await self._handle_service_account_token(request, sa_token,
@@ -386,6 +389,17 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 return fastapi.responses.JSONResponse(
                     status_code=401,
                     content={'detail': 'Service account user no longer exists'})
+
+            # Verify token still exists in database
+            token_info = global_user_state.get_service_account_token(token_id)
+            if token_info is None:
+                logger.warning(
+                    f'Service account token {token_id} no longer exists')
+                return fastapi.responses.JSONResponse(
+                    status_code=401,
+                    content={
+                        'detail': 'Service account token no longer exists'
+                    })
 
             # Update last used timestamp for token tracking
             try:
@@ -625,6 +639,7 @@ app.add_middleware(
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
 app.add_middleware(RBACMiddleware)
+app.add_middleware(AnonymousAccessMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
 # BearerTokenMiddleware, since it should be skipped if either of those set the
 # auth user.
