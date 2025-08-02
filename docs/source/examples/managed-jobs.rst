@@ -492,6 +492,121 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
 
+Event callbacks and notifications
+---------------------------------
+
+Get Slack notifications when your managed jobs start, succeed, or fail.
+
+**Quick Start:**
+
+.. code-block:: yaml
+
+  name: my-training-job
+  
+  envs:
+    SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+  
+  run: |
+    echo "Training model..."
+    # Your training code here
+  
+  event_callback:
+    - slack:
+        webhook_url: ${SLACK_WEBHOOK_URL}
+
+**Setup:** Create a Slack webhook, then:
+
+.. code-block:: bash
+
+   export SLACK_WEBHOOK_URL="your-webhook-url"
+   sky jobs launch --env SLACK_WEBHOOK_URL my-training-job.yaml
+
+You'll get notifications when the job starts, succeeds, or fails.
+
+.. dropdown:: How to create a Slack webhook
+   :animate: fade-in
+
+   **Step 1: Create a Slack App**
+
+   1. Go to https://api.slack.com/apps and click "Create New App"
+   2. Choose "From scratch"
+   3. Give your app a name (e.g., "SkyPilot Notifications") 
+   4. Select your Slack workspace
+
+   **Step 2: Enable Incoming Webhooks**
+
+   1. In your app settings, go to "Incoming Webhooks" in the left sidebar
+   2. Toggle "Activate Incoming Webhooks" to On
+   3. Click "Add New Webhook to Workspace"
+   4. Choose the channel where you want notifications (e.g., #general, #ml-jobs)
+   5. Click "Allow"
+
+   **Step 3: Copy Your Webhook URL**
+
+   1. You'll see a webhook URL like: ``https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX``
+   2. Copy this URL and use it as your ``SLACK_WEBHOOK_URL``
+
+**Customization options:**
+
+.. code-block:: yaml
+
+  event_callback:
+    - slack:
+        webhook_url: ${SLACK_WEBHOOK_URL}
+        username: "ML Bot"                    # Optional: custom bot name
+        channel: "#ml-jobs"                   # Optional: specific channel  
+        notify_on: ["FAILED", "SUCCEEDED"]    # Optional: filter statuses
+        message: "{EMOJI} {TASK_NAME} is {JOB_STATUS}"  # Optional: custom message
+
+**Multiple services:** Replace ``slack:`` with ``discord:`` for Discord, or use both in a list.
+
+.. dropdown:: Advanced: Custom bash scripts
+   :animate: fade-in
+
+   For advanced customization, you can write custom bash scripts instead of using built-in handlers:
+
+   .. code-block:: yaml
+
+     name: custom-notification-job
+     
+     envs:
+       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+     
+     run: |
+       echo "Running custom job..."
+       # Your job code here
+     
+     # Custom bash script with full control
+     event_callback: |
+       curl -X POST "$SLACK_WEBHOOK_URL" \
+         -H 'Content-type: application/json' \
+         --data "{
+           \"text\": \"🚀 Custom notification: $JOB_STATUS\",
+           \"blocks\": [
+             {
+               \"type\": \"section\",
+               \"text\": {
+                 \"type\": \"mrkdwn\",
+                 \"text\": \"*Status:* \`$JOB_STATUS\`\\n*Job:* $TASK_NAME\\n*Cluster:* $CLUSTER_NAME\"
+               }
+             }
+           ]
+         }"
+
+   **Available environment variables:**
+
+   - ``$JOB_STATUS`` - Current status (STARTING, RUNNING, SUCCEEDED, FAILED, etc.)
+   - ``$JOB_ID`` - Unique job identifier
+   - ``$TASK_ID`` - Task ID within the job
+   - ``$TASK_NAME`` - Name of the task
+   - ``$CLUSTER_NAME`` - Name of the cluster running the job
+   - ``$SKYPILOT_TASK_ID`` - SkyPilot's internal task ID
+   - ``$SKYPILOT_TASK_IDS`` - All task IDs in the job
+   - ``$EVENT_TYPE`` - Type of event (currently "Spot")
+
+See ``examples/managed_jobs_notifications/`` for complete examples.
+
+
 .. _jobs-controller:
 
 How it works: The jobs controller
@@ -605,120 +720,6 @@ To tear down the current controller, so that new resource config is picked up, u
 
 The next time you use :code:`sky jobs launch`, a new controller will be created with the updated resources.
 
-
-Event callbacks and notifications
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Get Slack notifications when your managed jobs start, succeed, or fail.
-
-**Quick Start:**
-
-.. code-block:: yaml
-
-  name: my-training-job
-  
-  envs:
-    SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
-  
-  run: |
-    echo "Training model..."
-    # Your training code here
-  
-  event_callback:
-    - slack:
-        webhook_url: ${SLACK_WEBHOOK_URL}
-
-**Setup:** Create a Slack webhook, then:
-
-.. code-block:: bash
-
-   export SLACK_WEBHOOK_URL="your-webhook-url"
-   sky jobs launch my-training-job.yaml
-
-You'll get notifications when the job starts, succeeds, or fails.
-
-.. dropdown:: How to create a Slack webhook
-   :animate: fade-in
-
-   **Step 1: Create a Slack App**
-
-   1. Go to https://api.slack.com/apps and click "Create New App"
-   2. Choose "From scratch"
-   3. Give your app a name (e.g., "SkyPilot Notifications") 
-   4. Select your Slack workspace
-
-   **Step 2: Enable Incoming Webhooks**
-
-   1. In your app settings, go to "Incoming Webhooks" in the left sidebar
-   2. Toggle "Activate Incoming Webhooks" to On
-   3. Click "Add New Webhook to Workspace"
-   4. Choose the channel where you want notifications (e.g., #general, #ml-jobs)
-   5. Click "Allow"
-
-   **Step 3: Copy Your Webhook URL**
-
-   1. You'll see a webhook URL like: ``https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX``
-   2. Copy this URL and use it as your ``SLACK_WEBHOOK_URL``
-
-**Customization options:**
-
-.. code-block:: yaml
-
-  event_callback:
-    - slack:
-        webhook_url: ${SLACK_WEBHOOK_URL}
-        username: "ML Bot"                    # Optional: custom bot name
-        channel: "#ml-jobs"                   # Optional: specific channel  
-        notify_on: ["FAILED", "SUCCEEDED"]    # Optional: filter statuses
-        message: "{EMOJI} {TASK_NAME} is {JOB_STATUS}"  # Optional: custom message
-
-**Multiple services:** Replace ``slack:`` with ``discord:`` for Discord, or use both in a list.
-
-.. dropdown:: Advanced: Custom bash scripts
-   :animate: fade-in
-
-   For advanced customization, you can write custom bash scripts instead of using built-in handlers:
-
-   .. code-block:: yaml
-
-     name: custom-notification-job
-     
-     envs:
-       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
-     
-     run: |
-       echo "Running custom job..."
-       # Your job code here
-     
-     # Custom bash script with full control
-     event_callback: |
-       curl -X POST "$SLACK_WEBHOOK_URL" \
-         -H 'Content-type: application/json' \
-         --data "{
-           \"text\": \"🚀 Custom notification: $JOB_STATUS\",
-           \"blocks\": [
-             {
-               \"type\": \"section\",
-               \"text\": {
-                 \"type\": \"mrkdwn\",
-                 \"text\": \"*Status:* \`$JOB_STATUS\`\\n*Job:* $TASK_NAME\\n*Cluster:* $CLUSTER_NAME\"
-               }
-             }
-           ]
-         }"
-
-   **Available environment variables:**
-
-   - ``$JOB_STATUS`` - Current status (STARTING, RUNNING, SUCCEEDED, FAILED, etc.)
-   - ``$JOB_ID`` - Unique job identifier
-   - ``$TASK_ID`` - Task ID within the job
-   - ``$TASK_NAME`` - Name of the task
-   - ``$CLUSTER_NAME`` - Name of the cluster running the job
-   - ``$SKYPILOT_TASK_ID`` - SkyPilot's internal task ID
-   - ``$SKYPILOT_TASK_IDS`` - All task IDs in the job
-   - ``$EVENT_TYPE`` - Type of event (currently "Spot")
-
-See ``examples/managed_jobs_slack_notifications/`` for complete examples.
 
 .. _jobs-controller-sizing:
 
