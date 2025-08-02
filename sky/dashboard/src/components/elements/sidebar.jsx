@@ -26,7 +26,10 @@ import { Settings, User } from 'lucide-react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
-import { getAuthHeaders, getContentTypeAuthHeaders } from '@/data/connectors/client';
+import {
+  getAuthHeaders,
+  getContentTypeAuthHeaders,
+} from '@/data/connectors/client';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
