@@ -3260,7 +3260,7 @@ def _down_or_stop_clusters(
 
     def _down_or_stop(name: str):
         success_progress = False
-        if idle_minutes_to_autostop is not None and wait_for is not None:
+        if idle_minutes_to_autostop is not None:
             try:
                 request_id = sdk.autostop(name, idle_minutes_to_autostop,
                                           wait_for, down)
