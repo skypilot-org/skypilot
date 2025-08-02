@@ -127,6 +127,11 @@ class TestBearerTokenMiddleware:
             'token_id': 'token_123'
         }
 
+        mock_service_account_token = mock.Mock()
+        mock_service_account_token.id = 'token_123'
+        mock_service_account_token.user_id = 'sa-123456'
+        mock_service_account_token.name = 'test-service-account'
+
         mock_user_info = mock.Mock()
         mock_user_info.name = 'test-service-account'
 
@@ -136,10 +141,12 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
+                mock.patch('sky.users.server.global_user_state.get_service_account_token') as mock_get_service_account_token, \
                 mock.patch('sky.server.auth.authn.override_user_info_in_request_body') as mock_override_user_info:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
+            mock_get_service_account_token.return_value = mock_service_account_token
 
             response = await middleware.dispatch(request, mock_call_next)
 
@@ -241,6 +248,11 @@ class TestBearerTokenMiddleware:
             'token_id': 'token_123'
         }
 
+        mock_service_account_token = mock.Mock()
+        mock_service_account_token.id = 'token_123'
+        mock_service_account_token.user_id = 'sa-123456'
+        mock_service_account_token.name = 'test-service-account'
+
         mock_user_info = mock.Mock()
         mock_user_info.name = 'test-service-account'
 
@@ -250,11 +262,13 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
+                mock.patch('sky.server.server.global_user_state.get_service_account_token') as mock_get_service_account_token, \
                 mock.patch('sky.server.auth.authn.override_user_info_in_request_body') as mock_override_user_info:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
             mock_update_last_used.side_effect = Exception("Database error")
+            mock_get_service_account_token.return_value = mock_service_account_token
 
             response = await middleware.dispatch(request, mock_call_next)
 
@@ -299,6 +313,11 @@ class TestBearerTokenMiddleware:
             'token_id': 'token_123'
         }
 
+        mock_service_account_token = mock.Mock()
+        mock_service_account_token.id = 'token_123'
+        mock_service_account_token.user_id = 'sa-123456'
+        mock_service_account_token.name = 'test-service-account'
+
         mock_user_info = mock.Mock()
         mock_user_info.name = 'test-service-account'
 
@@ -308,10 +327,12 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used'), \
+                mock.patch('sky.server.server.global_user_state.get_service_account_token') as mock_get_service_account_token, \
                 mock.patch('sky.server.auth.authn.override_user_info_in_request_body'):
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
+            mock_get_service_account_token.return_value = mock_service_account_token
 
             response = await middleware.dispatch(request, mock_call_next)
 
