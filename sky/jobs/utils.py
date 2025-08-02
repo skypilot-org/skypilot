@@ -31,6 +31,7 @@ from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import notifications
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses
@@ -715,7 +716,7 @@ def event_callback_func(
         event_callback = task.event_callback if task else None
         if event_callback is None or task is None:
             return
-            
+
         # Get job context information
         pool = managed_job_state.get_pool_from_job_id(job_id)
         if pool is not None:
@@ -723,9 +724,9 @@ def event_callback_func(
         else:
             cluster_name = generate_managed_job_cluster_name(
                 task.name, job_id) if task.name else None
-                
+
         logger.info(f'=== START: event callback for {status!r} ===')
-        
+
         # Build job context for notifications
         job_context = {
             'job_id': job_id,
@@ -733,18 +734,23 @@ def event_callback_func(
             'task_name': task.name or '',
             'cluster_name': cluster_name or '',
             'status': status,
-            'skypilot_task_id': str(task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')) if task.envs else 'N.A.',
-            'skypilot_task_ids': str(task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')) if task.envs else 'N.A.',
+            'skypilot_task_id': str(
+                task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.'))
+                                if task.envs else 'N.A.',
+            'skypilot_task_ids': str(
+                task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.'))
+                                 if task.envs else 'N.A.',
         }
-        
-        # Use new notification system if event_callback is list, 
+
+        # Use new notification system if event_callback is list,
         # otherwise fall back to bash script for backward compatibility
         if isinstance(event_callback, list):
             # Import here to avoid circular imports
             from sky.jobs import notifications
-            
+
             try:
-                notifications.send_notifications(event_callback, status, job_context)
+                notifications.send_notifications(event_callback, status,
+                                                 job_context)
             except Exception as e:
                 logger.error(f'Failed to send notifications: {e}')
         else:
@@ -756,8 +762,8 @@ def event_callback_func(
             env_vars = task.envs.copy() if task.envs else {}
             env_vars.update(
                 dict(
-                    SKYPILOT_TASK_ID=job_context['skypilot_task_id'],
-                    SKYPILOT_TASK_IDS=job_context['skypilot_task_ids'],
+                    SKYPILOT_TASK_ID=str(job_context['skypilot_task_id']),
+                    SKYPILOT_TASK_IDS=str(job_context['skypilot_task_ids']),
                     TASK_ID=str(task_id),
                     JOB_ID=str(job_id),
                     JOB_STATUS=status,
@@ -765,12 +771,13 @@ def event_callback_func(
                     TASK_NAME=task.name or '',
                     # TODO(MaoZiming): Future event type Job or Spot.
                     EVENT_TYPE='Spot'))
-            result = log_lib.run_bash_command_with_log(bash_command=event_callback,
-                                                       log_path=log_path,
-                                                       env_vars=env_vars)
+            result = log_lib.run_bash_command_with_log(
+                bash_command=event_callback,
+                log_path=log_path,
+                env_vars=env_vars)
             logger.info(
                 f'Bash:{event_callback},log_path:{log_path},result:{result}')
-        
+
         logger.info(f'=== END: event callback for {status!r} ===')
 
     async def async_callback_func(status: str):

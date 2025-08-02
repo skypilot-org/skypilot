@@ -31,28 +31,28 @@ class TestNotificationHandlers:
             'username': 'TestBot',
             'channel': '#test-channel',
         }
-        
+
         message = handler._build_message('SUCCEEDED', self.job_context, config)
-        
+
         assert message['username'] == 'TestBot'
         assert message['channel'] == '#test-channel'
         assert len(message['attachments']) == 1
-        
+
         attachment = message['attachments'][0]
         assert attachment['color'] == '#36a64f'  # Green for SUCCEEDED
         assert len(attachment['blocks']) == 2
-        
+
         # Check header block
         header = attachment['blocks'][0]
         assert header['type'] == 'header'
         assert '✅' in header['text']['text']  # Success emoji
         assert 'test-task' in header['text']['text']
-        
+
         # Check fields block
         fields_block = attachment['blocks'][1]
         assert fields_block['type'] == 'section'
         assert len(fields_block['fields']) == 4
-        
+
         # Verify field contents
         field_texts = [field['text'] for field in fields_block['fields']]
         assert any('SUCCEEDED' in text for text in field_texts)
@@ -67,22 +67,22 @@ class TestNotificationHandlers:
             'webhook_url': 'https://discord.com/api/webhooks/test',
             'username': 'TestBot',
         }
-        
+
         message = handler._build_message('FAILED', self.job_context, config)
-        
+
         assert message['username'] == 'TestBot'
         assert len(message['embeds']) == 1
-        
+
         embed = message['embeds'][0]
         assert '❌' in embed['title']  # Failed emoji
         assert embed['color'] == 0xff0000  # Red for FAILED
         assert len(embed['fields']) == 4
-        
+
         # Verify field contents
         fields = embed['fields']
         status_field = next(f for f in fields if f['name'] == 'Status')
         assert 'FAILED' in status_field['value']
-        
+
         job_id_field = next(f for f in fields if f['name'] == 'Job ID')
         assert '123' in job_id_field['value']
 
@@ -97,20 +97,23 @@ class TestNotificationHandlers:
             ('CANCELLED', '⛔', '#808080'),
             ('UNKNOWN', 'ℹ️', '#0099cc'),  # Default values
         ]
-        
+
         slack_handler = notifications.SlackNotificationHandler()
         discord_handler = notifications.DiscordNotificationHandler()
-        
+
         for status, expected_emoji, expected_color in test_cases:
             config = {'webhook_url': 'https://test.com'}
-            
+
             # Test Slack
-            slack_msg = slack_handler._build_message(status, self.job_context, config)
-            assert expected_emoji in slack_msg['attachments'][0]['blocks'][0]['text']['text']
+            slack_msg = slack_handler._build_message(status, self.job_context,
+                                                     config)
+            assert expected_emoji in slack_msg['attachments'][0]['blocks'][0][
+                'text']['text']
             assert slack_msg['attachments'][0]['color'] == expected_color
-            
+
             # Test Discord
-            discord_msg = discord_handler._build_message(status, self.job_context, config)
+            discord_msg = discord_handler._build_message(
+                status, self.job_context, config)
             assert expected_emoji in discord_msg['embeds'][0]['title']
             expected_color_int = int(expected_color.replace('#', ''), 16)
             assert discord_msg['embeds'][0]['color'] == expected_color_int
@@ -119,15 +122,16 @@ class TestNotificationHandlers:
     def test_successful_webhook_sending(self, mock_run_command):
         """Test successful webhook sending."""
         mock_run_command.return_value = 0  # Success
-        
+
         handler = notifications.SlackNotificationHandler()
         config = {'webhook_url': 'https://hooks.slack.com/test'}
-        
-        result = handler.send_notification('SUCCEEDED', self.job_context, config)
-        
+
+        result = handler.send_notification('SUCCEEDED', self.job_context,
+                                           config)
+
         assert result is True
         mock_run_command.assert_called_once()
-        
+
         # Verify curl command construction
         call_args = mock_run_command.call_args
         bash_command = call_args[1]['bash_command']
@@ -139,12 +143,12 @@ class TestNotificationHandlers:
     def test_failed_webhook_sending(self, mock_run_command):
         """Test failed webhook sending."""
         mock_run_command.return_value = 1  # Failure
-        
+
         handler = notifications.SlackNotificationHandler()
         config = {'webhook_url': 'https://hooks.slack.com/test'}
-        
+
         result = handler.send_notification('FAILED', self.job_context, config)
-        
+
         assert result is False
         mock_run_command.assert_called_once()
 
@@ -152,12 +156,12 @@ class TestNotificationHandlers:
     def test_webhook_exception_handling(self, mock_run_command):
         """Test webhook exception handling."""
         mock_run_command.side_effect = Exception('Network error')
-        
+
         handler = notifications.DiscordNotificationHandler()
         config = {'webhook_url': 'https://discord.com/api/webhooks/test'}
-        
+
         result = handler.send_notification('RUNNING', self.job_context, config)
-        
+
         assert result is False
         mock_run_command.assert_called_once()
 
@@ -165,9 +169,10 @@ class TestNotificationHandlers:
         """Test handling of missing webhook URL."""
         handler = notifications.SlackNotificationHandler()
         config = {}  # No webhook_url
-        
-        result = handler.send_notification('SUCCEEDED', self.job_context, config)
-        
+
+        result = handler.send_notification('SUCCEEDED', self.job_context,
+                                           config)
+
         assert result is False
 
     def test_notify_on_filtering(self):
@@ -177,15 +182,18 @@ class TestNotificationHandlers:
             'webhook_url': 'https://hooks.slack.com/test',
             'notify_on': ['FAILED', 'SUCCEEDED']
         }
-        
+
         # Should skip RUNNING status
         result = handler.send_notification('RUNNING', self.job_context, config)
         assert result is True
-        
+
         # Should process FAILED status
-        with mock.patch('sky.jobs.notifications.log_lib.run_bash_command_with_log') as mock_run:
+        with mock.patch(
+                'sky.jobs.notifications.log_lib.run_bash_command_with_log'
+        ) as mock_run:
             mock_run.return_value = 0
-            result = handler.send_notification('FAILED', self.job_context, config)
+            result = handler.send_notification('FAILED', self.job_context,
+                                               config)
             assert result is True
             mock_run.assert_called_once()
 
@@ -196,10 +204,13 @@ class TestNotificationHandlers:
             'webhook_url': 'https://hooks.slack.com/test',
             'notify_on': []
         }
-        
-        with mock.patch('sky.jobs.notifications.log_lib.run_bash_command_with_log') as mock_run:
+
+        with mock.patch(
+                'sky.jobs.notifications.log_lib.run_bash_command_with_log'
+        ) as mock_run:
             mock_run.return_value = 0
-            result = handler.send_notification('RUNNING', self.job_context, config)
+            result = handler.send_notification('RUNNING', self.job_context,
+                                               config)
             assert result is True
             mock_run.assert_called_once()
 
@@ -222,14 +233,16 @@ class TestCustomMessages:
     def test_custom_message_template_formatting(self):
         """Test custom message template variable substitution."""
         handler = notifications.SlackNotificationHandler()
-        
+
         # Test both {VAR} and $VAR syntax
         template1 = "{EMOJI} Job {TASK_NAME} is {JOB_STATUS} on {CLUSTER_NAME} (ID: {JOB_ID})"
         template2 = "$EMOJI Job $TASK_NAME is $JOB_STATUS on $CLUSTER_NAME (ID: $JOB_ID)"
-        
-        result1 = handler._format_custom_text(template1, 'SUCCEEDED', self.job_context)
-        result2 = handler._format_custom_text(template2, 'SUCCEEDED', self.job_context)
-        
+
+        result1 = handler._format_custom_text(template1, 'SUCCEEDED',
+                                              self.job_context)
+        result2 = handler._format_custom_text(template2, 'SUCCEEDED',
+                                              self.job_context)
+
         expected = "✅ Job custom-test is SUCCEEDED on test-cluster (ID: 999)"
         assert result1 == expected
         assert result2 == expected
@@ -242,9 +255,9 @@ class TestCustomMessages:
             'username': 'TestBot',
             'message': '{EMOJI} Custom notification: {TASK_NAME} → {JOB_STATUS}'
         }
-        
+
         message = handler._build_message('FAILED', self.job_context, config)
-        
+
         assert 'text' in message
         assert message['text'] == '❌ Custom notification: custom-test → FAILED'
         assert 'attachments' not in message  # Simple text format
@@ -257,9 +270,9 @@ class TestCustomMessages:
             'webhook_url': 'https://discord.com/api/webhooks/test',
             'message': '{EMOJI} {TASK_NAME} status: {JOB_STATUS}'
         }
-        
+
         message = handler._build_message('SUCCEEDED', self.job_context, config)
-        
+
         assert 'content' in message
         assert message['content'] == '✅ custom-test status: SUCCEEDED'
         assert 'embeds' not in message  # Simple text format
@@ -267,28 +280,31 @@ class TestCustomMessages:
     def test_variable_edge_cases(self):
         """Test edge cases in variable substitution."""
         handler = notifications.SlackNotificationHandler()
-        
+
         # Test with missing variables (should remain unchanged)
         template = "Status: {JOB_STATUS}, Unknown: {UNKNOWN_VAR}"
-        result = handler._format_custom_text(template, 'RUNNING', self.job_context)
+        result = handler._format_custom_text(template, 'RUNNING',
+                                             self.job_context)
         assert result == "Status: RUNNING, Unknown: {UNKNOWN_VAR}"
-        
+
         # Test with empty template
         result = handler._format_custom_text("", 'FAILED', self.job_context)
         assert result == ""
-        
+
         # Test with no variables
         template = "Static message with no variables"
-        result = handler._format_custom_text(template, 'SUCCEEDED', self.job_context)
+        result = handler._format_custom_text(template, 'SUCCEEDED',
+                                             self.job_context)
         assert result == "Static message with no variables"
 
     def test_all_available_variables(self):
         """Test that all documented variables are available."""
         handler = notifications.SlackNotificationHandler()
-        
+
         template = "Status:{JOB_STATUS} ID:{JOB_ID} TaskID:{TASK_ID} Name:{TASK_NAME} Cluster:{CLUSTER_NAME} Emoji:{EMOJI}"
-        result = handler._format_custom_text(template, 'RECOVERING', self.job_context)
-        
+        result = handler._format_custom_text(template, 'RECOVERING',
+                                             self.job_context)
+
         expected = "Status:RECOVERING ID:999 TaskID:5 Name:custom-test Cluster:test-cluster Emoji:🔄"
         assert result == expected
 
@@ -312,74 +328,85 @@ class TestNotificationSending:
         """Test sending single notification successfully."""
         mock_handler = mock.Mock()
         mock_handler.send_notification.return_value = True
-        
-        with mock.patch.dict('sky.jobs.notifications.NOTIFICATION_HANDLERS', 
-                           {'slack': mock_handler}):
+
+        with mock.patch.dict('sky.jobs.notifications.NOTIFICATION_HANDLERS',
+                             {'slack': mock_handler}):
             config = {'slack': {'webhook_url': 'https://test.com'}}
-            
+
             # Should not raise exception
-            notifications._send_single_notification(config, 'RUNNING', self.job_context)
-            
+            notifications._send_single_notification(config, 'RUNNING',
+                                                    self.job_context)
+
             mock_handler.send_notification.assert_called_once_with(
-                'RUNNING', self.job_context, {'webhook_url': 'https://test.com'}
-            )
+                'RUNNING', self.job_context,
+                {'webhook_url': 'https://test.com'})
 
     def test_send_single_notification_failure(self):
         """Test sending single notification with failure."""
         mock_handler = mock.Mock()
         mock_handler.send_notification.return_value = False
-        
-        with mock.patch.dict('sky.jobs.notifications.NOTIFICATION_HANDLERS', 
-                           {'discord': mock_handler}):
+
+        with mock.patch.dict('sky.jobs.notifications.NOTIFICATION_HANDLERS',
+                             {'discord': mock_handler}):
             config = {'discord': {'webhook_url': 'https://discord.test'}}
-            
+
             # Should not raise exception even on failure
-            notifications._send_single_notification(config, 'FAILED', self.job_context)
-            
+            notifications._send_single_notification(config, 'FAILED',
+                                                    self.job_context)
+
             mock_handler.send_notification.assert_called_once()
 
     def test_send_single_notification_exception(self):
         """Test sending single notification with exception."""
         mock_handler = mock.Mock()
         mock_handler.send_notification.side_effect = Exception('Handler error')
-        
-        with mock.patch.dict('sky.jobs.notifications.NOTIFICATION_HANDLERS', 
-                           {'slack': mock_handler}):
+
+        with mock.patch.dict('sky.jobs.notifications.NOTIFICATION_HANDLERS',
+                             {'slack': mock_handler}):
             config = {'slack': {'webhook_url': 'https://test.com'}}
-            
+
             # Should not raise exception even on handler exception
-            notifications._send_single_notification(config, 'SUCCEEDED', self.job_context)
-            
+            notifications._send_single_notification(config, 'SUCCEEDED',
+                                                    self.job_context)
+
             mock_handler.send_notification.assert_called_once()
 
     @mock.patch('sky.jobs.notifications._send_single_notification')
     def test_send_multiple_notifications(self, mock_send_single):
         """Test sending multiple notifications."""
         notifications_config = [
-            {'slack': {'webhook_url': 'https://slack.test'}},
-            {'discord': {'webhook_url': 'https://discord.test'}},
+            {
+                'slack': {
+                    'webhook_url': 'https://slack.test'
+                }
+            },
+            {
+                'discord': {
+                    'webhook_url': 'https://discord.test'
+                }
+            },
         ]
-        
-        notifications.send_notifications(notifications_config, 'SUCCEEDED', self.job_context)
-        
+
+        notifications.send_notifications(notifications_config, 'SUCCEEDED',
+                                         self.job_context)
+
         assert mock_send_single.call_count == 2
         mock_send_single.assert_any_call(
-            {'slack': {'webhook_url': 'https://slack.test'}}, 
-            'SUCCEEDED', 
-            self.job_context
-        )
+            {'slack': {
+                'webhook_url': 'https://slack.test'
+            }}, 'SUCCEEDED', self.job_context)
         mock_send_single.assert_any_call(
-            {'discord': {'webhook_url': 'https://discord.test'}}, 
-            'SUCCEEDED', 
-            self.job_context
-        )
+            {'discord': {
+                'webhook_url': 'https://discord.test'
+            }}, 'SUCCEEDED', self.job_context)
 
     def test_unknown_notification_handler(self):
         """Test handling of unknown notification handler."""
         config = {'unknown_service': {'webhook_url': 'https://unknown.test'}}
-        
+
         # Should not raise exception
-        notifications._send_single_notification(config, 'RUNNING', self.job_context)
+        notifications._send_single_notification(config, 'RUNNING',
+                                                self.job_context)
 
 
 class TestEventCallbackIntegration:
@@ -387,18 +414,14 @@ class TestEventCallbackIntegration:
 
     def setup_method(self):
         """Set up test fixtures."""
-        self.task = Task(
-            name='test-task',
-            run='echo test',
-            event_callback=[
-                {
-                    'slack': {
-                        'webhook_url': 'https://hooks.slack.com/test',
-                        'notify_on': ['FAILED', 'SUCCEEDED']
-                    }
-                }
-            ]
-        )
+        self.task = Task(name='test-task',
+                         run='echo test',
+                         event_callback=[{
+                             'slack': {
+                                 'webhook_url': 'https://hooks.slack.com/test',
+                                 'notify_on': ['FAILED', 'SUCCEEDED']
+                             }
+                         }])
         self.job_context = {
             'job_id': 789,
             'task_id': 3,
@@ -411,23 +434,24 @@ class TestEventCallbackIntegration:
 
     @mock.patch('sky.jobs.notifications.send_notifications')
     @mock.patch('sky.jobs.utils.managed_job_state')
-    def test_event_callback_with_list_config(self, mock_job_state, mock_send_notifications):
+    def test_event_callback_with_list_config(self, mock_job_state,
+                                             mock_send_notifications):
         """Test event callback function with list configuration."""
         from sky.jobs.utils import event_callback_func
-        
+
         # Mock job state functions
         mock_job_state.get_pool_from_job_id.return_value = None
-        
+
         # Create callback function
         callback = event_callback_func(789, 3, self.task)
-        
+
         # Execute callback
         callback('SUCCEEDED')
-        
+
         # Verify notifications were sent
         mock_send_notifications.assert_called_once()
         call_args = mock_send_notifications.call_args
-        
+
         # Check arguments
         notifications_config, status, job_context = call_args[0]
         assert notifications_config == self.task.event_callback
@@ -437,29 +461,28 @@ class TestEventCallbackIntegration:
 
     @mock.patch('sky.skylet.log_lib.run_bash_command_with_log')
     @mock.patch('sky.jobs.utils.managed_job_state')
-    def test_event_callback_with_bash_script(self, mock_job_state, mock_run_bash):
+    def test_event_callback_with_bash_script(self, mock_job_state,
+                                             mock_run_bash):
         """Test event callback function with bash script (backward compatibility)."""
         from sky.jobs.utils import event_callback_func
-        
+
         # Create task with bash script callback
-        bash_task = Task(
-            name='bash-test',
-            run='echo test',
-            event_callback='echo "Job status: $JOB_STATUS"'
-        )
-        
+        bash_task = Task(name='bash-test',
+                         run='echo test',
+                         event_callback='echo "Job status: $JOB_STATUS"')
+
         # Mock job state functions
         mock_job_state.get_pool_from_job_id.return_value = None
         mock_run_bash.return_value = 0
-        
+
         # Create and execute callback
         callback = event_callback_func(789, 3, bash_task)
         callback('RUNNING')
-        
+
         # Verify bash command was executed
         mock_run_bash.assert_called_once()
         call_args = mock_run_bash.call_args
-        
+
         # Check bash command and environment variables
         assert call_args[1]['bash_command'] == 'echo "Job status: $JOB_STATUS"'
         env_vars = call_args[1]['env_vars']
@@ -471,13 +494,13 @@ class TestEventCallbackIntegration:
     def test_event_callback_no_callback_configured(self, mock_job_state):
         """Test event callback function with no callback configured."""
         from sky.jobs.utils import event_callback_func
-        
+
         # Create task without event callback
         no_callback_task = Task(name='no-callback', run='echo test')
-        
+
         # Create and execute callback
         callback = event_callback_func(789, 3, no_callback_task)
-        
+
         # Should not raise exception
         callback('SUCCEEDED')
 
@@ -485,9 +508,9 @@ class TestEventCallbackIntegration:
     def test_event_callback_none_task(self, mock_job_state):
         """Test event callback function with None task."""
         from sky.jobs.utils import event_callback_func
-        
+
         # Create callback with None task
         callback = event_callback_func(789, 3, None)
-        
+
         # Should not raise exception
         callback('FAILED')
