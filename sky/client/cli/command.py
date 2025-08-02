@@ -1103,7 +1103,7 @@ def launch(
     network_tier: Optional[str],
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
-    wait_for: str,
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
@@ -1198,7 +1198,8 @@ def launch(
         cluster_name=cluster,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
-        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for),
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
         down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
@@ -2575,7 +2576,7 @@ def autostop(
     all: bool,  # pylint: disable=redefined-builtin
     all_users: bool,
     idle_minutes: Optional[int],
-    wait_for: str,
+    wait_for: Optional[str],
     cancel: bool,  # pylint: disable=redefined-outer-name
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
@@ -2644,7 +2645,8 @@ def autostop(
         down=down,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes,
-        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for),
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
         async_call=async_call)
 
 
@@ -2707,7 +2709,7 @@ def start(
     all: bool,
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
-    wait_for: str,
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     force: bool,
@@ -2867,7 +2869,8 @@ def start(
     request_ids = subprocess_utils.run_in_parallel(
         lambda name: sdk.start(name,
                                idle_minutes_to_autostop,
-                               autostop_lib.AutostopWaitFor.from_str(wait_for),
+                               autostop_lib.AutostopWaitFor.from_str(wait_for)
+                               if wait_for is not None else None,
                                retry_until_up,
                                down=down,
                                force=force), to_start)
@@ -3257,7 +3260,7 @@ def _down_or_stop_clusters(
 
     def _down_or_stop(name: str):
         success_progress = False
-        if idle_minutes_to_autostop is not None and wait_for is not None:
+        if idle_minutes_to_autostop is not None:
             try:
                 request_id = sdk.autostop(name, idle_minutes_to_autostop,
                                           wait_for, down)

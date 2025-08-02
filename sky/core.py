@@ -404,8 +404,8 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
 def _start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
-    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -484,8 +484,8 @@ def _start(
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
-    wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -657,7 +657,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 def autostop(
         cluster_name: str,
         idle_minutes: int,
-        wait_for: autostop_lib.AutostopWaitFor = autostop_lib.
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
     DEFAULT_AUTOSTOP_WAIT_FOR,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:

@@ -199,8 +199,10 @@ class AutostopCodeGen:
     def set_autostop(cls,
                      idle_minutes: int,
                      backend: str,
-                     wait_for: AutostopWaitFor,
+                     wait_for: Optional[AutostopWaitFor],
                      down: bool = False) -> str:
+        if wait_for is None:
+            wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
         code = [
             f'\nif getattr(constants, "SKYLET_LIB_VERSION", 1) < 4: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, {down})'

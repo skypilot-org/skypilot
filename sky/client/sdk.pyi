@@ -105,7 +105,7 @@ def launch(task: Union['sky.Task', 'sky.Dag'],
            cluster_name: Optional[str] = ...,
            retry_until_up: bool = ...,
            idle_minutes_to_autostop: Optional[int] = ...,
-           wait_for: autostop_lib.AutostopWaitFor = ...,
+           wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
            dryrun: bool = ...,
            down: bool = ...,
            backend: Optional['backends.Backend'] = ...,
@@ -144,7 +144,7 @@ def download_logs(cluster_name: str,
 
 def start(cluster_name: str,
           idle_minutes_to_autostop: Optional[int] = ...,
-          wait_for: autostop_lib.AutostopWaitFor = ...,
+          wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
           retry_until_up: bool = ...,
           down: bool = ...,
           force: bool = ...) -> server_common.RequestId:
@@ -161,7 +161,7 @@ def stop(cluster_name: str, purge: bool = ...) -> server_common.RequestId:
 
 def autostop(cluster_name: str,
              idle_minutes: int,
-             wait_for: autostop_lib.AutostopWaitFor = ...,
+             wait_for: Optional[autostop_lib.AutostopWaitFor] = ...,
              down: bool = ...) -> server_common.RequestId:
     ...
 
