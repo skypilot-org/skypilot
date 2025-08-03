@@ -58,8 +58,8 @@ class TestNotificationHandlers:
 
         # Verify field contents
         field_texts = [field['text'] for field in fields_block['fields']]
-        assert any('✅' in text and 'SUCCEEDED' in text
-                   for text in field_texts)  # Status with emoji
+        assert any(
+            'SUCCEEDED' in text for text in field_texts)  # Status without emoji
         assert any('123' in text for text in field_texts)
         assert any('test-task' in text for text in field_texts)
         assert any('test-cluster' in text for text in field_texts)
@@ -179,10 +179,11 @@ class TestNotificationHandlers:
             # Test Slack
             slack_msg = slack_handler._build_message(status, self.job_context,
                                                      config)
-            # Check emoji in fields
+            # Check emoji is NOT in status field
             fields = slack_msg['attachments'][0]['blocks'][1]['fields']
             status_field = next(f for f in fields if 'Status:' in f['text'])
-            assert expected_emoji in status_field['text']
+            assert expected_emoji not in status_field[
+                'text']  # No emoji in status field
             assert slack_msg['attachments'][0]['color'] == expected_color
 
             # Test Discord
