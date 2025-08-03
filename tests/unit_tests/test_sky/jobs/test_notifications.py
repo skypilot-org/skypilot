@@ -19,6 +19,7 @@ class TestNotificationHandlers:
             'task_name': 'test-task',
             'cluster_name': 'test-cluster',
             'status': 'SUCCEEDED',
+            'num_tasks': 1,
             'skypilot_task_id': 'sky-test-id',
             'skypilot_task_ids': 'sky-test-ids',
         }
@@ -40,25 +41,71 @@ class TestNotificationHandlers:
 
         attachment = message['attachments'][0]
         assert attachment['color'] == '#36a64f'  # Green for SUCCEEDED
-        assert len(attachment['blocks']) == 2
+        assert 'fallback' in attachment  # For notification preview
+        assert '(123.1: test-task) - Succeeded' in attachment[
+            'fallback']  # Task ID 1 should be shown
+        assert len(attachment['blocks']) == 2  # Header and section blocks
 
         # Check header block
-        header = attachment['blocks'][0]
-        assert header['type'] == 'header'
-        assert '✅' in header['text']['text']  # Success emoji
-        assert 'test-task' in header['text']['text']
+        header_block = attachment['blocks'][0]
+        assert header_block['type'] == 'header'
+        assert '(123.1: test-task) - Succeeded' in header_block['text']['text']
 
         # Check fields block
         fields_block = attachment['blocks'][1]
         assert fields_block['type'] == 'section'
-        assert len(fields_block['fields']) == 4
+        assert len(fields_block['fields']) == 5  # Always include task ID
 
         # Verify field contents
         field_texts = [field['text'] for field in fields_block['fields']]
-        assert any('SUCCEEDED' in text for text in field_texts)
+        assert any('✅' in text and 'SUCCEEDED' in text
+                   for text in field_texts)  # Status with emoji
         assert any('123' in text for text in field_texts)
         assert any('test-task' in text for text in field_texts)
         assert any('test-cluster' in text for text in field_texts)
+        # Task ID is always shown in fields
+        assert any('*Task ID:* 1' in text for text in field_texts)
+
+    def test_slack_handler_with_pipeline_task(self):
+        """Test Slack message for pipeline tasks (task_id > 0)."""
+        handler = notifications.SlackNotificationHandler()
+        config = {'webhook_url': 'https://hooks.slack.com/test'}
+
+        # Create job context for pipeline task
+        pipeline_context = self.job_context.copy()
+        pipeline_context['task_id'] = 2  # Second task in pipeline
+
+        message = handler._build_message('RUNNING', pipeline_context, config)
+
+        # Check fallback includes task ID
+        assert '(123.2:' in message['attachments'][0]['fallback']
+
+        # Check fields include task ID
+        fields_block = message['attachments'][0]['blocks'][1]
+        field_texts = [field['text'] for field in fields_block['fields']]
+        assert any('*Task ID:* 2' in text for text in field_texts)
+        assert len(fields_block['fields']) == 5  # Always includes task ID
+
+    def test_slack_handler_pipeline_first_task(self):
+        """Test Slack message for first task in pipeline (task_id = 0)."""
+        handler = notifications.SlackNotificationHandler()
+        config = {'webhook_url': 'https://hooks.slack.com/test'}
+
+        # Create job context for first task in pipeline
+        pipeline_context = self.job_context.copy()
+        pipeline_context['task_id'] = 0  # First task in pipeline
+
+        message = handler._build_message('STARTING', pipeline_context, config)
+
+        # Check fallback does NOT include task ID when it's 0
+        assert '(123:' in message['attachments'][0]['fallback']
+        assert '(123.0:' not in message['attachments'][0]['fallback']
+
+        # Check fields still include task ID even when it's 0
+        fields_block = message['attachments'][0]['blocks'][1]
+        field_texts = [field['text'] for field in fields_block['fields']]
+        assert any('*Task ID:* 0' in text for text in field_texts)
+        assert len(fields_block['fields']) == 5  # Always includes task ID
 
     def test_discord_handler_message_building(self):
         """Test Discord message payload construction."""
@@ -75,8 +122,11 @@ class TestNotificationHandlers:
 
         embed = message['embeds'][0]
         assert '❌' in embed['title']  # Failed emoji
+        assert '(123.1:' in embed[
+            'title']  # Job ID.task_id format (task_id is 1 from fixtures)
+        assert '- Failed' in embed['title']  # Status
         assert embed['color'] == 0xff0000  # Red for FAILED
-        assert len(embed['fields']) == 4
+        assert len(embed['fields']) == 5  # Always includes task ID
 
         # Verify field contents
         fields = embed['fields']
@@ -85,6 +135,28 @@ class TestNotificationHandlers:
 
         job_id_field = next(f for f in fields if f['name'] == 'Job ID')
         assert '123' in job_id_field['value']
+
+    def test_discord_handler_task_id_zero(self):
+        """Test Discord message when task_id is 0."""
+        handler = notifications.DiscordNotificationHandler()
+        config = {'webhook_url': 'https://discord.com/api/webhooks/test'}
+
+        # Create job context with task_id = 0
+        context_zero = self.job_context.copy()
+        context_zero['task_id'] = 0
+
+        message = handler._build_message('RUNNING', context_zero, config)
+
+        embed = message['embeds'][0]
+        # Title should NOT include .0
+        assert '(123:' in embed['title']
+        assert '(123.0:' not in embed['title']
+
+        # Fields still include task ID even when it's 0
+        fields = embed['fields']
+        assert len(fields) == 5  # Always includes task ID
+        task_id_field = next(f for f in fields if f['name'] == 'Task ID')
+        assert task_id_field['value'] == '0'
 
     def test_status_emoji_and_colors(self):
         """Test that status emojis and colors are correctly mapped."""
@@ -107,8 +179,10 @@ class TestNotificationHandlers:
             # Test Slack
             slack_msg = slack_handler._build_message(status, self.job_context,
                                                      config)
-            assert expected_emoji in slack_msg['attachments'][0]['blocks'][0][
-                'text']['text']
+            # Check emoji in fields
+            fields = slack_msg['attachments'][0]['blocks'][1]['fields']
+            status_field = next(f for f in fields if 'Status:' in f['text'])
+            assert expected_emoji in status_field['text']
             assert slack_msg['attachments'][0]['color'] == expected_color
 
             # Test Discord

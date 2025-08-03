@@ -591,14 +591,23 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         # otherwise fall back to bash script for backward compatibility
         if isinstance(event_callback, list):
             # Only send notifications for meaningful statuses
-            # Note: We use string comparison here because status is passed as string
-            # from the state transition functions in managed_job_state
+            # Note: Use string comparison as status is passed as string
+            # from state transition functions in managed_job_state
             notification_statuses = {
                 # Active statuses
-                'STARTING', 'STARTED', 'RUNNING', 'RECOVERING', 'RECOVERED',
+                'STARTING',
+                'STARTED',
+                'RUNNING',
+                'RECOVERING',
+                'RECOVERED',
                 # Terminal statuses from ManagedJobStatus.terminal_statuses()
-                'SUCCEEDED', 'FAILED', 'FAILED_SETUP', 'FAILED_PRECHECKS',
-                'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER', 'CANCELLED'
+                'SUCCEEDED',
+                'FAILED',
+                'FAILED_SETUP',
+                'FAILED_PRECHECKS',
+                'FAILED_NO_RESOURCE',
+                'FAILED_CONTROLLER',
+                'CANCELLED'
             }
             if status in notification_statuses:
                 try:
