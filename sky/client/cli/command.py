@@ -3502,7 +3502,14 @@ def show_gpus(
                               (cloud_name is None or cloud_is_ssh))
 
     def _list_to_str(lst):
-        return ', '.join([str(e) for e in lst])
+
+        def format_number(e):
+            # If it's a float that's a whole number, display as int
+            if isinstance(e, float) and e.is_integer():
+                return str(int(e))
+            return str(e)
+
+        return ', '.join([format_number(e) for e in lst])
 
     # TODO(zhwu,romilb): We should move most of these kubernetes related
     # queries into the backend, especially behind the server.
