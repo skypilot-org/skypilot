@@ -403,7 +403,6 @@ def _get_service_from_row(row) -> Dict[str, Any]:
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
      _, active_versions, load_balancing_policy, tls_encrypted, pool,
      controller_pid) = row[:17]
-
     record = {
         'name': name,
         'controller_job_id': controller_job_id,

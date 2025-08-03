@@ -108,29 +108,15 @@ async def download_logs(
     )
 
 
-@router.post('/pool_up')
-async def pool_up(request: fastapi.Request,
-                  jobs_pool_up_body: payloads.JobsPoolUpBody) -> None:
+@router.post('/pool_apply')
+async def pool_apply(request: fastapi.Request,
+                     jobs_pool_apply_body: payloads.JobsPoolApplyBody) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='jobs.pool_up',
-        request_body=jobs_pool_up_body,
-        func=core.pool_up,
+        request_name='jobs.pool_apply',
+        request_body=jobs_pool_apply_body,
+        func=core.pool_apply,
         schedule_type=api_requests.ScheduleType.LONG,
-        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
-    )
-
-
-@router.post('/pool_update')
-async def pool_update(
-        request: fastapi.Request,
-        jobs_pool_update_body: payloads.JobsPoolUpdateBody) -> None:
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='jobs.pool_update',
-        request_body=jobs_pool_update_body,
-        func=core.pool_update,
-        schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 

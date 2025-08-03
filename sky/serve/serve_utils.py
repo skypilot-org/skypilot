@@ -251,6 +251,13 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+def get_service_filelock_path(pool: str) -> str:
+    path = (pathlib.Path(constants.SKYSERVE_METADATA_DIR) / pool /
+            'pool.lock').expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
 @annotations.lru_cache(scope='request', maxsize=1)
 def is_consolidation_mode() -> bool:
     consolidation_mode = skypilot_config.get_nested(
@@ -744,29 +751,43 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
     if not service_status['pool']:
         logger.error(f'Service {service_name!r} is not a cluster pool.')
         return None
+    with filelock.FileLock(get_service_filelock_path(service_name)):
 
-    logger.debug(f'Get next cluster name for pool {service_name!r}')
-    ready_replicas = [
-        info for info in serve_state.get_replica_infos(service_name)
-        if info.status == serve_state.ReplicaStatus.READY
-    ]
-    idle_replicas: List['replica_managers.ReplicaInfo'] = []
-    for replica_info in ready_replicas:
-        jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
-            service_name, replica_info.cluster_name)
-        if not jobs_on_replica:
-            idle_replicas.append(replica_info)
-    if not idle_replicas:
-        logger.info(f'No idle replicas found for pool {service_name!r}')
-        return None
+        logger.debug(f'Get next cluster name for pool {service_name!r}')
+        ready_replicas = [
+            info for info in serve_state.get_replica_infos(service_name)
+            if info.status == serve_state.ReplicaStatus.READY
+        ]
+        idle_replicas: List['replica_managers.ReplicaInfo'] = []
+        for replica_info in ready_replicas:
+            jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
+                service_name, replica_info.cluster_name)
+            # TODO(tian): Make it resources aware. Currently we allow and only
+            # allow one job per replica. In the following PR, we should:
+            #  i) When the replica is launched with `any_of` resources (
+            #     replicas can have different resources), we should check if
+            #     the resources that jobs require are available on the replica.
+            #     e.g., if a job requires A100:1 on a {L4:1, A100:1} pool, it
+            #     should only goes to replica with A100.
+            # ii) When a job only requires a subset of the resources on the
+            #     replica, each replica should be able to handle multiple jobs
+            #     at the same time. e.g., if a job requires A100:1 on a A100:8
+            #     pool, it should be able to run 4 jobs at the same time.
+            if not jobs_on_replica:
+                idle_replicas.append(replica_info)
+        if not idle_replicas:
+            logger.info(f'No idle replicas found for pool {service_name!r}')
+            return None
 
-    # Select the first idle replica.
-    # TODO(tian): "Load balancing" policy.
-    replica_info = idle_replicas[0]
-    logger.info(f'Selected replica {replica_info.replica_id} with cluster '
-                f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
-                f'{service_name!r}')
-    return replica_info.cluster_name
+        # Select the first idle replica.
+        # TODO(tian): "Load balancing" policy.
+        replica_info = idle_replicas[0]
+        logger.info(f'Selected replica {replica_info.replica_id} with cluster '
+                    f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
+                    f'{service_name!r}')
+        managed_job_state.set_current_cluster_name(job_id,
+                                                   replica_info.cluster_name)
+        return replica_info.cluster_name
 
 
 def _terminate_failed_services(
@@ -906,35 +927,35 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     setup_completed = False
     
     while True:
-        record = serve_state.get_service_from_name(service_name)
-        
-        # First, wait for controller to be set up (PID saved)
-        if not setup_completed:
-            if record is not None and record.get('controller_pid') is not None:
+        # TODO(tian): PID-based tracking.
+        if not is_consolidation_mode():
+            job_status = job_lib.get_status(job_id)
+            if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+                # Wait for the controller process to finish setting up. It
+                # can be slow if a lot cloud dependencies are being installed.
+                if (time.time() - start_time >
+                        constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            f'Failed to start the controller process for '
+                            f'the service {service_name!r} within '
+                            f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
+                            f' seconds.')
+                # No need to check the service status as the controller process
+                # is still setting up.
+                time.sleep(1)
+                continue
+
+            if not setup_completed:
                 setup_completed = True
+                # Reset the start time to wait for the service to be registered.
                 start_time = time.time()
-            elif (time.time() - start_time > 
-                  constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Failed to start the controller process for '
-                        f'the service {service_name!r} within '
-                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS}'
-                        f' seconds.')
-        
-        # After setup is complete, wait for service registration
-        if setup_completed and record is not None:
-            # Check for name conflicts
-            # We need to verify this is the service we just launched, not a pre-existing one
-            # Both modes use unique job_id to detect conflicts:
-            # - Consolidation mode: negative job_ids (-1, -2, -3...)
-            # - Non-consolidation mode: positive job_ids (Ray job IDs)
-            
-            # If we reach here, a service with this name exists in the database
-            # This could be either:
-            # 1. The service we just launched (normal case)
-            # 2. A pre-existing service with the same name (name conflict)
-            if job_id != record['controller_job_id']:
+
+        record = serve_state.get_service_from_name(service_name)
+        if record is not None:
+            # TODO(tian): PID-based tracking.
+            if (not is_consolidation_mode() and
+                    job_id != record['controller_job_id']):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'The service {service_name!r} is already running. '

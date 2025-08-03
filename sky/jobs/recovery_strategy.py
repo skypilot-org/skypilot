@@ -5,13 +5,10 @@ In the YAML file, the user can specify the strategy to use for managed jobs.
 resources:
     job_recovery: EAGER_NEXT_REGION
 """
-import pathlib
 import time
 import traceback
 import typing
 from typing import Optional
-
-import filelock
 
 import sky
 from sky import backends
@@ -23,7 +20,6 @@ from sky.backends import backend_utils
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
-from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -46,16 +42,6 @@ MAX_JOB_CHECKING_RETRY = 10
 # managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
 # cluster before its status can be updated by the job controller.
 _AUTODOWN_MINUTES = 5
-
-
-def _get_pool_filelock_path(pool: Optional[str]) -> str:
-    path = pathlib.Path(serve_constants.SKYSERVE_METADATA_DIR)
-    if pool is not None:
-        path = path / pool
-    path = path / 'pm.lock'
-    path = path.expanduser().absolute()
-    path.parents[0].mkdir(parents=True, exist_ok=True)
-    return str(path)
 
 
 class StrategyExecutor:
@@ -347,16 +333,12 @@ class StrategyExecutor:
                                 down=True,
                                 _is_launched_by_jobs_controller=True)
                         else:
-                            with filelock.FileLock(
-                                    _get_pool_filelock_path(self.pool)):
-                                self.cluster_name = (
-                                    serve_utils.get_next_cluster_name(
-                                        self.pool, self.job_id))
-                                if self.cluster_name is None:
-                                    raise exceptions.NoClusterLaunchedError(
-                                        'No cluster name found in the pool.')
-                                state.set_current_cluster_name(
-                                    self.job_id, self.cluster_name)
+                            self.cluster_name = (
+                                serve_utils.get_next_cluster_name(
+                                    self.pool, self.job_id))
+                            if self.cluster_name is None:
+                                raise exceptions.NoClusterLaunchedError(
+                                    'No cluster name found in the pool.')
                             job_id_on_pool_cluster, _ = execution.exec(
                                 self.dag, cluster_name=self.cluster_name)
                             assert job_id_on_pool_cluster is not None, (

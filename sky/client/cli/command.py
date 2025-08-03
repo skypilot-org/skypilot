@@ -62,7 +62,9 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server import versions
 from sky.server.requests import requests
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -1011,11 +1013,11 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
-          'are found in the job queue. '
+          'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
+@flags.wait_for_option('idle-minutes-to-autostop')
 @click.option(
     '--down',
     default=False,
@@ -1101,6 +1103,7 @@ def launch(
     network_tier: Optional[str],
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
@@ -1195,6 +1198,8 @@ def launch(
         cluster_name=cluster,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
         down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
@@ -1827,6 +1832,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version is None or remote_api_version < 12:
+        show_pools = False
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -2545,6 +2553,7 @@ def stop(
               required=False,
               help=('Set the idle minutes before autostopping the cluster. '
                     'See the doc above for detailed semantics.'))
+@flags.wait_for_option('idle-minutes')
 @click.option(
     '--cancel',
     default=False,
@@ -2567,6 +2576,7 @@ def autostop(
     all: bool,  # pylint: disable=redefined-builtin
     all_users: bool,
     idle_minutes: Optional[int],
+    wait_for: Optional[str],
     cancel: bool,  # pylint: disable=redefined-outer-name
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
@@ -2576,8 +2586,7 @@ def autostop(
     """Schedule an autostop or autodown for cluster(s).
 
     Autostop/autodown will automatically stop or teardown a cluster when it
-    becomes idle for a specified duration.  Idleness means there are no
-    in-progress (pending/running) jobs in a cluster's job queue.
+    becomes idle for a specified duration.
 
     CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
@@ -2589,6 +2598,11 @@ def autostop(
     - The cluster has restarted.
 
     - An autostop idle time is set.
+
+    - An SSH session is active (To disable this, set ``--wait-for jobs``).
+
+    To disable the idleness timer completely and set a hard time limit, set
+    ``--wait-for none``.
 
     Example 1: say a cluster with autostop set to 2 hours has been idle for 1
     hour, then autostop is reset to 30 minutes. The cluster will not be
@@ -2610,6 +2624,9 @@ def autostop(
         # Cancel autostop for a specific cluster.
         sky autostop cluster_name --cancel
         \b
+        # Autostop this cluster after 60 minutes, regardless of activity.
+        sky autostop cluster_name -i 60 --wait-for none
+        \b
         # Autodown this cluster after 60 minutes of idleness.
         sky autostop cluster_name -i 60 --down
     """
@@ -2621,13 +2638,16 @@ def autostop(
         idle_minutes = -1
     elif idle_minutes is None:
         idle_minutes = 5
-    _down_or_stop_clusters(clusters,
-                           apply_to_all=all,
-                           all_users=all_users,
-                           down=down,
-                           no_confirm=yes,
-                           idle_minutes_to_autostop=idle_minutes,
-                           async_call=async_call)
+    _down_or_stop_clusters(
+        clusters,
+        apply_to_all=all,
+        all_users=all_users,
+        down=down,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes,
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
+        async_call=async_call)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2646,11 +2666,11 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
-          'are found in the job queue. '
+          'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
+@flags.wait_for_option('idle-minutes-to-autostop')
 @click.option(
     '--down',
     default=False,
@@ -2689,6 +2709,7 @@ def start(
     all: bool,
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     force: bool,
@@ -2848,6 +2869,8 @@ def start(
     request_ids = subprocess_utils.run_in_parallel(
         lambda name: sdk.start(name,
                                idle_minutes_to_autostop,
+                               autostop_lib.AutostopWaitFor.from_str(wait_for)
+                               if wait_for is not None else None,
                                retry_until_up,
                                down=down,
                                force=force), to_start)
@@ -3077,6 +3100,7 @@ def _down_or_stop_clusters(
         no_confirm: bool = True,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
         async_call: bool = False) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
@@ -3094,6 +3118,7 @@ def _down_or_stop_clusters(
         purge: If True, forcefully remove the clusters from the cluster table.
         idle_minutes_to_autostop: The number of minutes to wait before
             automatically stopping the cluster.
+        wait_for: Determines the condition for resetting the idleness timer.
         async_call: If True, send the request asynchronously.
     """
     if down:
@@ -3237,7 +3262,8 @@ def _down_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                request_id = sdk.autostop(name, idle_minutes_to_autostop, down)
+                request_id = sdk.autostop(name, idle_minutes_to_autostop,
+                                          wait_for, down)
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,
@@ -3535,13 +3561,6 @@ def show_gpus(
         num_filtered_contexts = 0
 
         if realtime_gpu_availability_lists:
-            if len(realtime_gpu_availability_lists[0]) != 2:
-                # TODO(kyuds): for backwards compatibility, as we add new
-                # context to the API server response in #5362. Remove this after
-                # 0.10.0.
-                realtime_gpu_availability_lists = [
-                    (context, realtime_gpu_availability_lists)
-                ]
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 if not _filter_ctx(ctx):
                     continue
@@ -4442,7 +4461,7 @@ def jobs_launch(
             click.secho(
                 f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
                 ' will be ignored in pool. To update a pool, please '
-                f'use `sky pool update {pool} pool.yaml`. '
+                f'use `sky pool apply {pool} pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
 
     # Optimize info is only show if _need_confirmation.
@@ -4744,7 +4763,10 @@ def pool():
     pass
 
 
-@pool.command('up', cls=_DocumentedCodeCommand)
+# TODO(MaoZiming): Update Doc.
+# TODO(MaoZiming): Expose mix replica traffic option to user.
+# Currently, we do not mix traffic from old and new replicas.
+@pool.command('apply', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('pool_yaml',
                 required=True,
@@ -4757,12 +4779,21 @@ def pool():
               type=str,
               help='A pool name. Unique for each pool. If not provided, '
               'a unique name is autogenerated.')
+@click.option('--mode',
+              default=serve_lib.DEFAULT_UPDATE_MODE.value,
+              type=click.Choice([m.value for m in serve_lib.UpdateMode],
+                                case_sensitive=False),
+              required=False,
+              help=('Update mode. If "rolling", cluster pool will be updated '
+                    'with rolling update. If "blue_green", cluster pool will '
+                    'be updated with blue-green update. This option is only '
+                    'valid when the pool is already running.'))
 @_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
                     flags.COMMON_OPTIONS)
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
-def jobs_pool_up(
+def jobs_pool_apply(
     pool_yaml: Tuple[str, ...],
     pool_name: Optional[str],
     workdir: Optional[str],
@@ -4784,10 +4815,14 @@ def jobs_pool_up(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    mode: str,
     yes: bool,
     async_call: bool,
 ):
-    """Launch a cluster pool for managed jobs submission.
+    """Apply a config to a cluster pool for managed jobs submission.
+
+    If the pool is already running, the config will be applied to the pool.
+    Otherwise, a new pool will be created.
 
     POOL_YAML must point to a valid YAML file.
     """
@@ -4827,100 +4862,17 @@ def jobs_pool_up(
     click.echo(task.service)
     serve_lib.validate_service_task(task, pool=True)
 
-    if task.run is not None:
-        click.secho('The `run` section will be ignored for pool workers.',
-                    fg='yellow')
-
     click.secho(
         'Each pool worker will use the following resources (estimated):',
         fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
 
-    request_id = managed_jobs.pool_up(task,
-                                      pool_name,
-                                      _need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_up')
-
-
-# TODO(MaoZiming): Update Doc.
-# TODO(MaoZiming): Expose mix replica traffic option to user.
-# Currently, we do not mix traffic from old and new replicas.
-@pool.command('update', cls=_DocumentedCodeCommand)
-@flags.config_option(expose_value=False)
-@click.argument('pool_name', required=True, type=str)
-@click.argument('pool_yaml',
-                required=True,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_file_name))
-@_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
-                    flags.COMMON_OPTIONS)
-@click.option('--mode',
-              default=serve_lib.DEFAULT_UPDATE_MODE.value,
-              type=click.Choice([m.value for m in serve_lib.UpdateMode],
-                                case_sensitive=False),
-              required=False,
-              help=('Update mode. If "rolling", SkyServe will update the '
-                    'service with rolling update. If "blue_green", SkyServe '
-                    'will update the service with blue-green update. '))
-@flags.yes_option()
-@timeline.event
-@usage_lib.entrypoint
-def jobs_pool_update(
-        pool_name: str, pool_yaml: Tuple[str, ...], workdir: Optional[str],
-        infra: Optional[str], cloud: Optional[str], region: Optional[str],
-        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
-        image_id: Optional[str], env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
-        gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
-        cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
-        yes: bool, async_call: bool):
-    """Update a cluster pool."""
-    cloud, region, zone = _handle_infra_cloud_region_zone_options(
-        infra, cloud, region, zone)
-    task = _generate_task_with_service(
-        service_name=pool_name,
-        service_yaml_args=pool_yaml,
-        workdir=workdir,
-        cloud=cloud,
-        region=region,
-        zone=zone,
-        gpus=gpus,
-        cpus=cpus,
-        memory=memory,
-        instance_type=instance_type,
-        num_nodes=num_nodes,
-        use_spot=use_spot,
-        image_id=image_id,
-        env_file=env_file,
-        env=env,
-        secret=secret,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        network_tier=network_tier,
-        ports=ports,
-        not_supported_cmd='sky jobs pool update',
-        pool=True,
-    )
-    assert task.service is not None
-    if not task.service.pool:
-        raise click.UsageError('The YAML file needs a `pool` section.')
-    click.secho('Pool spec:', fg='cyan')
-    click.echo(task.service)
-    serve_lib.validate_service_task(task, pool=True)
-
-    click.secho('New pool worker will use the following resources (estimated):',
-                fg='cyan')
-    with sky.Dag() as dag:
-        dag.add(task)
-
-    request_id = managed_jobs.pool_update(task,
-                                          pool_name,
-                                          mode=serve_lib.UpdateMode(mode),
-                                          _need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_update')
+    request_id = managed_jobs.pool_apply(task,
+                                         pool_name,
+                                         mode=serve_lib.UpdateMode(mode),
+                                         _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.jobs.pool_apply')
 
 
 @pool.command('status', cls=_DocumentedCodeCommand)

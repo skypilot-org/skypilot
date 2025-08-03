@@ -67,20 +67,6 @@ class FluentbitAgent(LoggingAgent):
         }
         return common_utils.dump_yaml_str(cfg_dict)
 
-    def add_fallback_outputs(self, cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Add fallback outputs to the Fluent Bit configuration.
-
-        This method can be overridden by subclasses to add fallback outputs
-        in case the primary output fails.
-
-        Args:
-            cfg_dict: The Fluent Bit configuration dictionary.
-
-        Returns:
-            The updated configuration dictionary.
-        """
-        return cfg_dict
-
     @abc.abstractmethod
     def fluentbit_output_config(
             self, cluster_name: resources_utils.ClusterName) -> Dict[str, Any]:

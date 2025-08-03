@@ -86,18 +86,6 @@ class TestCloudwatchLoggingAgent(unittest.TestCase):
                          f'my-prefix-{self.cluster_name.name_on_cloud}-')
         self.assertEqual(output_config['auto_create_group'], 'false')
 
-    def test_add_fallback_outputs(self):
-        """Test add_fallback_outputs method."""
-        agent = CloudwatchLoggingAgent({})
-        cfg_dict = {'pipeline': {'outputs': [{'name': 'cloudwatch_logs'}],}}
-        updated_cfg = agent.add_fallback_outputs(cfg_dict)
-        self.assertEqual(len(updated_cfg['pipeline']['outputs']), 2)
-        self.assertEqual(updated_cfg['pipeline']['outputs'][0]['name'],
-                         'cloudwatch_logs')
-        self.assertEqual(updated_cfg['pipeline']['outputs'][1]['name'], 'file')
-        self.assertEqual(updated_cfg['pipeline']['outputs'][1]['path'],
-                         '/tmp/skypilot_logs_fallback.log')
-
     @mock.patch('sky.logs.agent.FluentbitAgent.get_setup_command')
     def test_get_setup_command(self, mock_super_get_setup_command):
         """Test get_setup_command method."""
@@ -132,7 +120,6 @@ class TestCloudwatchLoggingAgent(unittest.TestCase):
         self.assertIn('inputs:', config_str)
         self.assertIn('outputs:', config_str)
         self.assertIn('name: cloudwatch', config_str)
-        self.assertIn('name: file', config_str)
 
         # parse yaml and check if the config is valid
         config_dict = yaml.safe_load(config_str)

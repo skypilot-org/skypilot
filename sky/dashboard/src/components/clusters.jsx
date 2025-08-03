@@ -173,7 +173,18 @@ export function Clusters() {
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [showHistory, setShowHistory] = useState(false); // 'active' or 'history'
+
+  // Initialize showHistory from URL parameter immediately
+  const getInitialShowHistory = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const historyParam = router.query.history;
+      return historyParam === 'true';
+    }
+    return false;
+  };
+
+  const [showHistory, setShowHistory] = useState(getInitialShowHistory);
+  const [shouldAnimate, setShouldAnimate] = useState(true); // Track if toggle should animate
   const isMobile = useMobile();
 
   const [filters, setFilters] = useState([]);
@@ -185,12 +196,24 @@ export function Clusters() {
     infra: [],
   }); /// Option values for properties
 
-  // Handle URL query parameters for workspace and user filtering
+  // Handle URL query parameters for workspace and user filtering and show history
   useEffect(() => {
     if (router.isReady) {
       updateFiltersByURLParams();
+
+      // Sync showHistory state with URL if it has changed
+      const historyParam = router.query.history;
+      const expectedState = historyParam === 'true';
+
+      if (showHistory !== expectedState) {
+        setShouldAnimate(false); // Disable animation for programmatic changes
+        setShowHistory(expectedState);
+        // Re-enable animation after a short delay
+        setTimeout(() => setShouldAnimate(true), 50);
+      }
     }
-  }, [router.isReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.history]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -298,6 +321,22 @@ export function Clusters() {
     );
   };
 
+  // Helper function to update show history in URL
+  const updateShowHistoryURL = (showHistoryValue) => {
+    const query = { ...router.query };
+    query.history = showHistoryValue.toString();
+
+    // Use replace to avoid adding to browser history for show history changes
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
   const updateFiltersByURLParams = () => {
     const query = { ...router.query };
 
@@ -377,16 +416,20 @@ export function Clusters() {
             <input
               type="checkbox"
               checked={showHistory}
-              onChange={(e) => setShowHistory(e.target.checked)}
+              onChange={(e) => {
+                const newValue = e.target.checked;
+                setShowHistory(newValue);
+                updateShowHistoryURL(newValue);
+              }}
               className="sr-only"
             />
             <div
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
                 showHistory ? 'bg-sky-600' : 'bg-gray-300'
               }`}
             >
               <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
                   showHistory ? 'translate-x-5' : 'translate-x-1'
                 }`}
               />
@@ -551,7 +594,7 @@ export function ClusterTable({
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [setLoading, showHistory]);
+  }, [setLoading, showHistory, setOptionValues]);
 
   // Utility: checks a condition based on operator
   const evaluateCondition = (item, filter) => {

@@ -33,6 +33,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
@@ -312,6 +313,7 @@ class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -321,6 +323,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 
@@ -693,6 +696,24 @@ class JobsPoolUpBody(RequestBody):
 
 class JobsPoolUpdateBody(RequestBody):
     """The request body for the jobs pool update endpoint."""
+    task: str
+    pool_name: str
+    mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a pool.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class JobsPoolApplyBody(RequestBody):
+    """The request body for the jobs pool apply endpoint."""
     task: str
     pool_name: str
     mode: serve.UpdateMode

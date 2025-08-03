@@ -327,14 +327,17 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_service_name()
+    auth_token = '123456'
 
     def generate_llm_test_command(prompt: str, expected_output: str) -> str:
         prompt = shlex.quote(prompt)
         expected_output = shlex.quote(expected_output)
         return (
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'python tests/skyserve/llm/get_response.py --endpoint $endpoint '
-            f'--prompt {prompt} | grep {expected_output}')
+            's=$(python tests/skyserve/llm/get_response.py --endpoint $endpoint '
+            f'--prompt {prompt} --auth_token {auth_token}); '
+            'echo "$s"; '
+            f'echo "$s" | grep {expected_output}')
 
     with open('tests/skyserve/llm/prompt_output.json', 'r',
               encoding='utf-8') as f:
@@ -343,7 +346,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     test = smoke_tests_utils.Test(
         'test-skyserve-llm',
         [
-            f'sky serve up -n {name} --infra {generic_cloud} --gpus {accelerator} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --infra {generic_cloud} --gpus {accelerator} -y --secret AUTH_TOKEN={auth_token} tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
@@ -1021,14 +1024,13 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.resource_heavy
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support opening ports for skypilot yet
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
 
+    keyfile = f'~/test-skyserve-key-{name}.pem'
     with tempfile.TemporaryDirectory() as tempdir:
-        keyfile = os.path.join(tempdir, 'key.pem')
         certfile = os.path.join(tempdir, 'cert.pem')
         subprocess_utils.run_no_outputs(
             f'openssl req -x509 -newkey rsa:2048 -days 36500 -nodes '
@@ -1038,7 +1040,7 @@ def test_skyserve_https(generic_cloud: str):
             'test-skyserve-https',
             [
                 f'sky serve up -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} -y tests/skyserve/https/service.yaml '
-                f'--env TLS_KEYFILE_ENV_VAR={keyfile} --env TLS_CERTFILE_ENV_VAR={certfile}',
+                f'--env TLS_KEYFILE_ENV_VAR={keyfile} --secret TLS_CERTFILE_ENV_VAR={certfile}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'output=$(curl $endpoint -k); echo $output; '
@@ -1053,7 +1055,7 @@ def test_skyserve_https(generic_cloud: str):
                 'output=$(curl $http_endpoint 2>&1); echo $output; '
                 'echo $output | grep "Empty reply from server"',
             ],
-            _TEARDOWN_SERVICE.format(name=name),
+            _TEARDOWN_SERVICE.format(name=name) + f'; rm -f {keyfile}',
             timeout=20 * 60,
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
