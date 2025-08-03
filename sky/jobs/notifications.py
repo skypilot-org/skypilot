@@ -181,7 +181,7 @@ class SlackNotificationHandler(NotificationHandler):
         """Build the fields for Slack message."""
         fields = [{
             'type': 'mrkdwn',
-            'text': f'*Status:* {emoji} `{status}`'
+            'text': f'*Status:* `{status}`'
         }, {
             'type': 'mrkdwn',
             'text': f'*Job ID:* {job_context["job_id"]}'
