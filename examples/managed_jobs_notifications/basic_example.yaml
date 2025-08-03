@@ -1,7 +1,13 @@
 name: my-training-job
 
 envs:
-  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+  SLACK_WEBHOOK_URL: null # Replace with your actual Slack webhook URL
+
+setup: |
+  echo "Setting up environment..."
+  # Simulate setup work
+  sleep 2
+  echo "Environment setup completed."
 
 run: |
   echo "Training model..."
