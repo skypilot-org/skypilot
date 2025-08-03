@@ -616,7 +616,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error(f'Failed to send notifications: {e}')
         else:
-            # Backward compatibility: execute as bash script
+            # Execute as bash script
             event_callback = event_callback.strip()
             log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'managed_job_event',

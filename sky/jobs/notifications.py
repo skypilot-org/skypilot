@@ -177,7 +177,7 @@ class SlackNotificationHandler(NotificationHandler):
     """Slack notification handler using webhooks."""
 
     def _build_slack_fields(self, status: str, job_context: Dict[str, Any],
-                            emoji: str, task_id: int) -> List[Dict[str, str]]:
+                            task_id: int) -> List[Dict[str, str]]:
         """Build the fields for Slack message."""
         fields = [{
             'type': 'mrkdwn',
@@ -232,7 +232,7 @@ class SlackNotificationHandler(NotificationHandler):
                     }, {
                         'type': 'section',
                         'fields': self._build_slack_fields(
-                            status, job_context, emoji, task_id)
+                            status, job_context, task_id)
                     }]
                 }]
             }
@@ -270,27 +270,33 @@ class DiscordNotificationHandler(NotificationHandler):
             # Use default rich embed format
             title = _build_title(job_context, status, emoji)
 
-            fields = [{
-                'name': 'Status',
-                'value': f'`{status}`',
-                'inline': True
-            }, {
-                'name': 'Job ID',
-                'value': str(job_context['job_id']),
-                'inline': True
-            }, {
-                'name': 'Task ID',
-                'value': str(task_id),
-                'inline': True
-            }, {
-                'name': 'Task',
-                'value': job_context['task_name'],
-                'inline': True
-            }, {
-                'name': 'Cluster',
-                'value': job_context['cluster_name'],
-                'inline': True
-            }]
+            fields = [
+                {
+                    'name': 'Status',
+                    'value': f'`{status}`',  # No emoji in status field
+                    'inline': True
+                },
+                {
+                    'name': 'Job ID',
+                    'value': str(job_context['job_id']),
+                    'inline': True
+                },
+                {
+                    'name': 'Task ID',
+                    'value': str(task_id),
+                    'inline': True
+                },
+                {
+                    'name': 'Task',
+                    'value': job_context['task_name'],
+                    'inline': True
+                },
+                {
+                    'name': 'Cluster',
+                    'value': job_context['cluster_name'],
+                    'inline': True
+                }
+            ]
 
             return {
                 'username': username,
