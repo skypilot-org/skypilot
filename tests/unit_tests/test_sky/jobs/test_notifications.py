@@ -507,14 +507,14 @@ class TestEventCallbackIntegration:
         }
 
     @mock.patch('sky.jobs.notifications.send_notifications')
-    @mock.patch('sky.jobs.utils.managed_job_state')
-    def test_event_callback_with_list_config(self, mock_job_state,
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_from_job_id')
+    def test_event_callback_with_list_config(self, mock_get_pool,
                                              mock_send_notifications):
         """Test event callback function with list configuration."""
         from sky.jobs.utils import event_callback_func
 
         # Mock job state functions
-        mock_job_state.get_pool_from_job_id.return_value = None
+        mock_get_pool.return_value = None
 
         # Create callback function
         callback = event_callback_func(789, 3, self.task)
@@ -534,14 +534,14 @@ class TestEventCallbackIntegration:
         assert job_context['task_id'] == 3
 
     @mock.patch('sky.jobs.notifications.send_notifications')
-    @mock.patch('sky.jobs.utils.managed_job_state')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_from_job_id')
     def test_event_callback_skips_non_notification_statuses(
-            self, mock_job_state, mock_send_notifications):
+            self, mock_get_pool, mock_send_notifications):
         """Test that event callback skips non-notification statuses."""
         from sky.jobs.utils import event_callback_func
 
         # Mock job state functions
-        mock_job_state.get_pool_from_job_id.return_value = None
+        mock_get_pool.return_value = None
 
         # Create callback function
         callback = event_callback_func(789, 3, self.task)
@@ -559,8 +559,8 @@ class TestEventCallbackIntegration:
         mock_send_notifications.assert_called_once()
 
     @mock.patch('sky.skylet.log_lib.run_bash_command_with_log')
-    @mock.patch('sky.jobs.utils.managed_job_state')
-    def test_event_callback_with_bash_script(self, mock_job_state,
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_from_job_id')
+    def test_event_callback_with_bash_script(self, mock_get_pool,
                                              mock_run_bash):
         """Test event callback function with bash script (backward compatibility)."""
         from sky.jobs.utils import event_callback_func
@@ -571,7 +571,7 @@ class TestEventCallbackIntegration:
                          event_callback='echo "Job status: $JOB_STATUS"')
 
         # Mock job state functions
-        mock_job_state.get_pool_from_job_id.return_value = None
+        mock_get_pool.return_value = None
         mock_run_bash.return_value = 0
 
         # Create and execute callback
@@ -589,8 +589,7 @@ class TestEventCallbackIntegration:
         assert env_vars['JOB_ID'] == '789'
         assert env_vars['TASK_ID'] == '3'
 
-    @mock.patch('sky.jobs.utils.managed_job_state')
-    def test_event_callback_no_callback_configured(self, mock_job_state):
+    def test_event_callback_no_callback_configured(self):
         """Test event callback function with no callback configured."""
         from sky.jobs.utils import event_callback_func
 
@@ -603,8 +602,7 @@ class TestEventCallbackIntegration:
         # Should not raise exception
         callback('SUCCEEDED')
 
-    @mock.patch('sky.jobs.utils.managed_job_state')
-    def test_event_callback_none_task(self, mock_job_state):
+    def test_event_callback_none_task(self):
         """Test event callback function with None task."""
         from sky.jobs.utils import event_callback_func
 

@@ -896,7 +896,7 @@ def set_failed(
         session.commit()
         updated = count > 0
     if callback_func and updated:
-        callback_func('FAILED')
+        callback_func(failure_type.value)
     logger.info(failure_reason)
 
 
