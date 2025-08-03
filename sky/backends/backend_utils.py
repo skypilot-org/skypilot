@@ -923,7 +923,10 @@ def write_cluster_config(
             cluster_config_overrides=cluster_config_overrides,
             cloud=cloud,
             context=region.name)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path, region.name)
+        kubernetes_utils.combine_metadata_fields(
+            tmp_yaml_path,
+            cluster_config_overrides=cluster_config_overrides,
+            context=region.name)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
