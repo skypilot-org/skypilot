@@ -62,7 +62,6 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
-from sky.server import versions
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
