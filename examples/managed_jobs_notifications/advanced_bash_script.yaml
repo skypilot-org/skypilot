@@ -3,8 +3,8 @@ name: multiple-notifications-example
 # Example using multiple built-in notifications
 
 envs:
-  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
-  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+  SLACK_WEBHOOK_URL: null # Replace with your actual Slack webhook URL
+  DISCORD_WEBHOOK_URL: null # Replace with your actual Discord webhook URL
 
 run: |
   echo "Starting job with multiple notifications..."

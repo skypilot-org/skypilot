@@ -590,14 +590,22 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         # Use new notification system if event_callback is list,
         # otherwise fall back to bash script for backward compatibility
         if isinstance(event_callback, list):
-            # Import here to avoid circular imports
-            from sky.jobs import notifications
-
-            try:
-                notifications.send_notifications(event_callback, status,
-                                                 job_context)
-            except Exception as e:
-                logger.error(f'Failed to send notifications: {e}')
+            # Only send notifications for meaningful statuses
+            # Note: We use string comparison here because status is passed as string
+            # from the state transition functions in managed_job_state
+            notification_statuses = {
+                # Active statuses
+                'STARTING', 'STARTED', 'RUNNING', 'RECOVERING', 'RECOVERED',
+                # Terminal statuses from ManagedJobStatus.terminal_statuses()
+                'SUCCEEDED', 'FAILED', 'FAILED_SETUP', 'FAILED_PRECHECKS',
+                'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER', 'CANCELLED'
+            }
+            if status in notification_statuses:
+                try:
+                    notifications.send_notifications(event_callback, status,
+                                                     job_context)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Failed to send notifications: {e}')
         else:
             # Backward compatibility: execute as bash script
             event_callback = event_callback.strip()

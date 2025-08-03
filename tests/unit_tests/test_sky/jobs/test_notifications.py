@@ -445,7 +445,7 @@ class TestEventCallbackIntegration:
         # Create callback function
         callback = event_callback_func(789, 3, self.task)
 
-        # Execute callback
+        # Execute callback with a valid notification status
         callback('SUCCEEDED')
 
         # Verify notifications were sent
@@ -458,6 +458,31 @@ class TestEventCallbackIntegration:
         assert status == 'SUCCEEDED'
         assert job_context['job_id'] == 789
         assert job_context['task_id'] == 3
+
+    @mock.patch('sky.jobs.notifications.send_notifications')
+    @mock.patch('sky.jobs.utils.managed_job_state')
+    def test_event_callback_skips_non_notification_statuses(
+            self, mock_job_state, mock_send_notifications):
+        """Test that event callback skips non-notification statuses."""
+        from sky.jobs.utils import event_callback_func
+
+        # Mock job state functions
+        mock_job_state.get_pool_from_job_id.return_value = None
+
+        # Create callback function
+        callback = event_callback_func(789, 3, self.task)
+
+        # Execute callback with statuses that should NOT trigger notifications
+        for status in ['PENDING', 'SUBMITTED', 'SETTING_UP', 'UNKNOWN']:
+            mock_send_notifications.reset_mock()
+            callback(status)
+            # Verify notifications were NOT sent
+            mock_send_notifications.assert_not_called()
+
+        # Execute callback with a status that SHOULD trigger notifications
+        callback('FAILED')
+        # Verify notifications WERE sent
+        mock_send_notifications.assert_called_once()
 
     @mock.patch('sky.skylet.log_lib.run_bash_command_with_log')
     @mock.patch('sky.jobs.utils.managed_job_state')

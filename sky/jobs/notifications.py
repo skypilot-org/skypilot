@@ -13,19 +13,31 @@ logger = sky_logging.init_logger(__name__)
 # Common status-based styling
 _STATUS_EMOJI = {
     'STARTING': '🚀',
+    'STARTED': '▶️',
     'RUNNING': '⚡',
     'SUCCEEDED': '✅',
     'FAILED': '❌',
+    'FAILED_SETUP': '❌',
+    'FAILED_PRECHECKS': '❌',
+    'FAILED_NO_RESOURCE': '❌',
+    'FAILED_CONTROLLER': '❌',
     'RECOVERING': '🔄',
+    'RECOVERED': '▶️',
     'CANCELLED': '⛔',
 }
 
 _STATUS_COLORS = {
     'STARTING': '#36a64f',
+    'STARTED': '#36a64f',
     'RUNNING': '#ffaa00',
     'SUCCEEDED': '#36a64f',
     'FAILED': '#ff0000',
+    'FAILED_SETUP': '#ff0000',
+    'FAILED_PRECHECKS': '#ff0000',
+    'FAILED_NO_RESOURCE': '#ff0000',
+    'FAILED_CONTROLLER': '#ff0000',
     'RECOVERING': '#ffaa00',
+    'RECOVERED': '#36a64f',
     'CANCELLED': '#808080',
 }
 
@@ -96,11 +108,11 @@ class NotificationHandler(abc.ABC):
         try:
             # Build curl command
             webhook_url_escaped = shlex.quote(webhook_url)
-            message_json = json.dumps(message).replace('"', '\\"')
+            message_json = shlex.quote(json.dumps(message))
 
             curl_cmd = (f'curl -X POST {webhook_url_escaped} '
                         f'-H "Content-type: application/json" '
-                        f'--data "{message_json}" --silent --fail')
+                        f'--data {message_json} --silent --fail --show-error')
 
             # Execute curl
             log_path = (f'/tmp/{self.__class__.__name__.lower()}_'
@@ -111,8 +123,9 @@ class NotificationHandler(abc.ABC):
                                                        env_vars={})
 
             if result != 0:
-                logger.error(f'{self.__class__.__name__} notification failed '
-                             f'with exit code: {result}')
+                logger.error(
+                    f'{self.__class__.__name__} notification failed '
+                    f'with exit code: {result}. Check log at: {log_path}')
                 return False
 
             logger.info(
