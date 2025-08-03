@@ -42,6 +42,41 @@ _STATUS_COLORS = {
 }
 
 
+def _format_status(status: str) -> str:
+    """Format status for display in notifications."""
+    # Special formatting for multi-word statuses
+    status_display = {
+        'STARTING': 'Starting',
+        'STARTED': 'Started',
+        'RUNNING': 'Running',
+        'SUCCEEDED': 'Succeeded',
+        'FAILED': 'Failed',
+        'FAILED_SETUP': 'Failed (Setup)',
+        'FAILED_PRECHECKS': 'Failed (Prechecks)',
+        'FAILED_NO_RESOURCE': 'Failed (No Resources)',
+        'FAILED_CONTROLLER': 'Failed (Controller)',
+        'RECOVERING': 'Recovering',
+        'RECOVERED': 'Recovered',
+        'CANCELLED': 'Cancelled',
+    }
+    return status_display.get(status, status.title())
+
+
+def _build_title(job_context: Dict[str, Any], status: str, emoji: str) -> str:
+    """Build notification title with job info and status."""
+    job_id = job_context['job_id']
+    task_id = job_context.get('task_id', 0)
+    task_name = job_context['task_name']
+
+    # Include task ID only when it's greater than 0
+    if task_id > 0:
+        job_info = f'{job_id}.{task_id}: {task_name}'
+    else:
+        job_info = f'{job_id}: {task_name}'
+
+    return f'{emoji} SkyPilot Job ({job_info}) - {_format_status(status)}'
+
+
 class NotificationHandler(abc.ABC):
     """Abstract base class for notification handlers."""
 
@@ -141,6 +176,28 @@ class NotificationHandler(abc.ABC):
 class SlackNotificationHandler(NotificationHandler):
     """Slack notification handler using webhooks."""
 
+    def _build_slack_fields(self, status: str, job_context: Dict[str, Any],
+                            emoji: str, task_id: int) -> List[Dict[str, str]]:
+        """Build the fields for Slack message."""
+        fields = [{
+            'type': 'mrkdwn',
+            'text': f'*Status:* {emoji} `{status}`'
+        }, {
+            'type': 'mrkdwn',
+            'text': f'*Job ID:* {job_context["job_id"]}'
+        }, {
+            'type': 'mrkdwn',
+            'text': f'*Task ID:* {task_id}'
+        }, {
+            'type': 'mrkdwn',
+            'text': f'*Task:* {job_context["task_name"]}'
+        }, {
+            'type': 'mrkdwn',
+            'text': f'*Cluster:* {job_context["cluster_name"]}'
+        }]
+
+        return fields
+
     def _build_message(self, status: str, job_context: Dict[str, Any],
                        config: Dict[str, Any]) -> Dict[str, Any]:
         """Build Slack-specific message payload."""
@@ -159,32 +216,23 @@ class SlackNotificationHandler(NotificationHandler):
             message = {'username': username, 'text': text}
         else:
             # Use default rich format
+            title_text = _build_title(job_context, status, emoji)
+            task_id = job_context.get('task_id', 0)
             message = {
                 'username': username,
                 'attachments': [{
                     'color': color,
+                    'fallback': title_text,  # Provides notification preview
                     'blocks': [{
                         'type': 'header',
                         'text': {
                             'type': 'plain_text',
-                            'text': (f'{emoji} SkyPilot Job: '
-                                     f'{job_context["task_name"]}')
+                            'text': title_text
                         }
                     }, {
                         'type': 'section',
-                        'fields': [{
-                            'type': 'mrkdwn',
-                            'text': f'*Status:* `{status}`'
-                        }, {
-                            'type': 'mrkdwn',
-                            'text': f'*Job ID:* {job_context["job_id"]}'
-                        }, {
-                            'type': 'mrkdwn',
-                            'text': f'*Task:* {job_context["task_name"]}'
-                        }, {
-                            'type': 'mrkdwn',
-                            'text': f'*Cluster:* {job_context["cluster_name"]}'
-                        }]
+                        'fields': self._build_slack_fields(
+                            status, job_context, emoji, task_id)
                     }]
                 }]
             }
@@ -208,6 +256,9 @@ class DiscordNotificationHandler(NotificationHandler):
         color_hex = _STATUS_COLORS.get(status, '#0099cc')
         color = int(color_hex.replace('#', ''), 16)
 
+        # Get task ID for pipelines
+        task_id = job_context.get('task_id', 0)
+
         # Check for custom message template
         custom_message = config.get('message')
         if custom_message:
@@ -217,28 +268,36 @@ class DiscordNotificationHandler(NotificationHandler):
             return {'username': username, 'content': text}
         else:
             # Use default rich embed format
+            title = _build_title(job_context, status, emoji)
+
+            fields = [{
+                'name': 'Status',
+                'value': f'`{status}`',
+                'inline': True
+            }, {
+                'name': 'Job ID',
+                'value': str(job_context['job_id']),
+                'inline': True
+            }, {
+                'name': 'Task ID',
+                'value': str(task_id),
+                'inline': True
+            }, {
+                'name': 'Task',
+                'value': job_context['task_name'],
+                'inline': True
+            }, {
+                'name': 'Cluster',
+                'value': job_context['cluster_name'],
+                'inline': True
+            }]
+
             return {
                 'username': username,
                 'embeds': [{
-                    'title': f'{emoji} SkyPilot Job Update',
+                    'title': title,
                     'color': color,
-                    'fields': [{
-                        'name': 'Status',
-                        'value': f'`{status}`',
-                        'inline': True
-                    }, {
-                        'name': 'Job ID',
-                        'value': str(job_context['job_id']),
-                        'inline': True
-                    }, {
-                        'name': 'Task',
-                        'value': job_context['task_name'],
-                        'inline': True
-                    }, {
-                        'name': 'Cluster',
-                        'value': job_context['cluster_name'],
-                        'inline': True
-                    }]
+                    'fields': fields
                 }]
             }
 
