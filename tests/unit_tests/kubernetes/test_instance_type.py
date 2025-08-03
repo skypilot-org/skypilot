@@ -89,24 +89,25 @@ def test_gpu_name_underscore_preservation():
         ("H100-80GB", "H100-80GB"),
         ("A100-40GB", "A100-40GB"),
     ]
-    
+
     for original_name, expected_name in test_cases:
         # Create instance type with accelerator name
         instance = KubernetesInstanceType.from_resources(
-            cpus=4, memory=16, accelerator_count=1, accelerator_type=original_name
-        )
-        
+            cpus=4,
+            memory=16,
+            accelerator_count=1,
+            accelerator_type=original_name)
+
         # Parse it back from the instance type string
-        parsed_instance = KubernetesInstanceType.from_instance_type(instance.name)
-        
+        parsed_instance = KubernetesInstanceType.from_instance_type(
+            instance.name)
+
         # Verify the accelerator name is preserved exactly
         assert parsed_instance.accelerator_type == expected_name, (
             f"Expected accelerator name '{expected_name}' but got "
-            f"'{parsed_instance.accelerator_type}' after round-trip parsing"
-        )
-        
+            f"'{parsed_instance.accelerator_type}' after round-trip parsing")
+
         # Verify the full instance type string contains the original name
         assert original_name in instance.name, (
             f"Instance type string '{instance.name}' should contain "
-            f"original accelerator name '{original_name}'"
-        )
+            f"original accelerator name '{original_name}'")
