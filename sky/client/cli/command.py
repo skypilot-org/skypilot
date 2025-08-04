@@ -62,7 +62,6 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
-from sky.server import versions
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -1103,7 +1102,7 @@ def launch(
     network_tier: Optional[str],
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
-    wait_for: str,
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
@@ -1198,7 +1197,8 @@ def launch(
         cluster_name=cluster,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
-        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for),
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
         down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
@@ -1831,9 +1831,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
-    remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is None or remote_api_version < 12:
-        show_pools = False
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -1885,7 +1882,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return serve_lib.status(service_names=None)
 
     def submit_pools() -> Optional[str]:
-        return managed_jobs.pool_status(pool_names=None)
+        try:
+            return managed_jobs.pool_status(pool_names=None)
+        except exceptions.APINotSupportedError as e:
+            logger.debug(f'Pools are not supported in the remote server: {e}')
+            return None
 
     def submit_workspace() -> Optional[str]:
         try:
@@ -2008,7 +2009,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
                 in_progress_hint(False).format(job_info=job_info))
 
-    if show_pools:
+    if show_pools and pool_status_request_id:
         num_pools = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
@@ -2575,7 +2576,7 @@ def autostop(
     all: bool,  # pylint: disable=redefined-builtin
     all_users: bool,
     idle_minutes: Optional[int],
-    wait_for: str,
+    wait_for: Optional[str],
     cancel: bool,  # pylint: disable=redefined-outer-name
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
@@ -2644,7 +2645,8 @@ def autostop(
         down=down,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes,
-        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for),
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
         async_call=async_call)
 
 
@@ -2707,7 +2709,7 @@ def start(
     all: bool,
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
-    wait_for: str,
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     force: bool,
@@ -2867,7 +2869,8 @@ def start(
     request_ids = subprocess_utils.run_in_parallel(
         lambda name: sdk.start(name,
                                idle_minutes_to_autostop,
-                               autostop_lib.AutostopWaitFor.from_str(wait_for),
+                               autostop_lib.AutostopWaitFor.from_str(wait_for)
+                               if wait_for is not None else None,
                                retry_until_up,
                                down=down,
                                force=force), to_start)
@@ -3257,7 +3260,7 @@ def _down_or_stop_clusters(
 
     def _down_or_stop(name: str):
         success_progress = False
-        if idle_minutes_to_autostop is not None and wait_for is not None:
+        if idle_minutes_to_autostop is not None:
             try:
                 request_id = sdk.autostop(name, idle_minutes_to_autostop,
                                           wait_for, down)

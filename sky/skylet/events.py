@@ -159,7 +159,7 @@ class AutostopEvent(SkyletEvent):
         else:
             autostop_lib.set_last_active_time_to_now()
             minutes_since_last_active = -1
-            logger.debug('Not idle. Reset idle minutes.'
+            logger.debug('Not idle. Reset idle minutes. '
                          f'AutoStop idle minutes: '
                          f'{autostop_config.autostop_idle_minutes}, '
                          f'Wait for: {autostop_config.wait_for.value}')

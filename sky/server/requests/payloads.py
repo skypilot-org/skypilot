@@ -313,8 +313,7 @@ class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
-    wait_for: autostop_lib.AutostopWaitFor = (
-        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR)
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -324,8 +323,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
-    wait_for: autostop_lib.AutostopWaitFor = (
-        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR)
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 

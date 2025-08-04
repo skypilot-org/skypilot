@@ -70,17 +70,18 @@ class AutostopConfig:
     # flags.
     idle_minutes: int = 0
     down: bool = False
-    wait_for: autostop_lib.AutostopWaitFor = (
-        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR)
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
             return False
-        return {
+        config: Dict[str, Any] = {
             'idle_minutes': self.idle_minutes,
             'down': self.down,
-            'wait_for': self.wait_for.value,
         }
+        if self.wait_for is not None:
+            config['wait_for'] = self.wait_for.value
+        return config
 
     @classmethod
     def from_yaml_config(
