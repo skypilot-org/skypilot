@@ -654,9 +654,9 @@ class Task:
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
             secrets=config.pop('secrets', None),
+            volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
-            _volume_mounts=config.pop('volume_mounts', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
