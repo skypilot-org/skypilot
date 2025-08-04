@@ -270,40 +270,47 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     return consolidation_mode
 
 
-def ha_recovery_for_consolidation_mode():
+def ha_recovery_for_consolidation_mode(pool: bool):
     """Recovery logic for HA mode."""
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
     runner = command_runner.LocalProcessCommandRunner()
-    with open(skylet_constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('serve_'),
+    noun = 'pool' if pool else 'serve'
+    capnoun = noun.capitalize()
+    prefix = f'{noun}_'
+    with open(skylet_constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(prefix),
               'w',
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        for svc in serve_state.get_services():
-            service_name = svc['name']
+        for service_name in serve_state.get_glob_service_names(None):
+            svc = _get_service_status(service_name,
+                                      pool=pool,
+                                      with_replica_info=False)
+            if svc is None:
+                continue
             controller_pid = svc['controller_pid']
             if controller_pid is not None:
                 try:
                     if _controller_process_alive(controller_pid, service_name):
                         f.write(f'Controller pid {controller_pid} for '
-                                f'service {service_name} is still running. '
+                                f'{noun} {service_name} is still running. '
                                 'Skipping recovery.\n')
                         continue
                 except Exception:  # pylint: disable=broad-except
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
                     f.write('Error checking controller pid '
-                            f'{controller_pid} for service {service_name}\n')
+                            f'{controller_pid} for {noun} {service_name}\n')
 
             script = serve_state.get_ha_recovery_script(service_name)
             if script is None:
-                f.write(f'Service {service_name}\'s recovery script does '
+                f.write(f'{capnoun} {service_name}\'s recovery script does '
                         'not exist. Skipping recovery.\n')
                 continue
             runner.run(script)
-            f.write(f'Service {service_name} completed recovery at '
+            f.write(f'{capnoun} {service_name} completed recovery at '
                     f'{datetime.datetime.now()}\n')
         f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
@@ -516,22 +523,41 @@ def set_service_status_and_active_versions_from_replica(
 
 
 def update_service_status(pool: bool) -> None:
-    # Disable this refresh for pool and services in consolidation mode.
-    if is_consolidation_mode(pool=pool):
-        # TODO(tian): PID-based tracking.
-        return
-    services = serve_state.get_services()
-    for record in services:
-        if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
+    service_names = serve_state.get_glob_service_names(None)
+    for service_name in service_names:
+        record = _get_service_status(service_name,
+                                     pool=pool,
+                                     with_replica_info=False)
+        if record is None:
+            continue
+        service_status = record['status']
+        if service_status == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
-        controller_job_id = record['controller_job_id']
-        assert controller_job_id is not None
-        controller_status = job_lib.get_status(controller_job_id)
-        if controller_status is None or controller_status.is_terminal():
-            # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status_and_active_versions(
-                record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+        controller_pid = record['controller_pid']
+        if controller_pid is None:
+            if service_status == serve_state.ServiceStatus.LAUNCHER_INIT:
+                continue
+        elif controller_pid < 0:
+            # Backwards compatibility: this service was submitted when ray was
+            # still used for controller process management. We set the
+            # value_to_replace_existing_entries to -1 to indicate historical
+            # services.
+            # TODO(tian): Remove before 0.12.0.
+            controller_job_id = record['controller_job_id']
+            assert controller_job_id is not None
+            controller_status = job_lib.get_status(controller_job_id)
+            if (controller_status is not None and
+                    not controller_status.is_terminal()):
+                continue
+        else:
+            if _controller_process_alive(controller_pid, record['name']):
+                # The controller is still running.
+                continue
+
+        # If controller job is not running, set it as controller failed.
+        serve_state.set_service_status_and_active_versions(
+            record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
 def update_service_encoded(service_name: str, version: int, mode: str,

@@ -96,14 +96,6 @@ def _get_service_record(
     return service_statuses[0]
 
 
-def _get_controller_type(pool: bool) -> controller_utils.Controllers:
-    """Get the controller type."""
-    if pool:
-        return controller_utils.Controllers.JOBS_CONTROLLER
-    else:
-        return controller_utils.Controllers.SKY_SERVE_CONTROLLER
-
-
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
@@ -259,7 +251,7 @@ def up(
                         _disable_controller_check=True,
                     )
         else:
-            controller_type = _get_controller_type(pool)
+            controller_type = controller_utils.get_controller_for_pool(pool)
             controller_handle = backend_utils.is_controller_accessible(
                 controller=controller_type, stopped_message='')
             backend = backend_utils.get_backend_from_handle(controller_handle)
@@ -448,7 +440,7 @@ def update(
                        'effect. To update TLS keyfile and certfile, please '
                        'tear down the service and spin up a new one.')
 
-    controller_type = _get_controller_type(pool)
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=
@@ -579,7 +571,7 @@ def apply(
     """Applies the config to the service or pool."""
     with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
         try:
-            controller_type = _get_controller_type(pool)
+            controller_type = controller_utils.get_controller_for_pool(pool)
             handle = backend_utils.is_controller_accessible(
                 controller=controller_type, stopped_message='')
             backend = backend_utils.get_backend_from_handle(handle)
@@ -605,7 +597,7 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    controller_type = _get_controller_type(pool)
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=f'All {noun}s should have terminated.')
@@ -662,7 +654,7 @@ def status(
             raise RuntimeError(f'Failed to refresh {noun}s status '
                                'due to network error.') from e
 
-    controller_type = _get_controller_type(pool)
+    controller_type = controller_utils.get_controller_for_pool(pool)
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
         stopped_message=controller_type.value.default_hint_if_non_existent.

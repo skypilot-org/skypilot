@@ -137,14 +137,15 @@ def _serve_status_refresh_event(pool: bool):
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
     from sky.utils import controller_utils
+    controller = controller_utils.get_controller_for_pool(pool)
     if controller_utils.high_availability_specified(
-            controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.cluster_name
-    ):
-        serve_utils.ha_recovery_for_consolidation_mode()
+            controller.value.cluster_name):
+        serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
     # After recovery, we start the event loop.
     from sky.skylet import events
     event = events.ServiceUpdateEvent(pool=pool)
-    logger.info('=== Running serve status refresh event ===')
+    noun = 'pool' if pool else 'serve'
+    logger.info(f'=== Running {noun} status refresh event ===')
     event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 

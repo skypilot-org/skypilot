@@ -190,13 +190,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     assert task.service is not None, task
     service_spec = task.service
 
-    def is_recovery_mode(service_name: str) -> bool:
-        """Check if service exists in database to determine recovery mode.
-        """
-        service = serve_state.get_service_from_name(service_name)
-        return service is not None
-
-    is_recovery = is_recovery_mode(service_name)
+    service_status_before = serve_state.get_service_status_from_name(
+        service_name)
+    logger.info(f'Service status before: {service_status_before}')
+    is_recovery = (
+        service_status_before is not None and
+        service_status_before != serve_state.ServiceStatus.LAUNCHER_INIT)
     logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
     if is_recovery:
@@ -214,12 +213,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name, version)
 
     if not is_recovery:
-        if (len(serve_state.get_services()) >=
-                serve_utils.get_num_service_threshold()):
-            cleanup_storage(tmp_task_yaml)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Max number of services reached.')
-        success = serve_state.add_service(
+        success = serve_state.set_service_info(
             service_name,
             controller_job_id=job_id,
             policy=service_spec.autoscaling_policy_str(),

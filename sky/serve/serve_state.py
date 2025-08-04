@@ -16,6 +16,7 @@ from sky.serve import constants
 from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
+
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
@@ -76,8 +77,12 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     db_utils.add_column_to_table(cursor, conn, 'services', 'pool',
                                  'INTEGER DEFAULT 0')
     # Add controller_pid for status tracking.
-    db_utils.add_column_to_table(cursor, conn, 'services', 'controller_pid',
-                                 'INTEGER DEFAULT NULL')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'services',
+                                 'controller_pid',
+                                 'INTEGER DEFAULT NULL',
+                                 value_to_replace_existing_entries=-1)
     conn.commit()
 
 
@@ -211,6 +216,9 @@ _REPLICA_STATUS_TO_COLOR = {
 class ServiceStatus(enum.Enum):
     """Service status as recorded in table 'services'."""
 
+    # Launcher is initializing
+    LAUNCHER_INIT = 'LAUNCHER_INIT'
+
     # Controller is initializing
     CONTROLLER_INIT = 'CONTROLLER_INIT'
 
@@ -277,34 +285,28 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 @init_db
-def add_service(name: str, controller_job_id: int, policy: str,
-                requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus, tls_encrypted: bool, pool: bool) -> bool:
-    """Add a service in the database.
+def set_service_info(name: str, controller_job_id: int, policy: str,
+                     requested_resources_str: str, load_balancing_policy: str,
+                     status: ServiceStatus, tls_encrypted: bool,
+                     pool: bool) -> bool:
+    """Set the service info in the database.
 
     Returns:
         True if the service is added successfully, False if the service already
         exists.
     """
     assert _DB_PATH is not None
-    try:
-        with db_utils.safe_cursor(_DB_PATH) as cursor:
-            cursor.execute(
-                """\
-                INSERT INTO services
-                (name, controller_job_id, status, policy,
-                requested_resources_str, load_balancing_policy, tls_encrypted,
-                pool)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (name, controller_job_id, status.value, policy,
-                 requested_resources_str, load_balancing_policy,
-                 int(tls_encrypted), int(pool)))
-
-    except sqlite3.IntegrityError as e:
-        if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
-            raise RuntimeError('Unexpected database error') from e
-        return False
-    return True
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            controller_job_id=(?), status=(?), policy=(?),
+            requested_resources_str=(?), load_balancing_policy=(?),
+            tls_encrypted=(?), pool=(?) WHERE name=(?) AND status=(?)""",
+            (controller_job_id, status.value, policy,
+             requested_resources_str, load_balancing_policy, int(tls_encrypted),
+             int(pool), name, ServiceStatus.LAUNCHER_INIT.value))
+        return cursor.rowcount > 0
 
 
 @init_db
@@ -436,6 +438,18 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     for row in rows:
         return _get_service_from_row(row)
     return None
+
+
+@init_db
+def get_service_status_from_name(service_name: str) -> Optional[ServiceStatus]:
+    """Get the status of a service."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute('SELECT status FROM services WHERE name=(?)',
+                              (service_name,)).fetchall()
+    if not rows:
+        return None
+    return ServiceStatus[rows[0][0]]
 
 
 @init_db
@@ -678,6 +692,28 @@ def get_service_load_balancer_port(service_name: str) -> int:
 
 
 @init_db
+def set_service_launcher_init(service_name: str) -> bool:
+    """Sets the launcher init status of a service.
+
+    Returns:
+        True if the service is added successfully, False if the service already
+        exists.
+    """
+    assert _DB_PATH is not None
+    try:
+        with db_utils.safe_cursor(_DB_PATH) as cursor:
+            cursor.execute(
+                """\
+                INSERT INTO services (name, status) VALUES (?, ?)""",
+                (service_name, ServiceStatus.LAUNCHER_INIT.value))
+    except sqlite3.IntegrityError as e:
+        if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
+            raise RuntimeError('Unexpected database error') from e
+        return False
+    return True
+
+
+@init_db
 def set_service_controller_pid(service_name: str, pid: int) -> None:
     """Sets the controller PID of a service."""
     assert _DB_PATH is not None
@@ -686,21 +722,6 @@ def set_service_controller_pid(service_name: str, pid: int) -> None:
             """\
             UPDATE services SET
             controller_pid=(?) WHERE name=(?)""", (pid, service_name))
-
-
-@init_db
-def get_service_controller_pid(service_name: str) -> Optional[int]:
-    """Gets the controller PID of a service."""
-    assert _DB_PATH is not None
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            SELECT controller_pid FROM services WHERE name=(?)""",
-            (service_name,))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return row[0]
 
 
 @init_db
