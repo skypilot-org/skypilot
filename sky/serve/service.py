@@ -112,6 +112,10 @@ def cleanup_storage(task_yaml: str) -> bool:
 
 def _cleanup(service_name: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
+    # Cleanup the HA recovery script first as it is possible that some error
+    # was raised when we construct the task object (e.g.,
+    # sky.exceptions.ResourcesUnavailableError).
+    serve_state.remove_ha_recovery_script(service_name)
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,

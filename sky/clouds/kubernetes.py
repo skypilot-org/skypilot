@@ -734,7 +734,8 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
             'k8s_high_availability_restarting_signal_file':
                 (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
-            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
+            'ha_recovery_log_path':
+                constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),

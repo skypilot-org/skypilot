@@ -2,6 +2,7 @@
 import base64
 import collections
 import dataclasses
+import datetime
 import enum
 import os
 import pathlib
@@ -33,6 +34,7 @@ from sky.serve import spot_placer
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -263,6 +265,56 @@ def is_consolidation_mode() -> bool:
         ('serve', 'controller', 'consolidation_mode'), default_value=False)
     # _check_consolidation_mode_consistency(consolidation_mode)
     return consolidation_mode
+
+
+def ha_recovery_for_consolidation_mode():
+    """Recovery logic for HA mode."""
+    # No setup recovery is needed in consolidation mode, as the API server
+    # already has all runtime installed. Directly start jobs recovery here.
+    # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
+    runner = command_runner.LocalProcessCommandRunner()
+    with open(skylet_constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('serve_'),
+              'w',
+              encoding='utf-8') as f:
+        start = time.time()
+        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
+        for svc in serve_state.get_services():
+            service_name = svc['name']
+            controller_pid = svc['controller_pid']
+            if controller_pid is not None:
+                try:
+                    if _controller_process_alive(controller_pid, service_name):
+                        f.write(f'Controller pid {controller_pid} for '
+                                f'service {service_name} is still running. '
+                                'Skipping recovery.\n')
+                        continue
+                except Exception:  # pylint: disable=broad-except
+                    # _controller_process_alive may raise if psutil fails; we
+                    # should not crash the recovery logic because of this.
+                    f.write('Error checking controller pid '
+                            f'{controller_pid} for service {service_name}\n')
+
+            script = serve_state.get_ha_recovery_script(service_name)
+            if script is None:
+                f.write(f'Service {service_name}\'s recovery script does '
+                        'not exist. Skipping recovery.\n')
+                continue
+            runner.run(script)
+            f.write(f'Service {service_name} completed recovery at '
+                    f'{datetime.datetime.now()}\n')
+        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+        f.write(f'Total recovery time: {time.time() - start} seconds\n')
+
+
+def _controller_process_alive(pid: int, service_name: str) -> bool:
+    """Check if the controller process is alive."""
+    try:
+        process = psutil.Process(pid)
+        cmd_str = ' '.join(process.cmdline())
+        return process.is_running(
+        ) and f'--service-name {service_name}' in cmd_str
+    except psutil.NoSuchProcess:
+        return False
 
 
 def validate_service_task(task: 'sky.Task', pool: bool) -> None:
@@ -754,6 +806,7 @@ def _terminate_failed_services(
     shutil.rmtree(service_dir)
     serve_state.remove_service(service_name)
     serve_state.delete_all_versions(service_name)
+    serve_state.remove_ha_recovery_script(service_name)
 
     if not remaining_replica_clusters:
         return None
