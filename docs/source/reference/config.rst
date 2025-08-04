@@ -175,6 +175,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     gcp:
       project_id: my-project-id
 
+  :ref:`daemons <config-yaml-daemons>`:
+    skypilot-status-refresh-daemon:
+      log_level: DEBUG
 
 Fields
 ----------
@@ -1410,7 +1413,7 @@ Default role for users (optional).  Either ``admin`` or ``user``.
 
 If not specified, the default role is ``admin``.
 
-Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` or :ref:`Basic Auth in API server <deploy-api-server-basic-auth>` is configured.
+Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` is configured.
 
 .. _config-yaml-db:
 
@@ -1476,3 +1479,32 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
+
+.. _config-yaml-daemons:
+
+``daemons``
+~~~~~~~~~~~
+
+Daemon configuration (optional).
+
+Configuration for API server daemons. Not applicable to client side config.
+
+Valid daemon names are:
+
+- ``skypilot-status-refresh-daemon``
+- ``skypilot-volume-status-refresh-daemon``
+- ``managed-job-status-refresh-daemon``
+
+``log_level``
+    Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
+
+.. code-block:: yaml
+
+  daemons:
+    skypilot-status-refresh-daemon:
+      log_level: DEBUG
+    skypilot-volume-status-refresh-daemon:
+      log_level: INFO
+    managed-job-status-refresh-daemon:
+      log_level: WARNING
+

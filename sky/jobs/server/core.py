@@ -207,8 +207,8 @@ def launch(
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
 
-    user_dag_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
-        dag, redact_secrets=True)
+    user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
+        dag, use_user_specified_yaml=True)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
@@ -326,7 +326,7 @@ def launch(
                 prefix=f'managed-user-dag-{dag.name}{rank_suffix}-',
                 mode='w',
         ) as original_user_yaml_path:
-            original_user_yaml_path.write(user_dag_str_redacted)
+            original_user_yaml_path.write(user_dag_str_user_specified)
             original_user_yaml_path.flush()
             for task_ in dag.tasks:
                 if job_rank is not None:

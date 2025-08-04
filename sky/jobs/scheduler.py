@@ -241,6 +241,7 @@ def scheduled_launch(job_id: int):
         while (state.get_job_schedule_state(job_id) !=
                state.ManagedJobScheduleState.LAUNCHING):
             time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
+    pool = state.get_pool_from_job_id(job_id)
 
     try:
         yield

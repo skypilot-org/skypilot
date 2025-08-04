@@ -13,7 +13,6 @@ import sqlalchemy
 from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
-from sky import skypilot_config
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
@@ -32,7 +31,7 @@ SPOT_JOBS_LOCK_PATH = '~/.sky/locks/.spot_jobs_db.lock'
 def get_engine(db_name: str, async_engine: bool = False):
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        conn_string = skypilot_config.get_nested(('db',), None)
+        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     if conn_string:
         logger.debug(f'using db URI from {conn_string}')
         if async_engine:

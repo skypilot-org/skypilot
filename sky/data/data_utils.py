@@ -22,6 +22,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import oci
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -358,6 +359,30 @@ def verify_ibm_cos_bucket(name: str) -> bool:
     return get_ibm_cos_bucket_region(name) != ''
 
 
+def verify_oci_bucket(name: str) -> bool:
+    """Helper method that checks if the OCI bucket exists
+
+    Args:
+      name: str; Name of OCI Bucket (without oci:// prefix)
+
+    Returns:
+      bool: True if the bucket exists, False otherwise
+    """
+    try:
+        # Get OCI client and check if bucket exists
+        client = oci.get_object_storage_client()
+        namespace = client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
+        # Try to get the bucket
+        client.get_bucket(namespace_name=namespace, bucket_name=name)
+        return True
+    except Exception:  # pylint: disable=broad-except
+        # If any exception occurs (bucket not found, permission issues, etc.),
+        # return False
+        return False
+
+
 def _get_ibm_cos_bucket_region(region, bucket_name):
     """helper function of get_ibm_cos_bucket_region
 
@@ -599,6 +624,7 @@ class Rclone:
         IBM = 'IBM'
         R2 = 'R2'
         AZURE = 'AZURE'
+        NEBIUS = 'NEBIUS'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -615,7 +641,8 @@ class Rclone:
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
-                Rclone.RcloneStores.AZURE: 'sky-azure'
+                Rclone.RcloneStores.AZURE: 'sky-azure',
+                Rclone.RcloneStores.NEBIUS: 'sky-nebius'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -702,6 +729,24 @@ class Rclone:
                     type = azureblob
                     account = {storage_account_name}
                     key = {storage_account_key}
+                    """)
+            elif self is Rclone.RcloneStores.NEBIUS:
+                nebius_session = nebius.session()
+                nebius_credentials = nebius.get_nebius_credentials(
+                    nebius_session)
+                # Get endpoint URL from the client
+                client = nebius.client('s3')
+                endpoint_url = client.meta.endpoint_url
+                access_key_id = nebius_credentials.access_key
+                secret_access_key = nebius_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    acl = private
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
