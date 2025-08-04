@@ -25,7 +25,7 @@ apiService:
   # If enabled, the basic auth configuration `ingress.authCredentials`
   # and `ingress.authSecret` in the ingress will be ignored.
   enableUserManagement: false
-  # Deprecated: use `apiService.auth.serviceAccount.enabled` instead.
+  # Deprecated: use `auth.serviceAccount.enabled` instead.
   # @schema type: [boolean]
   enableServiceAccounts: true
   # Initial basic auth credentials for the API server

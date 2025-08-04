@@ -105,12 +105,12 @@ false
 {{- $oauth2ProxyAuthEnabled := $oauth2ProxyConfig.enabled -}}
 {{/* External oauth2-proxy url and oauth2-proxy deployment are mutually exclusive */}}
 {{- if and $baseUrl $deployOAuth2Proxy -}}
-{{- fail "apiService.auth.oauth2Proxy.baseUrl and ingress.oauth2-proxy.enabled are mutually exclusive. Set only one of them." -}}
+{{- fail "auth.oauth2Proxy.baseUrl and ingress.oauth2-proxy.enabled are mutually exclusive. Set only one of them." -}}
 {{- end -}}
 {{/* If oauth2-proxy base authentication is enabled, either an external url or an oauth2-proxy deployment must be configured */}}
 {{- if $oauth2ProxyAuthEnabled -}}
 {{- if not (or $baseUrl $deployOAuth2Proxy) -}}
-{{- fail "When apiService.auth.oauth2Proxy.enabled is true, either apiService.auth.oauth2Proxy.baseUrl or ingress.oauth2-proxy.enabled must be set." -}}
+{{- fail "When auth.oauth2Proxy.enabled is true, either auth.oauth2Proxy.baseUrl or ingress.oauth2-proxy.enabled must be set." -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
