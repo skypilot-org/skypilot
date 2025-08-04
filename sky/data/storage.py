@@ -1606,11 +1606,7 @@ class S3CompatibleStore(AbstractStore):
                 if self.__class__.get_store_type() != self.config.store_type:
                     assert self.config.verify_bucket(self.name), (
                         f'Source specified as {self.source},'
-<<<<<<< HEAD
-                        f',a {self.config.store_type} '
-=======
                         f'a {self.config.store_type} '
->>>>>>> master
                         f'bucket. {self.config.store_type} Bucket should exist.'
                     )
             elif self.source.startswith('gs://'):
