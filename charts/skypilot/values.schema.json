@@ -132,20 +132,55 @@
                 "null"
             ],
             "properties": {
-                "oauth2Proxy": {
+                "oauth": {
                     "type": [
                         "object",
                         "null"
                     ],
                     "properties": {
-                        "baseUrl": {
+                        "client-details-from-secret": {
+                            "type": "string"
+                        },
+                        "client-id": {
+                            "type": "string"
+                        },
+                        "client-secret": {
+                            "type": "string"
+                        },
+                        "cookie-expire": {
+                            "type": [
+                                "string",
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "cookie-refresh": {
+                            "type": [
+                                "string",
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "email-domain": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "oidc-issuer-url": {
                             "type": [
                                 "string",
                                 "null"
                             ]
                         },
-                        "enabled": {
-                            "type": "boolean"
+                        "redis-url": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "session-store-type": {
+                            "type": "string"
                         }
                     }
                 },
@@ -363,7 +398,10 @@
                     ]
                 },
                 "authCredentials": {
-                    "type": "string"
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 },
                 "authSecret": {
                     "type": [

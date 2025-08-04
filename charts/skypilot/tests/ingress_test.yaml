@@ -60,8 +60,7 @@ tests:
     set:
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true
-      auth.oauth2Proxy.enabled: true
-      auth.oauth2Proxy.baseUrl: "https://external-oauth2-proxy.example.com"
+      auth.oauth.enabled: true
     asserts:
       - notExists:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-signin"]
@@ -89,7 +88,7 @@ tests:
           path: metadata.annotations["nginx.ingress.kubernetes.io/auth-response-headers"]
           value: "X-Auth-Request-Email, X-Skypilot-Auth"
 
-  - it: should enable ingress OAuth2 proxy when auth.oauth2Proxy is not configured
+  - it: should enable ingress OAuth2 proxy when auth.oauth is not configured
     set:
       ingress.enabled: true
       ingress.oauth2-proxy.enabled: true

@@ -1413,7 +1413,9 @@ Default role for users (optional).  Either ``admin`` or ``user``.
 
 If not specified, the default role is ``admin``.
 
-Note: RBAC is only functional when :ref:`Auth Proxy <api-server-auth-proxy>` is configured.
+.. TODO(aylei): Refine this after unified authentication.
+
+Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
 
 .. _config-yaml-db:
 

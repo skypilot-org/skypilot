@@ -76,9 +76,8 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
   
   :ref:`auth <helm-values-auth>`:
-    :ref:`oauth2Proxy <helm-values-auth-oauth2Proxy>`:
-      :ref:`enabled <helm-values-auth-oauth2Proxy-enabled>`: false
-      :ref:`baseUrl <helm-values-auth-oauth2Proxy-baseUrl>`: null
+    :ref:`oauth <helm-values-auth-oauth>`:
+      :ref:`enabled <helm-values-auth-oauth-enabled>`: false
     :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
       :ref:`enabled <helm-values-auth-serviceAccount-enabled>`: null
 
@@ -690,7 +689,7 @@ Default: ``null``
 
 Authentication configuration for the API server.
 
-.. _helm-values-auth-oauth2Proxy:
+.. _helm-values-auth-oauth:
 
 ``auth.oauth2Proxy``
 ^^^^^^^^^^^^^^^^^^^^
@@ -706,12 +705,12 @@ Default: see the yaml below.
       enabled: false
       baseUrl: null
 
-.. _helm-values-auth-oauth2Proxy-enabled:
+.. _helm-values-auth-oauth-enabled:
 
-``auth.oauth2Proxy.enabled``
+``auth.oauth.enabled``
 ''''''''''''''''''''''''''''
 
-Enable/disable OAuth2 Proxy based authentication.
+Enable/disable OAuth authentication.
 
 Default: ``false``
 
@@ -720,26 +719,6 @@ Default: ``false``
   auth:
     oauth2Proxy:
       enabled: true
-
-.. _helm-values-auth-oauth2Proxy-baseUrl:
-
-``auth.oauth2Proxy.baseUrl``
-''''''''''''''''''''''''''''
-
-Base URL of the OAuth2 Proxy. This setting is used when you have a self-hosted OAuth2 Proxy instance.
-
-- If you are using a self-hosted OAuth2 Proxy, set this to the base URL of the OAuth2 Proxy.
-- If you want this chart to provision an OAuth2 Proxy, leave this unset (``null``) and enable the OAuth2 Proxy deployment via :ref:`ingress.oauth2-proxy <helm-values-ingress-oauth2-proxy>` config.
-
-A non-empty ``baseUrl`` is mutually exclusive with :ref:`ingress.oauth2-proxy.enabled=true <helm-values-ingress-oauth2-proxy-enabled>`.
-
-Default: ``null``
-
-.. code-block:: yaml
-
-  auth:
-    oauth2Proxy:
-      baseUrl: "https://oauth.mycompany.com"
 
 .. _helm-values-auth-serviceAccount:
 

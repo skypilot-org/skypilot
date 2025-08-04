@@ -80,7 +80,7 @@ After the API server is deployed, you can inspect the API server pod status with
 
 You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
-The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>`.
+The API server above is deployed with a basic auth provided by Nginx. To use advanced OAuth2 authentication, refer to :ref:`Using OAuth for API server <api-server-oauth>`.
 
 .. _sky-get-api-server-url:
 
@@ -553,12 +553,12 @@ Following tabs describe how to configure credentials for different clouds on the
         Support for configuring other clouds through secrets is coming soon!
 
 
-Optional: Set up OAuth2 proxy
------------------------------
+Optional: Set up OAuth
+----------------------
 
-In addition to basic HTTP authentication, SkyPilot also supports using an OAuth2 proxy to securely authenticate users.
+In addition to basic HTTP authentication, SkyPilot also supports using OAuth2 to securely authenticate users.
 
-Refer to :ref:`Using an Auth Proxy with the SkyPilot API Server <api-server-auth-proxy>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth2-proxy-okta>` or Google Workspace.
+Refer to :ref:`Setup OAuth for SkyPilot API Server <api-server-oauth>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth-okta>` or Google Workspace.
 
 .. _api-server-persistence-db:
 
@@ -978,7 +978,7 @@ By default, the SkyPilot helm chart will deploy a new ingress-nginx controller w
 
     .. TODO(aylei): document service account token based authentication and proxy auth for custom ingress controllers.
 
-    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` is only supported when using ingress-nginx controller. Consider using :ref:`OAuth2 <api-server-oauth2>` to protect your API server instead.
+    :ref:`Basic auth on ingress <helm-values-ingress-authcredentials>` is only supported when using ingress-nginx controller. Consider using :ref:`OAuth2 <api-server-oauth>` to protect your API server instead.
 
 
 .. _sky-api-server-cloud-deploy:

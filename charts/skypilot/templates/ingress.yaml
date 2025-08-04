@@ -22,7 +22,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-next-upstream: "http_502 non_idempotent"
     nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
     {{- end }}
-    {{/* If oauth2-proxy based authentication is enabled on the API server, disable the oauth2-proxy at ingress to avoid conflicts */}}
+    {{/* If oauth authentication is enabled on the API server, disable the oauth2-proxy at ingress to avoid conflicts */}}
     {{- if and (index .Values.ingress "oauth2-proxy" "enabled") (not .Values.auth.oauth.enabled) }}
     # OAuth2 Proxy authentication for browser-based access
     # Bearer token requests bypass OAuth2 proxy and go directly to the application
@@ -39,7 +39,7 @@ metadata:
     nginx.ingress.kubernetes.io/configuration-snippet: |
       # Set X-Skypilot-Auth-Mode header to the value from the auth request.
       proxy_set_header X-Skypilot-Auth-Mode $x_skypilot_auth_mode;
-    {{- else if and (not .Values.auth.oauth2Proxy.enabled) (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
+    {{- else if and (not .Values.auth.oauth.enabled) (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"

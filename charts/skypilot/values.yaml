@@ -146,7 +146,10 @@ apiService:
 # Authentication configuration for the API server
 # @schema type: [object, null]
 auth:
-  # OAuth2 Proxy based authentication for the API server
+  # Note: we add new configuration entries instead of reusing ingress.oauth2-proxy because:
+  # 1. Make the semantic clearer: oauth2-proxy at the API server is an implemenation detail instead of an user-facing proxy;
+  # 2. The OAuth integration is not supported in old versions, enable it implicitly will break the deployment;
+  # OAuth Proxy based authentication for the API server
   # @schema type: [object, null]
   oauth:
     # Enable/disable OAuth2 Proxy based authentication on API server
@@ -166,7 +169,7 @@ auth:
     # Both dash and underscore formats are supported for compatibility with different secret managers
     # (e.g., HashiCorp Vault requires underscore format due to key naming constraints)
     # If empty/null, the above client-id and client-secret values are used instead
-    # See https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#auth-proxy-client-secret
+    # See https://docs.skypilot.co/en/latest/reference/auth.html#oauth-client-secret
     client-details-from-secret: ""
     # Email domains to allow (use "*" for all domains)
     email-domain: "*"
@@ -222,6 +225,7 @@ ingress:
   # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
   # Basic auth credentials in format "username:encrypted_password" (only used if ingress.authSecret is not set).
   # This will only be honored when ingress-nginx is used.
+  # @schema type: [string, null]
   authCredentials: null
   # Host to exclusively accept traffic from (optional) - will respond to all host requests if not set
   # @schema type: [string, null]
@@ -276,7 +280,7 @@ ingress:
     # Both dash and underscore formats are supported for compatibility with different secret managers
     # (e.g., HashiCorp Vault requires underscore format due to key naming constraints)
     # If empty/null, the above client-id and client-secret values are used instead
-    # See https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#auth-proxy-client-secret
+    # See https://docs.skypilot.co/en/latest/reference/auth.html#oauth-client-secret
     client-details-from-secret: ""
     # Use HTTPS (set to true for production environments)
     use-https: false

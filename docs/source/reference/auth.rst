@@ -44,21 +44,21 @@ Example login command:
 
     $ sky api login -e http://username:password@<SKYPILOT_API_SERVER_ENDPOINT>
 
-.. _api-server-auth-proxy:
+.. _api-server-oauth:
 
 SSO (recommended)
 ------------------
 
-You can configure the SkyPilot API server to use an web authentication proxy, such as `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__, to use SSO providers such as :ref:`Okta or Google Workspace <oauth2-proxy-oidc>`.
+You can configure the SkyPilot API server to use an SSO providers such as :ref:`Okta or Google Workspace <oauth-oidc>` for authentication.
 
-The SkyPilot implementation is flexible and will work with most cookie-based browser auth proxies. See :ref:`auth-proxy-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta or Google Workspace, see :ref:`oauth2-proxy-oidc`.
+The SkyPilot implementation is flexible and will also work with most cookie-based browser auth proxies. See :ref:`oauth-user-flow` and :ref:`auth-proxy-byo` for details. To set up Okta or Google Workspace, see :ref:`oauth-oidc`.
 
-.. image:: ../images/client-server/auth-proxy-user-flow.svg
-    :alt: SkyPilot with auth proxy
+.. image:: ../images/client-server/oauth-user-flow.svg
+    :alt: SkyPilot with OAuth
     :align: center
     :width: 100%
 
-.. _auth-proxy-user-flow:
+.. _oauth-user-flow:
 
 User flow
 ~~~~~~~~~
@@ -92,13 +92,13 @@ SkyPilot will automatically use the user email from the auth proxy to create a u
     :align: center
     :width: 70%
 
-.. _oauth2-proxy-okta:
-.. _oauth2-proxy-oidc:
+.. _oauth-okta:
+.. _oauth-oidc:
 
-Setting up the proxy (Okta, Google Workspace, etc)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Setting up OAuth (Okta, Google Workspace, etc)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The SkyPilot API server helm chart can also deploy and configure `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ to provide an out-of-the-box auth proxy setup.
+The SkyPilot API server helm chart provides out-of-the-box support for setting up OAuth on API server. An `OAuth2 Proxy <https://oauth2-proxy.github.io/oauth2-proxy/>`__ will be deployed under the hood and the API server will be configured to use it for authentication.
 
 The instructions below cover :ref:`Okta <okta-oidc-setup>` and :ref:`Google Workspace <google-oidc-setup>`, but any provider compatible with the OIDC spec should work.
 
@@ -241,14 +241,13 @@ Use ``helm upgrade`` to redeploy the API server helm chart with the ``skypilot-o
 
     $ # --reuse-values is critical to keep the old values that aren't being updated here.
     $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-      --set auth.oauth2Proxy.enabled=true \
-      --set ingress.oauth2-proxy.enabled=true \
-      --set ingress.oauth2-proxy.oidc-issuer-url=https://<ISSUER URL> \
-      --set ingress.oauth2-proxy.client-id=<CLIENT ID> \
-      --set ingress.oauth2-proxy.client-secret=<CLIENT SECRET> \
-      --set ingress.oauth2-proxy.email-domain=<EMAIL DOMAIN> # optional
+      --set auth.oauth.enabled=true \
+      --set auth.oauth.oidc-issuer-url=https://<ISSUER URL> \
+      --set auth.oauth.client-id=<CLIENT ID> \
+      --set auth.oauth.client-secret=<CLIENT SECRET> \
+      --set auth.oauth.email-domain=<EMAIL DOMAIN> # optional
 
-.. _auth-proxy-client-secret:
+.. _oauth-client-secret:
 
 For better security, you can also store the client details in a Kubernetes secret instead of passing them as Helm values:
 
@@ -261,11 +260,10 @@ For better security, you can also store the client details in a Kubernetes secre
 
     $ # Deploy using the secret
     $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-      --set auth.oauth2Proxy.enabled=true \
-      --set ingress.oauth2-proxy.enabled=true \
-      --set ingress.oauth2-proxy.oidc-issuer-url=https://<ISSUER URL> \
-      --set ingress.oauth2-proxy.client-details-from-secret=oauth2-proxy-credentials \
-      --set ingress.oauth2-proxy.email-domain=<EMAIL DOMAIN> # optional
+      --set auth.oauth.enabled=true \
+      --set auth.oauth.oidc-issuer-url=https://<ISSUER URL> \
+      --set auth.oauth.client-details-from-secret=oauth2-proxy-credentials \
+      --set auth.oauth.email-domain=<EMAIL DOMAIN> # optional
 
 
 .. note::
@@ -274,6 +272,37 @@ For better security, you can also store the client details in a Kubernetes secre
 To make sure it's working, visit your endpoint URL in a browser. You should be redirected to your auth provider to sign in.
 
 Now, you can use ``sky api login -e <ENDPOINT>`` to go though the login flow for the CLI.
+
+.. _oauth-migration-guide:
+
+OAuth migration guide
+^^^^^^^^^^^^^^^^^^^^^
+
+.. dropdown:: Migration guide for auth proxy based authentication (before SkyPilot v0.10.2)
+
+    .. TODO(aylei): Add the nightly version after this change get released
+
+    After SkyPilot v0.10.2, the API server supports built-in OAuth2 integration (delegate authentication to `OAuth2 Proxy <https://github.com/oauth2-proxy/oauth2-proxy>`_ under the hood) without ingress support. This is more flexible and can work seamlessly with other authentication schemes supported by the API server.
+
+    If you are using the auth proxy in ingress (enabled by setting ``ingress.oauth2-proxy.enabled=true`` in the Helm chart), you can migrate to the new OAuth2 integration by setting ``auth.oauth.enabled=true`` and migrate other settings from ``ingress.oauth2-proxy.*`` to ``auth.oauth.*`` in the Helm chart:
+
+    .. note::
+
+        Both the API server docker image and the helm chart should be updated to version 0.10.2 or later to use the new OAuth2 integration.
+
+    .. code-block:: console
+
+        # NAMESPACE and RELEASE_NAME are the same as the ones used in the Helm deployment
+        $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+          --set ingress.oauth2-proxy.enabled=false \
+          --set auth.oauth.enabled=true \
+          --set auth.oauth.oidc-issuer-url=https://<ISSUER URL> \
+          --set auth.oauth.client-id=<CLIENT ID> \
+          --set auth.oauth.client-secret=<CLIENT SECRET> \
+          --set auth.oauth.email-domain=<EMAIL DOMAIN> # optional
+
+    The migration will not break authenticated clients as long as the OAuth provider config is not changed.
+
 
 Auth integration FAQ
 ^^^^^^^^^^^^^^^^^^^^^
@@ -393,7 +422,7 @@ SkyPilot provides basic RBAC (role-based access control) support. Two roles are 
 - **User**: Use SkyPilot as usual to launch and manage resources (clusters, jobs, etc.).
 - **Admin**: Manage SkyPilot API server settings, users, and workspaces.
 
-RBAC support is enabled only when :ref:`SSO authentication <api-server-auth-proxy>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
+RBAC support is enabled only when :ref:`SSO authentication <api-server-oauth>` is used (not when using :ref:`basic auth <api-server-basic-auth>`).
 
 Config :ref:`config-yaml-rbac-default-role` determines whether a new
 SkyPilot user is created with the ``user`` or ``admin`` role. By default, it is

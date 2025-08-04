@@ -118,7 +118,7 @@ false
 {{- end -}}
 
 {{- define "skypilot.ingressOAuthEnabled" -}}
-{{- if and .Values.ingress.enabled .Values.ingress.oauth2-proxy.enabled}}
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") -}}
 true
 {{- else -}}
 false

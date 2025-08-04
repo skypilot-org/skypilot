@@ -1,8 +1,7 @@
 {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
-{{- if .Values.auth.oauth.enabled -}}
 {{- $oauth2 := .Values.auth.oauth -}}
-{{- else -}}
-{{- $oauth2 := index .Values.ingress "oauth2-proxy" }}
+{{- if not .Values.auth.oauth.enabled -}}
+{{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
 {{- end -}}
 {{- if not (index $oauth2 "oidc-issuer-url") -}}
 {{- fail "ingress.oauth2-proxy.oidc-issuer-url is required when OAuth2 proxy is enabled" -}}
