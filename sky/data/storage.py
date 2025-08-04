@@ -1640,7 +1640,6 @@ class S3CompatibleStore(AbstractStore):
                 raise NotImplementedError(
                     f'Moving data from OCI to {self.source} is ',
                     'currently not supported.')
-<<<<<<< HEAD
             elif self.source.startswith('nebius://'):
                 assert self.name == data_utils.split_nebius_path(
                     self.source)[0], (
@@ -1659,8 +1658,6 @@ class S3CompatibleStore(AbstractStore):
                     f'Source specified as {self.source}, a Tigris Object '
                     f'Storage bucket. Tigris Object Storage Bucket should '
                     f'exist.')
-=======
->>>>>>> master
 
         # Validate name
         self.name = self.validate_name(self.name)
