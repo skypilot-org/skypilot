@@ -27,6 +27,7 @@ from sky.client import common as client_common
 from sky.client import sdk
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
+from sky.server import rest
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import job_lib
@@ -35,6 +36,8 @@ from sky.utils import annotations
 from sky.utils import common
 from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import message_utils
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -113,29 +116,28 @@ async def get(request_id: str) -> Any:
             response.close()
 
 
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@annotations.client_api
-async def stream_response_async(
-        request_id: Optional[str],
-        response: 'aiohttp.ClientResponse',
-        output_stream: Optional['io.TextIOBase'] = None) -> Any:
-    """Async version of stream_response that streams the response to the
-    console.
+async def decode_rich_status_async(
+        response: 'aiohttp.ClientResponse'
+) -> typing.AsyncIterator[Optional[str]]:
+    """Async version of rich_utils.decode_rich_status that decodes rich status
+    messages from an aiohttp response.
 
     Args:
-        request_id: The request ID.
         response: The aiohttp response.
-        output_stream: The output stream to write to. If None, print to the
-            console.
+
+    Yields:
+        Optional[str]: Decoded lines or None for control messages.
     """
+    decoding_status = None
     try:
+        last_line = ''
         # Buffer to store incomplete UTF-8 bytes between chunks
         undecoded_buffer = b''
 
+        # Iterate over the response content in chunks
         async for chunk in response.content.iter_chunked(8192):
             if chunk is None:
-                break
+                return
 
             # Append the new chunk to any leftover bytes from previous iteration
             current_bytes = undecoded_buffer + chunk
@@ -144,29 +146,126 @@ async def stream_response_async(
             # Try to decode the combined bytes
             try:
                 encoded_msg = current_bytes.decode('utf-8')
-                print(encoded_msg, flush=True, end='', file=output_stream)
             except UnicodeDecodeError as e:
                 # Check if this is potentially an incomplete sequence at the end
                 if e.start > 0:
                     # Decode the valid part
                     encoded_msg = current_bytes[:e.start].decode('utf-8')
-                    print(encoded_msg, flush=True, end='', file=output_stream)
 
-                    # Store remaining bytes for next iteration
-                    undecoded_buffer = current_bytes[e.start:]
+                    # Check if the remaining bytes are likely a partial char
+                    # or actually invalid UTF-8
+                    remaining_bytes = current_bytes[e.start:]
+                    if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
+                        # Likely incomplete - save for next chunk
+                        undecoded_buffer = remaining_bytes
+                    else:
+                        # Likely invalid - replace with replacement character
+                        encoded_msg += remaining_bytes.decode('utf-8',
+                                                              errors='replace')
+                        undecoded_buffer = b''
                 else:
-                    # Invalid UTF-8 at the beginning, skip this chunk
+                    # Error at the very beginning of the buffer - invalid UTF-8
+                    encoded_msg = current_bytes.decode('utf-8',
+                                                       errors='replace')
+                    undecoded_buffer = b''
+
+            lines = encoded_msg.splitlines(keepends=True)
+
+            # Skip processing if lines is empty to avoid IndexError
+            if not lines:
+                continue
+
+            lines[0] = last_line + lines[0]
+            last_line = lines[-1]
+            # If the last line is not ended with `\r` or `\n` (with ending
+            # spaces stripped), it means the last line is not a complete line.
+            # We keep the last line in the buffer and continue.
+            if (not last_line.strip(' ').endswith('\r') and
+                    not last_line.strip(' ').endswith('\n')):
+                lines = lines[:-1]
+            else:
+                # Reset the buffer for the next line, as the last line is a
+                # complete line.
+                last_line = ''
+
+            for line in lines:
+                if line.endswith('\r\n'):
+                    # Replace `\r\n` with `\n`, as printing a line ends with
+                    # `\r\n` in linux will cause the line to be empty.
+                    line = line[:-2] + '\n'
+                is_payload, line = message_utils.decode_payload(
+                    line, raise_for_mismatch=False)
+                control = None
+                if is_payload:
+                    control, encoded_status = rich_utils.Control.decode(line)
+                if control is None:
+                    yield line
                     continue
 
-        # Handle any remaining bytes
-        if undecoded_buffer:
-            try:
-                encoded_msg = undecoded_buffer.decode('utf-8', errors='ignore')
-                print(encoded_msg, flush=True, end='', file=output_stream)
-            except UnicodeDecodeError:
-                # Skip malformed trailing bytes
-                pass
+                if control == rich_utils.Control.RETRY:
+                    raise exceptions.RequestInterruptedError(
+                        'Streaming interrupted. Please retry.')
+                # control is not None, i.e. it is a rich status control message.
+                # In async context, we'll handle rich status controls normally
+                # since async typically runs in main thread
+                if control == rich_utils.Control.INIT:
+                    decoding_status = rich_utils.client_status(encoded_status)
+                else:
+                    if decoding_status is None:
+                        # status may not be initialized if a user use --tail for
+                        # sky api logs.
+                        continue
+                    assert decoding_status is not None, (
+                        f'Rich status not initialized: {line}')
+                    if control == rich_utils.Control.UPDATE:
+                        decoding_status.update(encoded_status)
+                    elif control == rich_utils.Control.STOP:
+                        decoding_status.stop()
+                    elif control == rich_utils.Control.EXIT:
+                        decoding_status.__exit__(None, None, None)
+                    elif control == rich_utils.Control.START:
+                        decoding_status.start()
+                    elif control == rich_utils.Control.HEARTBEAT:
+                        # Heartbeat is not displayed to the user, so we do not
+                        # need to update the status.
+                        pass
+    finally:
+        if decoding_status is not None:
+            decoding_status.__exit__(None, None, None)
 
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+async def stream_response_async(request_id: Optional[str],
+                                response: 'aiohttp.ClientResponse',
+                                output_stream: Optional['io.TextIOBase'] = None,
+                                resumable: bool = False) -> Any:
+    """Async version of stream_response that streams the response to the
+    console.
+
+    Args:
+        request_id: The request ID.
+        response: The aiohttp response.
+        output_stream: The output stream to write to. If None, print to the
+            console.
+        resumable: Whether the response is resumable on retry. If True, the
+            streaming will start from the previous failure point on retry.
+    """
+
+    retry_context: Optional[rest.RetryContext] = None
+    if resumable:
+        retry_context = rest.get_retry_context()
+    try:
+        line_count = 0
+        async for line in decode_rich_status_async(response):
+            if line is not None:
+                line_count += 1
+                if retry_context is None:
+                    print(line, flush=True, end='', file=output_stream)
+                elif line_count > retry_context.line_processed:
+                    print(line, flush=True, end='', file=output_stream)
+                    retry_context.line_processed = line_count
         if request_id is not None:
             return await get(request_id)
     except Exception:  # pylint: disable=broad-except
