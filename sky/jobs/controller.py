@@ -150,7 +150,8 @@ class JobsController:
 
     def _download_log_and_stream(
         self, task_id: Optional[int],
-        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        job_id_on_pool_cluster: Optional[int],
     ) -> None:
         """Downloads and streams the logs of the current job with given task ID.
 
@@ -164,11 +165,14 @@ class JobsController:
             return
 
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                            'managed_jobs')
-
-        log_file = controller_utils.download_and_stream_latest_job_log(
-            self._backend, handle, managed_job_logs_dir)
-
+                                            'managed_jobs',
+                                            f'job-id-{self._job_id}')
+        log_file = controller_utils.download_and_stream_job_log(
+            self._backend,
+            handle,
+            managed_job_logs_dir,
+            job_ids=[str(job_id_on_pool_cluster)]
+            if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can
             # be accessed even after the job is finished
@@ -273,8 +277,11 @@ class JobsController:
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         assert task.name is not None, task
+        # Set the cluster name to None if the job is submitted
+        # to a pool. This will be updated when we later calls the `launch`
+        # or `recover` function from the strategy executor.
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id) if self._pool is None else ''
+            task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._job_id, task_id,
             self._logger, self._pool)
@@ -320,13 +327,12 @@ class JobsController:
             self._logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
         if self._pool is None:
-            job_id_on_pm = None
+            job_id_on_pool_cluster = None
         else:
             # Update the cluster name when using cluster pool.
-            # TODO(luca) make this async
-            cluster_name, job_id_on_pm = (
+            cluster_name, job_id_on_pool_cluster = (
                 managed_job_state.get_pool_submit_info(self._job_id))
-            assert cluster_name is not None, (cluster_name, job_id_on_pm)
+        assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
         if not is_resume:
             await managed_job_state.set_started_async(
@@ -404,7 +410,8 @@ class JobsController:
                 try:
                     job_status = await managed_job_utils.to_thread(
                         managed_job_utils.get_job_status, self._backend,
-                        cluster_name, self._logger, job_id_on_pm)
+                        cluster_name, self._logger,
+                        job_id=job_id_on_pool_cluster)
                 except exceptions.FetchClusterInfoError as fetch_e:
                     self._logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
@@ -416,7 +423,7 @@ class JobsController:
                                   'Getting end time and cleaning up')
                 success_end_time = await managed_job_utils.to_thread(
                     managed_job_utils.try_to_get_job_end_time, self._backend,
-                    cluster_name)
+                    cluster_name, job_id_on_pool_cluster)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 await managed_job_state.set_succeeded_async(
@@ -428,6 +435,8 @@ class JobsController:
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
                 try:
+                    logger.info(f'Downloading logs on cluster {cluster_name} '
+                                f'and job id {job_id_on_pool_cluster}.')
                     clusters = backend_utils.get_clusters(
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
@@ -437,7 +446,8 @@ class JobsController:
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
                         await managed_job_utils.to_thread(
-                            self._download_log_and_stream, task_id, handle)
+                            self._download_log_and_stream,
+                            task_id, handle, job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     self._logger.warning(
@@ -504,7 +514,7 @@ class JobsController:
                         f'Task {task_id} failed with status: {job_status}')
                     end_time = await managed_job_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
-                        self._backend, cluster_name)
+                        self._backend, cluster_name, job_id_on_pool_cluster)
                     self._logger.info(
                         f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
@@ -514,7 +524,8 @@ class JobsController:
                     # event loop. We should make _download_log_and_stream async
                     # however that will require a lot of changes to the code.
                     await managed_job_utils.to_thread(
-                        self._download_log_and_stream, task_id, handle)
+                        self._download_log_and_stream,
+                        task_id, handle, job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -621,7 +632,7 @@ class JobsController:
                 self._strategy_executor.recover)
 
             if self._pool is not None:
-                cluster_name, job_id_on_pm = (
+                cluster_name, job_id_on_pool_cluster = (
                     managed_job_state.get_pool_submit_info(self._job_id))
                 assert cluster_name is not None
             await managed_job_state.set_recovered(self._job_id,

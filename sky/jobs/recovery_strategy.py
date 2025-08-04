@@ -51,7 +51,7 @@ class StrategyExecutor:
 
     RETRY_INIT_GAP_SECONDS = 60
 
-    def __init__(self, cluster_name: str, backend: 'backends.Backend',
+    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
                  job_id: int, task_id: int, job_logger: logging.Logger,
                  pool: Optional[str]) -> None:
@@ -70,18 +70,22 @@ class StrategyExecutor:
             'Only CloudVMRayBackend is supported.')
         self.dag = sky.Dag()
         self.dag.add(task)
+        # For jobs submitted to a pool, the cluster name might change after each
+        # recovery. Initially this is set to an empty string to indicate that no
+        # cluster is assigned yet, and in `_launch`, it will be set to one of
+        # the cluster names in the pool.
         self.cluster_name = cluster_name
         self.backend = backend
         self.max_restarts_on_errors = max_restarts_on_errors
         self.job_id = job_id
         self.task_id = task_id
-        self.pool = pool
+        self.poo = pool
         self.restart_cnt_on_failure = 0
         self._logger = job_logger
-        self.job_id_on_pm: Optional[int] = None if pool is None else -1
+        self.job_id_on_pool_cluster: Optional[int] = None
 
     @classmethod
-    def make(cls, cluster_name: str, backend: 'backends.Backend',
+    def make(cls, cluster_name: Optional[str], backend: 'backends.Backend',
              task: 'task_lib.Task', job_id: int, task_id: int,
              job_logger: logging.Logger,
              pool: Optional[str]) -> 'StrategyExecutor':
@@ -147,9 +151,11 @@ class StrategyExecutor:
     def _try_cancel_jobs(self):
         from sky import core  # pylint: disable=import-outside-toplevel
 
+        if self.cluster_name is None:
+            return
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
-        if handle is None:
+        if handle is None or self.pool is not None:
             return
         try:
             usage_lib.messages.usage.set_internal()
@@ -176,19 +182,18 @@ class StrategyExecutor:
             if self.pool is None:
                 kwargs = dict(all=True)
             else:
-                kwargs = dict(job_ids=[self.job_id_on_pm])
+                kwargs = dict(job_ids=[self.job_id_on_pool_cluster])
             core.cancel(cluster_name=self.cluster_name,
                         **kwargs,
                         _try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
-            self._logger.info(
-                'Failed to cancel the job on the cluster. The cluster '
-                'might be already down or the head node is preempted.'
-                '\n  Detailed exception: '
-                f'{common_utils.format_exception(e)}\n'
-                'Terminating the cluster explicitly to ensure no '
-                'remaining job process interferes with recovery.')
-            managed_job_utils.terminate_cluster(self.cluster_name)
+            logger.info('Failed to cancel the job on the cluster. The cluster '
+                        'might be already down or the head node is preempted.'
+                        '\n  Detailed exception: '
+                        f'{common_utils.format_exception(e)}\n'
+                        'Terminating the cluster explicitly to ensure no '
+                        'remaining job process interferes with recovery.')
+            self._cleanup_cluster()
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
@@ -197,6 +202,7 @@ class StrategyExecutor:
             The timestamp of when the job is submitted, or None if failed to
             submit.
         """
+        assert self.cluster_name is not None
         status = None
         job_checking_retry_cnt = 0
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
@@ -231,7 +237,7 @@ class StrategyExecutor:
                     self.backend,
                     self.cluster_name,
                     job_logger=self._logger,
-                    job_id=self.job_id_on_pm)
+                    job_id=self.job_id_on_pool_cluster)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -248,7 +254,10 @@ class StrategyExecutor:
             if status is not None and status > job_lib.JobStatus.INIT:
                 try:
                     job_submitted_at = managed_job_utils.get_job_timestamp(
-                        self.backend, self.cluster_name, get_end_time=False)
+                        self.backend,
+                        self.cluster_name,
+                        self.job_id_on_pool_cluster,
+                        get_end_time=False)
                     return job_submitted_at
                 except Exception as e:  # pylint: disable=broad-except
                     # If we failed to get the job timestamp, we will retry
@@ -262,10 +271,10 @@ class StrategyExecutor:
         return None
 
     def _cleanup_cluster(self) -> None:
+        if self.cluster_name is None:
+            return
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
-        else:
-            serve_utils.release_cluster_name(self.pool, self.cluster_name)
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
@@ -322,6 +331,8 @@ class StrategyExecutor:
                     try:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
+                            assert self.cluster_name is not None
+                            
                             request_id = sdk.launch(
                                 self.dag,
                                 cluster_name=self.cluster_name,
@@ -347,20 +358,19 @@ class StrategyExecutor:
                                 sdk.get(request_id)
                             self._logger.info('Managed job cluster launched.')
                         else:
-                            cluster_name = serve_utils.get_next_cluster_name(
-                                self.pool, self.job_id)
-                            if cluster_name is None:
+                            self.cluster_name = (
+                                serve_utils.get_next_cluster_name(
+                                    self.pool, self.job_id))
+                            if self.cluster_name is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
-                            self.cluster_name = cluster_name
-                            job_id_on_pm, _ = execution.exec(
+                            job_id_on_pool_cluster, _ = execution.exec(
                                 self.dag, cluster_name=self.cluster_name)
-                            assert job_id_on_pm is not None, (self.cluster_name,
-                                                              self.job_id)
-                            self.job_id_on_pm = job_id_on_pm
-                            state.set_pool_submit_info(self.job_id,
-                                                       cluster_name,
-                                                       job_id_on_pm)
+                            assert job_id_on_pool_cluster is not None, (
+                                self.cluster_name, self.job_id)
+                            self.job_id_on_pool_cluster = job_id_on_pool_cluster
+                            state.set_job_id_on_pool_cluster(
+                                self.job_id, job_id_on_pool_cluster)
                         self._logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
@@ -491,7 +501,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
-    def __init__(self, cluster_name: str, backend: 'backends.Backend',
+    def __init__(self, cluster_name: Optional[str], backend: 'backends.Backend',
                  task: 'task_lib.Task', max_restarts_on_errors: int,
                  job_id: int, task_id: int, job_logger: logging.Logger,
                  pool: Optional[str]) -> None:
@@ -509,7 +519,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 recovery: bool = False) -> Optional[float]:
         job_submitted_at = super()._launch(max_retry, raise_on_failure,
                                            recovery)
-        if job_submitted_at is not None:
+        if job_submitted_at is not None and self.cluster_name is not None:
             # Only record the cloud/region if the launch is successful.
             handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)

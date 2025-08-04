@@ -9,9 +9,11 @@ The scheduler is not its own process - instead, maybe_schedule_next_jobs() can
 be called from any code running on the managed jobs controller instance to
 trigger scheduling of new jobs if possible. This function should be called
 immediately after any state change that could result in jobs newly being able to
-be scheduled.
+be scheduled. If the job is running in a pool, the scheduler will only schedule
+jobs for the same pool, because the resources limitations are per-pool (see the
+following section for more details).
 
-The scheduling logic limits the number of running jobs according to two limits:
+The scheduling logic limits #running jobs according to three limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
    once, based on the number of CPUs. (See _get_launch_parallelism.) This the
    most compute-intensive part of the job lifecycle, which is why we have an
@@ -20,6 +22,8 @@ The scheduling logic limits the number of running jobs according to two limits:
    of memory. (See _get_job_parallelism.) Since the job controller is doing very
    little once a job starts (just checking its status periodically), the most
    significant resource it consumes is memory.
+3. The number of jobs that can be running in a pool at any given time, based on
+   the number of ready workers in the pool. (See _can_start_new_job.)
 
 The state of the scheduler is entirely determined by the schedule_state column
 of all the jobs in the job_info table. This column should only be modified via

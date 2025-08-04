@@ -32,7 +32,7 @@ def upgrade():
                                              sa.Text(),
                                              server_default=None)
         db_utils.add_column_to_table_alembic('job_info',
-                                             'job_id_on_pm',
+                                             'job_id_on_pool_cluster',
                                              sa.Integer(),
                                              server_default=None)
 

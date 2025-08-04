@@ -479,7 +479,7 @@ class JobsLaunchBody(RequestBody):
     task: str
     name: Optional[str]
     pool: Optional[str] = None
-    batch_size: Optional[int] = None
+    num_jobs: Optional[int] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -502,6 +502,7 @@ class JobsCancelBody(RequestBody):
     job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
+    pool: Optional[str] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -673,25 +674,8 @@ class JobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
-class JobsCreatePoolBody(RequestBody):
-    """The request body for the jobs create pool endpoint."""
-    task: str
-    pool_name: str
-
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-        assert len(
-            dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                              'a pool.', dag)
-        kwargs['task'] = dag.tasks[0]
-        return kwargs
-
-
-class JobsUpdatePoolBody(RequestBody):
-    """The request body for the jobs update pool endpoint."""
+class JobsPoolApplyBody(RequestBody):
+    """The request body for the jobs pool apply endpoint."""
     task: str
     pool_name: str
     mode: serve.UpdateMode
@@ -708,15 +692,15 @@ class JobsUpdatePoolBody(RequestBody):
         return kwargs
 
 
-class JobsDeletePoolBody(RequestBody):
-    """The request body for the jobs delete pool endpoint."""
+class JobsPoolDownBody(RequestBody):
+    """The request body for the jobs pool down endpoint."""
     pool_names: Optional[Union[str, List[str]]]
     all: bool = False
     purge: bool = False
 
 
-class JobsQueryPoolBody(RequestBody):
-    """The request body for the jobs query pool endpoint."""
+class JobsPoolStatusBody(RequestBody):
+    """The request body for the jobs pool status endpoint."""
     pool_names: Optional[Union[str, List[str]]]
 
 

@@ -128,7 +128,7 @@ class Controllers(enum.Enum):
         in_progress_hint=(
             lambda pool:
             (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
-             f'sky jobs query-pool -v{colorama.Style.RESET_ALL}') if pool else
+             f'sky jobs pool status -v{colorama.Style.RESET_ALL}') if pool else
             (f'* To see detailed service status: {colorama.Style.BRIGHT}'
              f'sky serve status -v{colorama.Style.RESET_ALL}')),
         decline_cancel_hint=(
@@ -394,10 +394,11 @@ def check_cluster_name_not_controller(
 
 
 # Internal only:
-def download_and_stream_latest_job_log(
+def download_and_stream_job_log(
         backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        local_dir: str) -> Optional[str]:
+        local_dir: str,
+        job_ids: Optional[List[str]] = None) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
@@ -415,7 +416,7 @@ def download_and_stream_latest_job_log(
             # multi-node cluster is preempted, and we recover the managed job
             # on the existing cluster, which leads to a larger job_id. Those
             # job_ids all represent the same logical managed job.
-            job_ids=None,
+            job_ids=job_ids,
             local_dir=local_dir)
     except Exception as e:  # pylint: disable=broad-except
         # We want to avoid crashing the controller. sync_down_logs() is pretty

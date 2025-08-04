@@ -690,6 +690,9 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'workers': {
+                'type': 'integer',
+            },
             'load_balancing_policy': {
                 'type': 'string',
                 'case_insensitive_enum': list(
@@ -1142,21 +1145,7 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema(add_consolidation_mode: bool = False):
-        controller_properties = {
-            'resources': resources_schema,
-            'high_availability': {
-                'type': 'boolean',
-                'default': False,
-            },
-            'autostop': _AUTOSTOP_SCHEMA,
-        }
-        if add_consolidation_mode:
-            controller_properties['consolidation_mode'] = {
-                'type': 'boolean',
-                'default': False,
-            }
-
+    def _get_controller_schema():
         return {
             'type': 'object',
             'required': [],
@@ -1166,7 +1155,18 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'additionalProperties': False,
-                    'properties': controller_properties,
+                    'properties': {
+                        'resources': resources_schema,
+                        'high_availability': {
+                            'type': 'boolean',
+                            'default': False,
+                        },
+                        'autostop': _AUTOSTOP_SCHEMA,
+                        'consolidation_mode': {
+                            'type': 'boolean',
+                            'default': False,
+                        }
+                    },
                 },
                 'bucket': {
                     'type': 'string',
@@ -1712,8 +1712,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(add_consolidation_mode=True),
-            'serve': _get_controller_schema(add_consolidation_mode=True),
+            'jobs': _get_controller_schema(),
+            'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,

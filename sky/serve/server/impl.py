@@ -4,6 +4,7 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
+import filelock
 
 import sky
 from sky import backends
@@ -14,6 +15,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -62,14 +64,50 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
     return tls_template_vars
 
 
+def _get_service_record(
+        service_name: str, pool: bool,
+        handle: backends.CloudVmRayResourceHandle,
+        backend: backends.CloudVmRayBackend) -> Optional[Dict[str, Any]]:
+    """Get the service record."""
+    noun = 'pool' if pool else 'service'
+
+    code = serve_utils.ServeCodeGen.get_service_status([service_name],
+                                                       pool=pool)
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           f'Failed to get {noun} status',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_statuses = serve_utils.load_service_status(serve_status_payload)
+
+    assert len(service_statuses) <= 1, service_statuses
+    if not service_statuses:
+        return None
+    return service_statuses[0]
+
+
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
+    if pool and not serve_utils.is_consolidation_mode():
+        raise ValueError(
+            'Pool is only supported in consolidation mode. To fix, set '
+            '`serve.controller.consolidation_mode: true` in SkyPilot config.')
     task.validate()
-    serve_utils.validate_service_task(task)
+    serve_utils.validate_service_task(task, pool=pool)
     assert task.service is not None
     assert task.service.pool == pool, 'Inconsistent pool flag.'
     noun = 'pool' if pool else 'service'
@@ -98,13 +136,33 @@ def up(
     task = dag.tasks[0]
     assert task.service is not None
     if pool:
+        if task.run is not None:
+            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
+                           f'ignored for pool.{colorama.Style.RESET_ALL}')
         # Use dummy run script for cluster pool.
-        task.run = 'echo "setup done"'
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     with rich_utils.safe_status(
             ux_utils.spinner_message(f'Initializing {noun}')):
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, task_type='serve')
+        # Handle file mounts using two-hop approach when cloud storage
+        # unavailable
+        storage_clouds = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
+        force_disable_cloud_bucket = skypilot_config.get_nested(
+            ('serve', 'force_disable_cloud_bucket'), False)
+        if storage_clouds and not force_disable_cloud_bucket:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task, task_type='serve')
+            local_to_controller_file_mounts = {}
+        else:
+            # Fall back to two-hop file_mount uploading when no cloud storage
+            if task.storage_mounts:
+                raise exceptions.NotSupportedError(
+                    'Cloud-based file_mounts are specified, but no cloud '
+                    'storage is available. Please specify local '
+                    'file_mounts only.')
+            local_to_controller_file_mounts = (
+                controller_utils.translate_local_file_mounts_to_two_hop(task))
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -138,6 +196,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'consolidation_mode_job_id': controller_job_id,
@@ -304,16 +363,18 @@ def up(
                 f'\n📋 Useful Commands'
                 f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
-                f'--batch-size 10 <run-command>{ux_utils.RESET_BOLD}'
+                f'<run-command>{ux_utils.RESET_BOLD}'
+                f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs:\t'
+                f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
+                f'--num-jobs 10 <run-command>{ux_utils.RESET_BOLD}'
                 f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
-                f'{ux_utils.BOLD}sky jobs query-pool {service_name}'
+                f'{ux_utils.BOLD}sky jobs pool status {service_name}'
                 f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}To delete the pool:\t\t'
-                f'{ux_utils.BOLD}sky jobs delete-pool {service_name}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
+                f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
-                '\n\n' +
-                ux_utils.finishing_message('Pool is initializing and '
-                                           'workers will be ready shortly.'))
+                '\n\n' + ux_utils.finishing_message('Successfully created pool '
+                                                    f'{service_name!r}.'))
         else:
             logger.info(
                 f'{fore.CYAN}Service name: '
@@ -358,7 +419,7 @@ def update(
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
     task.validate()
-    serve_utils.validate_service_task(task)
+    serve_utils.validate_service_task(task, pool=pool)
 
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
@@ -368,8 +429,11 @@ def update(
     dag, _ = admin_policy_utils.apply(task)
     task = dag.tasks[0]
     if pool:
+        if task.run is not None:
+            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
+                           f'ignored for pool.{colorama.Style.RESET_ALL}')
         # Use dummy run script for cluster pool.
-        task.run = 'echo "setup done"'
+        task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     assert task.service is not None
     if not pool and task.service.tls_credential is not None:
@@ -392,35 +456,15 @@ def update(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.get_service_status([service_name],
-                                                       pool=pool)
-    returncode, serve_status_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code, f'Failed to get {noun} status '
-                                           f'when updating {noun}',
-                                           stderr,
-                                           stream_logs=True)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+    service_record = _get_service_record(service_name, pool, handle, backend)
 
-    service_statuses = serve_utils.load_service_status(serve_status_payload)
-    if not service_statuses:
-        cmd = 'sky jobs create-pool' if pool else 'sky serve up'
+    if service_record is None:
+        cmd = 'sky jobs pool up' if pool else 'sky serve up'
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find {noun} {service_name!r}.'
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
 
-    if len(service_statuses) > 1:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Multiple {noun}s found for {service_name!r}. ')
-    service_record = service_statuses[0]
     prompt = None
     if (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED
        ):
@@ -475,7 +519,6 @@ def update(
             raise ValueError(f'Failed to parse version: {version_string}; '
                              f'Returncode: {returncode}') from e
 
-    print(f'New version: {current_version}')
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:
@@ -484,9 +527,10 @@ def update(
         remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
             service_name, current_version, expand_user=False)
 
-        backend.sync_file_mounts(handle,
-                                 {remote_task_yaml_path: service_file.name},
-                                 storage_mounts=None)
+        with sky_logging.silent():
+            backend.sync_file_mounts(handle,
+                                     {remote_task_yaml_path: service_file.name},
+                                     storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
                                                        current_version,
@@ -506,11 +550,40 @@ def update(
         except exceptions.CommandError as e:
             raise RuntimeError(e.error_msg) from e
 
-    cmd = 'sky jobs query-pool' if pool else 'sky serve status'
-    print(f'{colorama.Fore.GREEN}{capnoun} {service_name!r} update scheduled.'
-          f'{colorama.Style.RESET_ALL}\n'
-          f'Please use {ux_utils.BOLD}{cmd} {service_name} '
-          f'{ux_utils.RESET_BOLD}to check the latest status.')
+    cmd = 'sky jobs pool status' if pool else 'sky serve status'
+    logger.info(
+        f'{colorama.Fore.GREEN}{capnoun} {service_name!r} update scheduled.'
+        f'{colorama.Style.RESET_ALL}\n'
+        f'Please use {ux_utils.BOLD}{cmd} {service_name} '
+        f'{ux_utils.RESET_BOLD}to check the latest status.')
+
+    logger.info(
+        ux_utils.finishing_message(
+            f'Successfully updated {noun} {service_name!r} '
+            f'to version {current_version}.'))
+
+
+def apply(
+    task: 'sky.Task',
+    service_name: str,
+    mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE,
+    pool: bool = False,
+) -> None:
+    """Applies the config to the service or pool."""
+    with filelock.FileLock(serve_utils.get_service_filelock_path(service_name)):
+        try:
+            handle = backend_utils.is_controller_accessible(
+                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+                stopped_message='')
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            service_record = _get_service_record(service_name, pool, handle,
+                                                 backend)
+            if service_record is not None:
+                return update(task, service_name, mode, pool)
+        except exceptions.ClusterNotUpError:
+            pass
+        up(task, service_name, pool)
 
 
 def down(
@@ -556,7 +629,7 @@ def down(
 
     try:
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to terminate service',
+                                           f'Failed to terminate {noun}',
                                            stdout)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
@@ -584,7 +657,8 @@ def status(
     controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
         controller=controller_type,
-        stopped_message=controller_type.value.default_hint_if_non_existent)
+        stopped_message=controller_type.value.default_hint_if_non_existent.
+        replace('service', noun))
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)

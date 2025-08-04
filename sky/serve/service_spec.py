@@ -47,9 +47,14 @@ class SkyServiceSpec:
     ) -> None:
         if pool:
             for unsupported_field in [
+                    'max_replicas',
+                    'num_overprovision',
                     'target_qps_per_replica',
                     'upscale_delay_seconds',
                     'downscale_delay_seconds',
+                    'base_ondemand_fallback_replicas',
+                    'dynamic_ondemand_fallback',
+                    'spot_placer',
                     'load_balancing_policy',
                     'ports',
                     'post_data',
@@ -179,8 +184,29 @@ class SkyServiceSpec:
                     raise ValueError('Port must be between 1 and 65535.')
         service_config['ports'] = str(ports) if ports is not None else None
 
+        pool_config = config.get('pool', None)
+        if pool_config is not None:
+            service_config['pool'] = pool_config
+
         policy_section = config.get('replica_policy', None)
+        if policy_section is not None and pool_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify `replica_policy` for cluster '
+                                 'pool. Only `workers: <num>` is supported '
+                                 'for cluster pool now.')
+
         simplified_policy_section = config.get('replicas', None)
+        workers_config = config.get('workers', None)
+        if simplified_policy_section is not None and workers_config is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both `replicas` and `workers`.'
+                                 ' Please use one of them.')
+        if simplified_policy_section is not None and pool_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify `replicas` for cluster pool. '
+                                 'Please use `workers` instead.')
+        if simplified_policy_section is None:
+            simplified_policy_section = workers_config
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
@@ -214,10 +240,6 @@ class SkyServiceSpec:
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
-
-        pool_config = config.get('pool', None)
-        if pool_config is not None:
-            service_config['pool'] = pool_config
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
@@ -265,6 +287,13 @@ class SkyServiceSpec:
                         config[section] = dict()
                     config[section][key] = value
 
+        add_if_not_none('pool', None, self._pool)
+
+        if self.pool:
+            # For pool, currently only `workers: <num>` is supported.
+            add_if_not_none('workers', None, self.min_replicas)
+            return config
+
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
@@ -293,9 +322,6 @@ class SkyServiceSpec:
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
             add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
-        add_if_not_none('pool', None, self.pool)
-        if self.pool:
-            config.pop('readiness_probe', None)
         return config
 
     def probe_str(self):
@@ -335,6 +361,9 @@ class SkyServiceSpec:
         return ' '.join(policy_strs)
 
     def autoscaling_policy_str(self):
+        if self.pool:
+            # We only support fixed-size pool for now.
+            return f'Fixed-size ({self.min_replicas} workers)'
         # TODO(MaoZiming): Update policy_str
         noun = 'worker' if self.pool else 'replica'
         min_plural = '' if self.min_replicas == 1 else 's'
@@ -364,8 +393,7 @@ class SkyServiceSpec:
     def __repr__(self) -> str:
         if self.pool:
             return textwrap.dedent(f"""\
-                Worker autoscaling policy:  {self.autoscaling_policy_str()}
-                Spot Policy:                {self.spot_policy_str()}
+                Worker policy:  {self.autoscaling_policy_str()}
             """)
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
@@ -458,4 +486,7 @@ class SkyServiceSpec:
 
     @property
     def pool(self) -> bool:
+        # This can happen for backward compatibility.
+        if not hasattr(self, '_pool'):
+            return False
         return bool(self._pool)

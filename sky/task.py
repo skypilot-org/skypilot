@@ -736,12 +736,16 @@ class Task:
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
+        pool = config.pop('pool', None)
+        if service is not None and pool is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot set both service and pool in the same task.')
+
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
             task.set_service(service)
-
-        pool = config.pop('pool', None)
-        if pool is not None:
+        elif pool is not None:
             pool['pool'] = True
             pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
             task.set_service(pool)

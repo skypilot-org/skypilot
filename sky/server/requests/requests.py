@@ -376,13 +376,7 @@ def sky_serve_status_refresh_event():
     from sky.serve import serve_utils
     if not serve_utils.is_consolidation_mode():
         return
-    # We run the recovery logic before starting the event loop as those two are
-    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    # from sky.utils import controller_utils
-    # if controller_utils.high_availability_specified(
-    #         controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name):
-    #     managed_job_utils.ha_recovery_for_consolidation_mode()
-    # After recovery, we start the event loop.
+    # TODO(tian): Add HA recovery logic.
     from sky.skylet import events
     event = events.ServiceUpdateEvent()
     while True:

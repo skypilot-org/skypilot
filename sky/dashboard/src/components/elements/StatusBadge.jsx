@@ -38,6 +38,7 @@ export const getStatusStyle = (status) => {
     case 'RECOVERING':
       return 'bg-orange-50 text-orange-700';
     case 'SUBMITTED':
+    case 'READY':
       return 'bg-indigo-50 text-indigo-700';
     case 'STARTING':
       return 'bg-cyan-50 text-cyan-700';
@@ -51,10 +52,6 @@ export const getStatusStyle = (status) => {
       return 'bg-red-50 text-red-700';
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
-
-    //Serve specific statuses
-    case 'READY':
-      return 'bg-green-50 text-green-700';
 
     default:
       return 'bg-gray-100 text-gray-800';
