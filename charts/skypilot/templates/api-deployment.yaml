@@ -116,6 +116,10 @@ spec:
             fieldRef:
               fieldPath: metadata.uid
         {{- end }}
+        {{- if .Values.apiService.metrics.enabled }}
+        - name: SKY_API_SERVER_METRICS_ENABLED
+          value: "true"
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:

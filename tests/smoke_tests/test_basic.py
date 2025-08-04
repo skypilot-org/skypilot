@@ -1198,7 +1198,7 @@ def test_cli_output(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Testing Autodowning ----------
+# ---------- Testing Autostopping ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
@@ -1207,7 +1207,7 @@ def test_cli_output(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    # See test_autostop() for explanation of autostop_timeout.
+    # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
     test = smoke_tests_utils.Test(
         'autostop_with_unhealthy_ray_cluster',

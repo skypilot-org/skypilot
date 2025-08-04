@@ -191,7 +191,12 @@ def set_sky_logging_levels(level: int):
         for logger_name in logging.Logger.manager.loggerDict:
             if logger_name.startswith('sky'):
                 logger = logging.getLogger(logger_name)
-                logger.setLevel(previous_levels[logger_name])
+                try:
+                    logger.setLevel(previous_levels[logger_name])
+                except KeyError:
+                    # New loggers maybe initialized after the context manager,
+                    # no need to restore the level.
+                    pass
         if level == logging.DEBUG and not previous_show_debug_info:
             os.environ.pop(env_options.Options.SHOW_DEBUG_INFO.env_key)
 

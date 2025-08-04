@@ -33,6 +33,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
@@ -312,6 +313,7 @@ class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -321,6 +323,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 

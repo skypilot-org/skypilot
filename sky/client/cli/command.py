@@ -62,8 +62,8 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
-from sky.server import versions
 from sky.server.requests import requests
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -1012,11 +1012,11 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
-          'are found in the job queue. '
+          'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
+@flags.wait_for_option('idle-minutes-to-autostop')
 @click.option(
     '--down',
     default=False,
@@ -1102,6 +1102,7 @@ def launch(
     network_tier: Optional[str],
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
@@ -1196,6 +1197,8 @@ def launch(
         cluster_name=cluster,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
         down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
@@ -1828,9 +1831,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
-    remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is not None and remote_api_version < 12:
-        show_pools = False
 
     query_clusters: Optional[List[str]] = None if not clusters else clusters
     refresh_mode = common.StatusRefreshMode.NONE
@@ -1882,7 +1882,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return serve_lib.status(service_names=None)
 
     def submit_pools() -> Optional[str]:
-        return managed_jobs.pool_status(pool_names=None)
+        try:
+            return managed_jobs.pool_status(pool_names=None)
+        except exceptions.APINotSupportedError as e:
+            logger.debug(f'Pools are not supported in the remote server: {e}')
+            return None
 
     def submit_workspace() -> Optional[str]:
         try:
@@ -2005,7 +2009,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 controller_utils.Controllers.JOBS_CONTROLLER.value.
                 in_progress_hint(False).format(job_info=job_info))
 
-    if show_pools:
+    if show_pools and pool_status_request_id:
         num_pools = None
         if managed_jobs_query_interrupted:
             msg = 'KeyboardInterrupt'
@@ -2549,6 +2553,7 @@ def stop(
               required=False,
               help=('Set the idle minutes before autostopping the cluster. '
                     'See the doc above for detailed semantics.'))
+@flags.wait_for_option('idle-minutes')
 @click.option(
     '--cancel',
     default=False,
@@ -2571,6 +2576,7 @@ def autostop(
     all: bool,  # pylint: disable=redefined-builtin
     all_users: bool,
     idle_minutes: Optional[int],
+    wait_for: Optional[str],
     cancel: bool,  # pylint: disable=redefined-outer-name
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
@@ -2580,8 +2586,7 @@ def autostop(
     """Schedule an autostop or autodown for cluster(s).
 
     Autostop/autodown will automatically stop or teardown a cluster when it
-    becomes idle for a specified duration.  Idleness means there are no
-    in-progress (pending/running) jobs in a cluster's job queue.
+    becomes idle for a specified duration.
 
     CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
@@ -2593,6 +2598,11 @@ def autostop(
     - The cluster has restarted.
 
     - An autostop idle time is set.
+
+    - An SSH session is active (To disable this, set ``--wait-for jobs``).
+
+    To disable the idleness timer completely and set a hard time limit, set
+    ``--wait-for none``.
 
     Example 1: say a cluster with autostop set to 2 hours has been idle for 1
     hour, then autostop is reset to 30 minutes. The cluster will not be
@@ -2614,6 +2624,9 @@ def autostop(
         # Cancel autostop for a specific cluster.
         sky autostop cluster_name --cancel
         \b
+        # Autostop this cluster after 60 minutes, regardless of activity.
+        sky autostop cluster_name -i 60 --wait-for none
+        \b
         # Autodown this cluster after 60 minutes of idleness.
         sky autostop cluster_name -i 60 --down
     """
@@ -2625,13 +2638,16 @@ def autostop(
         idle_minutes = -1
     elif idle_minutes is None:
         idle_minutes = 5
-    _down_or_stop_clusters(clusters,
-                           apply_to_all=all,
-                           all_users=all_users,
-                           down=down,
-                           no_confirm=yes,
-                           idle_minutes_to_autostop=idle_minutes,
-                           async_call=async_call)
+    _down_or_stop_clusters(
+        clusters,
+        apply_to_all=all,
+        all_users=all_users,
+        down=down,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes,
+        wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
+        if wait_for is not None else None,
+        async_call=async_call)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2650,11 +2666,11 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
-          'are found in the job queue. '
+          'queue. Idleness gets reset depending on the ``--wait-for`` flag. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
+@flags.wait_for_option('idle-minutes-to-autostop')
 @click.option(
     '--down',
     default=False,
@@ -2693,6 +2709,7 @@ def start(
     all: bool,
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
+    wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     force: bool,
@@ -2852,6 +2869,8 @@ def start(
     request_ids = subprocess_utils.run_in_parallel(
         lambda name: sdk.start(name,
                                idle_minutes_to_autostop,
+                               autostop_lib.AutostopWaitFor.from_str(wait_for)
+                               if wait_for is not None else None,
                                retry_until_up,
                                down=down,
                                force=force), to_start)
@@ -3081,6 +3100,7 @@ def _down_or_stop_clusters(
         no_confirm: bool = True,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
         async_call: bool = False) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
@@ -3098,6 +3118,7 @@ def _down_or_stop_clusters(
         purge: If True, forcefully remove the clusters from the cluster table.
         idle_minutes_to_autostop: The number of minutes to wait before
             automatically stopping the cluster.
+        wait_for: Determines the condition for resetting the idleness timer.
         async_call: If True, send the request asynchronously.
     """
     if down:
@@ -3241,7 +3262,8 @@ def _down_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                request_id = sdk.autostop(name, idle_minutes_to_autostop, down)
+                request_id = sdk.autostop(name, idle_minutes_to_autostop,
+                                          wait_for, down)
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,

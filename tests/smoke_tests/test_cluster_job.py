@@ -1218,7 +1218,7 @@ def test_azure_start_stop():
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
-def test_autostop(generic_cloud: str):
+def test_autostop_wait_for_jobs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
     # the VM is stopped.
@@ -1227,10 +1227,10 @@ def test_autostop(generic_cloud: str):
     # a stopped Azure cluster can take 7m. So we set the total timeout to 70m.
     total_timeout_minutes = 70 if generic_cloud == 'azure' else 20
     test = smoke_tests_utils.Test(
-        'autostop',
+        'autostop_wait_for_jobs',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} -i 1',
+            f'sky autostop -y {name} -i 1 --wait-for jobs',
 
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m"',
@@ -1254,9 +1254,9 @@ def test_autostop(generic_cloud: str):
             f'sky logs {name} 2 --status',
 
             # Test restarting the idleness timer via reset:
-            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            f'sky autostop -y {name} -i 1 --wait-for jobs',  # Idleness starts counting.
             'sleep 40',  # Almost reached the threshold.
-            f'sky autostop -y {name} -i 1',  # Should restart the timer.
+            f'sky autostop -y {name} -i 1 --wait-for jobs',  # Should restart the timer.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -1267,7 +1267,7 @@ def test_autostop(generic_cloud: str):
             # Test restarting the idleness timer via exec:
             f'sky start -y {name}',
             f'sky status | grep {name} | grep -E "UP\s+-"',
-            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            f'sky autostop -y {name} -i 1 --wait-for jobs',  # Idleness starts counting.
             'sleep 45',  # Almost reached the threshold.
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
@@ -1278,6 +1278,90 @@ def test_autostop(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
+def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
+    """Test that autostop is prevented when SSH sessions are active."""
+    name = smoke_tests_utils.get_cluster_name()
+    # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    test = smoke_tests_utils.Test(
+        'autostop_wait_for_jobs_and_ssh',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # --wait-for jobs_and_ssh is the default, so we don't need to specify it here.
+            f'sky autostop -y {name} -i 1',
+
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m"',
+
+            # Ensure the job succeeded.
+            f'sky queue {name} | grep SUCCEEDED',
+
+            # Start an interactive SSH session to keep the cluster active.
+            # -tt forces a pseudo-terminal to be allocated.
+            f'ssh -tt {name} "sleep 180"',
+
+            # Ensure the cluster is still UP (autostop should be prevented by active SSH session).
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
+
+            # Now the cluster should autostop since no SSH sessions are active
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and autostop yet
+def test_autostop_wait_for_none(generic_cloud: str):
+    """Test that autostop is prevented when hard stop is set."""
+    name = smoke_tests_utils.get_cluster_name()
+    # See test_autostop_wait_for_jobs() for explanation of autostop_timeout.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    test = smoke_tests_utils.Test(
+        'autostop_with_hard_stop',
+        [
+            # Launch a cluster with a long running job (1h).
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} sleep 3600 --async',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=180),
+
+            # Set wait mode to none, so the cluster doesn't wait for the job to finish.
+            f'sky autostop -y {name} -i 1 --wait-for none',
+            f'sky status | grep {name} | grep "1m"',
+
+            # The cluster should autostop.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1656,17 +1740,21 @@ def test_gcp_disk_tier(instance_types: List[str]):
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-central1'
-        instance_type_options = ['']
+        instance_type_options = [f'--instance-type {instance_type}']
         if disk_tier == resources_utils.DiskTier.BEST:
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             # If using default instance type, it will only enable the high disk tier.
+            # Test both scenarios: n2-standard-2 maps to HIGH, n2-standard-64 maps to ULTRA
             disk_types = [
-                GCP._get_disk_type(instance_type,
+                GCP._get_disk_type(instance_type_low,
                                    resources_utils.DiskTier.HIGH),
                 GCP._get_disk_type(instance_type,
                                    resources_utils.DiskTier.ULTRA),
             ]
-            instance_type_options = ['', f'--instance-type {instance_type}']
+            instance_type_options = [
+                f'--instance-type {instance_type_low}',
+                f'--instance-type {instance_type}'
+            ]
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
             test = smoke_tests_utils.Test(
