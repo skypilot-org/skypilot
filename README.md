@@ -25,7 +25,7 @@
 </p>
 
 <h3 align="center">
-    Run AI on Any Infra — Unified, Faster, Cheaper
+    Simplify and Scale Any AI Infrastructure
 </h3>
 
 <div align="center">
@@ -62,6 +62,12 @@ SkyPilot **is easy to use for AI users**:
 - Quickly spin up compute on your own infra
 - Environment and job as code — simple and portable
 - Easy job management: queue, run, and auto-recover many jobs
+
+SkyPilot **makes Kubernetes easy for AI teams**:
+
+- Slurm-like ease of use, cloud-native robustness
+- Reimagined interactive dev on K8s: SSH, sync code, or connect IDE
+- Turbocharge your clusters: gang scheduling, multi-cluster, and scaling
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 - One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
@@ -112,7 +118,7 @@ You can find our documentation [here](https://docs.skypilot.co/).
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands.
 
-Once written in this [**unified interface**](https://docs.skypilot.co/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud.  This avoids vendor lock-in, and allows easily moving jobs to a different provider.
+Once written in this [**unified interface**](https://docs.skypilot.co/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available infra (Kubernetes, cloud, etc.).  This avoids vendor lock-in, and allows easily moving jobs to a different provider.
 
 Paste the following into a file `my_task.yaml`:
 
@@ -150,12 +156,11 @@ sky launch my_task.yaml
 ```
 
 SkyPilot then performs the heavy-lifting for you, including:
-1. Find the lowest priced VM instance type across different clouds
-2. Provision the VM, with auto-failover if the cloud returned capacity errors
-3. Sync the local `workdir` to the VM
-4. Run the task's `setup` commands to prepare the VM for running the task
-5. Run the task's `run` commands
-
+1. Find the cheapest & available infra across your clusters or clouds
+2. Provision the GPUs (pods or VMs), with auto-failover if the infra returned capacity errors
+3. Sync your local `workdir` to the provisioned cluster
+4. Auto-install dependencies by running the task's `setup` commands
+5. Run the task's `run` commands, and stream logs
 
 See [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
@@ -167,13 +172,13 @@ Latest featured examples:
 
 | Task | Examples |
 |----------|----------|
-| Training | [PyTorch](https://docs.skypilot.co/en/latest/getting-started/tutorial.html), [DeepSpeed](https://docs.skypilot.co/en/latest/examples/training/deepspeed.html), [Finetune Llama 3](https://docs.skypilot.co/en/latest/examples/training/llama-3_1-finetuning.html), [NeMo](https://docs.skypilot.co/en/latest/examples/training/nemo.html), [Ray](https://docs.skypilot.co/en/latest/examples/training/ray.html), [Unsloth](https://docs.skypilot.co/en/latest/examples/training/unsloth.html), [Jax/TPU](https://docs.skypilot.co/en/latest/examples/training/tpu.html) |
+| Training | [Verl](https://docs.skypilot.co/en/latest/examples/training/verl.html), [Finetune Llama 4](https://docs.skypilot.co/en/latest/examples/training/llama-4-finetuning.html), [PyTorch](https://docs.skypilot.co/en/latest/getting-started/tutorial.html), [DeepSpeed](https://docs.skypilot.co/en/latest/examples/training/deepspeed.html), [NeMo](https://docs.skypilot.co/en/latest/examples/training/nemo.html), [Ray](https://docs.skypilot.co/en/latest/examples/training/ray.html), [Unsloth](https://docs.skypilot.co/en/latest/examples/training/unsloth.html), [Jax/TPU](https://docs.skypilot.co/en/latest/examples/training/tpu.html) |
 | Serving | [vLLM](https://docs.skypilot.co/en/latest/examples/serving/vllm.html), [SGLang](https://docs.skypilot.co/en/latest/examples/serving/sglang.html), [Ollama](https://docs.skypilot.co/en/latest/examples/serving/ollama.html) |
 | Models | [DeepSeek-R1](https://docs.skypilot.co/en/latest/examples/models/deepseek-r1.html), [Llama 3](https://docs.skypilot.co/en/latest/examples/models/llama-3.html), [CodeLlama](https://docs.skypilot.co/en/latest/examples/models/codellama.html), [Qwen](https://docs.skypilot.co/en/latest/examples/models/qwen.html), [Mixtral](https://docs.skypilot.co/en/latest/examples/models/mixtral.html) |
 | AI apps | [RAG](https://docs.skypilot.co/en/latest/examples/applications/rag.html), [vector databases](https://docs.skypilot.co/en/latest/examples/applications/vector_database.html) (ChromaDB, CLIP) |
 | Common frameworks | [Airflow](https://docs.skypilot.co/en/latest/examples/frameworks/airflow.html), [Jupyter](https://docs.skypilot.co/en/latest/examples/frameworks/jupyter.html) |
 
-Source files and more examples can be found in [`llm/`](https://github.com/skypilot-org/skypilot/tree/master/llm) and [`examples/`](https://github.com/skypilot-org/skypilot/tree/master/examples).
+Source files can be found in [`llm/`](https://github.com/skypilot-org/skypilot/tree/master/llm) and [`examples/`](https://github.com/skypilot-org/skypilot/tree/master/examples).
 
 ## More information
 To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overview.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
