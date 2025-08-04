@@ -16,7 +16,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
-from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -97,19 +96,6 @@ def _get_service_record(
     return service_statuses[0]
 
 
-def _is_consolidation_mode(pool: bool) -> bool:
-    """Check if the consolidation mode is enabled.
-
-    Pool consolidation mode is configured in the jobs config as pool is a
-    concept of managed jobs. A setting of `jobs.controller.consolidation_mode`
-    should affect both managed jobs and pool.
-    """
-    if pool:
-        return managed_job_utils.is_consolidation_mode()
-    else:
-        return serve_utils.is_consolidation_mode()
-
-
 def _get_controller_type(pool: bool) -> controller_utils.Controllers:
     """Get the controller type."""
     if pool:
@@ -124,7 +110,7 @@ def up(
     pool: bool = False,
 ) -> Tuple[str, str]:
     """Spins up a service or a pool."""
-    if pool and not _is_consolidation_mode(pool):
+    if pool and not serve_utils.is_consolidation_mode(pool):
         raise ValueError(
             'Pool is only supported in consolidation mode. To fix, set '
             '`jobs.controller.consolidation_mode: true` in SkyPilot config.')
@@ -209,7 +195,7 @@ def up(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
         controller_job_id = None
-        if _is_consolidation_mode(pool):
+        if serve_utils.is_consolidation_mode(pool):
             controller_job_id = 0
 
         vars_to_fill = {
@@ -260,7 +246,7 @@ def up(
         # for the first time; otherwise it is a name conflict.
         # Since the controller may be shared among multiple users, launch the
         # controller with the API server's user hash.
-        if not _is_consolidation_mode(pool):
+        if not serve_utils.is_consolidation_mode(pool):
             print(f'{colorama.Fore.YELLOW}Launching controller for '
                   f'{service_name!r}...{colorama.Style.RESET_ALL}')
             with common.with_server_user():
@@ -326,7 +312,7 @@ def up(
                 returncode, code, f'Failed to wait for {noun} initialization',
                 lb_port_payload)
         except exceptions.CommandError:
-            if _is_consolidation_mode(pool):
+            if serve_utils.is_consolidation_mode(pool):
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'Failed to wait for {noun} initialization. '
@@ -361,7 +347,7 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            if not _is_consolidation_mode(pool):
+            if not serve_utils.is_consolidation_mode(pool):
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
@@ -714,7 +700,7 @@ def status(
         if service_record['load_balancer_port'] is not None:
             try:
                 lb_port = service_record['load_balancer_port']
-                if not _is_consolidation_mode(pool):
+                if not serve_utils.is_consolidation_mode(pool):
                     endpoint = backend_utils.get_endpoints(
                         cluster=common.SKY_SERVE_CONTROLLER_NAME,
                         port=lb_port).get(lb_port, None)

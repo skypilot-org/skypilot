@@ -258,22 +258,14 @@ def get_service_filelock_path(pool: str) -> str:
 
 
 @annotations.lru_cache(scope='request', maxsize=1)
-def is_consolidation_mode() -> bool:
+def is_consolidation_mode(pool: bool = False) -> bool:
+    # Use jobs config for pool consolidation mode.
+    controller_type = 'jobs' if pool else 'serve'
     consolidation_mode = skypilot_config.get_nested(
-        ('serve', 'controller', 'consolidation_mode'), default_value=False)
-    # _check_consolidation_mode_consistency(consolidation_mode)
+        (controller_type, 'controller', 'consolidation_mode'),
+        default_value=False)
+    # _check_consolidation_mode_consistency(consolidation_mode, pool)
     return consolidation_mode
-
-
-@annotations.lru_cache(scope='request', maxsize=1)
-def _is_consolidation_mode_pool(pool: bool) -> bool:
-    """Check if the consolidation mode is enabled for pool."""
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs import utils as managed_job_utils
-    if pool:
-        return managed_job_utils.is_consolidation_mode()
-    else:
-        return is_consolidation_mode()
 
 
 def validate_service_task(task: 'sky.Task', pool: bool) -> None:
@@ -471,10 +463,9 @@ def set_service_status_and_active_versions_from_replica(
         active_versions=active_versions)
 
 
-def update_service_status() -> None:
+def update_service_status(pool: bool) -> None:
     # Disable this refresh for pool and services in consolidation mode.
-    if _is_consolidation_mode_pool(pool=True) or _is_consolidation_mode_pool(
-            pool=False):
+    if is_consolidation_mode(pool=pool):
         # TODO(tian): PID-based tracking.
         return
     services = serve_state.get_services()
@@ -876,7 +867,7 @@ def wait_service_registration(service_name: str, job_id: int,
     setup_completed = False
     while True:
         # TODO(tian): PID-based tracking.
-        if not _is_consolidation_mode_pool(pool):
+        if not is_consolidation_mode(pool):
             job_status = job_lib.get_status(job_id)
             if job_status is None or job_status < job_lib.JobStatus.RUNNING:
                 # Wait for the controller process to finish setting up. It
@@ -902,7 +893,7 @@ def wait_service_registration(service_name: str, job_id: int,
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
             # TODO(tian): PID-based tracking.
-            if (not _is_consolidation_mode_pool(pool) and
+            if (not is_consolidation_mode(pool) and
                     job_id != record['controller_job_id']):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
