@@ -16,7 +16,7 @@ from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 _INDENT_PREFIX = '    '
 
@@ -62,6 +62,9 @@ class Nebius(clouds.Cloud):
             ('Custom network tier is currently not supported on Nebius.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers are not supported on Nebius.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported on '
+             f'{_REPR}.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
     # 63 - 8 - 5 = 50 characters since
@@ -172,16 +175,19 @@ class Nebius(clouds.Cloud):
         return isinstance(other, Nebius)
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for Nebius."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='nebius')
 
     @classmethod
@@ -216,21 +222,20 @@ class Nebius(clouds.Cloud):
             acc_dict)
         platform, _ = resources.instance_type.split('_')
 
-        if platform in ('cpu-d3', 'cpu-e2'):
-            image_family = 'ubuntu22.04-driverless'
-        elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
-            image_family = 'ubuntu22.04-cuda12'
+        # Selecting image_family by platform
+        # https://docs.nebius.com/compute/storage/boot-disk-images
+        if platform.startswith('cpu'):
+            image_family = 'ubuntu24.04-driverless'
+        elif platform.startswith('gpu'):
+            image_family = 'ubuntu24.04-cuda12'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',
-            region=None,
-            keys=(
-                region.name,
-                'filesystems',
-            ),
+            region=region.name,
+            keys=('filesystems',),
             default_value=[])
         resources_vars_fs = []
         for i, fs in enumerate(config_fs):
@@ -315,7 +320,9 @@ class Nebius(clouds.Cloud):
             default_instance_type = Nebius.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -351,7 +358,7 @@ class Nebius(clouds.Cloud):
             f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # pylint: disable=line-too-long
             f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
-        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
                       f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # pylint: disable=line-too-long

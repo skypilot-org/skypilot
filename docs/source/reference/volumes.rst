@@ -3,13 +3,22 @@
 Volumes
 =======
 
-Volumes offer a high-performance alternative to :ref:`cloud buckets <sky-storage>` for storing data. Unlike buckets, volumes are limited to a single region and cannot be accessed across regions and clouds. 
+Volumes offer a high-performance alternative to :ref:`cloud buckets <sky-storage>` for storing data. Unlike buckets, volumes are limited to a single region and cannot be accessed across regions and clouds.
+
+Benefits of using volumes:
+
+* **Performance**: Volumes are generally faster than object stores, and SkyPilot lets you choose from different storage classes based on your performance requirements.
+* **Data persistence**: Volumes can persist data independently of task life cycles, making it easy to share data between different tasks (e.g., datasets, caches) or preserve results.
+* **Size control**: You can set volume size limits to manage costs and limit storage usage.
 
 SkyPilot supports creating and managing volumes directly through the ``sky`` CLI and the web dashboard.
 
 Supported volume types:
 
 - Kubernetes: `Persistent Volume Claims (PVCs) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
+
+  - Tested storage backends: AWS EBS, GCP Persistent Disk, Nebius network SSD, JuiceFS, Nebius shared file system, GCP Filestore
+
 - GCP: `Persistent Disks <https://cloud.google.com/compute/docs/disks/persistent-disks>`_ and `Local SSDs <https://cloud.google.com/compute/docs/disks/local-ssd>`_
 
 
@@ -18,7 +27,9 @@ Supported volume types:
 Volumes on Kubernetes
 ---------------------
 
-SkyPilot supports creating and managing PVC (Persistent Volume Claim) volumes on Kubernetes clusters through three commands:
+In Kubernetes clusters, PVCs (Persistent Volume Claims) request and bind to PV (Persistent Volume) resources. These persistent volumes can be backed by various storage backends, including **block storage** solutions (AWS EBS, GCP Persistent Disk) and **distributed file systems** (JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore), etc.
+
+SkyPilot supports creating and managing PVC volumes in Kubernetes clusters through three commands:
 
 - ``sky volumes apply``: Create a new volume
 - ``sky volumes ls``: List all volumes
@@ -103,6 +114,127 @@ You can also check the volumes in the SkyPilot dashboard.
     :alt: SkyPilot volumes
     :align: center
     :width: 80%
+
+Filesystem volume examples
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This section demonstrates how to configure and use distributed filesystems as SkyPilot volumes. We'll cover options like `JuiceFS <https://juicefs.com/docs/community/introduction/>`_ (a cloud-native distributed filesystem) and `Nebius shared file system <https://docs.nebius.com/compute/storage/types#filesystems>`_ (a high-performance shared storage solution).
+
+
+.. tab-set::
+
+    .. tab-item:: JuiceFS
+        :sync: juicefs-tab
+
+        To use JuiceFS as a SkyPilot volume:
+
+        1. **Install the JuiceFS CSI driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
+
+        2. **Verify the driver installation** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
+
+        .. code-block:: console
+
+          $ kubectl get storageclass
+          NAME           PROVISIONER         RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+          juicefs-sc     csi.juicefs.com     Retain          Immediate           false                  10m
+
+        .. note::
+           If the ``juicefs-sc`` storage class is not available, refer to the `JuiceFS storage class creation guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ to set it up.
+
+        3. **Create a SkyPilot volume for JuiceFS** with a volume YAML:
+
+        .. code-block:: yaml
+
+          # juicefs-volume.yaml
+          name: juicefs-pvc
+          type: k8s-pvc
+          infra: k8s
+          size: 100Gi
+          config:
+            storage_class_name: juicefs-sc
+            access_mode: ReadWriteMany
+
+        .. code-block:: console
+
+          $ sky volumes apply juicefs-volume.yaml
+
+        4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
+
+        .. code-block:: yaml
+
+          # task.yaml
+          num_nodes: 2
+
+          volumes:
+            # Mount the JuiceFS volume to /mnt/data across all nodes
+            /mnt/data: juicefs-pvc
+
+          run: |
+            # Verify the volume is mounted and accessible
+            df -h /mnt/data
+            ls -la /mnt/data
+
+        .. code-block:: console
+
+          # Launch the cluster with the JuiceFS volume
+          $ sky launch -c juicefs-cluster task.yaml
+
+    .. tab-item:: Nebius shared file system
+        :sync: nebius-tab
+
+        To use Nebius shared file system as a SkyPilot volume:
+
+        1. **Set up the Nebius filesystem infrastructure** by following the official documentation:
+
+           - `Create a shared filesystem <https://docs.nebius.com/kubernetes/storage/filesystem-over-csi#create-filesystem>`_
+           - `Create a node group and mount the filesystem <https://docs.nebius.com/kubernetes/storage/filesystem-over-csi#create-node-group>`_
+           - `Install the CSI driver <https://docs.nebius.com/kubernetes/storage/filesystem-over-csi#install-csi>`_
+
+        2. **Verify the storage class** - Confirm that the ``csi-mounted-fs-path-sc`` storage class has been created:
+
+        .. code-block:: console
+
+          $ kubectl get storageclass
+          NAME                     PROVISIONER                    RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+          csi-mounted-fs-path-sc   mounted-fs-path.csi.nebius.ai  Delete          WaitForFirstConsumer   false                  10m
+
+        3. **Create a SkyPilot volume for Nebius file system** with a volume YAML:
+
+        .. code-block:: yaml
+
+          # nebius-volume.yaml
+          name: nebius-pvc
+          type: k8s-pvc
+          infra: k8s
+          size: 100Gi
+          config:
+            storage_class_name: csi-mounted-fs-path-sc
+            access_mode: ReadWriteMany
+
+        .. code-block:: console
+
+          $ sky volumes apply nebius-volume.yaml
+
+        4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
+
+        .. code-block:: yaml
+
+          # task.yaml
+          num_nodes: 2
+
+          volumes:
+            # Mount the Nebius shared filesystem to /mnt/data across all nodes
+            /mnt/data: nebius-pvc
+
+          run: |
+            # Verify the volume is mounted and accessible
+            df -h /mnt/data
+            ls -la /mnt/data
+
+        .. code-block:: console
+
+          # Launch the cluster with the Nebius volume
+          $ sky launch -c nebius-cluster task.yaml
 
 Volumes on GCP
 --------------

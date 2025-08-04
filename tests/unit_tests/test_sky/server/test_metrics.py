@@ -268,29 +268,6 @@ async def test_middleware_different_status_codes(prometheus_middleware):
         assert total_requests == 1.0
 
 
-@patch('sky.server.metrics.asyncio.run')
-@patch('sky.server.metrics.uvicorn.Server')
-@patch('sky.server.metrics.uvicorn.Config')
-def test_run_metrics_server(mock_config, mock_server, mock_run):
-    """Test metrics server configuration and startup."""
-    mock_config_instance = MagicMock()
-    mock_config.return_value = mock_config_instance
-
-    mock_server_instance = MagicMock()
-    mock_server.return_value = mock_server_instance
-
-    metrics.run_metrics_server("localhost", 8080)
-
-    mock_config.assert_called_once_with(
-        'sky.server.metrics:metrics_app',
-        host="localhost",
-        port=8080,
-        workers=1,
-    )
-    mock_server.assert_called_once_with(mock_config_instance)
-    mock_run.assert_called_once_with(mock_server_instance.serve())
-
-
 @pytest.fixture(autouse=True)
 def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""

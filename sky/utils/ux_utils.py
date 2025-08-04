@@ -253,9 +253,7 @@ def command_hint_messages(hint_type: CommandHintType,
                 f'{BOLD}sky jobs logs {job_id}{RESET_BOLD}'
                 f'\n{INDENT_SYMBOL}To stream controller logs:\t\t'
                 f'{BOLD}sky jobs logs --controller {job_id}{RESET_BOLD}'
-                f'\n{INDENT_SYMBOL}To view all managed jobs:\t\t'
-                f'{BOLD}sky jobs queue{RESET_BOLD}'
-                f'\n{INDENT_LAST_SYMBOL}To view managed job dashboard:\t\t'
-                f'{BOLD}sky jobs dashboard{RESET_BOLD}')
+                f'\n{INDENT_LAST_SYMBOL}To view all managed jobs:\t\t'
+                f'{BOLD}sky jobs queue{RESET_BOLD}')
     else:
         raise ValueError(f'Invalid hint type: {hint_type}')

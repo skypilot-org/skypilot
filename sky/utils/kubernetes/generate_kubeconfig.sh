@@ -156,6 +156,9 @@ rules:
   - apiGroups: [""]                 # Required for sky show-gpus command
     resources: ["pods"]
     verbs: ["get", "list"]
+  - apiGroups: ["rbac.authorization.k8s.io"]   # Required for SkyPilot to inspect its own permissions
+    resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+    verbs: ["get", "list", "watch"]
 ---
 # ClusterRoleBinding for the service account
 apiVersion: rbac.authorization.k8s.io/v1

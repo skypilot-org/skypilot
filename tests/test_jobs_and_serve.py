@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+import traceback
 
 import click
 from click import testing as cli_testing
@@ -14,7 +15,7 @@ from sky import global_user_state
 from sky.client.cli import command
 from sky.utils import common
 from sky.utils import controller_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 
 def test_job_nonexist_strategy():
@@ -46,7 +47,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
-    global_user_state.create_table()
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 def _generate_tmp_yaml(tmp_path, filename: str) -> str:
@@ -273,7 +274,8 @@ class TestJobsOperations:
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
-        assert isinstance(result.exception, exceptions.NotSupportedError)
+        assert isinstance(result.exception, exceptions.NotSupportedError), (
+            f'{traceback.format_tb(result.exception.__traceback__)}')
 
         result = cli_runner.invoke(command.down, ['sky-jobs-con*'])
         assert not result.exception

@@ -15,6 +15,7 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -23,6 +24,7 @@ from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -308,11 +310,13 @@ def _execute_dag(
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
+                wait_for = resource_autostop_config.wait_for
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -430,7 +434,7 @@ def _execute_dag(
             logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
-            backend.sync_workdir(handle, task.workdir)
+            backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
 
         if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,
@@ -449,9 +453,8 @@ def _execute_dag(
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle,
-                                     idle_minutes_to_autostop,
-                                     down=down)
+                backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
+                                     down)
 
         if Stage.EXEC in stages:
             try:
@@ -476,6 +479,9 @@ def _execute_dag(
 
 @timeline.event
 @usage_lib.entrypoint
+# A launch routine will share tempfiles between steps, so we init a tempdir
+# for the launch routine and gc the entire dir after launch.
+@tempstore.with_tempdir
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,

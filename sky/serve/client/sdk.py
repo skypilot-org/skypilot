@@ -3,16 +3,13 @@ import json
 import typing
 from typing import List, Optional, Union
 
-import click
-
 from sky.client import common as client_common
+from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
 from sky.usage import usage_lib
-from sky.utils import admin_policy_utils
 from sky.utils import context
-from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -49,37 +46,10 @@ def up(
             argument.
         endpoint (str): The service endpoint.
     """
-
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
-        if _need_confirmation:
-            prompt = f'Launching a new service {service_name!r}. Proceed?'
-            if prompt is not None:
-                click.confirm(prompt,
-                              default=True,
-                              abort=True,
-                              show_default=True)
-
-        dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-
-        body = payloads.ServeUpBody(
-            task=dag_str,
-            service_name=service_name,
-        )
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/serve/up',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None))
-        return server_common.get_request_id(response)
+    return impl.up(task,
+                   service_name,
+                   pool=False,
+                   _need_confirmation=_need_confirmation)
 
 
 @context.contextual
@@ -112,35 +82,11 @@ def update(
     Request Returns:
         None
     """
-    # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
-
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-    with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
-        sdk.validate(dag)
-        request_id = sdk.optimize(dag)
-        sdk.stream_and_get(request_id)
-        if _need_confirmation:
-            click.confirm(f'Updating service {service_name!r}. Proceed?',
-                          default=True,
-                          abort=True,
-                          show_default=True)
-
-        dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-        body = payloads.ServeUpdateBody(
-            task=dag_str,
-            service_name=service_name,
-            mode=mode,
-        )
-
-        response = server_common.make_authenticated_request(
-            'POST',
-            '/serve/update',
-            json=json.loads(body.model_dump_json()),
-            timeout=(5, None))
-        return server_common.get_request_id(response)
+    return impl.update(task,
+                       service_name,
+                       mode,
+                       pool=False,
+                       _need_confirmation=_need_confirmation)
 
 
 @usage_lib.entrypoint
@@ -171,17 +117,7 @@ def down(
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
-    body = payloads.ServeDownBody(
-        service_names=service_names,
-        all=all,
-        purge=purge,
-    )
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/serve/down',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
-    return server_common.get_request_id(response)
+    return impl.down(service_names, all, purge, pool=False)
 
 
 @usage_lib.entrypoint
@@ -281,23 +217,18 @@ def status(
         RuntimeError: if failed to get the service status.
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
-    body = payloads.ServeStatusBody(service_names=service_names,)
-    response = server_common.make_authenticated_request(
-        'POST',
-        '/serve/status',
-        json=json.loads(body.model_dump_json()),
-        timeout=(5, None))
-    return server_common.get_request_id(response)
+    return impl.status(service_names, pool=False)
 
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@rest.retry_on_server_unavailable()
+@rest.retry_transient_errors()
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
               follow: bool = True,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None,
+              tail: Optional[int] = None) -> None:
     """Tails logs for a service.
 
     Usage:
@@ -367,6 +298,7 @@ def tail_logs(service_name: str,
         target=target,
         replica_id=replica_id,
         follow=follow,
+        tail=tail,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -390,7 +322,8 @@ def sync_down_logs(service_name: str,
                        str, 'serve_utils.ServiceComponent',
                        List[Union[str,
                                   'serve_utils.ServiceComponent']]]] = None,
-                   replica_ids: Optional[List[int]] = None) -> None:
+                   replica_ids: Optional[List[int]] = None,
+                   tail: Optional[int] = None) -> None:
     """Sync down logs from the service components to a local directory.
 
     This function syncs logs from the specified service components (controller,
@@ -429,6 +362,7 @@ def sync_down_logs(service_name: str,
         local_dir=local_dir,
         targets=targets,
         replica_ids=replica_ids,
+        tail=tail,
     )
     response = server_common.make_authenticated_request(
         'POST',

@@ -25,6 +25,7 @@ from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -403,6 +404,8 @@ def cost_report(days: Optional[int] = None) -> List[Dict[str, Any]]:
 def _start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -473,7 +476,7 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
+        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
     return handle
 
 
@@ -481,6 +484,8 @@ def _start(
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = (
+        autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR),
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
@@ -535,6 +540,7 @@ def start(
             '`idle_minutes_to_autostop` must be set if `down` is True.')
     return _start(cluster_name,
                   idle_minutes_to_autostop,
+                  wait_for,
                   retry_until_up,
                   down,
                   force=force)
@@ -651,6 +657,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 def autostop(
         cluster_name: str,
         idle_minutes: int,
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
+    DEFAULT_AUTOSTOP_WAIT_FOR,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -740,7 +748,7 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, down)
+    backend.set_autostop(handle, idle_minutes, wait_for, down)
 
 
 # ==================
@@ -878,8 +886,10 @@ def cancel(
         f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
+    user_hash: Optional[str] = common_utils.get_current_user().id
 
     if all_users:
+        user_hash = None
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
@@ -904,7 +914,7 @@ def cancel(
     backend.cancel_jobs(handle,
                         job_ids,
                         cancel_all=all or all_users,
-                        user_hash=common_utils.get_current_user().id)
+                        user_hash=user_hash)
 
 
 @usage_lib.entrypoint
@@ -942,7 +952,12 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    return backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    # Although tail_logs returns an int when require_outputs=False (default),
+    # we need to check returnval as an int to avoid type checking errors.
+    returnval = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    assert isinstance(returnval,
+                      int), (f'returnval must be an int, but got {returnval}')
+    return returnval
 
 
 @usage_lib.entrypoint

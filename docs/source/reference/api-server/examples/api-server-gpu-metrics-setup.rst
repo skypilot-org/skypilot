@@ -3,7 +3,7 @@
 Monitoring Cluster-wide GPU Metrics
 ===================================
 
-SkyPilot provides native integration with Nvidia DCGM to surface
+SkyPilot provides native integration with NVIDIA DCGM to surface
 real-time GPU metrics directly in the SkyPilot dashboard.
 
 .. image:: ../../../images/metrics/gpu-metrics.png
@@ -22,6 +22,16 @@ requirements:
   and the NVIDIA **GPU Operator** are installed.
 * **DCGM-Exporter** is running on the cluster and exposes metrics on
   port ``9400``.  Most GPU Operator installations already deploy DCGM-Exporter for you.
+
+If this is the Kubernetes cluster you will be deploying the SkyPilot API server on, these
+are the only prerequisites. Otherwise, make sure to also helm install the SkyPilot Prometheus
+server using the following command:
+
+.. code-block:: bash
+
+    helm upgrade --install skypilot skypilot/skypilot-prometheus-server --devel \
+     --namespace skypilot \
+     --create-namespace
 
 Set up DCGM metrics scraping
 ----------------------------

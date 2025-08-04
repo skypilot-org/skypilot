@@ -1,9 +1,27 @@
 """Payloads for the Sky API requests.
 
-TODO(zhwu): We can consider a better way to handle the default values of the
-kwargs for the payloads, otherwise, we have to keep the default values the sync
-with the backend functions. The benefit of having the default values in the
-payloads is that a user can find the default values in the Restful API docs.
+All the payloads that will be used between the client and server communication
+must be defined here to make sure it get covered by our API compatbility tests.
+
+Compatibility note:
+- Adding a new body for new API is compatible as long as the SDK method using
+  the new API is properly decorated with `versions.minimal_api_version`.
+- Adding a new field with default value to an existing body is compatible at
+  API level, but the business logic must handle the case where the field is
+  not proccessed by an old version of remote client/server. This can usually
+  be done by checking `versions.get_remote_api_version()`.
+- Other changes are not compatible at API level, so must be handled specially.
+  A common pattern is to keep both the old and new version of the body and
+  checking `versions.get_remote_api_version()` to decide which body to use. For
+  example, say we refactor the `LaunchBody`, the original `LaunchBody` must be
+  kept in the codebase and the new body should be added via `LaunchBodyV2`.
+  Then if the remote runs in an old version, the local code should still send
+  `LaunchBody` to keep the backward compatibility. `LaunchBody` can be removed
+  later when constants.MIN_COMPATIBLE_API_VERSION is updated to a version that
+  supports `LaunchBodyV2`
+
+Also refer to sky.server.constants.MIN_COMPATIBLE_API_VERSION and the
+sky.server.versions module for more details.
 """
 import os
 import typing
@@ -15,6 +33,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.server import common
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
@@ -94,7 +113,18 @@ def get_override_skypilot_config_path_from_client() -> Optional[str]:
     return skypilot_config.loaded_config_path_serialized()
 
 
-class RequestBody(pydantic.BaseModel):
+class BasePayload(pydantic.BaseModel):
+    """The base payload for the SkyPilot API."""
+    # Ignore extra fields in the request body, which is useful for backward
+    # compatibility. The difference with `allow` is that `ignore` will not
+    # include the unknown fields when dump the model, i.e., we can add new
+    # fields to the request body without breaking the existing old API server
+    # where the handler function does not accept the new field in function
+    # signature.
+    model_config = pydantic.ConfigDict(extra='ignore')
+
+
+class RequestBody(BasePayload):
     """The request body for the SkyPilot API."""
     env_vars: Dict[str, str] = {}
     entrypoint: str = ''
@@ -102,11 +132,6 @@ class RequestBody(pydantic.BaseModel):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
-
-    # Allow extra fields in the request body, which is useful for backward
-    # compatibility, i.e., we can add new fields to the request body without
-    # breaking the existing old API server.
-    model_config = pydantic.ConfigDict(extra='allow')
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -179,17 +204,33 @@ class DagRequestBody(RequestBody):
         return kwargs
 
 
-class ValidateBody(DagRequestBody):
-    """The request body for the validate endpoint."""
-    dag: str
+class DagRequestBodyWithRequestOptions(DagRequestBody):
+    """Request body base class for endpoints with a dag and request options."""
     request_options: Optional[admin_policy.RequestOptions]
 
+    def get_request_options(self) -> Optional[admin_policy.RequestOptions]:
+        """Get the request options."""
+        if self.request_options is None:
+            return None
+        if isinstance(self.request_options, dict):
+            return admin_policy.RequestOptions(**self.request_options)
+        return self.request_options
 
-class OptimizeBody(DagRequestBody):
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        kwargs['request_options'] = self.get_request_options()
+        return kwargs
+
+
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+
+
+class OptimizeBody(DagRequestBodyWithRequestOptions):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: Optional[admin_policy.RequestOptions]
 
 
 class LaunchBody(RequestBody):
@@ -272,6 +313,7 @@ class StartBody(RequestBody):
     """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
@@ -281,6 +323,7 @@ class AutostopBody(RequestBody):
     """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
 
 
@@ -438,6 +481,8 @@ class JobsLaunchBody(RequestBody):
     """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
+    pool: Optional[str] = None
+    num_jobs: Optional[int] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -460,6 +505,7 @@ class JobsCancelBody(RequestBody):
     job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
+    pool: Optional[str] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -533,6 +579,7 @@ class ServeLogsBody(RequestBody):
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
+    tail: Optional[int] = None
 
 
 class ServeDownloadLogsBody(RequestBody):
@@ -542,6 +589,7 @@ class ServeDownloadLogsBody(RequestBody):
     targets: Optional[Union[str, serve.ServiceComponent,
                             List[Union[str, serve.ServiceComponent]]]]
     replica_ids: Optional[List[int]] = None
+    tail: Optional[int] = None
 
 
 class ServeStatusBody(RequestBody):
@@ -629,6 +677,36 @@ class JobsDownloadLogsBody(RequestBody):
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
+class JobsPoolApplyBody(RequestBody):
+    """The request body for the jobs pool apply endpoint."""
+    task: str
+    pool_name: str
+    mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a pool.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class JobsPoolDownBody(RequestBody):
+    """The request body for the jobs pool down endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+    all: bool = False
+    purge: bool = False
+
+
+class JobsPoolStatusBody(RequestBody):
+    """The request body for the jobs pool status endpoint."""
+    pool_names: Optional[Union[str, List[str]]]
+
+
 class UploadZipFileResponse(pydantic.BaseModel):
     """The response body for the upload zip file endpoint."""
     status: str
@@ -665,3 +743,25 @@ class GetConfigBody(RequestBody):
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
+
+
+class RequestPayload(BasePayload):
+    """The payload for the requests."""
+
+    request_id: str
+    name: str
+    entrypoint: str
+    request_body: str
+    status: str
+    created_at: float
+    user_id: str
+    return_value: str
+    error: str
+    pid: Optional[int]
+    schedule_type: str
+    user_name: Optional[str] = None
+    # Resources the request operates on.
+    cluster_name: Optional[str] = None
+    status_msg: Optional[str] = None
+    should_retry: bool = False
+    finished_at: Optional[float] = None

@@ -11,6 +11,7 @@ import platform
 import random
 import re
 import socket
+import subprocess
 import sys
 import time
 import typing
@@ -85,6 +86,18 @@ def generate_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     return user_hash
+
+
+def get_git_commit(path: Optional[str] = None) -> Optional[str]:
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_user_hash() -> str:
@@ -356,6 +369,83 @@ def get_pretty_entrypoint_cmd() -> str:
     return ' '.join(argv)
 
 
+def read_last_n_lines(file_path: str,
+                      n: int,
+                      chunk_size: int = 8192,
+                      encoding: str = 'utf-8',
+                      errors: str = 'replace') -> List[str]:
+    """Read the last N lines of a file.
+
+    Args:
+        file_path: Path to the file to read.
+        n: Number of lines to read from the end of the file.
+        chunk_size: Size of chunks in bytes.
+        encoding: Encoding to use when decoding binary chunks.
+        errors: Error handling for decode errors (e.g., 'replace', 'ignore').
+
+    Returns:
+        A list of the last N lines, preserving newlines where applicable.
+    """
+
+    assert n >= 0, f'n must be non-negative. Got {n}'
+    assert chunk_size > 0, f'chunk_size must be positive. Got {chunk_size}'
+    assert os.path.exists(file_path), f'File not found: {file_path}'
+
+    if n == 0:
+        return []
+
+    try:
+        with open(file_path, 'rb') as f:
+            # Start reading from the end of the file
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            if file_size == 0:
+                return []
+
+            pos = file_size
+            lines_found = 0
+            chunks = []
+
+            # Read backwards in chunks until we've found at least n newlines
+            while pos > 0 and lines_found <= n:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                chunk = f.read(read_size)
+                chunks.append(chunk)
+                lines_found += chunk.count(b'\n')
+
+            # Combine all chunks in reverse order since we read backwards
+            full_bytes = b''.join(reversed(chunks))
+
+            # Split by newline byte. Note: this handles '\n' endings.
+            all_lines = full_bytes.split(b'\n')
+
+            # Handle edge case: if file ends with a newline, last element is b''
+            if all_lines and all_lines[-1] == b'':
+                result_bytes = all_lines[-n - 1:-1]
+            else:
+                result_bytes = all_lines[-n:]
+
+            # Decode each line and normalize CR/LF endings
+            decoded_lines = [
+                line.decode(encoding, errors=errors).rstrip('\r') + '\n'
+                for line in result_bytes[:-1]
+            ]
+
+            # Decode the final line — only add newline if it was present
+            last_line = result_bytes[-1].decode(encoding,
+                                                errors=errors).rstrip('\r')
+            decoded_lines.append(last_line)
+
+            return decoded_lines
+
+    except OSError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Failed to read last {n} lines from {file_path}: {e}') from e
+
+
 def _redact_secrets_values(argv: List[str]) -> List[str]:
     """Redact sensitive values from --secret arguments.
 
@@ -472,8 +562,9 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return read_yaml_all_str(f.read())
 
 
-def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
-                                       Dict[str, Any]]) -> None:
+def dump_yaml(path: str,
+              config: Union[List[Dict[str, Any]], Dict[str, Any]],
+              blank: bool = False) -> None:
     """Dumps a YAML file.
 
     Args:
@@ -481,7 +572,11 @@ def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
         config: the configuration to dump.
     """
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(dump_yaml_str(config))
+        contents = dump_yaml_str(config)
+        if blank and isinstance(config, dict) and len(config) == 0:
+            # when dumping to yaml, an empty dict will go in as {}.
+            contents = ''
+        f.write(contents)
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:

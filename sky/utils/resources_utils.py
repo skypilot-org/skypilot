@@ -405,3 +405,33 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
                 continue
 
     raise ValueError(error_msg)
+
+
+def parse_time_minutes(time: str) -> int:
+    """Convert a time string to minutes.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+
+    Returns:
+        Time in minutes as an integer
+    """
+    time_str = str(time)
+
+    if time_str.isdecimal():
+        # We assume it is already in minutes to maintain backwards
+        # compatibility
+        return int(time_str)
+
+    time_str = time_str.lower()
+    for unit, multiplier in constants.TIME_UNITS.items():
+        if time_str.endswith(unit):
+            try:
+                value = float(time_str[:-len(unit)])
+                final_value = math.ceil(value * multiplier)
+                if final_value >= 0:
+                    return final_value
+            except ValueError:
+                continue
+
+    raise ValueError(f'Invalid time format: {time}')

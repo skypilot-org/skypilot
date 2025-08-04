@@ -5,7 +5,7 @@ import enum
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 import uuid
 
 import colorama
@@ -64,7 +64,7 @@ class _ControllerSpec:
     controller_type: str
     name: str
     cluster_name: str
-    in_progress_hint: str
+    in_progress_hint: Callable[[bool], str]
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
@@ -94,9 +94,9 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         cluster_name=common.JOB_CONTROLLER_NAME,
-        in_progress_hint=(
-            '* {job_info}To see all managed jobs: '
-            f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
+        in_progress_hint=lambda _:
+        ('* {job_info}To see all managed jobs: '
+         f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the jobs controller\'s jobs is not allowed.\nTo cancel '
             f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel '
@@ -126,8 +126,11 @@ class Controllers(enum.Enum):
         name='serve controller',
         cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
-            f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status -v{colorama.Style.RESET_ALL}'),
+            lambda pool:
+            (f'* To see detailed pool status: {colorama.Style.BRIGHT}'
+             f'sky jobs pool status -v{colorama.Style.RESET_ALL}') if pool else
+            (f'* To see detailed service status: {colorama.Style.BRIGHT}'
+             f'sky serve status -v{colorama.Style.RESET_ALL}')),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         _decline_down_when_failed_to_fetch_status_hint=(
@@ -391,10 +394,11 @@ def check_cluster_name_not_controller(
 
 
 # Internal only:
-def download_and_stream_latest_job_log(
+def download_and_stream_job_log(
         backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        local_dir: str) -> Optional[str]:
+        local_dir: str,
+        job_ids: Optional[List[str]] = None) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
@@ -412,7 +416,7 @@ def download_and_stream_latest_job_log(
             # multi-node cluster is preempted, and we recover the managed job
             # on the existing cluster, which leads to a larger job_id. Those
             # job_ids all represent the same logical managed job.
-            job_ids=None,
+            job_ids=job_ids,
             local_dir=local_dir)
     except Exception as e:  # pylint: disable=broad-except
         # We want to avoid crashing the controller. sync_down_logs() is pretty
@@ -812,7 +816,7 @@ def translate_local_file_mounts_to_two_hop(
     file_mount_id = 0
 
     file_mounts_to_translate = task.file_mounts or {}
-    if task.workdir is not None:
+    if task.workdir is not None and isinstance(task.workdir, str):
         file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
         task.workdir = None
 
@@ -880,7 +884,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         copy_mounts = {}
 
     has_local_source_paths_file_mounts = bool(copy_mounts)
-    has_local_source_paths_workdir = task.workdir is not None
+    has_local_source_paths_workdir = (task.workdir is not None and
+                                      isinstance(task.workdir, str))
 
     msg = None
     if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
@@ -928,7 +933,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
-    if task.workdir is not None:
+    if task.workdir is not None and isinstance(task.workdir, str):
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or

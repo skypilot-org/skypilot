@@ -1,7 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import collections
 import dataclasses
-import math
 import re
 import textwrap
 import typing
@@ -20,6 +19,8 @@ from sky.clouds import cloud as sky_cloud
 from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.nebius import constants as nebius_constants
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
@@ -33,7 +34,7 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -69,14 +70,18 @@ class AutostopConfig:
     # flags.
     idle_minutes: int = 0
     down: bool = False
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
             return False
-        return {
+        config: Dict[str, Any] = {
             'idle_minutes': self.idle_minutes,
             'down': self.down,
         }
+        if self.wait_for is not None:
+            config['wait_for'] = self.wait_for.value
+        return config
 
     @classmethod
     def from_yaml_config(
@@ -92,7 +97,7 @@ class AutostopConfig:
             return cls(idle_minutes=config, down=False, enabled=True)
 
         if isinstance(config, str):
-            return cls(idle_minutes=parse_time_minutes(config),
+            return cls(idle_minutes=resources_utils.parse_time_minutes(config),
                        down=False,
                        enabled=True)
 
@@ -104,6 +109,9 @@ class AutostopConfig:
                 autostop_config.idle_minutes = config['idle_minutes']
             if 'down' in config:
                 autostop_config.down = config['down']
+            if 'wait_for' in config:
+                autostop_config.wait_for = (
+                    autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
             return autostop_config
 
         return None
@@ -798,8 +806,13 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
+                # TODO(syang): GCP TPU names are supported on both GCP and
+                # kubernetes (GKE), but this logic automatically assumes
+                # GCP TPUs can only be used on GCP.
+                # Fix the logic such that GCP TPU names can failover between
+                # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc):
+                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -814,7 +827,8 @@ class Resources:
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
-                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                        not kubernetes_utils.is_tpu_on_gke(acc,
+                                                           normalize=False)):
                     if 'runtime_version' not in accelerator_args:
 
                         def _get_default_runtime_version() -> str:
@@ -952,15 +966,18 @@ class Resources:
             valid_volumes.append(volume)
         self._volumes = valid_volumes
 
-    def override_autostop_config(self,
-                                 down: bool = False,
-                                 idle_minutes: Optional[int] = None) -> None:
+    def override_autostop_config(
+            self,
+            down: bool = False,
+            idle_minutes: Optional[int] = None,
+            wait_for: Optional[autostop_lib.AutostopWaitFor] = None) -> None:
         """Override autostop config to the resource.
 
         Args:
             down: If true, override the autostop config to use autodown.
             idle_minutes: If not None, override the idle minutes to autostop or
                 autodown.
+            wait_for: If not None, override the wait mode.
         """
         if not down and idle_minutes is None:
             return
@@ -970,6 +987,8 @@ class Resources:
             self._autostop_config.down = down
         if idle_minutes is not None:
             self._autostop_config.idle_minutes = idle_minutes
+        if wait_for is not None:
+            self._autostop_config.wait_for = wait_for
 
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""
@@ -1255,15 +1274,19 @@ class Resources:
             ValueError: if the attribute is invalid.
         """
 
-        if (self._network_tier == resources_utils.NetworkTier.BEST and
-                isinstance(self._cloud, clouds.GCP)):
-            # Handle GPU Direct TCPX requirement for docker images
-            if self._image_id is None:
-                # No custom image specified - use the default GPU Direct image
-                self._image_id = {
-                    self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
-                }
-            else:
+        if self._network_tier == resources_utils.NetworkTier.BEST:
+            if isinstance(self._cloud, clouds.GCP):
+                # Handle GPU Direct TCPX requirement for docker images
+                if self._image_id is None:
+                    self._image_id = {
+                        self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
+                    }
+            elif isinstance(self._cloud, clouds.Nebius):
+                if self._image_id is None:
+                    self._image_id = {
+                        self._region: nebius_constants.INFINIBAND_IMAGE_ID
+                    }
+            elif self._image_id:
                 # Custom image specified - validate it's a docker image
                 # Check if any of the specified images are not docker images
                 non_docker_images = []
@@ -1275,14 +1298,13 @@ class Resources:
                 if non_docker_images:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'When using network_tier=BEST on GCP, image_id '
+                            f'When using network_tier=BEST, image_id '
                             f'must be a docker image. '
                             f'Found non-docker images: '
                             f'{", ".join(non_docker_images)}. '
                             f'Please either: (1) use a docker image '
                             f'(prefix with "docker:"), or '
-                            f'(2) leave image_id empty to use the default '
-                            f'GPU Direct TCPX image.')
+                            f'(2) leave image_id empty to use the default')
 
         if self._image_id is None:
             return
@@ -1730,6 +1752,8 @@ class Resources:
             is_matched = False
         if (blocked.accelerators is not None and
                 self.accelerators != blocked.accelerators):
+            is_matched = False
+        if blocked.use_spot is not None and self.use_spot != blocked.use_spot:
             is_matched = False
         return is_matched
 
@@ -2415,31 +2439,3 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
-
-
-def parse_time_minutes(time: str) -> int:
-    """Convert a time string to minutes.
-
-    Args:
-        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
-
-    Returns:
-        Time in minutes as an integer
-    """
-    time_str = str(time)
-
-    if time_str.isdecimal():
-        # We assume it is already in minutes to maintain backwards
-        # compatibility
-        return int(time_str)
-
-    time_str = time_str.lower()
-    for unit, multiplier in constants.TIME_UNITS.items():
-        if time_str.endswith(unit):
-            try:
-                value = int(time_str[:-len(unit)])
-                return math.ceil(value * multiplier)
-            except ValueError:
-                continue
-
-    raise ValueError(f'Invalid time format: {time}')

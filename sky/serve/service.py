@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.data import data_utils
 from sky.serve import constants
 from sky.serve import controller
 from sky.serve import load_balancer
@@ -71,6 +72,8 @@ def cleanup_storage(task_yaml: str) -> bool:
     Returns:
         True if the storage is cleaned up successfully, False otherwise.
     """
+    failed = False
+
     try:
         task = task_lib.Task.from_yaml(task_yaml)
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -86,8 +89,25 @@ def cleanup_storage(task_yaml: str) -> bool:
                      f'{common_utils.format_exception(e)}')
         with ux_utils.enable_traceback():
             logger.error(f'  Traceback: {traceback.format_exc()}')
-        return False
-    return True
+        failed = True
+
+    # Clean up any files mounted from the local disk, such as two-hop file
+    # mounts.
+    for file_mount in (task.file_mounts or {}).values():
+        try:
+            if not data_utils.is_cloud_store_url(file_mount):
+                path = os.path.expanduser(file_mount)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to clean up file mount {file_mount}: {e}')
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
+            failed = True
+
+    return not failed
 
 
 def _cleanup(service_name: str) -> bool:
@@ -202,7 +222,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             requested_resources_str=backend_utils.get_task_resources_str(task),
             load_balancing_policy=service_spec.load_balancing_policy,
             status=serve_state.ServiceStatus.CONTROLLER_INIT,
-            tls_encrypted=service_spec.tls_credential is not None)
+            tls_encrypted=service_spec.tls_credential is not None,
+            pool=service_spec.pool)
         # Directly throw an error here. See sky/serve/api.py::up
         # for more details.
         if not success:
@@ -272,14 +293,17 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # TODO(tian): Probably we could enable multiple ports specified in
             # service spec and we could start multiple load balancers.
             # After that, we will have a mapping from replica port to endpoint.
-            load_balancer_process = multiprocessing.Process(
-                target=ux_utils.RedirectOutputForProcess(
-                    load_balancer.run_load_balancer,
-                    load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port,
-                      service_spec.load_balancing_policy,
-                      service_spec.tls_credential, service_spec))
-            load_balancer_process.start()
+            # NOTE(tian): We don't need the load balancer for cluster pool.
+            # Skip the load balancer process for cluster pool.
+            if not service_spec.pool:
+                load_balancer_process = multiprocessing.Process(
+                    target=ux_utils.RedirectOutputForProcess(
+                        load_balancer.run_load_balancer,
+                        load_balancer_log_file).run,
+                    args=(controller_addr, load_balancer_port,
+                          service_spec.load_balancing_policy,
+                          service_spec.tls_credential))
+                load_balancer_process.start()
 
             if not is_recovery:
                 serve_state.set_service_load_balancer_port(

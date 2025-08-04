@@ -76,7 +76,7 @@ jobs:
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
+          name: skypilot-artifacts-skypilot
           path: dist/
 
   publish-and-validate-test-pypi:
@@ -89,7 +89,7 @@ jobs:
     secrets: inherit
 
   publish-and-validate-pypi:
-    needs: [publish-and-validate-test-pypi]
+    needs: [extract-version, publish-and-validate-test-pypi]
     uses: ./.github/workflows/publish-and-validate.yml
     with:
       package_name: skypilot
@@ -97,21 +97,11 @@ jobs:
       repository_type: 'pypi'
     secrets: inherit
 
-  trigger-docker-build:
-    needs: [extract-version, publish-and-validate-pypi]
-    uses: ./.github/workflows/docker-build.yaml
+  trigger-helm-release:
+    needs: [publish-and-validate-pypi]
+    uses: ./.github/workflows/helm-docker-release.yaml
     with:
-      package_name: 'skypilot'
-      version: ${{ needs.extract-version.outputs.version }}
-    secrets: inherit
-
-  publish-helm:
-    needs: [extract-version, publish-and-validate-pypi, trigger-docker-build]
-    uses: ./.github/workflows/publish-helm.yml
-    with:
-      version: ${{ needs.extract-version.outputs.version }}
-      commit_message: 'Update Helm charts for skypilot version ${{ needs.extract-version.outputs.version }}'
-      package_name: 'skypilot'
+      package_name: skypilot
     secrets: inherit
 
   create-release:
@@ -124,6 +114,8 @@ jobs:
           fetch-depth: 0
 
       - name: Create and push tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         run: |
           VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
@@ -138,7 +130,7 @@ jobs:
           tag_name: "v${{ needs.extract-version.outputs.version }}"
           generate_release_notes: true
           draft: true
-
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
 
   cleanup-branches:
     needs: extract-version

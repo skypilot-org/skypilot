@@ -1,5 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
+import enum
 import functools
 import hashlib
 import json
@@ -57,6 +58,78 @@ HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # and store all data that needs to be persisted in future.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
 
+
+class KubernetesHighPerformanceNetworkType(enum.Enum):
+    """Enum for different Kubernetes cluster types with high performance
+    network configurations.
+
+    This enum defines cluster types that support optimized networking for
+    distributed ML workloads:
+    - GCP_TCPX: GKE clusters with GPUDirect-TCPX support
+      (A3 High instances: a3-highgpu-8g)
+    - GCP_TCPXO: GKE clusters with GPUDirect-TCPXO support
+      (A3 Mega instances: a3-megagpu-8g)
+    - GCP_GPUDIRECT_RDMA: GKE clusters with GPUDirect-RDMA support
+      (A4/A3 Ultra instances)
+    - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
+      low-latency networking
+    - COREWEAVE: CoreWeave clusters with InfiniBand support.
+    - NONE: Standard clusters without specialized networking optimizations
+
+    The network configurations align with corresponding VM-based
+    implementations:
+    - GCP settings match
+      sky.provision.gcp.constants.GPU_DIRECT_TCPX_SPECIFIC_OPTIONS
+    - Nebius settings match the InfiniBand configuration used in Nebius VMs
+    """
+
+    GCP_TCPX = 'gcp_tcpx'
+    GCP_TCPXO = 'gcp_tcpxo'
+    GCP_GPUDIRECT_RDMA = 'gcp_gpudirect_rdma'
+    NEBIUS = 'nebius'
+    COREWEAVE = 'coreweave'
+    NONE = 'none'
+
+    def get_network_env_vars(self) -> Dict[str, str]:
+        """Get network environment variables for this cluster type."""
+        if self == KubernetesHighPerformanceNetworkType.NEBIUS:
+            # Nebius cluster with InfiniBand - use InfiniBand optimizations
+            return {
+                'NCCL_IB_HCA': 'mlx5',
+                'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
+                                    'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
+            }
+        elif self == KubernetesHighPerformanceNetworkType.COREWEAVE:
+            return {
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'NCCL_IB_HCA': 'ibp',
+                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
+                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
+            }
+        else:
+            # GCP clusters and generic clusters - environment variables are
+            # handled directly in the template
+            return {}
+
+    def supports_high_performance_networking(self) -> bool:
+        """Check if this cluster type supports high performance networking."""
+        return self is not KubernetesHighPerformanceNetworkType.NONE
+
+    def supports_gpu_direct(self) -> bool:
+        """Check if this cluster type supports GPUDirect networking."""
+        return self in (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                        KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                        KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+
+    def requires_ipc_lock_capability(self) -> bool:
+        """Check if this cluster type requires IPC_LOCK capability."""
+        return self.supports_high_performance_networking()
+
+    def requires_tcpxo_daemon(self) -> bool:
+        """Check if this cluster type requires TCPXO daemon."""
+        return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
+
+
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
 
@@ -74,12 +147,14 @@ MEMORY_SIZE_UNITS = {
 # The resource keys used by Kubernetes to track NVIDIA GPUs and Google TPUs on
 # nodes. These keys are typically used in the node's status.allocatable
 # or status.capacity fields to indicate the available resources on the node.
-GPU_RESOURCE_KEY = 'nvidia.com/gpu'
+SUPPORTED_GPU_RESOURCE_KEYS = {'amd': 'amd.com/gpu', 'nvidia': 'nvidia.com/gpu'}
 TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
-    f'{GPU_RESOURCE_KEY} or {TPU_RESOURCE_KEY} resource is available '
+    f'one of {SUPPORTED_GPU_RESOURCE_KEYS["amd"]}, '
+    f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]} or '
+    f'{TPU_RESOURCE_KEY} resource is available '
     'on the nodes and the node labels for identifying GPUs/TPUs '
     '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
@@ -313,7 +388,12 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
         # have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
+    elif accelerator == 'H200':
+        # H200s on GCP use this label format
+        return 'nvidia-h200-141gb'
     elif accelerator.startswith('tpu-'):
+        return accelerator
+    elif accelerator.startswith('amd-'):
         return accelerator
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
@@ -451,7 +531,10 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
-        acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
+        # If the TPU type is in the GKE_TPU_ACCELERATOR_TO_GENERATION, it means
+        # that it has been normalized before, no need to normalize again.
+        if acc_type not in GKE_TPU_ACCELERATOR_TO_GENERATION:
+            acc_type, acc_count = normalize_tpu_accelerator_name(acc_type)
         count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
                                                        {}).get(acc_count, None)
         if count_to_topology is None:
@@ -479,9 +562,14 @@ class GKELabelFormatter(GPULabelFormatter):
                 # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
                 # to distinguish between a3-high and a3-mega instances
                 return 'H100'
+            elif acc == 'H200-141GB':
+                return 'H200'
             return acc
         elif is_tpu_on_gke(value):
             return value
+        elif value == '':
+            # heterogenous cluster may have empty labels for cpu nodes.
+            return ''
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
@@ -751,6 +839,74 @@ class GKEAutoscaler(Autoscaler):
         return False
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
+    def get_available_machine_types(cls, context: str) -> List[str]:
+        """Returns the list of machine types that are available in the cluster.
+        """
+        # Assume context naming convention of
+        # gke_PROJECT-ID_LOCATION_CLUSTER-NAME
+        valid, project_id, location, cluster_name = cls._validate_context_name(
+            context)
+        if not valid:
+            # Context name is not in the format of
+            # gke_PROJECT-ID_LOCATION_CLUSTER-NAME.
+            # Cannot determine if the context can autoscale.
+            # Return empty list.
+            logger.debug(f'Context {context} is not in the format of '
+                         f'gke_PROJECT-ID_LOCATION_CLUSTER-NAME. '
+                         'Returning empty machine type list.')
+            return []
+        try:
+            logger.debug(
+                f'Attempting to get information about cluster {cluster_name}')
+            container_service = gcp.build('container',
+                                          'v1',
+                                          credentials=None,
+                                          cache_discovery=False)
+            cluster = container_service.projects().locations().clusters().get(
+                name=f'projects/{project_id}'
+                f'/locations/{location}'
+                f'/clusters/{cluster_name}').execute()
+        except ImportError:
+            # If the gcp module is not installed, return empty list.
+            # Remind the user once per day to install the gcp module for better
+            # pod scheduling with GKE autoscaler.
+            if time.time() - cls._pip_install_gcp_hint_last_sent > 60 * 60 * 24:
+                logger.info(
+                    'Could not fetch autoscaler information from GKE. '
+                    'Run pip install "skypilot[gcp]" for more intelligent pod '
+                    'scheduling with GKE autoscaler.')
+                cls._pip_install_gcp_hint_last_sent = time.time()
+            return []
+        except gcp.http_error_exception() as e:
+            # Cluster information is not available.
+            # Return empty list.
+            logger.debug(f'{e.message}', exc_info=True)
+            return []
+
+        machine_types = []
+        # Get the list of machine types that are available in the cluster.
+        node_pools = cluster.get('nodePools', [])
+        for node_pool in node_pools:
+            name = node_pool.get('name', '')
+            logger.debug(f'Checking if node pool {name} '
+                         'has autoscaling enabled.')
+            autoscaling_enabled = (node_pool.get('autoscaling',
+                                                 {}).get('enabled', False))
+            if autoscaling_enabled:
+                logger.debug(f'Node pool {name} has autoscaling enabled.')
+                try:
+                    machine_type = node_pool.get('config',
+                                                 {}).get('machineType', '')
+                    if machine_type:
+                        machine_types.append(machine_type)
+                except KeyError:
+                    logger.debug(f'Encountered KeyError while checking machine '
+                                 f'type of node pool {name}.')
+                    continue
+        return machine_types
+
+    @classmethod
     def _validate_context_name(cls, context: str) -> Tuple[bool, str, str, str]:
         """Validates the context name is in the format of
         gke_PROJECT-ID_LOCATION_CLUSTER-NAME
@@ -853,6 +1009,9 @@ class GKEAutoscaler(Autoscaler):
             node_accelerator_type = (
                 GKELabelFormatter.get_accelerator_from_label_value(
                     accelerator['acceleratorType']))
+            # handle heterogenous nodes.
+            if not node_accelerator_type:
+                continue
             node_accelerator_count = accelerator['acceleratorCount']
             if node_accelerator_type == requested_gpu_type and int(
                     node_accelerator_count) >= requested_gpu_count:
@@ -943,10 +1102,10 @@ def detect_accelerator_resource(
         context: Optional[str]) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has GPU/TPU resource.
 
-    Two types of accelerator resources are available which are each checked
-    with nvidia.com/gpu and google.com/tpu. If nvidia.com/gpu resource is
+    Three types of accelerator resources are available which are each checked
+    with amd.com/gpu, nvidia.com/gpu and google.com/tpu. If amd.com/gpu or nvidia.com/gpu resource is
     missing, that typically means that the Kubernetes cluster does not have
-    GPUs or the nvidia GPU operator and/or device drivers are not installed.
+    GPUs or the amd/nvidia GPU operator and/or device drivers are not installed.
 
     Returns:
         bool: True if the cluster has GPU_RESOURCE_KEY or TPU_RESOURCE_KEY
@@ -957,7 +1116,7 @@ def detect_accelerator_resource(
     nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_accelerator = (get_gpu_resource_key() in cluster_resources or
+    has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
                        TPU_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
@@ -1107,8 +1266,8 @@ def check_instance_fits(context: Optional[str],
         else:
             # Check if any of the GPU nodes have sufficient number of GPUs.
             gpu_nodes = [
-                node for node in gpu_nodes if
-                get_node_accelerator_count(node.status.allocatable) >= acc_count
+                node for node in gpu_nodes if get_node_accelerator_count(
+                    context, node.status.allocatable) >= acc_count
             ]
             if not gpu_nodes:
                 return False, (
@@ -1170,14 +1329,14 @@ def get_accelerator_label_key_values(
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
-                (nvidia.com/gpu, google.com/tpu)
+                (amd.com/gpu, nvidia.com/gpu, google.com/tpu)
             - The cluster has GPU/TPU resources, but no node in the cluster has
               an accelerator label.
             - The cluster has a node with an invalid accelerator label value.
             - The cluster doesn't have any nodes with acc_type GPU/TPU
     """
     # Check if the cluster has GPU resources
-    # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
+    # TODO(romilb): This assumes the accelerator is a amd/nvidia GPU. We
     #  need to support TPUs and other accelerators as well.
     # TODO(romilb): Currently, we broadly disable all GPU checks if autoscaling
     #  is configured in config.yaml since the cluster may be scaling up from
@@ -1203,7 +1362,8 @@ def get_accelerator_label_key_values(
             # early since we assume the cluster autoscaler will handle GPU
             # node provisioning.
             return None, None, None, None
-        autoscaler = AUTOSCALER_TYPE_TO_AUTOSCALER.get(autoscaler_type)
+        autoscaler = AUTOSCALER_TYPE_TO_AUTOSCALER.get(
+            kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
         assert autoscaler is not None, ('Unsupported autoscaler type:'
                                         f' {autoscaler_type}')
         formatter = autoscaler.label_formatter
@@ -1340,12 +1500,15 @@ def get_accelerator_label_key_values(
                     f'`sky ssh up --infra {context_display_name}`. {suffix}')
             else:
                 msg = (
-                    f'Could not detect GPU/TPU resources ({GPU_RESOURCE_KEY!r} or '
+                    f'Could not detect GPU/TPU resources ({SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r}, '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]!r} or '
                     f'{TPU_RESOURCE_KEY!r}) in Kubernetes cluster. If this cluster'
                     ' contains GPUs, please ensure GPU drivers are installed on '
                     'the node. Check if the GPUs are setup correctly by running '
                     '`kubectl describe nodes` and looking for the '
-                    f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["amd"]!r}, '
+                    f'{SUPPORTED_GPU_RESOURCE_KEYS["nvidia"]!r} or '
+                    f'{TPU_RESOURCE_KEY!r} resource. '
                     'Please refer to the documentation on how to set up GPUs.'
                     f'{suffix}')
             raise exceptions.ResourcesUnavailableError(msg)
@@ -2479,6 +2642,7 @@ def combine_pod_config_fields(
 
 
 def combine_metadata_fields(cluster_yaml_path: str,
+                            cluster_config_overrides: Dict[str, Any],
                             context: Optional[str] = None) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
@@ -2489,11 +2653,24 @@ def combine_metadata_fields(cluster_yaml_path: str,
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
+
+    # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
         default_value={})
+
+    # Get custom_metadata from task-level config overrides
+    override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
+
+    # Merge task-level overrides with global config
+    config_utils.merge_k8s_configs(custom_metadata, override_custom_metadata)
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -2516,17 +2693,33 @@ def combine_metadata_fields(cluster_yaml_path: str,
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def merge_custom_metadata(original_metadata: Dict[str, Any],
-                          context: Optional[str] = None) -> None:
+def merge_custom_metadata(
+        original_metadata: Dict[str, Any],
+        context: Optional[str] = None,
+        cluster_config_overrides: Optional[Dict[str, Any]] = None) -> None:
     """Merges original metadata with custom_metadata from config
 
     Merge is done in-place, so return is not required
     """
+    # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
         default_value={})
+
+    # Get custom_metadata from task-level config overrides if available
+    if cluster_config_overrides is not None:
+        override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='kubernetes',
+            region=context,
+            keys=('custom_metadata',),
+            default_value={})
+        # Merge task-level overrides with global config
+        config_utils.merge_k8s_configs(custom_metadata,
+                                       override_custom_metadata)
+
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
@@ -2705,7 +2898,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     nodes = get_kubernetes_nodes(context=context)
     nodes_with_accelerator = []
     for node in nodes:
-        if get_gpu_resource_key() in node.status.capacity:
+        if get_gpu_resource_key(context) in node.status.capacity:
             nodes_with_accelerator.append(node)
 
     label_formatter, _ = detect_gpu_label_formatter(context)
@@ -2794,7 +2987,8 @@ def get_kubernetes_node_info(
                         break
 
         allocated_qty = 0
-        accelerator_count = get_node_accelerator_count(node.status.allocatable)
+        accelerator_count = get_node_accelerator_count(context,
+                                                       node.status.allocatable)
 
         if pods is None:
             accelerators_available = -1
@@ -2809,7 +3003,7 @@ def get_kubernetes_node_info(
                     for container in pod.spec.containers:
                         if container.resources.requests:
                             allocated_qty += get_node_accelerator_count(
-                                container.resources.requests)
+                                context, container.resources.requests)
 
             accelerators_available = accelerator_count - allocated_qty
 
@@ -3015,13 +3209,16 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     return pods
 
 
-def is_tpu_on_gke(accelerator: str) -> bool:
+def is_tpu_on_gke(accelerator: str, normalize: bool = True) -> bool:
     """Determines if the given accelerator is a TPU supported on GKE."""
-    normalized, _ = normalize_tpu_accelerator_name(accelerator)
-    return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
+    if normalize:
+        normalized, _ = normalize_tpu_accelerator_name(accelerator)
+        return normalized in GKE_TPU_ACCELERATOR_TO_GENERATION
+    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
-def get_node_accelerator_count(attribute_dict: dict) -> int:
+def get_node_accelerator_count(context: Optional[str],
+                               attribute_dict: dict) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
 
     This method checks the node's allocatable resources or the accelerators
@@ -3036,7 +3233,7 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key()
+    gpu_resource_name = get_gpu_resource_key(context)
     assert not (gpu_resource_name in attribute_dict and
                 TPU_RESOURCE_KEY in attribute_dict)
     if gpu_resource_name in attribute_dict:
@@ -3162,7 +3359,7 @@ def process_skypilot_pods(
                 unit='G')
             gpu_count = parse_cpu_or_gpu_resource(
                 pod.spec.containers[0].resources.requests.get(
-                    'nvidia.com/gpu', '0'))
+                    get_gpu_resource_key(context), '0'))
             gpu_name = None
             if gpu_count > 0:
                 label_formatter, _ = (detect_gpu_label_formatter(context))
@@ -3217,19 +3414,33 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
-def get_gpu_resource_key():
-    """Get the GPU resource name to use in kubernetes.
-    The function first checks for an environment variable.
-    If defined, it uses its value; otherwise, it returns the default value.
-    Args:
-        name (str): Default GPU resource name, default is "nvidia.com/gpu".
+def _gpu_resource_key_helper(context: Optional[str]) -> str:
+    """Helper function to get the GPU resource key."""
+    gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
+    try:
+        nodes = kubernetes.core_api(context).list_node().items
+        for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
+            if any(gpu_key in node.status.capacity for node in nodes):
+                return gpu_key
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to load kube config or query nodes: {e}. '
+                       'Falling back to default GPU resource key.')
+    return gpu_resource_key
+
+
+@annotations.lru_cache(scope='request')
+def get_gpu_resource_key(context: Optional[str] = None) -> str:
+    """Get the GPU resource name to use in Kubernetes.
+
+    The function auto-detects the GPU resource key by querying the Kubernetes node API.
+    If detection fails, it falls back to a default value.
+    An environment variable can override the detected or default value.
+
     Returns:
         str: The selected GPU resource name.
     """
-    # Retrieve GPU resource name from environment variable, if set.
-    # Else use default.
-    # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
+    gpu_resource_key = _gpu_resource_key_helper(context)
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=gpu_resource_key)
 
 
 def get_kubeconfig_paths() -> List[str]:

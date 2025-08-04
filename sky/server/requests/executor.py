@@ -53,6 +53,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.workspaces import core as workspaces_core
 
@@ -175,7 +176,7 @@ class RequestWorker:
             if request_element is None:
                 time.sleep(0.1)
                 return
-            request_id, ignore_return_value, retryable = request_element
+            request_id, ignore_return_value, _ = request_element
             request = api_requests.get_request(request_id)
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
@@ -189,12 +190,10 @@ class RequestWorker:
             # the process, such as subprocess_daemon.py.
             fut = executor.submit_until_success(_request_execution_wrapper,
                                                 request_id, ignore_return_value)
-            if retryable:
-                # If the task might fail and be retried, start a thread to
-                # monitor the future and process retry.
-                threading.Thread(target=self.handle_task_result,
-                                 args=(fut, request_element),
-                                 daemon=True).start()
+            # Monitor the result of the request execution.
+            threading.Thread(target=self.handle_task_result,
+                             args=(fut, request_element),
+                             daemon=True).start()
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -208,6 +207,21 @@ class RequestWorker:
                            request_element: Tuple[str, bool, bool]) -> None:
         try:
             fut.result()
+        except concurrent.futures.process.BrokenProcessPool as e:
+            # Happens when the worker process dies unexpectedly, e.g. OOM
+            # killed.
+            request_id, _, retryable = request_element
+            # Ensure the request status.
+            api_requests.set_request_failed(request_id, e)
+            logger.error(
+                f'Request {request_id} failed to get processed '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            if retryable:
+                # If the request is retryable and disrupted by broken
+                # process pool, reschedule it immediately to get it
+                # retried in the new process pool.
+                queue = _get_queue(self.schedule_type)
+                queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
             time.sleep(e.retry_wait_seconds)
             # Reschedule the request.
@@ -338,6 +352,7 @@ def _request_execution_wrapper(request_id: str,
     2. Update the request status based on the execution result;
     3. Redirect the stdout and stderr of the execution to log file;
     4. Handle the SIGTERM signal to abort the request gracefully.
+    5. Maintain the lifecycle of the temp dir used by the request.
     """
     # Handle the SIGTERM signal to abort the request processing gracefully.
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -361,7 +376,8 @@ def _request_execution_wrapper(request_id: str,
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
         try:
-            with override_request_env_and_config(request_body):
+            with override_request_env_and_config(request_body), \
+                tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
@@ -396,11 +412,8 @@ def _request_execution_wrapper(request_id: str,
                         f'{common_utils.format_exception(e)}')
             return
         else:
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.SUCCEEDED
-                if not ignore_return_value:
-                    request_task.set_return_value(return_value)
+            api_requests.set_request_succeeded(
+                request_id, return_value if not ignore_return_value else None)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 

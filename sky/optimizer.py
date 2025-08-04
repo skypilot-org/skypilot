@@ -997,23 +997,29 @@ class Optimizer:
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
-            if node.best_resources:
-                accelerator = node.best_resources.accelerators
-            else:
-                accelerator = list(node.resources)[0].accelerators
+            best_resources = node.best_resources
+            if best_resources is None:
+                best_resources = list(node.resources)[0]
             is_multi_instances = False
-            if accelerator:
-                acc_name, acc_count = list(accelerator.items())[0]
+            if best_resources.accelerators:
+                acc_name, acc_count = list(
+                    best_resources.accelerators.items())[0]
                 for cloud, candidate_list in candidate_set.items():
-                    if len(candidate_list) > 1:
+                    # Filter only the candidates matching the best
+                    # resources chosen by the optimizer.
+                    best_resources_candidates = [
+                        res for res in candidate_list if
+                        res.get_accelerators_str() == f'{acc_name}:{acc_count}'
+                    ]
+                    if len(best_resources_candidates) > 1:
                         is_multi_instances = True
-                        instance_list = [
+                        instance_list = set([
                             res.instance_type
-                            for res in candidate_list
+                            for res in best_resources_candidates
                             if res.instance_type is not None
-                        ]
+                        ])
                         candidate_str = resources_utils.format_resource(
-                            candidate_list[0], simplify=True)
+                            best_resources, simplify=True)
 
                         logger.info(
                             f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
@@ -1327,8 +1333,7 @@ def _fill_in_launchable_resources(
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (
         collections.defaultdict(list))
     all_fuzzy_candidates = set()
-    cloud_candidates: _PerCloudCandidates = collections.defaultdict(
-        List[resources_lib.Resources])
+    cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
     if blocked_resources is None:
@@ -1365,7 +1370,10 @@ def _fill_in_launchable_resources(
                 launchable[resources].extend(
                     resources_utils.make_launchables_for_valid_region_zones(
                         cheapest))
-                cloud_candidates[cloud] = feasible_resources.resources_list
+                # Each cloud can occur multiple times in feasible_list,
+                # for different region/zone.
+                cloud_candidates[cloud].extend(
+                    feasible_resources.resources_list)
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)

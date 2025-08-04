@@ -24,7 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.volumes import volume as volume_lib
+from sky.utils import volume as volume_lib
 
 if typing.TYPE_CHECKING:
     import yaml
@@ -245,7 +245,7 @@ class Task:
         run: Optional[CommandOrCommandGen] = None,
         envs: Optional[Dict[str, str]] = None,
         secrets: Optional[Dict[str, str]] = None,
-        workdir: Optional[str] = None,
+        workdir: Optional[Union[str, Dict[str, Any]]] = None,
         num_nodes: Optional[int] = None,
         volumes: Optional[Dict[str, str]] = None,
         # Advanced:
@@ -255,6 +255,8 @@ class Task:
         # Internal use only.
         file_mounts_mapping: Optional[Dict[str, str]] = None,
         volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        _user_specified_yaml: Optional[str] = None,
     ):
         """Initializes a Task.
 
@@ -300,10 +302,14 @@ class Task:
           secrets: A dictionary of secret environment variables to set before
             running the setup and run commands. These will be redacted in logs
             and YAML output.
-          workdir: The local working directory.  This directory will be synced
+          workdir: The local working directory or a git repository.
+            For a local working directory, this directory will be synced
             to a location on the remote VM(s), and ``setup`` and ``run``
             commands will be run under that location (thus, they can rely on
             relative paths when invoking binaries).
+            If a git repository is provided, the repository will be cloned to
+            the working directory and the ``setup`` and ``run`` commands will
+            be run under the cloned repository.
           num_nodes: The number of nodes to provision for this Task.  If None,
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command, where ``run`` can either be a str, meaning all
@@ -313,6 +319,7 @@ class Task:
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
           blocked_resources: A set of resources that this task cannot run on.
+          metadata: A dictionary of metadata to be added to the task.
         """
         self.name = name
         self.run = run
@@ -369,9 +376,13 @@ class Task:
         self.volume_mounts: Optional[List[volume_lib.VolumeMount]] = (
             volume_mounts)
 
+        self._metadata = metadata if metadata is not None else {}
+
         dag = sky.dag.get_current_dag()
         if dag is not None:
             dag.add(self)
+
+        self._user_specified_yaml = _user_specified_yaml
 
     def validate(self,
                  skip_file_mounts: bool = False,
@@ -494,6 +505,12 @@ class Task:
         """
         if self.workdir is None:
             return
+        # Only expand the workdir if it is a string
+        if isinstance(self.workdir, dict):
+            git_ref = self.workdir.get('ref')
+            if git_ref is not None:
+                self._metadata['git_commit'] = git_ref
+            return
         user_workdir = self.workdir
         self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
         if not os.path.isdir(self.workdir):
@@ -503,12 +520,16 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
+        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+
     @staticmethod
     def from_yaml_config(
         config: Dict[str, Any],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
         secrets_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
+        user_specified_yaml = config.pop('_user_specified_yaml',
+                                         common_utils.dump_yaml_str(config))
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.
@@ -574,19 +595,23 @@ class Task:
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
+        env_vars = config.get('envs', {})
+        secrets = config.get('secrets', {})
+        env_and_secrets = env_vars.copy()
+        env_and_secrets.update(secrets)
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
-                                                      config.get('envs', {}))
+                                                      env_and_secrets)
 
         # Fill in any Task.envs into service (e.g. MODEL_NAME).
         if config.get('service') is not None:
             config['service'] = _fill_in_env_vars(config['service'],
-                                                  config.get('envs', {}))
+                                                  env_and_secrets)
 
         # Fill in any Task.envs into workdir
         if config.get('workdir') is not None:
             config['workdir'] = _fill_in_env_vars(config['workdir'],
-                                                  config.get('envs', {}))
+                                                  env_and_secrets)
 
         task = Task(
             config.pop('name', None),
@@ -599,6 +624,8 @@ class Task:
             event_callback=config.pop('event_callback', None),
             file_mounts_mapping=config.pop('file_mounts_mapping', None),
             volumes=config.pop('volumes', None),
+            metadata=config.pop('_metadata', None),
+            _user_specified_yaml=user_specified_yaml,
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -719,9 +746,19 @@ class Task:
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
+        pool = config.pop('pool', None)
+        if service is not None and pool is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot set both service and pool in the same task.')
+
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
-        task.set_service(service)
+            task.set_service(service)
+        elif pool is not None:
+            pool['pool'] = True
+            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
+            task.set_service(pool)
 
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:
@@ -756,7 +793,8 @@ class Task:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
-            config = yaml.safe_load(f)
+            user_specified_yaml = f.read()
+            config = yaml.safe_load(user_specified_yaml)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
@@ -765,6 +803,7 @@ class Task:
 
         if config is None:
             config = {}
+        config['_user_specified_yaml'] = user_specified_yaml
         return Task.from_yaml_config(config)
 
     def resolve_and_validate_volumes(self) -> None:
@@ -871,6 +910,14 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        return self._metadata
+
+    @property
+    def metadata_json(self) -> str:
+        return json.dumps(self._metadata)
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -1512,11 +1559,22 @@ class Task:
                 d[k] = v
         return d
 
-    def to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
+    def to_yaml_config(self,
+                       use_user_specified_yaml: bool = False) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 
         INTERNAL: this method is internal-facing.
         """
+        if use_user_specified_yaml:
+            if self._user_specified_yaml is None:
+                return self._to_yaml_config(redact_secrets=True)
+            config = yaml.safe_load(self._user_specified_yaml)
+            if config.get('secrets') is not None:
+                config['secrets'] = {k: '<redacted>' for k in config['secrets']}
+            return config
+        return self._to_yaml_config()
+
+    def _to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:
         config = {}
 
         def add_if_not_none(key, value, no_empty: bool = False):
@@ -1561,13 +1619,9 @@ class Task:
         # Add envs without redaction
         add_if_not_none('envs', self.envs, no_empty=True)
 
-        # Add secrets with redaction if requested
         secrets = self.secrets
         if secrets and redact_secrets:
-            secrets = {
-                k: '<redacted>' if isinstance(v, str) else v
-                for k, v in secrets.items()
-            }
+            secrets = {k: '<redacted>' for k in secrets}
         add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
@@ -1588,6 +1642,9 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
+        # we manually check if its empty to not clog up the generated yaml
+        add_if_not_none('_metadata', self._metadata if self._metadata else None)
+        add_if_not_none('_user_specified_yaml', self._user_specified_yaml)
         return config
 
     def get_required_cloud_features(

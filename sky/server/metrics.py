@@ -1,6 +1,5 @@
 """Instrumentation for the API server."""
 
-import asyncio
 import os
 import time
 
@@ -50,7 +49,7 @@ async def metrics() -> fastapi.Response:
                             headers={'Cache-Control': 'no-cache'})
 
 
-def run_metrics_server(host: str, port: int):
+def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     metrics_config = uvicorn.Config(
         'sky.server.metrics:metrics_app',
         host=host,
@@ -58,7 +57,7 @@ def run_metrics_server(host: str, port: int):
         workers=1,
     )
     metrics_server_instance = uvicorn.Server(metrics_config)
-    asyncio.run(metrics_server_instance.serve())
+    return metrics_server_instance
 
 
 def _get_status_code_group(status_code: int) -> str:

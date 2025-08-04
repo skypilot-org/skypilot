@@ -1961,16 +1961,69 @@ export function GPUs() {
       return renderContextDetails(selectedContext);
     }
 
+    // Dynamically determine section order based on current data availability
+    // Sections will reorder automatically as data becomes ready
+    const sections = [];
+
+    // Helper function to check if contexts have activity
+    const hasContextActivity = (contexts, isSSH = false) => {
+      return contexts.some((context) => {
+        const contextKey = isSSH
+          ? `ssh/${context.replace(/^ssh-/, '')}`
+          : `kubernetes/${context}`;
+        const stats = contextStats[contextKey] || { clusters: 0, jobs: 0 };
+        return stats.clusters > 0 || stats.jobs > 0;
+      });
+    };
+
+    // Always add all three sections (they handle their own loading/empty states)
+
+    // Add Kubernetes section (always show)
+    // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
+    const kubeHasActivity = kubeContexts.length > 0;
+    sections.push({
+      name: 'Kubernetes',
+      render: renderKubernetesInfrastructure,
+      hasActivity: kubeHasActivity,
+      priority: 1, // Kubernetes gets priority 1 within same activity level
+    });
+
+    // Add Cloud section (always show)
+    // Cloud section is active if there are any enabled clouds
+    const cloudHasActivity = enabledClouds > 0;
+    sections.push({
+      name: 'Cloud',
+      render: renderCloudInfrastructure,
+      hasActivity: cloudHasActivity,
+      priority: 2, // Cloud gets priority 2 within same activity level
+    });
+
+    // Add SSH section (always show)
+    const sshHasActivity =
+      sshContexts.length > 0 && hasContextActivity(sshContexts, true);
+    sections.push({
+      name: 'SSH Node Pool',
+      render: renderSSHNodePoolInfrastructure,
+      hasActivity: sshHasActivity,
+      priority: 3, // SSH gets priority 3 within same activity level
+    });
+
+    // Dynamic sorting: enabled/active sections move to front automatically
+    // This re-sorts every render as data becomes available
+    const sortedSections = sections.sort((a, b) => {
+      // Primary sort: active sections come first (this causes dynamic reordering)
+      if (a.hasActivity !== b.hasActivity) {
+        return a.hasActivity ? -1 : 1; // active sections move to front
+      }
+      // Secondary sort: maintain consistent order within same activity level
+      return a.priority - b.priority;
+    });
+
     return (
       <>
-        {/* Show SSH Node Pool Infrastructure first */}
-        {renderSSHNodePoolInfrastructure()}
-
-        {/* Show Kubernetes Infrastructure second */}
-        {renderKubernetesInfrastructure()}
-
-        {/* Then show Cloud Infrastructure */}
-        {renderCloudInfrastructure()}
+        {sortedSections.map((section, index) => (
+          <React.Fragment key={index}>{section.render()}</React.Fragment>
+        ))}
       </>
     );
   };

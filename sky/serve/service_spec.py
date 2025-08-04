@@ -43,7 +43,33 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        pool: Optional[bool] = None,
     ) -> None:
+        if pool:
+            for unsupported_field in [
+                    'max_replicas',
+                    'num_overprovision',
+                    'target_qps_per_replica',
+                    'upscale_delay_seconds',
+                    'downscale_delay_seconds',
+                    'base_ondemand_fallback_replicas',
+                    'dynamic_ondemand_fallback',
+                    'spot_placer',
+                    'load_balancing_policy',
+                    'ports',
+                    'post_data',
+                    'tls_credential',
+                    'readiness_headers',
+            ]:
+                if locals()[unsupported_field] is not None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'{unsupported_field} is not supported for pool.')
+            if max_replicas is not None and max_replicas != min_replicas:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Autoscaling is not supported for pool '
+                                     'for now.')
+
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('max_replicas must be greater than or '
@@ -97,6 +123,7 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._pool: Optional[bool] = pool
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -116,7 +143,7 @@ class SkyServiceSpec:
 
         service_config: Dict[str, Any] = {}
 
-        readiness_section = config['readiness_probe']
+        readiness_section = config.get('readiness_probe', '/')
         if isinstance(readiness_section, str):
             service_config['readiness_path'] = readiness_section
             initial_delay_seconds = None
@@ -158,8 +185,29 @@ class SkyServiceSpec:
                     raise ValueError('Port must be between 1 and 65535.')
         service_config['ports'] = str(ports) if ports is not None else None
 
+        pool_config = config.get('pool', None)
+        if pool_config is not None:
+            service_config['pool'] = pool_config
+
         policy_section = config.get('replica_policy', None)
+        if policy_section is not None and pool_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify `replica_policy` for cluster '
+                                 'pool. Only `workers: <num>` is supported '
+                                 'for cluster pool now.')
+
         simplified_policy_section = config.get('replicas', None)
+        workers_config = config.get('workers', None)
+        if simplified_policy_section is not None and workers_config is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both `replicas` and `workers`.'
+                                 ' Please use one of them.')
+        if simplified_policy_section is not None and pool_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify `replicas` for cluster pool. '
+                                 'Please use `workers` instead.')
+        if simplified_policy_section is None:
+            simplified_policy_section = workers_config
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
@@ -252,6 +300,13 @@ class SkyServiceSpec:
                         config[section] = dict()
                     config[section][key] = value
 
+        add_if_not_none('pool', None, self._pool)
+
+        if self.pool:
+            # For pool, currently only `workers: <num>` is supported.
+            add_if_not_none('workers', None, self.min_replicas)
+            return config
+
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
@@ -319,10 +374,14 @@ class SkyServiceSpec:
         return ' '.join(policy_strs)
 
     def autoscaling_policy_str(self):
+        if self.pool:
+            # We only support fixed-size pool for now.
+            return f'Fixed-size ({self.min_replicas} workers)'
         # TODO(MaoZiming): Update policy_str
+        noun = 'worker' if self.pool else 'replica'
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
-            return f'Fixed {self.min_replicas} replica{min_plural}'
+            return f'Fixed {self.min_replicas} {noun}{min_plural}'
         # Already checked in __init__.
         assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
@@ -332,8 +391,8 @@ class SkyServiceSpec:
             overprovision_str = (
                 f' with {self.num_overprovision} overprovisioned replicas')
         return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
-                f'replica{max_plural}{overprovision_str} (target QPS per '
-                f'replica: {self.target_qps_per_replica})')
+                f'{noun}{max_plural}{overprovision_str} (target QPS per '
+                f'{noun}: {self.target_qps_per_replica})')
 
     def set_ports(self, ports: str) -> None:
         self._ports = ports
@@ -345,6 +404,10 @@ class SkyServiceSpec:
                 f'Certfile: {self.tls_credential.certfile}')
 
     def __repr__(self) -> str:
+        if self.pool:
+            return textwrap.dedent(f"""\
+                Worker policy:  {self.autoscaling_policy_str()}
+            """)
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
@@ -434,3 +497,10 @@ class SkyServiceSpec:
     def load_balancing_policy(self) -> str:
         return lb_policies.LoadBalancingPolicy.make_policy_name(
             self._load_balancing_policy)
+
+    @property
+    def pool(self) -> bool:
+        # This can happen for backward compatibility.
+        if not hasattr(self, '_pool'):
+            return False
+        return bool(self._pool)

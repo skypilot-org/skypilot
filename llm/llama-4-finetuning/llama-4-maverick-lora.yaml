@@ -1,0 +1,64 @@
+# Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch llama-4-maverick-lora.yaml -c maverick --env HF_TOKEN
+#
+# This config requires at least 2 nodes with 8x H100 GPUs each.
+
+envs:
+  HF_TOKEN: 
+
+resources:
+  infra: k8s
+  cpus: 100+
+  memory: 1000+
+  accelerators: H100:8
+  disk_tier: best
+  network_tier: best
+
+num_nodes: 2
+
+# Optional: configure buckets for dataset and checkpoints. You can then use the /outputs directory to write checkpoints.
+# file_mounts:
+#  /dataset:
+#    source: s3://my-dataset-bucket
+#    mode: COPY  # COPY mode will prefetch the dataset to the node for faster access
+#  /checkpoints:
+#    source: s3://my-checkpoint-bucket
+#    mode: MOUNT_CACHED  # MOUNT_CACHED mode will intelligently cache the checkpoint for faster writes
+
+file_mounts:
+  /configs: ./configs
+
+setup: |
+  conda create -n training python=3.10 -y
+  conda activate training
+
+  # Download the repository configuration package
+  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+
+  # Install the keyring package
+  sudo dpkg -i cuda-keyring_1.1-1_all.deb
+
+  # Update package list
+  sudo apt-get update
+
+  #sudo apt-get install cuda-minimal-build-12-6 -y
+  sudo apt-get install cuda-toolkit-12-6 -y
+
+  git clone -b v0.9.3 --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
+  cd LLaMA-Factory
+  pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
+  pip install "transformers>=4.51.1"
+
+
+run: |
+  conda activate training
+
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  echo "Starting distributed finetuning, head node: $MASTER_ADDR"
+
+  cd LLaMA-Factory
+
+  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=$SKYPILOT_NUM_NODES NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_lora_sft.yaml
