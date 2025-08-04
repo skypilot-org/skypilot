@@ -2642,6 +2642,7 @@ def combine_pod_config_fields(
 
 
 def combine_metadata_fields(cluster_yaml_path: str,
+                            cluster_config_overrides: Dict[str, Any],
                             context: Optional[str] = None) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
     fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
@@ -2652,11 +2653,24 @@ def combine_metadata_fields(cluster_yaml_path: str,
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
+
+    # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
         default_value={})
+
+    # Get custom_metadata from task-level config overrides
+    override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud='kubernetes',
+        region=context,
+        keys=('custom_metadata',),
+        default_value={})
+
+    # Merge task-level overrides with global config
+    config_utils.merge_k8s_configs(custom_metadata, override_custom_metadata)
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -2679,17 +2693,33 @@ def combine_metadata_fields(cluster_yaml_path: str,
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 
 
-def merge_custom_metadata(original_metadata: Dict[str, Any],
-                          context: Optional[str] = None) -> None:
+def merge_custom_metadata(
+        original_metadata: Dict[str, Any],
+        context: Optional[str] = None,
+        cluster_config_overrides: Optional[Dict[str, Any]] = None) -> None:
     """Merges original metadata with custom_metadata from config
 
     Merge is done in-place, so return is not required
     """
+    # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
         region=context,
         keys=('custom_metadata',),
         default_value={})
+
+    # Get custom_metadata from task-level config overrides if available
+    if cluster_config_overrides is not None:
+        override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='kubernetes',
+            region=context,
+            keys=('custom_metadata',),
+            default_value={})
+        # Merge task-level overrides with global config
+        config_utils.merge_k8s_configs(custom_metadata,
+                                       override_custom_metadata)
+
     config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 

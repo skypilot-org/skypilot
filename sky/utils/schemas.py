@@ -6,6 +6,7 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import kubernetes_enums
 
@@ -65,6 +66,11 @@ _AUTOSTOP_SCHEMA = {
                 'down': {
                     'type': 'boolean',
                 },
+                'wait_for': {
+                    'type': 'string',
+                    'case_insensitive_enum':
+                        autostop_lib.AutostopWaitFor.supported_modes(),
+                }
             },
         },
     ],
